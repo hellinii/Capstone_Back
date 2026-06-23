@@ -135,6 +135,20 @@ def test_engine_binary_evaluation(binary_df):
     assert "TC15" in results_invalid
     assert "error" in results_invalid["TC15"]
 
+def test_engine_binary_evaluation_with_positive_class(binary_df):
+    mappings = [
+        {"role": "y_true", "column": "y_true"},
+        {"role": "y_pred", "column": "y_pred"},
+        {"role": "score_positive", "column": "score_positive"}
+    ]
+    # positive_class = "1"
+    results = evaluate(binary_df, mappings, "binary", BINARY_SUPPORTED_TCS, positive_class="1")
+    assert_valid_results(results, BINARY_SUPPORTED_TCS, "binary")
+
+    # positive_class = "0" (reverse positive class)
+    results_reverse = evaluate(binary_df, mappings, "binary", BINARY_SUPPORTED_TCS, positive_class="0")
+    assert_valid_results(results_reverse, BINARY_SUPPORTED_TCS, "binary")
+
 def test_engine_multiclass_evaluation(multiclass_df):
     mappings = [
         {"role": "y_true", "column": "y_true"},

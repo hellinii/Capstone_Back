@@ -57,7 +57,17 @@ def parse_file_content(file_content: bytes, filename: str) -> tuple[list[str], p
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if ext == "csv":
-        df = pd.read_csv(io.BytesIO(file_content))
+        # 인코딩 자동 감지: UTF-8 → CP949(한국어 Excel) → latin-1 순으로 시도
+        last_error = None
+        for encoding in ("utf-8", "utf-8-sig", "cp949", "latin-1"):
+            try:
+                df = pd.read_csv(io.BytesIO(file_content), encoding=encoding)
+                break
+            except (UnicodeDecodeError, pd.errors.ParserError) as e:
+                last_error = e
+                continue
+        else:
+            raise ValueError(f"파일 인코딩을 자동으로 감지할 수 없습니다: {last_error}")
 
     elif ext == "json":
         raw = json.loads(file_content.decode("utf-8"))
@@ -221,10 +231,20 @@ async def analyze_columns_with_llm(
     )
 
     data = json.loads(response.choices[0].message.content)
-    column_mappings = [
-        ColumnMapping(column=m["column"], role=ColumnRole(m["role"]))
-        for m in data["column_mappings"]
-    ]
+    column_mappings = []
+    for m in data["column_mappings"]:
+        col_name = m["column"]
+        samples = []
+        if col_name in df.columns:
+            # 결측치를 제거하고 상위 3개 값을 문자열로 변환하여 예시 데이터 추출
+            samples = [str(v) for v in df[col_name].dropna().head(3).tolist()]
+        column_mappings.append(
+            ColumnMapping(
+                column=col_name,
+                role=ColumnRole(m["role"]),
+                sample_values=samples
+            )
+        )
 
     # 클래스 감지: sample_df(30행) / 분포 계산: 전체 df
     metadata = extract_metadata(task_type, df, sample_df, column_mappings)
@@ -233,4 +253,57 @@ async def analyze_columns_with_llm(
         task_type=task_type,
         column_mappings=column_mappings,
         metadata=metadata,
+    )
+
+
+def analyze_columns_fallback(
+    task_type: TaskType,
+    columns: list[str],
+    df: pd.DataFrame,
+) -> AnalysisResponse:
+    """OpenAI API 키가 없을 때 작동하는 규칙 기반 컬럼 매핑 폴백 함수"""
+    column_mappings = []
+
+    for col in columns:
+        col_lower = col.lower()
+        role = ColumnRole.ignore
+
+        if "id" in col_lower or "index" in col_lower:
+            role = ColumnRole.sample_id
+        elif col_lower in ["y_true", "actual", "ground_truth", "label", "target"]:
+            if task_type == TaskType.multilabel:
+                role = ColumnRole.true_labels
+            else:
+                role = ColumnRole.y_true
+        elif col_lower in ["y_pred", "predicted", "pred", "prediction"]:
+            if task_type == TaskType.multilabel:
+                role = ColumnRole.pred_labels
+            else:
+                role = ColumnRole.y_pred
+        elif task_type == TaskType.binary and ("score" in col_lower or "prob" in col_lower or "pos" in col_lower):
+            role = ColumnRole.score_positive
+        elif task_type == TaskType.multiclass and ("prob" in col_lower or "p_" in col_lower or "class_" in col_lower):
+            role = ColumnRole.prob_per_class
+        elif task_type == TaskType.multilabel and ("score" in col_lower or "prob" in col_lower or "p_" in col_lower):
+            role = ColumnRole.score_per_label
+
+        samples = []
+        if col in df.columns:
+            samples = [str(v) for v in df[col].dropna().head(3).tolist()]
+
+        column_mappings.append(
+            ColumnMapping(
+                column=col,
+                role=role,
+                sample_values=samples
+            )
+        )
+
+    sample_df = df.head(30)
+    metadata = extract_metadata(task_type, df, sample_df, column_mappings)
+
+    return AnalysisResponse(
+        task_type=task_type,
+        column_mappings=column_mappings,
+        metadata=metadata
     )

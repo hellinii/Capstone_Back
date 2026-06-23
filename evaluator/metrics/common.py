@@ -12,10 +12,10 @@ from sklearn.metrics import (
 )
 
 def _get_true_pred(df: pd.DataFrame, mapping_dict: dict):
-    true_col = mapping_dict.get('true_class')
-    pred_col = mapping_dict.get('predicted_class')
+    true_col = mapping_dict.get('y_true') or mapping_dict.get('true_labels')
+    pred_col = mapping_dict.get('y_pred') or mapping_dict.get('pred_labels')
     if not true_col or not pred_col:
-        raise ValueError("true_class 또는 predicted_class 컬럼 매핑이 필요합니다.")
+        raise ValueError("y_true(또는 true_labels) 및 y_pred(또는 pred_labels) 컬럼 매핑이 필요합니다.")
         
     y_true = df[true_col]
     y_pred = df[pred_col]
@@ -51,10 +51,10 @@ def calculate_f1_score(df: pd.DataFrame, mapping_dict: dict) -> float:
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     return float(f1_score(y_true, y_pred, average='macro', zero_division=0))
 
-def calculate_fbeta_score(df: pd.DataFrame, mapping_dict: dict, beta: float = 1.0) -> float:
+def calculate_fbeta_score(df: pd.DataFrame, mapping_dict: dict) -> float:
     """TC5: F-beta Score (Macro Average)"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
-    # 차후 프론트에서 beta 값을 넘겨주면 활용 가능하도록 설계
+    beta = mapping_dict.get('_beta', 1.0)
     return float(fbeta_score(y_true, y_pred, beta=beta, average='macro', zero_division=0))
 
 def calculate_kl_divergence(df: pd.DataFrame, mapping_dict: dict) -> float:
@@ -106,9 +106,9 @@ def calculate_class_metrics(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, A
 
 def calculate_imbalance_ratio(df: pd.DataFrame, mapping_dict: dict) -> float:
     """TC23: Imbalance Ratio (가장 많은 클래스 / 가장 적은 클래스 비율)"""
-    true_col = mapping_dict.get('true_class')
+    true_col = mapping_dict.get('y_true') or mapping_dict.get('true_labels')
     if not true_col:
-        raise ValueError("true_class 컬럼 매핑이 필요합니다.")
+        raise ValueError("y_true 또는 true_labels 컬럼 매핑이 필요합니다.")
     
     y_true = df[true_col]
     if not y_true.empty and isinstance(y_true.iloc[0], list):

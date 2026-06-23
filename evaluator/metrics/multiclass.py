@@ -4,10 +4,10 @@ from typing import Dict, Any
 from sklearn.metrics import precision_recall_fscore_support
 
 def _get_true_pred(df: pd.DataFrame, mapping_dict: dict):
-    true_col = mapping_dict.get('true_class')
-    pred_col = mapping_dict.get('predicted_class')
+    true_col = mapping_dict.get('y_true')
+    pred_col = mapping_dict.get('y_pred')
     if not true_col or not pred_col:
-        raise ValueError("true_class 또는 predicted_class 컬럼 매핑이 필요합니다.")
+        raise ValueError("y_true 및 y_pred 컬럼 매핑이 필요합니다.")
     return df[true_col], df[pred_col]
 
 def calculate_macro_average(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, float]:
