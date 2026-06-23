@@ -50,6 +50,14 @@ async def analyze_columns(
 
     # app.state에서 openai_client 가져오기
     client = request.app.state.openai_client
+    if not client:
+        print("⚠️ OPENAI_API_KEY가 설정되어 있지 않아 룰 기반(Rule-based) 폴백 컬럼 매핑을 수행합니다.")
+        from analyzer import analyze_columns_fallback
+        return analyze_columns_fallback(
+            task_type=task_type,
+            columns=columns,
+            df=df,
+        )
 
     # LLM 호출 → 컬럼 매핑 + 메타데이터 추출
     try:

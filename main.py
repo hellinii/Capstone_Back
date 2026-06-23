@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
-from routers import analyze, evaluate
+from routers import analyze, evaluate, validate
 
 load_dotenv()
 
@@ -18,13 +18,16 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "❌ OPENAI_API_KEY 환경변수가 설정되지 않았습니다.\n"
-            "backend/.env 파일에 OPENAI_API_KEY=sk-... 를 추가해주세요."
+        print(
+            "⚠️  경고: OPENAI_API_KEY 환경변수가 설정되지 않았습니다.\n"
+            "컬럼 자동 매핑(/api/analyze-columns) 기능은 작동하지 않으나, "
+            "평가 실행(/api/evaluate) 및 매핑 확정(/api/confirm-mapping) 기능은 테스트하실 수 있습니다."
         )
-    # app.state에 클라이언트를 저장하여 모든 라우터에서 재사용 가능하게 함
-    app.state.openai_client = AsyncOpenAI(api_key=api_key)
-    print("✅ OpenAI 클라이언트 초기화 완료")
+        app.state.openai_client = None
+    else:
+        # app.state에 클라이언트를 저장하여 모든 라우터에서 재사용 가능하게 함
+        app.state.openai_client = AsyncOpenAI(api_key=api_key)
+        print("✅ OpenAI 클라이언트 초기화 완료")
     yield
     print("🛑 서버 종료")
 
@@ -51,6 +54,7 @@ async def health_check():
 # ── 라우터(Router) 모듈 연결 ──
 app.include_router(analyze.router)
 app.include_router(evaluate.router)
+app.include_router(validate.router)
 
 if __name__ == "__main__":
     import uvicorn
