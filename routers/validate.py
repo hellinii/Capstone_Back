@@ -422,6 +422,48 @@ async def validate_data(
                     group="multilabel",
                 ))
 
+    # ── 3-7. 지연시간(Latency) 컬럼 검사 (선택, 매핑된 경우만) ──────────────────────
+    # 평가 파이프라인과 일치하도록 결측 제거 후(df_clean) 기준으로 검사한다.
+    # latency 는 best-effort 측정이므로 비숫자/음수는 평가를 막지 않고 경고로만 표시한다
+    # (비숫자는 평가 시 NaN 으로 처리되어 통계에서만 제외됨).
+    latency_col = mapping_dict.get("latency")
+    if latency_col and latency_col in df_clean.columns:
+        latency_numeric = pd.to_numeric(df_clean[latency_col], errors="coerce")
+        # 원래 결측이 아니었는데 숫자 변환에 실패한 값 = 비숫자 문자열
+        non_numeric = int((latency_numeric.isna() & df_clean[latency_col].notna()).sum())
+        if non_numeric > 0:
+            validation_details.append(ValidationCheckItem(
+                name="Latency non-numeric values",
+                result=f"{non_numeric} rows",
+                handling="Treated as unmeasured (excluded from latency stats)",
+                status="warning",
+                group="latency",
+            ))
+
+        valid_latency = latency_numeric.dropna()
+        negative = int((valid_latency < 0).sum())
+        if negative > 0:
+            validation_details.append(ValidationCheckItem(
+                name="Latency negative values",
+                result=f"{negative} rows",
+                handling="Review measurement (kept as-is)",
+                status="warning",
+                group="latency",
+            ))
+
+        if len(valid_latency) > 0:
+            validation_details.append(ValidationCheckItem(
+                name="Latency statistics (ms)",
+                result=(
+                    f"mean={valid_latency.mean():.2f}, "
+                    f"p95={valid_latency.quantile(0.95):.2f}, "
+                    f"max={valid_latency.max():.2f} (n={len(valid_latency)})"
+                ),
+                handling="Informational",
+                status="pass",
+                group="latency",
+            ))
+
     # ── 4. 실행 요약 구성 ─────────────────────────────────────────────────────
     error_count = sum(1 for v in validation_details if v.status == "error")
     warning_count = sum(1 for v in validation_details if v.status == "warning")

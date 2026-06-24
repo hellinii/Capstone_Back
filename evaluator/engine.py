@@ -95,5 +95,39 @@ def evaluate(
                 results[tc_id] = {"error": str(e)}
         else:
             results[tc_id] = {"error": "구현되지 않은 지표입니다."}
-            
+
+    # ── 차트용 곡선 좌표 (binary, 스칼라 AUROC/AUPRC 산출 성공 시 함께 제공) ──
+    # 별도 TC가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다.
+    if task_type == "binary":
+        if "TC9" in selected_tcs and isinstance(results.get("TC9"), (int, float)):
+            try:
+                results["roc_curve"] = binary.calculate_roc_curve(df, mapping_dict)
+            except Exception:
+                pass
+        if "TC10" in selected_tcs and isinstance(results.get("TC10"), (int, float)):
+            try:
+                results["pr_curve"] = binary.calculate_pr_curve(df, mapping_dict)
+            except Exception:
+                pass
+
+    # ── 지연시간(Latency) 통계 (선택 컬럼, 모든 task_type, 단위 ms 가정) ──
+    # 별도 TC가 아니라 success_metrics 의 latency_stats 키로 내려보낸다.
+    latency_col = mapping_dict.get("latency")
+    if latency_col and latency_col in df.columns:
+        try:
+            lat = pd.to_numeric(df[latency_col], errors="coerce").dropna()
+            if len(lat) > 0:
+                results["latency_stats"] = {
+                    "count": int(len(lat)),
+                    "mean": float(lat.mean()),
+                    "min": float(lat.min()),
+                    "p50": float(lat.quantile(0.50)),
+                    "p95": float(lat.quantile(0.95)),
+                    "p99": float(lat.quantile(0.99)),
+                    "max": float(lat.max()),
+                    "unit": "ms",
+                }
+        except Exception:
+            pass
+
     return results
