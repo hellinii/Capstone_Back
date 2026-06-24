@@ -5,6 +5,8 @@ from sklearn.metrics import (
     confusion_matrix,
     roc_auc_score,
     average_precision_score,
+    roc_curve,
+    precision_recall_curve,
     log_loss,
     matthews_corrcoef
 )
@@ -85,4 +87,41 @@ def calculate_mcc(df: pd.DataFrame, mapping_dict: dict) -> float:
     """TC20: Matthews Correlation Coefficient (MCC)"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     return float(matthews_corrcoef(y_true, y_pred))
+
+
+def _downsample_pair(x, y, n: int = 60):
+    """
+    쌍을 이루는 두 좌표 배열(x, y)을 동일 인덱스로 균등 다운샘플링.
+    차트 렌더링/응답 페이로드 경량화를 위해 점 개수를 n개 이하로 줄인다.
+    """
+    x = list(x)
+    y = list(y)
+    L = len(x)
+    if L <= n:
+        return [float(v) for v in x], [float(v) for v in y]
+    idxs = sorted({round(i * (L - 1) / (n - 1)) for i in range(n)})
+    return [float(x[i]) for i in idxs], [float(y[i]) for i in idxs]
+
+
+def calculate_roc_curve(df: pd.DataFrame, mapping_dict: dict) -> dict:
+    """ROC 곡선 좌표 (차트용). AUROC(TC9)와 동일 입력을 사용한다."""
+    y_true, y_score = _get_true_score(df, mapping_dict)
+    pos_class = mapping_dict.get('_positive_class')
+    y_true_bin = _binarize_true_labels(y_true, pos_class)
+    fpr, tpr, _ = roc_curve(y_true_bin, y_score)
+    fpr, tpr = _downsample_pair(fpr, tpr)
+    return {"fpr": fpr, "tpr": tpr}
+
+
+def calculate_pr_curve(df: pd.DataFrame, mapping_dict: dict) -> dict:
+    """Precision-Recall 곡선 좌표 (차트용). AUPRC(TC10)와 동일 입력을 사용한다."""
+    y_true, y_score = _get_true_score(df, mapping_dict)
+    pos_class = mapping_dict.get('_positive_class')
+    y_true_bin = _binarize_true_labels(y_true, pos_class)
+    precision, recall, _ = precision_recall_curve(y_true_bin, y_score)
+    # recall 오름차순으로 정렬(차트 x축 기준)
+    recall = recall[::-1]
+    precision = precision[::-1]
+    recall, precision = _downsample_pair(recall, precision)
+    return {"recall": recall, "precision": precision}
 

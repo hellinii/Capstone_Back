@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
-from routers import analyze, evaluate, validate
+from routers import analyze, evaluate, validate, narrative
 
 load_dotenv()
 
@@ -55,6 +55,7 @@ async def health_check():
 app.include_router(analyze.router)
 app.include_router(evaluate.router)
 app.include_router(validate.router)
+app.include_router(narrative.router)
 
 if __name__ == "__main__":
     import uvicorn
