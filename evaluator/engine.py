@@ -79,6 +79,7 @@ def evaluate(
     # 파라미터 전달용 내부 변수 설정
     mapping_dict['_positive_class'] = positive_class
     mapping_dict['_beta'] = beta
+    mapping_dict['_task_type'] = task_type
     
     for tc_id in selected_tcs:
         if tc_id not in valid_tcs:
