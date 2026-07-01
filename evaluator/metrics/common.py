@@ -35,26 +35,54 @@ def calculate_accuracy(df: pd.DataFrame, mapping_dict: dict) -> float:
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     return float(accuracy_score(y_true, y_pred))
 
+def _get_binary_kwargs(y_true, mapping_dict):
+    """이진 분류를 위한 kwargs 반환 (pos_label 추론)"""
+    classes = np.sort(np.unique(y_true))
+    pos_label = mapping_dict.get('_positive_class')
+    if pos_label is None:
+        pos_label = classes[-1] if len(classes) > 0 else 1
+    try:
+        if np.issubdtype(y_true.dtype, np.number):
+            pos_label = type(y_true.iloc[0])(pos_label)
+        else:
+            pos_label = str(pos_label)
+    except Exception:
+        pass
+    return {"pos_label": pos_label, "average": "binary", "zero_division": 0}
+
 def calculate_precision(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC2: Precision (Macro Average)"""
+    """TC2: Precision"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
-    # 클래스 이름이 문자열일 경우를 대비해 가장 안전한 macro average 사용
+    task_type = mapping_dict.get('_task_type', 'multiclass')
+    if task_type == 'binary':
+        return float(precision_score(y_true, y_pred, **_get_binary_kwargs(y_true, mapping_dict)))
     return float(precision_score(y_true, y_pred, average='macro', zero_division=0))
 
 def calculate_recall(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC3: Recall (Macro Average)"""
+    """TC3: Recall"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
+    task_type = mapping_dict.get('_task_type', 'multiclass')
+    if task_type == 'binary':
+        return float(recall_score(y_true, y_pred, **_get_binary_kwargs(y_true, mapping_dict)))
     return float(recall_score(y_true, y_pred, average='macro', zero_division=0))
 
 def calculate_f1_score(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC4: F1 Score (Macro Average)"""
+    """TC4: F1 Score"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
+    task_type = mapping_dict.get('_task_type', 'multiclass')
+    if task_type == 'binary':
+        return float(f1_score(y_true, y_pred, **_get_binary_kwargs(y_true, mapping_dict)))
     return float(f1_score(y_true, y_pred, average='macro', zero_division=0))
 
 def calculate_fbeta_score(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC5: F-beta Score (Macro Average)"""
+    """TC5: F-beta Score"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
+    task_type = mapping_dict.get('_task_type', 'multiclass')
     beta = mapping_dict.get('_beta', 1.0)
+    if task_type == 'binary':
+        kwargs = _get_binary_kwargs(y_true, mapping_dict)
+        kwargs['beta'] = beta
+        return float(fbeta_score(y_true, y_pred, **kwargs))
     return float(fbeta_score(y_true, y_pred, beta=beta, average='macro', zero_division=0))
 
 def calculate_kl_divergence(df: pd.DataFrame, mapping_dict: dict) -> float:

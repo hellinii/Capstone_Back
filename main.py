@@ -20,8 +20,8 @@ async def lifespan(app: FastAPI):
     if not api_key:
         print(
             "⚠️  경고: OPENAI_API_KEY 환경변수가 설정되지 않았습니다.\n"
-            "컬럼 자동 매핑(/api/analyze-columns) 기능은 작동하지 않으나, "
-            "평가 실행(/api/evaluate) 및 매핑 확정(/api/confirm-mapping) 기능은 테스트하실 수 있습니다."
+            "LLM 기반 컬럼 자동 매핑 대신 룰 기반(Rule-based) 매핑이 작동하며, "
+            "7, 8, 9절의 정성적 분석 서술 기능도 Fallback 문구로 대체됩니다."
         )
         app.state.openai_client = None
     else:
