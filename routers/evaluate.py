@@ -67,6 +67,7 @@ async def evaluate_dataset(
     metadata = eval_results.pop("_metadata", {})
     warnings = metadata.get("warnings", [])
     dropped_rows = metadata.get("dropped_rows", 0)
+    class_distribution = metadata.get("class_distribution", {})
 
     # 성공/실패 지표 분리 및 리포트 포매팅
     formatted_results = generate_report(eval_results)
@@ -74,5 +75,6 @@ async def evaluate_dataset(
     return EvaluateResponse(
         results=formatted_results,
         warnings=warnings,
-        dropped_rows=dropped_rows
+        dropped_rows=dropped_rows,
+        class_distribution=class_distribution
     )
