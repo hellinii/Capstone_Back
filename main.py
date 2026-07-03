@@ -5,6 +5,7 @@ main.py — FastAPI 앱의 진입점
 import os
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
@@ -25,8 +26,13 @@ async def lifespan(app: FastAPI):
         )
         app.state.openai_client = None
     else:
-        # app.state에 클라이언트를 저장하여 모든 라우터에서 재사용 가능하게 함
-        app.state.openai_client = AsyncOpenAI(api_key=api_key)
+        # app.state에 클라이언트를 저장하여 모든 라우터에서 재사용 가능하게 함.
+        # timeout 미설정 시 SDK 기본(~600s)으로 워커가 장시간 점유돼 자원 고갈 위험(D6a).
+        app.state.openai_client = AsyncOpenAI(
+            api_key=api_key,
+            timeout=httpx.Timeout(45.0, connect=5.0),  # 전체 45s / 연결 5s
+            max_retries=2,
+        )
         print("✅ OpenAI 클라이언트 초기화 완료")
     yield
     print("🛑 서버 종료")

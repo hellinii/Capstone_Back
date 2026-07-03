@@ -102,11 +102,20 @@ class DataMetadata(BaseModel):
     class_distribution: dict[str, int]         = Field(default={}, description="클래스(또는 레이블)별 샘플 수")
 
 
+class ColumnMatchNote(BaseModel):
+    """LLM 반환 컬럼명과 실제 헤더 대조 결과(보정/제외/미매핑 안내). 프론트 배너용."""
+    llm_column:      str        = Field(description="LLM이 반환한 컬럼명(미반환 헤더 보완 시 빈 문자열)")
+    matched_column:  str | None = Field(default=None, description="실제 데이터의 매칭 컬럼명(없으면 None)")
+    status:          str        = Field(description="corrected | unmatched | unmapped_header")
+    message:         str        = Field(description="사용자 안내 메시지")
+
+
 class AnalysisResponse(BaseModel):
     """[Step 1] LLM 컬럼 자동 매핑 결과 + 데이터 메타데이터"""
     task_type:       TaskType            = Field(description="분류 모델 유형")
     column_mappings: list[ColumnMapping] = Field(description="컬럼별 역할 매핑")
     metadata:        DataMetadata        = Field(description="데이터에서 추출한 클래스/레이블 정보")
+    column_notes:    list[ColumnMatchNote] = Field(default=[], description="컬럼명 대조 보정/제외 안내(없으면 빈 배열)")
 
 
 # ── Step 2: 사용자 확정 매핑 검증 ─────────────────────────────────────────────
