@@ -3,6 +3,7 @@ from schemas import EvaluateRequest, EvaluateResponse
 from analyzer import parse_file_content
 from evaluator.engine import evaluate as run_evaluation
 from evaluator.report import generate_report
+from validator import find_column_conflicts
 
 router = APIRouter(prefix="/api", tags=["Evaluation"])
 
@@ -40,7 +41,12 @@ async def evaluate_dataset(
             detail=f"설정 데이터 파싱 실패. 올바른 EvaluateRequest 형식이어야 합니다. 상세 에러: {str(e)}"
         )
 
-    # 4. mappings 형식 변환 (List[Dict] 형태로 전송)
+    # 4. 컬럼 매핑 충돌 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단)
+    conflicts = find_column_conflicts(request_data.column_mappings, request_data.task_type)
+    if conflicts:
+        raise HTTPException(status_code=400, detail="; ".join(c.message for c in conflicts))
+
+    # 4-1. mappings 형식 변환 (List[Dict] 형태로 전송)
     mappings = [{"column": m.column, "role": m.role.value} for m in request_data.column_mappings]
     
     # positive_class 및 beta 값 가져오기

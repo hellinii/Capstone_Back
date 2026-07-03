@@ -209,6 +209,7 @@ class PerClassFact(BaseModel):
 class ConfusionFact(BaseModel):
     labels: list[str]        = Field(default=[], description="클래스 라벨")
     matrix: list[list[int]]  = Field(default=[], description="혼동 행렬")
+    positive_class: str | None = Field(default=None, description="양성 클래스 라벨(2x2 FN/FP 매핑 기준)")
 
 
 class DistributionFact(BaseModel):

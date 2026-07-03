@@ -92,3 +92,45 @@ def test_exempt_tokens_not_flagged():
     wl = build_number_whitelist(fs, [], derived)
     g = verify_grounding(["본 시험은 ISO/IEC TS 4213:2022 기준으로 7절·8절·9절을 구성한다."], wl)
     assert g.passed, f"면제 토큰 오탐: {g.violations}"
+
+
+# ── D2: compute_derived 의 FN/FP 가 positive 클래스 index 를 따라 매핑되는지 ──
+
+def _confusion_fs(labels, matrix, positive_class=None) -> FactSheet:
+    return FactSheet(
+        verdict="PASS", score=100.0,
+        confusion=ConfusionFact(labels=labels, matrix=matrix, positive_class=positive_class),
+    )
+
+
+def test_compute_derived_positive_index0():
+    """positive('fraud')가 정렬상 index 0 → 하드코딩(index1)이면 FN/FP 가 반전된다."""
+    fs = _confusion_fs(["fraud", "normal"], [[40, 10], [5, 45]], positive_class="fraud")
+    c = compute_derived(fs)["confusion"]
+    assert c["tp"] == 40 and c["fn"] == 10 and c["fp"] == 5 and c["tn"] == 45
+
+
+def test_compute_derived_positive_index1_default():
+    fs = _confusion_fs(["0", "1"], [[120, 10], [15, 55]], positive_class="1")
+    c = compute_derived(fs)["confusion"]
+    assert c["tp"] == 55 and c["fn"] == 15 and c["fp"] == 10 and c["tn"] == 120
+
+
+def test_compute_derived_positive_none_fallback():
+    """positive 미지정 → index 1 폴백(기존 동작 하위호환)."""
+    fs = _confusion_fs(["0", "1"], [[120, 10], [15, 55]], positive_class=None)
+    c = compute_derived(fs)["confusion"]
+    assert c["fn"] == 15 and c["fp"] == 10
+
+
+def test_compute_derived_positive_not_in_labels_fallback():
+    fs = _confusion_fs(["0", "1"], [[120, 10], [15, 55]], positive_class="xyz")
+    c = compute_derived(fs)["confusion"]
+    assert c["fn"] == 15 and c["fp"] == 10
+
+
+def test_compute_derived_positive_float_match():
+    """positive_class='0.0' 는 라벨 '0'(index 0)과 float 매칭되어야 한다."""
+    fs = _confusion_fs(["0", "1"], [[40, 10], [5, 45]], positive_class="0.0")
+    c = compute_derived(fs)["confusion"]
+    assert c["tp"] == 40 and c["fn"] == 10 and c["fp"] == 5 and c["tn"] == 45

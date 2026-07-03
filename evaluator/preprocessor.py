@@ -18,6 +18,19 @@ def preprocess_data(df: pd.DataFrame, mappings: List[Dict[str, str]], task_type:
     
     # List[Dict] 형태의 mappings를 딕셔너리로 변환
     mapping_dict = {m['role']: m['column'] for m in mappings}
+
+    # ── 0. 정답=예측 동일 컬럼 방어선 (가짜 100% 차단) ─────────────────────────────
+    # 라우터/검증을 우회한 호출도 절대 accuracy 1.0 을 내지 않도록 하는 최종 백스톱.
+    for true_role, pred_role in [
+        ('y_true', 'y_pred'), ('true_class', 'predicted_class'), ('true_labels', 'pred_labels'),
+    ]:
+        t_col, p_col = mapping_dict.get(true_role), mapping_dict.get(pred_role)
+        if t_col and p_col and t_col == p_col:
+            raise ValueError(
+                f"정답('{true_role}')과 예측('{pred_role}')에 동일한 컬럼 '{t_col}'이 매핑되어 "
+                "모든 지표가 100%로 산출됩니다(평가 무의미). 서로 다른 컬럼을 지정해주세요."
+            )
+
     # 멀티클래스의 경우 prob_per_class 가 여러 컬럼에 매핑될 수 있으므로 배열 추출
     prob_cols = [m['column'] for m in mappings if m['role'] == 'prob_per_class']
     

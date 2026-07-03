@@ -16,6 +16,7 @@ from schemas import (
     ExecutionSummaryItem,
 )
 from analyzer import parse_file_content
+from validator import find_column_conflicts
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])
 
@@ -68,6 +69,18 @@ async def validate_data(
     prob_cols = [m["column"] for m in mappings if m["role"] == "prob_per_class"]
     # 필수 컬럼 추출 (ignore 제외)
     required_cols = list(set([m["column"] for m in mappings if m["role"] != "ignore"]))
+
+    # ── 3-0. 컬럼 단위 상호배타 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단) ──
+    #   evaluate 만 막고 validate-data 가 "정상"이라 안내하면 UX 가 모순되므로 여기서도 검사.
+    for conflict in find_column_conflicts(request_data.column_mappings, request_data.task_type):
+        validation_details.append(ValidationCheckItem(
+            name="Same column for true/pred" if conflict.code == "SAME_COLUMN_TRUE_PRED"
+                 else "Column mapped to multiple roles",
+            result=conflict.message,
+            handling="Assign distinct columns",
+            status="error",
+            group="common",
+        ))
 
     # ── 3-1. 필수 컬럼 존재 확인 ──────────────────────────────────────────────
     missing_cols = [col for col in required_cols if col not in df.columns]
