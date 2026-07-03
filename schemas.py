@@ -13,6 +13,13 @@ class TaskType(str, Enum):
     multilabel = "multilabel"
 
 
+class ReportPurpose(str, Enum):
+    """성적서 용도. 허용값 외 문자열은 pydantic 이 422 로 거부(프롬프트 주입 여지 차단, D7[4])."""
+    internal = "internal"
+    external = "external"
+    project  = "project"
+
+
 class ColumnRole(str, Enum):
     """
     ISO/IEC TS 4213:2022 기반 컬럼 역할 정의.
@@ -250,9 +257,9 @@ class FactSheet(BaseModel):
 
 class NarrativeRequest(BaseModel):
     """[Step 4] LLM 서술 생성 요청"""
-    task_type:      TaskType  = Field(description="분류 모델 유형")
-    report_purpose: str       = Field(default="external", description="internal | external | project")
-    fact_sheet:     FactSheet = Field(description="평가 결과 사실 시트")
+    task_type:      TaskType      = Field(description="분류 모델 유형")
+    report_purpose: ReportPurpose = Field(default=ReportPurpose.external, description="internal | external | project")
+    fact_sheet:     FactSheet     = Field(description="평가 결과 사실 시트")
 
 
 class InterpretationOut(BaseModel):

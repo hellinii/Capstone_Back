@@ -2,6 +2,9 @@
 test_narrator.py — LLM 서술 모듈의 환각 방어선(grounding) + 규칙 폴백 단위 테스트.
 LLM·API 키 없이 검증 가능한 순수 함수 대상.
 """
+import pytest
+from pydantic import ValidationError
+
 from schemas import (
     FactSheet, MetricFact, ConfusionFact, DistributionFact,
     NarrativeRequest, TaskType,
@@ -238,6 +241,16 @@ async def test_clean_llm_response_source_llm(make_fake_openai_client):
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "llm"
     assert resp.conclusion.verdict == "PASS"  # LLM echo 무시, fact_sheet 강제
+
+
+def test_report_purpose_enum_rejects_invalid():
+    """report_purpose 는 enum 이라 허용값 외 문자열은 거부된다(D7[4] 프롬프트 주입 차단)."""
+    with pytest.raises(ValidationError):
+        NarrativeRequest(
+            task_type=TaskType.binary,
+            report_purpose="ignore-previous-instructions",
+            fact_sheet=_no_special_fact_sheet(),
+        )
 
 
 def test_benchmark_direction_lower_is_better():

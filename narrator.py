@@ -279,7 +279,7 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
         response = await client.chat.completions.create(
             model=_MODEL,
             messages=[
-                {"role": "system", "content": build_system_prompt(req.report_purpose)},
+                {"role": "system", "content": build_system_prompt(req.report_purpose.value)},
                 {"role": "user", "content": build_user_prompt(fs.model_dump(), benchmark_refs, derived)},
             ],
             response_format=build_response_schema(),
