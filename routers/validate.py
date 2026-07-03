@@ -121,7 +121,11 @@ async def validate_data(
     df_work = df[required_cols].copy()
 
     # ── 3-2. 결측치(NaN) 검사 ─────────────────────────────────────────────────
-    nan_count = int(df_work.isna().any(axis=1).sum())
+    # latency 는 preprocessor 에서 dropna 대상이 아니므로(부가 측정), 여기서도 제외해
+    # '제외 행 수'가 실제 평가와 어긋나지 않게 정합화한다(D5d).
+    latency_col = mapping_dict.get("latency")
+    nan_cols = [c for c in df_work.columns if c != latency_col]
+    nan_count = int(df_work[nan_cols].isna().any(axis=1).sum()) if nan_cols else 0
     if nan_count > 0:
         validation_details.append(ValidationCheckItem(
             name="Missing value",

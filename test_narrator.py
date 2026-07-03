@@ -240,6 +240,26 @@ async def test_clean_llm_response_source_llm(make_fake_openai_client):
     assert resp.conclusion.verdict == "PASS"  # LLM echo 무시, fact_sheet 강제
 
 
+def test_benchmark_direction_lower_is_better():
+    """Hamming Loss(낮을수록 좋음): 범위 아래=우수, 위=미흡 (D7[3])."""
+    good = build_benchmark_refs(
+        "multilabel", [MetricFact(tc_id="M15", display_name="Hamming Loss", value=0.02, threshold=0.1, status="pass")]
+    )[0]
+    bad = build_benchmark_refs(
+        "multilabel", [MetricFact(tc_id="M15", display_name="Hamming Loss", value=0.30, threshold=0.1, status="fail")]
+    )[0]
+    assert good["direction"] == "lower" and good["quality"] == "better"
+    assert bad["quality"] == "worse"
+
+
+def test_benchmark_direction_higher_is_better():
+    """Accuracy(높을수록 좋음): 범위 위=우수 (D7[3])."""
+    ref = build_benchmark_refs(
+        "binary", [MetricFact(tc_id="M1", display_name="Accuracy", value=0.95, threshold=0.85, status="pass")]
+    )[0]
+    assert ref["direction"] == "higher" and ref["quality"] == "better"
+
+
 async def test_assembly_error_falls_back(make_fake_openai_client):
     """스키마 불일치(조립 불가) 응답은 500 대신 규칙 폴백(assembly_error, D7[1])."""
     fs = _no_special_fact_sheet()
