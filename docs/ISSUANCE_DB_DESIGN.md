@@ -253,8 +253,26 @@ Capstone_Back/
 | 항목 | 상태 | 비고 |
 |---|---|---|
 | 설계 확정(본 문서) | ✅ 완료 | DB=SQLite, 채번=발급시점, 기관=단일, 재발급=버전업 |
-| Phase A DB 인프라 | 🔜 예정 | |
-| Phase B 발급 API | 🔜 예정 | |
-| Phase C 백엔드 테스트 | 🔜 예정 | |
-| Phase D 프론트 연동 | 🔜 예정 | |
-| Phase E 통합 검증 | 🔜 예정 | |
+| Phase A DB 인프라 | ✅ 완료 | `database.py`(엔진·세션·Base·get_db·`configure_sqlite`), `models.py`(3테이블), `main.py` 기동 시 `init_db`+`seed_organization`, `.gitignore`(충돌 정리 + `data/app.db` 무시), `requirements.txt`+SQLAlchemy>=2.0 |
+| Phase B 발급 API | ✅ 완료 | `schemas.py`(+Organization/Issue/Reissue/Issuance 스키마), `services/issuance.py`(채번·멱등·재발급·`bump_version`), `routers/reports.py`(issue/reissue/get/organization·PUT), 라우터 등록 |
+| Phase C 백엔드 테스트 | ✅ 완료 | `test_issuance.py` 18개 통과 (순번·멱등·재발급·연도경계·bump엣지·API·**파일DB FK·2스레드 동시 채번/재발급**) |
+| Phase D 프론트 연동 | ✅ 완료(라이브 미검증) | `issuanceApi.ts`(발급 API + KST 포맷터), `useIssuance.ts`(상태·스토어 영속), `ReportLayout`(발급/정정 버튼 + 상태 배지), `Report.tsx`, `SignatureSection`/`ReportCoverSection`/`EvalScopeSection`(초안·"미발급" 표기), `mapWorkflowToFinalReport`(가짜 번호/서명 생성기 제거→초안 기본값). `issued_at`→KST 변환으로 날짜 일원화. tsc 신규 오류 0 |
+| Phase E 통합 검증 | 🔄 부분 | 백엔드 end-to-end(발급→재발급→재오픈, TestClient) ✅, 적대적 리뷰 워크플로우(백 5관점·프론트 3관점) ✅, tsc-delta ✅. **미완**: 백+프론트+브라우저 라이브 클릭(현 환경 제약 → `pnpm install` 후 dev 서버로 수동 확인 필요) |
+
+### 12.1 구현 시 설계 대비 결정/강화 (적대적 리뷰 반영)
+
+- **`run_id` UNIQUE 제약 추가**(§3.2는 INDEX만): §11.4 "멱등성은 run_id 유일성에 의존"을 DB 제약으로 강제 → 동시 발급 중복 채번 원천 차단.
+- **`UNIQUE(issuance.report_id, version)` 추가**: 동시/재시도 재발급이 같은 버전을 중복 커밋해 이력이 손상되는 것 방지.
+- **BEGIN IMMEDIATE 구현**(§4 명시 사항): `configure_sqlite`가 `isolation_level=None`+`BEGIN IMMEDIATE`+`busy_timeout`으로 쓰기 직렬화 → 동시 발급이 교착·HTTP 500 대신 순번 대기. 서비스는 `IntegrityError`/`OperationalError` 모두 재시도.
+- **발급 전 기관 존재 선검사**: 기관 미시드 시 FK 위반을 "채번 충돌"로 오인하지 않도록 정확한 오류 반환.
+- **`run_id` 빈/공백 문자열 거부**(pydantic 422): 서로 다른 평가가 한 번호로 병합되는 것 차단.
+- **PUT /organization 부분 업데이트**(`exclude_unset`): 요청에 없는 필드를 NULL로 덮어쓰지 않음.
+- **`issued_at`는 offset 포함 ISO8601로 방출**: naive-UTC로 인한 KST 날짜 하루 어긋남 방지(표시 포맷은 프론트=Phase D 책임).
+
+### 12.2 Phase D 결정/강화 (프론트 적대적 리뷰 반영)
+
+- **초안/발급 상태 모델**: `meta.reportId === ""` = 미발급(초안). `mapWorkflowToFinalReport`가 가짜 `buildReportId`(timestamp 의사난수)·`buildSignature` 생성기를 제거하고 초안 기본값을 둔다.
+- **발급은 평가 완료본에만 허용**: `useIssuance.canIssue`를 `isEvaluated` 로 게이트 → 재로드 후 미평가 draft(빈 KPI/차트)에 성적서 번호가 발급되는 것 차단.
+- **`issued_at` KST 변환**: 백엔드 offset ISO를 `formatKstDate/DateTime`으로 변환해 표기 → 서명일/발급일시가 KST로 일관(하루 어긋남 해소), `meta.issuedAt`도 백엔드 값으로 일원화.
+- **발급 결과 영속**: `run.reportData`/`run.reportId`에 병합 저장(재오픈·인쇄 탭에서 유지). `isEvaluated` 플래그 보존.
+- **초안 표기 일원화**: Cover 문서번호/발급일시, EvalScope 시험기간, Signature 섹션 모두 미발급 시 "(미발급)"/"초안—미발급" 표기.
