@@ -10,12 +10,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
-from routers import analyze, evaluate, validate, narrative
+from database import init_db, seed_organization
+from routers import analyze, evaluate, validate, narrative, reports
 
 load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 발급 메타 DB 준비: 테이블 생성(없으면) + 기관 시드(없으면). 설계 문서 §8.
+    init_db()
+    seed_organization()
+    print("✅ 발급 메타 DB 초기화 완료 (organization 시드 확인)")
+
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print(
@@ -56,6 +62,7 @@ app.include_router(analyze.router)
 app.include_router(evaluate.router)
 app.include_router(validate.router)
 app.include_router(narrative.router)
+app.include_router(reports.router)
 
 if __name__ == "__main__":
     import uvicorn
