@@ -3,12 +3,7 @@ import numpy as np
 from typing import Dict, Any
 from sklearn.metrics import precision_recall_fscore_support
 
-def _get_true_pred(df: pd.DataFrame, mapping_dict: dict):
-    true_col = mapping_dict.get('y_true')
-    pred_col = mapping_dict.get('y_pred')
-    if not true_col or not pred_col:
-        raise ValueError("y_true 및 y_pred 컬럼 매핑이 필요합니다.")
-    return df[true_col], df[pred_col]
+from .common import _get_true_pred
 
 def calculate_macro_average(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, float]:
     """TC11: Macro Average"""

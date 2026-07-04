@@ -26,6 +26,7 @@ def _get_true_pred(df: pd.DataFrame, mapping_dict: dict):
         mlb = MultiLabelBinarizer()
         # 정답과 예측의 모든 클래스를 수집하여 fit
         mlb.fit(y_true.tolist() + y_pred.tolist())
+        mapping_dict['_mlb_classes'] = list(mlb.classes_)
         return mlb.transform(y_true), mlb.transform(y_pred)
         
     return y_true, y_pred
@@ -111,8 +112,10 @@ def calculate_confusion_matrix(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     if isinstance(y_true, np.ndarray) and y_true.ndim > 1:
         from sklearn.metrics import multilabel_confusion_matrix
         cm = multilabel_confusion_matrix(y_true, y_pred)
+        classes = mapping_dict.get('_mlb_classes', [])
         return {
             "type": "multilabel",
+            "labels": [str(l) for l in classes] if classes else [f"Class {i}" for i in range(len(cm))],
             "matrix": cm.tolist() # 클래스별 2x2 행렬의 리스트
         }
         
@@ -128,8 +131,12 @@ def calculate_confusion_matrix(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
 def calculate_class_metrics(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
     """TC22: Class별 Metric"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
+    target_names = mapping_dict.get('_mlb_classes')
     # output_dict=True를 통해 JSON 형태로 바로 내려주기 좋음
-    report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
+    if target_names:
+        report = classification_report(y_true, y_pred, output_dict=True, zero_division=0, target_names=[str(x) for x in target_names])
+    else:
+        report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
     return report
 
 def calculate_imbalance_ratio(df: pd.DataFrame, mapping_dict: dict) -> float:

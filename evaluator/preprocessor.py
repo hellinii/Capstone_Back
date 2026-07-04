@@ -131,5 +131,19 @@ def preprocess_data(df: pd.DataFrame, mappings: List[Dict[str, str]], task_type:
         if not invalid_sums.empty:
             logs["warnings"].append(f"Multiclass 확률합 경고: {len(invalid_sums)}개 행에서 확률의 합이 1.0(±0.01) 범위를 벗어났습니다. 결과의 신뢰도가 낮을 수 있습니다.")
 
+    # ── 6. 클래스 분포(Class Distribution) 추출 ─────────────────────────────────
+    class_dist = {}
+    y_true_col_for_dist = mapping_dict.get('y_true') or mapping_dict.get('true_class') or mapping_dict.get('true_labels')
+    if y_true_col_for_dist and y_true_col_for_dist in df.columns:
+        if task_type == 'multilabel':
+            # df[y_true_col_for_dist]는 이미 parse_multilabel을 거쳐 리스트 형태임
+            for labels in df[y_true_col_for_dist].dropna():
+                if isinstance(labels, list):
+                    for label in labels:
+                        class_dist[label] = class_dist.get(label, 0) + 1
+        else:
+            class_dist = df[y_true_col_for_dist].value_counts().to_dict()
+    logs["class_distribution"] = class_dist
+
     return df, logs
 
