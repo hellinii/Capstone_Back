@@ -16,6 +16,7 @@ from schemas import (
     ExecutionSummaryItem,
 )
 from analyzer import parse_file_content
+from validator import find_column_conflicts
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])
 
@@ -69,6 +70,18 @@ async def validate_data(
     # 필수 컬럼 추출 (ignore 제외)
     required_cols = list(set([m["column"] for m in mappings if m["role"] != "ignore"]))
 
+    # ── 3-0. 컬럼 단위 상호배타 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단) ──
+    #   evaluate 만 막고 validate-data 가 "정상"이라 안내하면 UX 가 모순되므로 여기서도 검사.
+    for conflict in find_column_conflicts(request_data.column_mappings, request_data.task_type):
+        validation_details.append(ValidationCheckItem(
+            name="Same column for true/pred" if conflict.code == "SAME_COLUMN_TRUE_PRED"
+                 else "Column mapped to multiple roles",
+            result=conflict.message,
+            handling="Assign distinct columns",
+            status="error",
+            group="common",
+        ))
+
     # ── 3-1. 필수 컬럼 존재 확인 ──────────────────────────────────────────────
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
@@ -108,7 +121,11 @@ async def validate_data(
     df_work = df[required_cols].copy()
 
     # ── 3-2. 결측치(NaN) 검사 ─────────────────────────────────────────────────
-    nan_count = int(df_work.isna().any(axis=1).sum())
+    # latency 는 preprocessor 에서 dropna 대상이 아니므로(부가 측정), 여기서도 제외해
+    # '제외 행 수'가 실제 평가와 어긋나지 않게 정합화한다(D5d).
+    latency_col = mapping_dict.get("latency")
+    nan_cols = [c for c in df_work.columns if c != latency_col]
+    nan_count = int(df_work[nan_cols].isna().any(axis=1).sum()) if nan_cols else 0
     if nan_count > 0:
         validation_details.append(ValidationCheckItem(
             name="Missing value",

@@ -22,6 +22,8 @@ _VERDICT_LABEL = {
     "FAIL": "부적합(불합격)",
 }
 _POSITION_LABEL = {"above": "상위", "within": "범위 내", "below": "하위"}
+# 방향 반영 품질 라벨(D7[3]) — 낮을수록 좋은 지표의 'below'는 미흡이 아니라 우수.
+_QUALITY_LABEL = {"better": "우수", "within": "기준 범위 내", "worse": "미흡"}
 
 
 def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
@@ -65,7 +67,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     if benchmark_refs:
         segs = [
             f"{r['metric']} {r['model_value']}는 내부 참조 기준 {r['ref_low']}~{r['ref_high']} 대비 "
-            f"{_POSITION_LABEL.get(r['position'], r['position'])}"
+            f"{_QUALITY_LABEL.get(r.get('quality'), _POSITION_LABEL.get(r['position'], r['position']))}"
             for r in benchmark_refs
         ]
         benchmark = "; ".join(segs) + f". ({benchmark_refs[0]['source_note']})"

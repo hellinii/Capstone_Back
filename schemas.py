@@ -13,6 +13,13 @@ class TaskType(str, Enum):
     multilabel = "multilabel"
 
 
+class ReportPurpose(str, Enum):
+    """성적서 용도. 허용값 외 문자열은 pydantic 이 422 로 거부(프롬프트 주입 여지 차단, D7[4])."""
+    internal = "internal"
+    external = "external"
+    project  = "project"
+
+
 class ColumnRole(str, Enum):
     """
     ISO/IEC TS 4213:2022 기반 컬럼 역할 정의.
@@ -102,11 +109,20 @@ class DataMetadata(BaseModel):
     class_distribution: dict[str, int]         = Field(default={}, description="클래스(또는 레이블)별 샘플 수")
 
 
+class ColumnMatchNote(BaseModel):
+    """LLM 반환 컬럼명과 실제 헤더 대조 결과(보정/제외/미매핑 안내). 프론트 배너용."""
+    llm_column:      str        = Field(description="LLM이 반환한 컬럼명(미반환 헤더 보완 시 빈 문자열)")
+    matched_column:  str | None = Field(default=None, description="실제 데이터의 매칭 컬럼명(없으면 None)")
+    status:          str        = Field(description="corrected | unmatched | unmapped_header")
+    message:         str        = Field(description="사용자 안내 메시지")
+
+
 class AnalysisResponse(BaseModel):
     """[Step 1] LLM 컬럼 자동 매핑 결과 + 데이터 메타데이터"""
     task_type:       TaskType            = Field(description="분류 모델 유형")
     column_mappings: list[ColumnMapping] = Field(description="컬럼별 역할 매핑")
     metadata:        DataMetadata        = Field(description="데이터에서 추출한 클래스/레이블 정보")
+    column_notes:    list[ColumnMatchNote] = Field(default=[], description="컬럼명 대조 보정/제외 안내(없으면 빈 배열)")
 
 
 # ── Step 2: 사용자 확정 매핑 검증 ─────────────────────────────────────────────
@@ -210,6 +226,7 @@ class PerClassFact(BaseModel):
 class ConfusionFact(BaseModel):
     labels: list[str]        = Field(default=[], description="클래스 라벨")
     matrix: list[list[int]]  = Field(default=[], description="혼동 행렬")
+    positive_class: str | None = Field(default=None, description="양성 클래스 라벨(2x2 FN/FP 매핑 기준)")
 
 
 class DistributionFact(BaseModel):
@@ -241,9 +258,9 @@ class FactSheet(BaseModel):
 
 class NarrativeRequest(BaseModel):
     """[Step 4] LLM 서술 생성 요청"""
-    task_type:      TaskType  = Field(description="분류 모델 유형")
-    report_purpose: str       = Field(default="external", description="internal | external | project")
-    fact_sheet:     FactSheet = Field(description="평가 결과 사실 시트")
+    task_type:      TaskType      = Field(description="분류 모델 유형")
+    report_purpose: ReportPurpose = Field(default=ReportPurpose.external, description="internal | external | project")
+    fact_sheet:     FactSheet     = Field(description="평가 결과 사실 시트")
 
 
 class InterpretationOut(BaseModel):

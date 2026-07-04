@@ -39,7 +39,10 @@ def build_user_prompt(fact_sheet: dict, benchmark_refs: list, derived: dict) -> 
         "distribution_analysis=클래스 분포/불균형 해석), "
         "conclusion(8절: benchmark=벤치마크 비교, narrative=종합 총평, risks=리스크), "
         "recommendation_narrative(9절 서술: data_quality, model_ops), "
-        "recommendations(9절 권고표 항목들).\n\n"
+        "recommendations(9절 권고표 항목들).\n"
+        "benchmark_refs 의 각 항목은 direction(higher/lower=높을수록/낮을수록 좋음)과 "
+        "quality(better/within/worse=우수/기준 범위 내/미흡)를 포함한다. 벤치마크 우열은 "
+        "position(단순 수치 위치)이 아니라 quality 로 서술하라(낮을수록 좋은 지표는 범위 아래가 오히려 우수).\n\n"
         + json.dumps(payload, ensure_ascii=False)
     )
 

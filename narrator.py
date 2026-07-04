@@ -10,6 +10,7 @@ narrator.py — LLM 서술 생성 오케스트레이션 + 환각 방어(groundin
 LLM·API 키 없이 단위 테스트 가능하다. (LLM 호출부는 generate_narrative)
 """
 import json
+import logging
 import re
 from typing import Any
 
@@ -30,10 +31,15 @@ from narrative_prompt import build_system_prompt, build_user_prompt, build_respo
 
 _MODEL = "gpt-4.1-nano"
 
-# 절 번호(7/8/9), ISO 표준번호/연도 등 수치가 아닌 고정 토큰은 환각으로 보지 않는다.
-_EXEMPT_TOKENS = {"7", "8", "9", "100", "2022", "4213", "0", "1"}
+# 문맥상 '수치'가 아닌 고정 토큰(표준 표기·절 번호·오류 유형 서수)은 검증 전에 제거한다.
+# 0/1/100/연도 같은 범용 숫자는 더 이상 무조건 면제하지 않는다 — fact_sheet 근거로만 허용(D3a).
+_CTX_TOKEN_RE = re.compile(
+    r"ISO/?IEC\s+TS\s*4213(?:\s*:\s*2022)?|4213\s*:\s*2022|\d+\s*절|제\s*\d+\s*종"
+)
 
-_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?%?")
+# 숫자 토큰: 앞 글자가 영숫자면(F1·P99 등 식별자) 숫자로 보지 않는다(선행 lookbehind).
+# 부호(음수 정답값 -0.1 등)·천단위 콤마·백분율(%)을 함께 포착한다(D7[2]).
+_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9])[+-]?\d+(?:[.,]\d+)?%?")
 
 
 def _canon(num_str: str):
@@ -60,6 +66,32 @@ def _add(wl: set, v: Any) -> None:
             wl.add(f"{round(f * 100, k):g}")
 
 
+def _find_pos_idx(labels: list, positive_class) -> int:
+    """2x2 혼동행렬에서 양성 클래스의 행/열 index(0|1)를 찾는다.
+
+    labels 는 정렬된 클래스 문자열, positive_class 는 metadata 의 양성값.
+    직접 → 정규화(strip/casefold) → float 비교 순으로 매칭하고("1.0" vs "1" 등),
+    못 찾으면 index 1 로 폴백한다(평가기 'sorted-last=positive' 규칙 = 기존 동작 하위호환).
+    """
+    if not positive_class or not labels or len(labels) != 2:
+        return 1
+    norm = [str(l).strip() for l in labels]
+    p = str(positive_class).strip()
+    if p in norm:
+        return norm.index(p)
+    low = [x.casefold() for x in norm]
+    if p.casefold() in low:
+        return low.index(p.casefold())
+    try:
+        pf = float(p)
+        floats = [float(x) for x in norm]
+        if pf in floats:
+            return floats.index(pf)
+    except ValueError:
+        pass
+    return 1
+
+
 def compute_derived(fs: FactSheet) -> dict:
     """LLM·폴백이 공통으로 인용할 파생 사실(서버 계산). 환각 방지를 위해 덧셈은 여기서만."""
     derived: dict = {}
@@ -79,10 +111,15 @@ def compute_derived(fs: FactSheet) -> dict:
         if total > 0:
             conf["correct_pct"] = round(correct / total * 100, 1)
             conf["misclassified_pct"] = round(misclassified / total * 100, 1)
-        # 2x2(binary)면 FN/FP 및 그 비율도 제공 (행=실제, 열=예측, index 1 = positive 가정)
+        # 2x2(binary)면 FN/FP 및 그 비율도 제공 (행=실제, 열=예측).
+        # positive 클래스의 실제 index 를 근거로 매핑한다(index 1 하드코딩 금지).
         if len(m) == 2 and len(m[0]) == 2:
-            tn, fp = m[0][0], m[0][1]
-            fn, tp = m[1][0], m[1][1]
+            pos_idx = _find_pos_idx(fs.confusion.labels, fs.confusion.positive_class)
+            neg_idx = 1 - pos_idx
+            tp = m[pos_idx][pos_idx]
+            tn = m[neg_idx][neg_idx]
+            fp = m[neg_idx][pos_idx]  # 실제=음성, 예측=양성
+            fn = m[pos_idx][neg_idx]  # 실제=양성, 예측=음성
             conf.update({"tn": tn, "fp": fp, "fn": fn, "tp": tp})
             if total > 0:
                 conf.update({
@@ -118,7 +155,7 @@ def compute_derived(fs: FactSheet) -> dict:
 
 def build_number_whitelist(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> set:
     """출력 검증용 허용 숫자 집합 (fact_sheet + 파생값의 다중 표기)."""
-    wl: set = set(_EXEMPT_TOKENS)
+    wl: set = set()
 
     _add(wl, fs.n_samples)
     _add(wl, fs.dropped_rows)
@@ -182,7 +219,9 @@ def verify_grounding(texts: list[str], whitelist: set) -> GroundingInfo:
     for t in texts:
         if not t:
             continue
-        for tok in _NUMBER_RE.findall(t):
+        # 표준 표기·절/서수 등 문맥 토큰을 먼저 제거한 뒤 숫자만 검증(오탐 방지, D3a).
+        stripped = _CTX_TOKEN_RE.sub(" ", t)
+        for tok in _NUMBER_RE.findall(stripped):
             c = _canon(tok)
             if c is None:
                 continue
@@ -193,9 +232,31 @@ def verify_grounding(texts: list[str], whitelist: set) -> GroundingInfo:
     return GroundingInfo(checked=checked, violations=uniq, passed=len(uniq) == 0)
 
 
-def _strict_mode(report_purpose: str) -> bool:
-    """external/project(인증·법적)는 grounding 위반 시 항상 전체 폐기(엄격)."""
-    return report_purpose in ("external", "project")
+def _collect_strings(obj: Any, out: list) -> None:
+    """LLM 산출물(dict/list/str)의 모든 문자열 리프를 재귀 수집(grounding 전수 검사용)."""
+    if isinstance(obj, str):
+        out.append(obj)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _collect_strings(v, out)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_strings(item, out)
+
+
+def _collect_grounding_texts(data: dict) -> list:
+    """LLM 응답 전체에서 검증 대상 문자열을 전수 수집(수동 나열 제거 — D3b).
+
+    conclusion.verdict 만 제외한다(서버가 fact_sheet 값으로 강제 대체하므로 미노출 →
+    불필요한 폴백 전환 방지). 이후 스키마에 문자열 필드가 추가돼도 자동 포함된다.
+    """
+    grounded = dict(data)
+    concl = grounded.get("conclusion")
+    if isinstance(concl, dict):
+        grounded["conclusion"] = {k: v for k, v in concl.items() if k != "verdict"}
+    texts: list = []
+    _collect_strings(grounded, texts)
+    return texts
 
 
 async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse:
@@ -218,7 +279,7 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
         response = await client.chat.completions.create(
             model=_MODEL,
             messages=[
-                {"role": "system", "content": build_system_prompt(req.report_purpose)},
+                {"role": "system", "content": build_system_prompt(req.report_purpose.value)},
                 {"role": "user", "content": build_user_prompt(fs.model_dump(), benchmark_refs, derived)},
             ],
             response_format=build_response_schema(),
@@ -229,40 +290,36 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
     except Exception:
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="api_error")
 
-    # 3. grounding 검증
-    interp = data.get("interpretation", {})
-    concl = data.get("conclusion", {})
-    rec_narr = data.get("recommendation_narrative", {})
-    recs = data.get("recommendations", [])
-    texts = [
-        interp.get("confusion_analysis", ""),
-        interp.get("distribution_analysis", ""),
-        concl.get("benchmark", ""),
-        concl.get("narrative", ""),
-        concl.get("risks", ""),
-        rec_narr.get("data_quality", ""),
-        rec_narr.get("model_ops", ""),
-        *[r.get("action", "") for r in recs],
-        *[r.get("expected_impact", "") for r in recs],
-    ]
-    grounding = verify_grounding(texts, whitelist)
+    # 3~5. grounding 검증 + 응답 조립. 스키마 불일치/누락으로 조립이 실패해도
+    #      500 대신 규칙 폴백(assembly_error)으로 강등한다(D7[1]).
+    try:
+        interp = data.get("interpretation", {})
+        concl = data.get("conclusion", {})
+        rec_narr = data.get("recommendation_narrative", {})
+        recs = data.get("recommendations", [])
 
-    # 4. 위반 시(엄격 모드) 폴백으로 대체
-    if not grounding.passed and _strict_mode(req.report_purpose):
-        fb = build_fallback_narrative(fs, benchmark_refs, derived, reason="grounding_failed")
-        fb.meta.grounding = grounding  # 어떤 환각이 잡혔는지 추적성 보존
-        return fb
+        # LLM 이 생성한 모든 문자열 필드를 전수 수집해 검증(수동 나열 제거 — D3b).
+        grounding = verify_grounding(_collect_grounding_texts(data), whitelist)
 
-    # 5. 정상 — verdict 는 서버값으로 강제
-    return NarrativeResponse(
-        interpretation=InterpretationOut(**interp),
-        conclusion=ConclusionOut(
-            verdict=fs.verdict,
-            benchmark=concl.get("benchmark", ""),
-            narrative=concl.get("narrative", ""),
-            risks=concl.get("risks", ""),
-        ),
-        recommendation_narrative=RecommendationNarrativeOut(**rec_narr),
-        recommendations=[RecommendationOut(**r) for r in recs][:5],
-        meta=NarrativeMeta(source="llm", model=_MODEL, grounding=grounding),
-    )
+        # 위반 시 report_purpose 무관하게 폴백(internal fail-open 제거 — D3c).
+        if not grounding.passed:
+            fb = build_fallback_narrative(fs, benchmark_refs, derived, reason="grounding_failed")
+            fb.meta.grounding = grounding  # 어떤 환각이 잡혔는지 추적성 보존
+            return fb
+
+        # 정상 — verdict 는 서버값으로 강제
+        return NarrativeResponse(
+            interpretation=InterpretationOut(**interp),
+            conclusion=ConclusionOut(
+                verdict=fs.verdict,
+                benchmark=concl.get("benchmark", ""),
+                narrative=concl.get("narrative", ""),
+                risks=concl.get("risks", ""),
+            ),
+            recommendation_narrative=RecommendationNarrativeOut(**rec_narr),
+            recommendations=[RecommendationOut(**r) for r in recs][:5],
+            meta=NarrativeMeta(source="llm", model=_MODEL, grounding=grounding),
+        )
+    except Exception:
+        logging.exception("narrative 조립/검증 실패 → 규칙 폴백(assembly_error)")
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")

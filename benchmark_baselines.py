@@ -41,6 +41,13 @@ def get_baseline(task_type: str, metric_name: str) -> Optional[tuple[float, floa
     return BASELINES.get(task_type, {}).get(metric_name)
 
 
+# 낮을수록 좋은 지표(display_name 기준) — 범위 '아래(below)'가 오히려 우수함(D7[3]).
+LOWER_IS_BETTER = {
+    "Hamming Loss", "KL Divergence", "FPR", "Log Loss",
+    "Distribution Diff (MC)", "Distribution Diff (ML)", "Imbalance Ratio",
+}
+
+
 def benchmark_position(value: float, low: float, high: float) -> str:
     """value 가 참조 범위 대비 어디에 위치하는지: below | within | above"""
     if value < low:
@@ -48,6 +55,16 @@ def benchmark_position(value: float, low: float, high: float) -> str:
     if value > high:
         return "above"
     return "within"
+
+
+def _quality(position: str, lower_is_better: bool) -> str:
+    """방향을 반영한 품질 라벨: better | within | worse.
+    (position 은 순수 수치 위치라 낮을수록 좋은 지표에서는 방향이 반대다.)"""
+    if position == "within":
+        return "within"
+    if lower_is_better:
+        return "better" if position == "below" else "worse"
+    return "better" if position == "above" else "worse"
 
 
 def build_benchmark_refs(task_type: str, metrics: list) -> list[dict]:
@@ -68,12 +85,17 @@ def build_benchmark_refs(task_type: str, metrics: list) -> list[dict]:
         if rng is None:
             continue
         low, high = rng
+        lower_is_better = name in LOWER_IS_BETTER
+        position = benchmark_position(float(value), low, high)
         refs.append({
             "metric": name,
             "model_value": round(float(value), 4),
             "ref_low": low,
             "ref_high": high,
-            "position": benchmark_position(float(value), low, high),
+            "position": position,
+            # 방향 반영 필드(D7[3]). 낮을수록 좋은 지표의 'below'는 worse 가 아니라 better.
+            "direction": "lower" if lower_is_better else "higher",
+            "quality": _quality(position, lower_is_better),
             "source_note": SOURCE_NOTE,
         })
     return refs
