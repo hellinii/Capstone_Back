@@ -14,7 +14,7 @@ task_type별 필수/선택 역할 규칙을 검사하고,
     y_true + y_pred        → TC1~TC6, TC11~TC14, TC21~TC23
 
   [Multilabel]
-    true_labels + pred_labels          → TC2~TC6, TC11~TC13, TC15~TC17, TC21~TC23
+    true_labels + pred_labels          → TC1~TC6, TC11~TC13, TC15~TC17, TC21~TC23
     true_labels + score_per_label(N개) → TC18
 """
 
@@ -63,6 +63,9 @@ _TC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
         "TC23": {ColumnRole.y_true, ColumnRole.y_pred},
     },
     TaskType.multilabel: {
+        # TC1(Accuracy)은 multilabel 에서 sklearn subset accuracy(전 라벨 일치 비율)로
+        # 계산된다 — 정의상 TC16(Exact Match Ratio)과 동일 값.
+        "TC1":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "TC2":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "TC3":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "TC4":  {ColumnRole.true_labels, ColumnRole.pred_labels},
