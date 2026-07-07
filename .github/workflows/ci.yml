@@ -40,6 +40,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # shallow clone에서의 push는 GitHub이 거부
+          # 기본값(true)이면 GITHUB_TOKEN이 git extraheader로 남아 푸시 URL의
+          # FORK_SYNC_TOKEN을 덮어써 403이 난다 — 포크 푸시엔 PAT만 써야 함.
+          persist-credentials: false
       - name: 팀 main → 포크 main 미러
         run: |
           git push --force \
