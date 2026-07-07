@@ -11,17 +11,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
-from database import init_db, seed_organization
-from routers import analyze, evaluate, validate, narrative, reports
+load_dotenv()  # database.py 가 import 시점에 DATABASE_URL 을 읽으므로 그보다 먼저 실행해야 함
 
-load_dotenv()
+from database import DATABASE_URL, init_db, seed_organization
+from routers import analyze, evaluate, validate, narrative, reports
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 발급 메타 DB 준비: 테이블 생성(없으면) + 기관 시드(없으면). 설계 문서 §8.
     init_db()
     seed_organization()
-    print("✅ 발급 메타 DB 초기화 완료 (organization 시드 확인)")
+    print(f"✅ 발급 메타 DB 초기화 완료 (backend={'sqlite' if DATABASE_URL.startswith('sqlite') else 'postgresql'})")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:

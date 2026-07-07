@@ -13,13 +13,27 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 # ── 엔진 ──────────────────────────────────────────────────────────────────────
 _DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "app.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_DEFAULT_DB_PATH}")
+
+# Heroku/Render 스타일 URL 은 legacy "postgres://" 스킴을 쓰는데 SQLAlchemy 2.0 은
+# 이를 거부한다. (Neon 은 postgresql:// 을 주지만 방어적으로 정규화.)
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
+
 _IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
-engine = create_engine(
-    DATABASE_URL,
-    # check_same_thread=False: FastAPI 스레드풀에서 세션 사용 허용(요청별 세션이라 안전).
-    connect_args={"check_same_thread": False} if _IS_SQLITE else {},
-)
+if _IS_SQLITE:
+    _ENGINE_KWARGS: dict = {
+        # check_same_thread=False: FastAPI 스레드풀에서 세션 사용 허용(요청별 세션이라 안전).
+        "connect_args": {"check_same_thread": False},
+    }
+else:
+    _ENGINE_KWARGS = {
+        # Neon free tier 는 ~5분 유휴 시 compute suspend → 풀에 남은 연결이 죽는다.
+        "pool_pre_ping": True,   # checkout 시 연결 검증, 죽었으면 투명하게 재연결
+        "pool_recycle": 300,     # suspend 윈도우(5분)보다 오래된 연결은 선제 폐기
+    }
+
+engine = create_engine(DATABASE_URL, **_ENGINE_KWARGS)
 
 
 def configure_sqlite(bind_engine) -> None:
