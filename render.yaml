@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: capstone-back
+    runtime: python
+    plan: free
+    region: singapore          # 사용자·Neon(ap-southeast-1)과 가장 가까움
+    branch: main
+    healthCheckPath: /health
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.13         # 로컬(.venv)과 동일 버전 핀
+      - key: DATABASE_URL
+        sync: false            # Neon 연결 문자열 — 대시보드에서 입력(커밋 금지)
+      - key: OPENAI_API_KEY
+        sync: false            # 대시보드에서 입력(커밋 금지)
