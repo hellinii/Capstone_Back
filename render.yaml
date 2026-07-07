@@ -5,6 +5,7 @@ services:
     plan: free
     region: singapore          # 사용자·Neon(ap-southeast-1)과 가장 가까움
     branch: main
+    autoDeploy: false          # 배포는 CI(deploy job)의 Deploy Hook으로만 — 푸시 자체로는 배포 안 됨
     healthCheckPath: /health
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
