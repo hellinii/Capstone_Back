@@ -4,19 +4,27 @@ analyzer.py — 파일 파싱 + 메타데이터 추출 + LLM 호출 핵심 로�
 
 import json
 import io
+import re
 import pandas as pd
 from openai import AsyncOpenAI
 
 from schemas import (
-    AnalysisResponse, ColumnMapping, ColumnRole,
+    AnalysisResponse, ColumnMapping, ColumnMatchNote, ColumnRole,
     DataMetadata, TaskType, VALID_ROLES_BY_TASK,
 )
 from prompt_builder import build_system_prompt, build_user_prompt
 
 
-def _build_response_schema(task_type: TaskType) -> dict:
-    """task_type에 맞는 role만 허용하는 JSON Schema 생성"""
+def _build_response_schema(task_type: TaskType, columns: list[str] | None = None) -> dict:
+    """task_type에 맞는 role만 허용하는 JSON Schema 생성.
+
+    columns 를 주면 column 값을 실제 헤더 enum 으로 제약해 LLM 환각 컬럼명을 원천 차단한다(D5a).
+    (동적 enum strict 가 거부되면 호출부가 columns=None 으로 1회 재시도한다.)
+    """
     valid_roles = [r.value for r in VALID_ROLES_BY_TASK[task_type]]
+    column_prop: dict = {"type": "string"}
+    if columns:
+        column_prop = {"type": "string", "enum": columns}
     return {
         "type": "json_schema",
         "json_schema": {
@@ -30,7 +38,7 @@ def _build_response_schema(task_type: TaskType) -> dict:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "column": {"type": "string"},
+                                "column": column_prop,
                                 "role":   {"type": "string", "enum": valid_roles},
                             },
                             "required": ["column", "role"],
@@ -45,6 +53,71 @@ def _build_response_schema(task_type: TaskType) -> dict:
     }
 
 
+def _norm(s: str) -> str:
+    """컬럼명 정규화: 공백/밑줄/하이픈 제거 + 소문자. (대소문자·구분자 변형 매칭용)"""
+    return re.sub(r"[\s_\-]+", "", str(s).strip().lower())
+
+
+def _reconcile_llm_columns(
+    llm_mappings: list[dict], actual_cols: list[str]
+) -> tuple[list[dict], list[ColumnMatchNote]]:
+    """LLM 반환 컬럼명을 실제 헤더에 정렬한다(신뢰 경계 검증, D5a).
+
+    - 정확 일치 → 그대로. 정규화(대소문자/공백/_/-) 일치 → 실제 헤더로 보정(corrected).
+    - 실제 헤더에 없으면 매핑에서 제외(unmatched) — 환각 컬럼명이 결과에 들어가지 않게.
+    - LLM 이 한 번도 반환하지 않은 실제 헤더는 ignore 로 보완(unmapped_header) — 조용한 컬럼 소실 방지.
+    (difflib 유사 매칭은 무음 오매핑 위험이 있어 advisory 로 분리, 여기서는 자동 치환하지 않음.)
+    """
+    notes: list[ColumnMatchNote] = []
+    actual_set = set(actual_cols)
+
+    # 정규화 사전(충돌 키는 모호하므로 정규화 매칭 대상에서 제외)
+    norm_to_actual: dict[str, str] = {}
+    collisions: set[str] = set()
+    for c in actual_cols:
+        n = _norm(c)
+        if n in norm_to_actual:
+            collisions.add(n)
+        else:
+            norm_to_actual[n] = c
+    for n in collisions:
+        norm_to_actual.pop(n, None)
+
+    used: set[str] = set()
+    reconciled: list[dict] = []
+    for m in llm_mappings:
+        col = m.get("column", "")
+        role = m.get("role", ColumnRole.ignore.value)
+        if col in actual_set and col not in used:
+            reconciled.append({"column": col, "role": role})
+            used.add(col)
+            continue
+        matched = norm_to_actual.get(_norm(col))
+        if matched and matched not in used:
+            reconciled.append({"column": matched, "role": role})
+            used.add(matched)
+            notes.append(ColumnMatchNote(
+                llm_column=col, matched_column=matched, status="corrected",
+                message=f"'{col}'을(를) 실제 컬럼 '{matched}'(으)로 보정했습니다.",
+            ))
+            continue
+        notes.append(ColumnMatchNote(
+            llm_column=col, matched_column=None, status="unmatched",
+            message=f"'{col}'은(는) 파일 헤더에 없어 매핑에서 제외했습니다. 필요 시 직접 지정하세요.",
+        ))
+
+    # 미반환 실제 헤더 → ignore 로 보완(UI 에서 역할 지정 가능)
+    for c in actual_cols:
+        if c not in used:
+            reconciled.append({"column": c, "role": ColumnRole.ignore.value})
+            notes.append(ColumnMatchNote(
+                llm_column="", matched_column=c, status="unmapped_header",
+                message=f"'{c}'은(는) 자동 매핑되지 않아 '무시(ignore)'로 추가했습니다. 필요 시 역할을 지정하세요.",
+            ))
+
+    return reconciled, notes
+
+
 def parse_file_content(file_content: bytes, filename: str) -> tuple[list[str], pd.DataFrame]:
     """
     CSV 또는 JSON 파일을 파싱해 컬럼명 목록과 전체 DataFrame을 반환합니다.
@@ -57,7 +130,17 @@ def parse_file_content(file_content: bytes, filename: str) -> tuple[list[str], p
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if ext == "csv":
-        df = pd.read_csv(io.BytesIO(file_content))
+        # 인코딩 자동 감지: UTF-8 → CP949(한국어 Excel) → latin-1 순으로 시도
+        last_error = None
+        for encoding in ("utf-8", "utf-8-sig", "cp949", "latin-1"):
+            try:
+                df = pd.read_csv(io.BytesIO(file_content), encoding=encoding)
+                break
+            except (UnicodeDecodeError, pd.errors.ParserError) as e:
+                last_error = e
+                continue
+        else:
+            raise ValueError(f"파일 인코딩을 자동으로 감지할 수 없습니다: {last_error}")
 
     elif ext == "json":
         raw = json.loads(file_content.decode("utf-8"))
@@ -210,21 +293,45 @@ async def analyze_columns_with_llm(
     # 30행 샘플: LLM 컬럼 매핑 + 클래스 감지용
     sample_df = df.head(30)
 
-    response = await client.chat.completions.create(
-        model="gpt-4.1-nano",
-        messages=[
-            {"role": "system", "content": build_system_prompt(task_type)},
-            {"role": "user",   "content": build_user_prompt(columns, sample_df)},
-        ],
-        response_format=_build_response_schema(task_type),
-        temperature=0,
-    )
+    messages = [
+        {"role": "system", "content": build_system_prompt(task_type)},
+        {"role": "user",   "content": build_user_prompt(columns, sample_df)},
+    ]
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4.1-nano",
+            messages=messages,
+            response_format=_build_response_schema(task_type, columns),
+            temperature=0,
+        )
+    except Exception:
+        # 동적 enum strict 스키마가 거부되면 enum 없는 스키마로 1회 재시도(D5a).
+        # (그래도 실패하면 라우터의 규칙 폴백으로 강등된다.)
+        response = await client.chat.completions.create(
+            model="gpt-4.1-nano",
+            messages=messages,
+            response_format=_build_response_schema(task_type, None),
+            temperature=0,
+        )
 
     data = json.loads(response.choices[0].message.content)
-    column_mappings = [
-        ColumnMapping(column=m["column"], role=ColumnRole(m["role"]))
-        for m in data["column_mappings"]
-    ]
+
+    # LLM 반환 컬럼명을 실제 헤더에 정렬(환각/변형 컬럼명 차단, 미반환 헤더 보완) — D5a
+    reconciled, notes = _reconcile_llm_columns(data["column_mappings"], columns)
+    column_mappings = []
+    for m in reconciled:
+        col_name = m["column"]
+        samples = []
+        if col_name in df.columns:
+            # 결측치를 제거하고 상위 3개 값을 문자열로 변환하여 예시 데이터 추출
+            samples = [str(v) for v in df[col_name].dropna().head(3).tolist()]
+        column_mappings.append(
+            ColumnMapping(
+                column=col_name,
+                role=ColumnRole(m["role"]),
+                sample_values=samples
+            )
+        )
 
     # 클래스 감지: sample_df(30행) / 분포 계산: 전체 df
     metadata = extract_metadata(task_type, df, sample_df, column_mappings)
@@ -233,4 +340,58 @@ async def analyze_columns_with_llm(
         task_type=task_type,
         column_mappings=column_mappings,
         metadata=metadata,
+        column_notes=notes,
+    )
+
+
+def analyze_columns_fallback(
+    task_type: TaskType,
+    columns: list[str],
+    df: pd.DataFrame,
+) -> AnalysisResponse:
+    """OpenAI API 키가 없을 때 작동하는 규칙 기반 컬럼 매핑 폴백 함수"""
+    column_mappings = []
+
+    for col in columns:
+        col_lower = col.lower()
+        role = ColumnRole.ignore
+
+        if "id" in col_lower or "index" in col_lower:
+            role = ColumnRole.sample_id
+        elif col_lower in ["y_true", "actual", "ground_truth", "label", "target"]:
+            if task_type == TaskType.multilabel:
+                role = ColumnRole.true_labels
+            else:
+                role = ColumnRole.y_true
+        elif col_lower in ["y_pred", "predicted", "pred", "prediction"]:
+            if task_type == TaskType.multilabel:
+                role = ColumnRole.pred_labels
+            else:
+                role = ColumnRole.y_pred
+        elif task_type == TaskType.binary and ("score" in col_lower or "prob" in col_lower or "pos" in col_lower):
+            role = ColumnRole.score_positive
+        elif task_type == TaskType.multiclass and ("prob" in col_lower or "p_" in col_lower or "class_" in col_lower):
+            role = ColumnRole.prob_per_class
+        elif task_type == TaskType.multilabel and ("score" in col_lower or "prob" in col_lower or "p_" in col_lower):
+            role = ColumnRole.score_per_label
+
+        samples = []
+        if col in df.columns:
+            samples = [str(v) for v in df[col].dropna().head(3).tolist()]
+
+        column_mappings.append(
+            ColumnMapping(
+                column=col,
+                role=role,
+                sample_values=samples
+            )
+        )
+
+    sample_df = df.head(30)
+    metadata = extract_metadata(task_type, df, sample_df, column_mappings)
+
+    return AnalysisResponse(
+        task_type=task_type,
+        column_mappings=column_mappings,
+        metadata=metadata
     )

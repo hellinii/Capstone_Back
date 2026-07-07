@@ -26,10 +26,10 @@ def _get_binarized_true_pred(df: pd.DataFrame, mapping_dict: dict):
     """
     MultiLabelBinarizer를 사용해 One-Hot Vector 형태(2D Array)로 변환
     """
-    true_col = mapping_dict.get('true_class')
-    pred_col = mapping_dict.get('predicted_class')
+    true_col = mapping_dict.get('true_labels')
+    pred_col = mapping_dict.get('pred_labels')
     if not true_col or not pred_col:
-        raise ValueError("true_class 또는 predicted_class 컬럼 매핑이 필요합니다.")
+        raise ValueError("true_labels 및 pred_labels 컬럼 매핑이 필요합니다.")
         
     y_true_list = _parse_multilabel_col(df[true_col])
     y_pred_list = _parse_multilabel_col(df[pred_col])

@@ -3,7 +3,7 @@ from schemas import (
     AnalysisResponse, TaskType,
     ConfirmMappingRequest, ConfirmMappingResponse,
 )
-from analyzer import parse_file_content, analyze_columns_with_llm
+from analyzer import parse_file_content, analyze_columns_with_llm, analyze_columns_fallback
 from validator import validate_mapping
 
 router = APIRouter(prefix="/api", tags=["Column Analysis"])
@@ -51,18 +51,29 @@ async def analyze_columns(
     # app.state에서 openai_client 가져오기
     client = request.app.state.openai_client
 
-    # LLM 호출 → 컬럼 매핑 + 메타데이터 추출
+    def _rule_fallback(reason: str) -> AnalysisResponse:
+        # 규칙 폴백도 extract_metadata 를 공유하므로 실패 가능 → 방어적으로 감싸 명확한 500 로(D5c).
+        try:
+            return analyze_columns_fallback(task_type=task_type, columns=columns, df=df)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"컬럼 매핑 실패({reason}) 및 규칙 기반 폴백도 실패했습니다: {e}",
+            )
+
+    # 무키(client is None): 규칙 폴백
+    if not client:
+        print("⚠️ OPENAI_API_KEY 미설정 → 룰 기반(Rule-based) 폴백 컬럼 매핑을 수행합니다.")
+        return _rule_fallback("no_key")
+
+    # LLM 호출 실패(타임아웃/레이트리밋/파싱 등)도 500 대신 규칙 폴백으로 graceful degrade(D5c).
     try:
-        result = await analyze_columns_with_llm(
-            client=client,
-            task_type=task_type,
-            columns=columns,
-            df=df,
+        return await analyze_columns_with_llm(
+            client=client, task_type=task_type, columns=columns, df=df,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LLM 분석 실패: {str(e)}")
-
-    return result
+        print(f"⚠️ LLM 컬럼 매핑 실패({e}) → 룰 기반(Rule-based) 폴백으로 대체합니다.")
+        return _rule_fallback("llm_error")
 
 
 @router.post(
