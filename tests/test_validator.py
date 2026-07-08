@@ -67,7 +67,7 @@ def test_validate_mapping_flags_same_column():
     resp = validate_mapping(ConfirmMappingRequest(
         task_type=TaskType.binary,
         column_mappings=[_cm("label", ColumnRole.y_true), _cm("label", ColumnRole.y_pred)],
-        selected_tcs=["TC1"],
+        selected_tcs=["M1"],
     ))
     assert resp.is_valid is False
     assert any(e.code == "SAME_COLUMN_TRUE_PRED" for e in resp.errors)
@@ -77,7 +77,7 @@ def test_validate_mapping_ok_when_distinct():
     resp = validate_mapping(ConfirmMappingRequest(
         task_type=TaskType.binary,
         column_mappings=[_cm("y", ColumnRole.y_true), _cm("p", ColumnRole.y_pred)],
-        selected_tcs=["TC1"],
+        selected_tcs=["M1"],
     ))
     assert not any(e.code in ("SAME_COLUMN_TRUE_PRED", "COLUMN_MULTIPLE_ROLES") for e in resp.errors)
 
@@ -94,6 +94,6 @@ def test_preprocess_rejects_same_true_pred_column():
 def test_engine_rejects_same_true_pred_column():
     df = pd.DataFrame({"label": [1, 0, 1, 0], "other": [1, 1, 0, 0]})
     mappings = [{"column": "label", "role": "y_true"}, {"column": "label", "role": "y_pred"}]
-    result = run_evaluation(df, mappings, "binary", ["TC1"])
+    result = run_evaluation(df, mappings, "binary", ["M1"])
     assert "error" in result           # 전처리 백스톱이 잡아 error 반환
-    assert result.get("TC1") != 1.0    # 가짜 100% 아님
+    assert result.get("M1") != 1.0    # 가짜 100% 아님

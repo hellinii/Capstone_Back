@@ -25,8 +25,8 @@ CASES = {
             ("noise_col1", "ignore"),
             ("noise_col2", "ignore"),
         ],
-        "selected_tcs": ["TC1", "TC2", "TC3", "TC4", "TC5", "TC6", "TC7", "TC8",
-                         "TC9", "TC10", "TC19", "TC20", "TC21", "TC22", "TC23"],
+        "selected_tcs": ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8",
+                         "M9", "M10", "M19", "M20", "M21", "M22", "M23"],
     },
     "multiclass": {
         "csv": DATA / "multiclass" / "multiclass_200.csv",
@@ -40,8 +40,8 @@ CASES = {
             ("prob_dog", "prob_per_class"),
             ("prob_bird", "prob_per_class"),
         ],
-        "selected_tcs": ["TC1", "TC2", "TC3", "TC4", "TC5", "TC6",
-                         "TC11", "TC12", "TC13", "TC14", "TC21", "TC22", "TC23"],
+        "selected_tcs": ["M1", "M2", "M3", "M4", "M5", "M6",
+                         "M11", "M12", "M13", "M14", "M21", "M22", "M23"],
     },
     "multilabel": {
         "csv": DATA / "multilabel" / "multilabel_200.csv",
@@ -56,8 +56,8 @@ CASES = {
             ("score_finance", "score_per_label"),
             ("score_tech", "score_per_label"),
         ],
-        "selected_tcs": ["TC1", "TC2", "TC3", "TC4", "TC5",
-                         "TC15", "TC16", "TC17", "TC18", "TC21", "TC22", "TC23"],
+        "selected_tcs": ["M1", "M2", "M3", "M4", "M5",
+                         "M15", "M16", "M17", "M18", "M21", "M22", "M23"],
     },
 }
 

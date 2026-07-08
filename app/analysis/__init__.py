@@ -11,7 +11,7 @@
 - reconcile.py          : LLM 반환 컬럼명을 실제 파일 헤더에 정렬(신뢰 경계)
 - metadata.py           : 확정 매핑 기반 메타데이터(클래스/분포) 추출
 - prompt_builder.py     : 컬럼 매핑용 LLM 프롬프트 생성
-- validator.py          : 매핑 유효성 검사 + 계산 가능 TC 산출, 컬럼 충돌 탐지
+- validator.py          : 매핑 유효성 검사 + 계산 가능 지표 산출, 컬럼 충돌 탐지
 - validation_checks.py  : 데이터 검증 개별 점검 함수 모음
 - schemas.py            : 분석 도메인 요청/응답 스키마
 """

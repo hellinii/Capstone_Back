@@ -50,22 +50,22 @@ def _get_binarized_true_pred(df: pd.DataFrame, mapping_dict: dict):
     return mlb.transform(y_true_list), mlb.transform(y_pred_list)
 
 def calculate_hamming_loss(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC15: Hamming Loss"""
+    """M15: Hamming Loss"""
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
     return float(hamming_loss(y_true_bin, y_pred_bin))
 
 def calculate_exact_match_ratio(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC16: Exact Match Ratio (Subset Accuracy)"""
+    """M16: Exact Match Ratio (Subset Accuracy)"""
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
     return float(accuracy_score(y_true_bin, y_pred_bin))
 
 def calculate_jaccard_index(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC17: Jaccard Index (Samples Average)"""
+    """M17: Jaccard Index (Samples Average)"""
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
     return float(jaccard_score(y_true_bin, y_pred_bin, average='samples', zero_division=0))
 
 def calculate_distribution_diff_ml(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC18: Distribution Diff (ML) - 레이블 빈도수 벡터 간의 코사인 거리 사용"""
+    """M18: Distribution Diff (ML) - 레이블 빈도수 벡터 간의 코사인 거리 사용"""
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
     
     p_freq = np.sum(y_true_bin, axis=0)

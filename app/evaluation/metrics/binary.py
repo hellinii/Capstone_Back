@@ -54,7 +54,7 @@ def _binarize_true_labels(y_true, positive_class=None):
     return y_true
 
 def calculate_specificity(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC7: Specificity (True Negative Rate)"""
+    """M7: Specificity (True Negative Rate)"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     cm = confusion_matrix(y_true, y_pred)
     if cm.shape == (2, 2):
@@ -63,7 +63,7 @@ def calculate_specificity(df: pd.DataFrame, mapping_dict: dict) -> float:
     return 0.0
 
 def calculate_fpr(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC8: False Positive Rate (FPR)"""
+    """M8: False Positive Rate (FPR)"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     cm = confusion_matrix(y_true, y_pred)
     if cm.shape == (2, 2):
@@ -72,28 +72,28 @@ def calculate_fpr(df: pd.DataFrame, mapping_dict: dict) -> float:
     return 0.0
 
 def calculate_auroc(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC9: Area Under the Receiver Operating Characteristic Curve (AUROC)"""
+    """M9: Area Under the Receiver Operating Characteristic Curve (AUROC)"""
     y_true, y_score = _get_true_score(df, mapping_dict)
     pos_class = mapping_dict.get('_positive_class')
     y_true_bin = _binarize_true_labels(y_true, pos_class)
     return float(roc_auc_score(y_true_bin, y_score))
 
 def calculate_auprc(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC10: Area Under the Precision-Recall Curve (AUPRC)"""
+    """M10: Area Under the Precision-Recall Curve (AUPRC)"""
     y_true, y_score = _get_true_score(df, mapping_dict)
     pos_class = mapping_dict.get('_positive_class')
     y_true_bin = _binarize_true_labels(y_true, pos_class)
     return float(average_precision_score(y_true_bin, y_score))
 
 def calculate_log_loss(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC19: Log Loss"""
+    """M19: Log Loss"""
     y_true, y_score = _get_true_score(df, mapping_dict)
     pos_class = mapping_dict.get('_positive_class')
     y_true_bin = _binarize_true_labels(y_true, pos_class)
     return float(log_loss(y_true_bin, y_score))
 
 def calculate_mcc(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC20: Matthews Correlation Coefficient (MCC)"""
+    """M20: Matthews Correlation Coefficient (MCC)"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     return float(matthews_corrcoef(y_true, y_pred))
 
@@ -113,7 +113,7 @@ def _downsample_pair(x, y, n: int = 60):
 
 
 def calculate_roc_curve(df: pd.DataFrame, mapping_dict: dict) -> dict:
-    """ROC 곡선 좌표 (차트용). AUROC(TC9)와 동일 입력을 사용한다."""
+    """ROC 곡선 좌표 (차트용). AUROC(M9)와 동일 입력을 사용한다."""
     y_true, y_score = _get_true_score(df, mapping_dict)
     pos_class = mapping_dict.get('_positive_class')
     y_true_bin = _binarize_true_labels(y_true, pos_class)
@@ -123,7 +123,7 @@ def calculate_roc_curve(df: pd.DataFrame, mapping_dict: dict) -> dict:
 
 
 def calculate_pr_curve(df: pd.DataFrame, mapping_dict: dict) -> dict:
-    """Precision-Recall 곡선 좌표 (차트용). AUPRC(TC10)와 동일 입력을 사용한다."""
+    """Precision-Recall 곡선 좌표 (차트용). AUPRC(M10)와 동일 입력을 사용한다."""
     y_true, y_score = _get_true_score(df, mapping_dict)
     pos_class = mapping_dict.get('_positive_class')
     y_true_bin = _binarize_true_labels(y_true, pos_class)

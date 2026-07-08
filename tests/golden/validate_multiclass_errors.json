@@ -18,7 +18,7 @@
     },
     {
       "label": "Selected metric count",
-      "note": "선택된 메트릭: TC1, TC2, TC3, TC4, TC5, TC6, TC11, TC12, TC13, TC14, TC21, TC22, TC23",
+      "note": "선택된 메트릭: M1, M2, M3, M4, M5, M6, M11, M12, M13, M14, M21, M22, M23",
       "value": "13 items"
     },
     {
@@ -28,19 +28,19 @@
     }
   ],
   "selected_metric_ids": [
-    "TC1",
-    "TC2",
-    "TC3",
-    "TC4",
-    "TC5",
-    "TC6",
-    "TC11",
-    "TC12",
-    "TC13",
-    "TC14",
-    "TC21",
-    "TC22",
-    "TC23"
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M6",
+    "M11",
+    "M12",
+    "M13",
+    "M14",
+    "M21",
+    "M22",
+    "M23"
   ],
   "task_type": "multiclass",
   "validation_details": [

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api", tags=["Evaluation"])
     summary="평가 연산 실행",
     description=(
         "업로드된 데이터셋 파일과 매핑 설정을 받아, "
-        "선택된 ISO/IEC 4213 평가지표(TC)를 계산하여 결과를 반환합니다."
+        "선택된 ISO/IEC 4213 평가지표를 계산하여 결과를 반환합니다."
     )
 )
 async def evaluate_dataset(

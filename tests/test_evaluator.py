@@ -12,9 +12,9 @@ MULTICLASS_CSV = BASE_DIR / "data" / "multiclass" / "multiclass_200.csv"
 MULTILABEL_CSV = BASE_DIR / "data" / "multilabel" / "multilabel_200.csv"
 
 # 3. 지원 TC 목록을 모듈 상수로 분리하여 유지보수성 향상
-BINARY_SUPPORTED_TCS = ["TC1", "TC2", "TC3", "TC4", "TC5", "TC6", "TC7", "TC8", "TC9", "TC10", "TC19", "TC20", "TC21", "TC22", "TC23"]
-MULTICLASS_SUPPORTED_TCS = ["TC1", "TC2", "TC3", "TC4", "TC5", "TC6", "TC11", "TC12", "TC13", "TC14", "TC21", "TC22", "TC23"]
-MULTILABEL_SUPPORTED_TCS = ["TC1", "TC2", "TC3", "TC4", "TC5", "TC15", "TC16", "TC17", "TC18", "TC21", "TC22", "TC23"]
+BINARY_SUPPORTED_TCS = ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M19", "M20", "M21", "M22", "M23"]
+MULTICLASS_SUPPORTED_TCS = ["M1", "M2", "M3", "M4", "M5", "M6", "M11", "M12", "M13", "M14", "M21", "M22", "M23"]
+MULTILABEL_SUPPORTED_TCS = ["M1", "M2", "M3", "M4", "M5", "M15", "M16", "M17", "M18", "M21", "M22", "M23"]
 
 @pytest.fixture
 def binary_df():
@@ -46,7 +46,7 @@ def assert_valid_results(results, selected_tcs, task_type):
             
             # 2. 메트릭 범위 검증 (대부분의 정확도/오차 지표는 0~1)
             # 단, TC6(KL Divergence), TC19(Log Loss), TC23(Imbalance Ratio)는 1.0을 초과할 수 있으므로 제외
-            if tc not in ["TC6", "TC19", "TC23"]:
+            if tc not in ["M6", "M19", "M23"]:
                 assert 0.0 <= val <= 1.0, f"{tc} 값({val})이 0.0~1.0 범위를 벗어남"
             print(f"  [OK] {tc}: {val:.4f}")
             
@@ -131,9 +131,9 @@ def test_engine_binary_evaluation(binary_df):
     assert_valid_results(results, BINARY_SUPPORTED_TCS, "binary")
     
     # 지원하지 않는 TC15는 에러를 반환해야 함
-    results_invalid = evaluate(binary_df, mappings, "binary", ["TC15"])
-    assert "TC15" in results_invalid
-    assert "error" in results_invalid["TC15"]
+    results_invalid = evaluate(binary_df, mappings, "binary", ["M15"])
+    assert "M15" in results_invalid
+    assert "error" in results_invalid["M15"]
 
 def test_engine_binary_evaluation_with_positive_class(binary_df):
     mappings = [
@@ -181,7 +181,7 @@ def test_edge_case_empty_dataframe():
     df_empty = pd.DataFrame()
     mappings = [{"role": "y_true", "column": "y_true"}]
     # evaluate 함수는 에러를 {"error": "..."} 형태로 반환함
-    results = evaluate(df_empty, mappings, "binary", ["TC1"])
+    results = evaluate(df_empty, mappings, "binary", ["M1"])
     assert "error" in results
     assert "비어 있" in results["error"]
     print("  [OK] 빈 데이터프레임 거부 정상 동작")
@@ -191,9 +191,9 @@ def test_edge_case_missing_mapping(binary_df):
     print("\n[Edge Case - 필수 매핑 누락]")
     # y_true가 누락됨
     mappings = [{"role": "y_pred", "column": "y_pred"}]
-    results = evaluate(binary_df, mappings, "binary", ["TC1"])
+    results = evaluate(binary_df, mappings, "binary", ["M1"])
     # 엔진 설계상, 매핑 누락 등은 개별 TC 계산 중 잡혀서 TC 내부에 에러로 반환됨
-    assert "TC1" in results
-    assert "error" in results["TC1"]
-    assert "매핑" in results["TC1"]["error"] or "필수" in results["TC1"]["error"]
+    assert "M1" in results
+    assert "error" in results["M1"]
+    assert "매핑" in results["M1"]["error"] or "필수" in results["M1"]["error"]
     print("  [OK] 필수 매핑 누락 시 개별 TC 에러 반환 정상 동작")

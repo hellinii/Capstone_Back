@@ -2,28 +2,28 @@
 validator.py — 사용자가 확정한 컬럼 매핑의 유효성 검사
 
 task_type별 필수/선택 역할 규칙을 검사하고,
-현재 매핑으로 계산 가능한 TC 목록을 반환합니다.
+현재 매핑으로 계산 가능한 지표 목록을 반환합니다.
 
-이미지 기준 TC 가용성 규칙:
+이미지 기준 지표 가용성 규칙:
   [Binary]
-    y_true + y_pred        → TC1~TC8, TC20~TC23
-    y_true + score_positive→ TC9, TC10, TC19
+    y_true + y_pred        → M1~M8, M20~M23
+    y_true + score_positive→ M9, M10, M19
     (y_pred OR score_positive 중 최소 하나 필수)
 
   [Multiclass]
-    y_true + y_pred        → TC1~TC6, TC11~TC14, TC21~TC23
+    y_true + y_pred        → M1~M6, M11~M14, M21~M23
 
   [Multilabel]
-    true_labels + pred_labels          → TC1~TC6, TC11~TC13, TC15~TC17, TC21~TC23
-    true_labels + score_per_label(N개) → TC18
+    true_labels + pred_labels          → M1~M6, M11~M13, M15~M17, M21~M23
+    true_labels + score_per_label(N개) → M18
 """
 
 from app.core.schemas import ColumnMapping, ColumnRole, TC_REQUIREMENTS, TaskType
 from app.analysis.schemas import ConfirmMappingRequest, ConfirmMappingResponse, MappingValidationError, MappingValidationWarning
 
 
-# ── TC 가용성 규칙 정의 ────────────────────────────────────────────────────────
-# TC_REQUIREMENTS(각 TC 계산에 필요한 role 집합)는 evaluator.engine 과 공유하므로
+# ── 지표 가용성 규칙 정의 ────────────────────────────────────────────────────────
+# TC_REQUIREMENTS(각 지표 계산에 필요한 role 집합)는 evaluator.engine 과 공유하므로
 # app.core.schemas 로 이동했다. 여기서는 import 해서 사용한다.
 
 # task_type별 필수 역할 (없으면 is_valid=False)
@@ -48,12 +48,12 @@ _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
         (
             ColumnRole.score_positive,
             "MISSING_SCORE_POSITIVE",
-            "score_positive가 없어 TC9, TC10, TC19 (확률 기반 지표)를 계산할 수 없습니다.",
+            "score_positive가 없어 M9, M10, M19 (확률 기반 지표)를 계산할 수 없습니다.",
         ),
         (
             ColumnRole.y_pred,
             "MISSING_Y_PRED",
-            "y_pred가 없어 TC1~TC8, TC20~TC23 (예측 기반 지표)를 계산할 수 없습니다.",
+            "y_pred가 없어 M1~M8, M20~M23 (예측 기반 지표)를 계산할 수 없습니다.",
         ),
     ],
     TaskType.multiclass: [
@@ -67,7 +67,7 @@ _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
         (
             ColumnRole.score_per_label,
             "MISSING_SCORE_PER_LABEL",
-            "score_per_label이 없어 TC18 (Distribution Diff ML)을 계산할 수 없습니다.",
+            "score_per_label이 없어 M18 (Distribution Diff ML)을 계산할 수 없습니다.",
         ),
     ],
 }
@@ -125,14 +125,14 @@ def find_column_conflicts(
 
 def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     """
-    사용자가 확정한 매핑을 검증하고 계산 가능한 TC 목록을 반환합니다.
+    사용자가 확정한 매핑을 검증하고 계산 가능한 지표 목록을 반환합니다.
 
     검사 순서:
     1. 역할 유효성: task_type에 허용되지 않는 role 사용 여부
     2. 중복 체크: 단일 역할(y_true, y_pred 등)에 여러 컬럼 매핑 여부
     3. 필수 역할 누락 체크 → is_valid 결정
     4. 선택 역할 누락 체크 → warnings
-    5. TC 가용성 계산
+    5. 지표 가용성 계산
     """
     task_type = request.task_type
     mappings = request.column_mappings
@@ -187,7 +187,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
         if role not in mapped_roles:
             warnings.append(MappingValidationWarning(code=code, message=message))
 
-    # ── 4. TC 가용성 계산 및 선택된 TC 검증 ────────────────────────────────────────────────────
+    # ── 4. 지표 가용성 계산 및 선택된 지표 검증 ────────────────────────────────────────────────────
     tc_requirements = TC_REQUIREMENTS[task_type]
     available_tcs: list[str] = []
     unavailable_tcs: list[str] = []
@@ -200,7 +200,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
             missing_str = ", ".join(r.value for r in missing)
             unavailable_tcs.append(f"{tc_name} (누락: {missing_str})")
             
-            # 🔥 [변경점] 사용자가 계산하겠다고 명시적으로 선택한 TC인데, 필요 역할이 매핑되지 않았다면 Error 처리
+            # 🔥 [변경점] 사용자가 계산하겠다고 명시적으로 선택한 지표인데, 필요 역할이 매핑되지 않았다면 Error 처리
             if tc_name in selected_tcs:
                 errors.append(MappingValidationError(
                     code="MISSING_TC_REQUIREMENT",
@@ -220,5 +220,5 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
 
 
 def _tc_sort_key(tc_name: str) -> int:
-    """'TC1', 'TC23' 같은 문자열을 숫자 기준으로 정렬하기 위한 키"""
-    return int(tc_name.replace("TC", ""))
+    """'M1', 'M23' 같은 지표 ID 문자열을 숫자 기준으로 정렬하기 위한 키(접두사 무관)."""
+    return int("".join(c for c in tc_name if c.isdigit()))

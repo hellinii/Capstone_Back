@@ -15,25 +15,25 @@ from sklearn.metrics import precision_recall_fscore_support
 from .common import _get_true_pred
 
 def calculate_macro_average(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, float]:
-    """TC11: Macro Average"""
+    """M11: Macro Average"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     p, r, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='macro', zero_division=0)
     return {"precision": float(p), "recall": float(r), "f1_score": float(f1)}
 
 def calculate_micro_average(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, float]:
-    """TC12: Micro Average"""
+    """M12: Micro Average"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     p, r, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='micro', zero_division=0)
     return {"precision": float(p), "recall": float(r), "f1_score": float(f1)}
 
 def calculate_weighted_average(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, float]:
-    """TC13: Weighted Average"""
+    """M13: Weighted Average"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     p, r, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='weighted', zero_division=0)
     return {"precision": float(p), "recall": float(r), "f1_score": float(f1)}
 
 def calculate_distribution_diff_mc(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC14: Distribution Diff (MC) - Total Variation Distance (TVD) 적용"""
+    """M14: Distribution Diff (MC) - Total Variation Distance (TVD) 적용"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     classes = np.unique(np.concatenate((y_true, y_pred)))
     

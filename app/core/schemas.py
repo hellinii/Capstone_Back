@@ -1,6 +1,6 @@
 """app/core/schemas.py — 전 도메인 공유 계약(enum·역할 규칙·파이프라인 인계 모델).
 
-TaskType/ColumnRole 등 공용 enum 과 TC 요건 테이블, 그리고 분석→평가로 넘어가는 인계
+TaskType/ColumnRole 등 공용 enum 과 지표 요건 테이블, 그리고 분석→평가로 넘어가는 인계
 계약(ColumnMapping, DataMetadata)만 여기 둔다. 도메인별 요청/응답 스키마는 각 <도메인>/schemas.py.
 """
 
@@ -69,56 +69,56 @@ VALID_ROLES_BY_TASK: dict[TaskType, list[ColumnRole]] = {
 
 TC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
     TaskType.binary: {
-        "TC1":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC2":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC3":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC4":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC5":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC6":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC7":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC8":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC9":  {ColumnRole.y_true, ColumnRole.score_positive},
-        "TC10": {ColumnRole.y_true, ColumnRole.score_positive},
-        "TC19": {ColumnRole.y_true, ColumnRole.score_positive},
-        "TC20": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC21": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC22": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC23": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M1":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M2":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M3":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M4":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M5":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M6":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M7":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M8":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M9":  {ColumnRole.y_true, ColumnRole.score_positive},
+        "M10": {ColumnRole.y_true, ColumnRole.score_positive},
+        "M19": {ColumnRole.y_true, ColumnRole.score_positive},
+        "M20": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M21": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M22": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M23": {ColumnRole.y_true, ColumnRole.y_pred},
     },
     TaskType.multiclass: {
-        "TC1":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC2":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC3":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC4":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC5":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC6":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC11": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC12": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC13": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC14": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC21": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC22": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC23": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M1":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M2":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M3":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M4":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M5":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M6":  {ColumnRole.y_true, ColumnRole.y_pred},
+        "M11": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M12": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M13": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M14": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M21": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M22": {ColumnRole.y_true, ColumnRole.y_pred},
+        "M23": {ColumnRole.y_true, ColumnRole.y_pred},
     },
     TaskType.multilabel: {
-        # TC1(Accuracy)은 multilabel 에서 sklearn subset accuracy(전 라벨 일치 비율)로
-        # 계산된다 — 정의상 TC16(Exact Match Ratio)과 동일 값.
-        "TC1":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC2":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC3":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC4":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC5":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC6":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC11": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC12": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC13": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC15": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC16": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC17": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC18": {ColumnRole.true_labels, ColumnRole.score_per_label},  # 분포 기반
-        "TC21": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC22": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC23": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        # M1(Accuracy)은 multilabel 에서 sklearn subset accuracy(전 라벨 일치 비율)로
+        # 계산된다 — 정의상 M16(Exact Match Ratio)과 동일 값.
+        "M1":  {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M2":  {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M3":  {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M4":  {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M5":  {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M6":  {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M11": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M12": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M13": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M15": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M16": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M17": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M18": {ColumnRole.true_labels, ColumnRole.score_per_label},  # 분포 기반
+        "M21": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M22": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        "M23": {ColumnRole.true_labels, ColumnRole.pred_labels},
     },
 }
 

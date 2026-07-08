@@ -1,7 +1,7 @@
 """app/evaluation/metrics/common.py — task 공통 지표 계산(sklearn 기반)
 
 정확도/정밀도/재현율/F1/Fbeta/혼동행렬/클래스별 지표/불균형비 등 세 task 가 공유하는 지표.
-engine 의 METRIC_REGISTRY 가 TC 별로 호출한다.
+engine 의 METRIC_REGISTRY 가 지표 별로 호출한다.
 
 상호작용
 - 의존(import): pandas, sklearn
@@ -42,7 +42,7 @@ def _get_true_pred(df: pd.DataFrame, mapping_dict: dict):
     return y_true, y_pred
 
 def calculate_accuracy(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC1: Accuracy"""
+    """M1: Accuracy"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     return float(accuracy_score(y_true, y_pred))
 
@@ -62,7 +62,7 @@ def _get_binary_kwargs(y_true, mapping_dict):
     return {"pos_label": pos_label, "average": "binary", "zero_division": 0}
 
 def calculate_precision(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC2: Precision"""
+    """M2: Precision"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     task_type = mapping_dict.get('_task_type', 'multiclass')
     if task_type == 'binary':
@@ -70,7 +70,7 @@ def calculate_precision(df: pd.DataFrame, mapping_dict: dict) -> float:
     return float(precision_score(y_true, y_pred, average='macro', zero_division=0))
 
 def calculate_recall(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC3: Recall"""
+    """M3: Recall"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     task_type = mapping_dict.get('_task_type', 'multiclass')
     if task_type == 'binary':
@@ -78,7 +78,7 @@ def calculate_recall(df: pd.DataFrame, mapping_dict: dict) -> float:
     return float(recall_score(y_true, y_pred, average='macro', zero_division=0))
 
 def calculate_f1_score(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC4: F1 Score"""
+    """M4: F1 Score"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     task_type = mapping_dict.get('_task_type', 'multiclass')
     if task_type == 'binary':
@@ -86,7 +86,7 @@ def calculate_f1_score(df: pd.DataFrame, mapping_dict: dict) -> float:
     return float(f1_score(y_true, y_pred, average='macro', zero_division=0))
 
 def calculate_fbeta_score(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC5: F-beta Score"""
+    """M5: F-beta Score"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     task_type = mapping_dict.get('_task_type', 'multiclass')
     beta = mapping_dict.get('_beta', 1.0)
@@ -97,7 +97,7 @@ def calculate_fbeta_score(df: pd.DataFrame, mapping_dict: dict) -> float:
     return float(fbeta_score(y_true, y_pred, beta=beta, average='macro', zero_division=0))
 
 def calculate_kl_divergence(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC6: KL Divergence"""
+    """M6: KL Divergence"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     
     classes = np.unique(np.concatenate((y_true, y_pred)))
@@ -115,7 +115,7 @@ def calculate_kl_divergence(df: pd.DataFrame, mapping_dict: dict) -> float:
     return float(kl_div)
 
 def calculate_confusion_matrix(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
-    """TC21: Confusion Matrix"""
+    """M21: Confusion Matrix"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     
     # Multilabel의 경우 (2D 배열)
@@ -139,7 +139,7 @@ def calculate_confusion_matrix(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     }
 
 def calculate_class_metrics(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
-    """TC22: Class별 Metric"""
+    """M22: Class별 Metric"""
     y_true, y_pred = _get_true_pred(df, mapping_dict)
     target_names = mapping_dict.get('_mlb_classes')
     # output_dict=True를 통해 JSON 형태로 바로 내려주기 좋음
@@ -150,7 +150,7 @@ def calculate_class_metrics(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, A
     return report
 
 def calculate_imbalance_ratio(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC23: Imbalance Ratio (가장 많은 클래스 / 가장 적은 클래스 비율)"""
+    """M23: Imbalance Ratio (가장 많은 클래스 / 가장 적은 클래스 비율)"""
     true_col = mapping_dict.get('y_true') or mapping_dict.get('true_labels')
     if not true_col:
         raise ValueError("y_true 또는 true_labels 컬럼 매핑이 필요합니다.")
