@@ -28,11 +28,11 @@ jobs:
         run: pip install -r requirements-dev.txt # -r requirements.txt 포함
       - name: 테스트
         run: pytest -q
-      - name: 앱 부팅 검증 (render.yaml startCommand와 문자 그대로 동일하게 유지할 것)
+      - name: 앱 부팅 검증 (Render 대시보드 Start Command와 문자 그대로 동일하게 유지할 것)
         env:
           DATABASE_URL: sqlite:///./ci-boot.db
         run: |
-          uvicorn main:app --host 0.0.0.0 --port 8000 &
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
           UV_PID=$!
           ok=0
           for i in $(seq 1 20); do
