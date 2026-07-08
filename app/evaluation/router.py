@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 from app.core.schemas import EvaluateRequest, EvaluateResponse
-from app.analysis.analyzer import parse_file_content
+from app.analysis.parsing import parse_file_content
 from app.evaluation.engine import evaluate as run_evaluation
 from app.evaluation.report import generate_report
 from app.analysis.validator import find_column_conflicts
