@@ -1,0 +1,90 @@
+{
+  "error_count": 0,
+  "execution_summary": [
+    {
+      "label": "Total validated rows",
+      "note": "업로드된 파일의 전체 행 수",
+      "value": "200 rows"
+    },
+    {
+      "label": "Valid prediction rows",
+      "note": "결측치 제거 후 평가에 사용될 행 수",
+      "value": "200 rows"
+    },
+    {
+      "label": "Excluded samples",
+      "note": "결측치·오류로 인해 제외된 행 수",
+      "value": "0 rows"
+    },
+    {
+      "label": "Selected metric count",
+      "note": "선택된 메트릭: TC1, TC2, TC3, TC4, TC5, TC15, TC16, TC17, TC18, TC21, TC22, TC23",
+      "value": "12 items"
+    },
+    {
+      "label": "Validation result",
+      "note": "아래 상세 테이블 참조",
+      "value": "Errors 0 / Warnings 1"
+    }
+  ],
+  "selected_metric_ids": [
+    "TC1",
+    "TC2",
+    "TC3",
+    "TC4",
+    "TC5",
+    "TC15",
+    "TC16",
+    "TC17",
+    "TC18",
+    "TC21",
+    "TC22",
+    "TC23"
+  ],
+  "task_type": "multilabel",
+  "validation_details": [
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
+      "name": "Missing required column",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude affected rows from evaluation",
+      "name": "Missing value",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Keep the first row and exclude later duplicates",
+      "name": "Duplicate ID",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude affected rows from evaluation",
+      "name": "Class mismatch",
+      "result": "N/A",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude only rows with missing or invalid values",
+      "name": "Excluded samples",
+      "result": "0 rows",
+      "status": "pass"
+    },
+    {
+      "group": "multilabel",
+      "handling": "Exclude affected rows from evaluation",
+      "name": "Label format mismatch",
+      "result": "26 rows (sampled first 100)",
+      "status": "warning"
+    }
+  ],
+  "warning_count": 1
+}
