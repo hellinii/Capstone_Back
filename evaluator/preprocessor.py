@@ -43,7 +43,14 @@ def preprocess_data(df: pd.DataFrame, mappings: List[Dict[str, str]], task_type:
         raise ValueError(f"데이터셋에 매핑된 필수 컬럼이 없습니다: {missing_cols}")
         
     df = df[required_cols].copy()
-
+    
+    # [버그 수정] 멀티레이블 컬럼의 결측치(NaN)는 "해당하는 레이블 없음"의 유효한 데이터이므로,
+    # dropna로 인해 행 전체가 유실되지 않도록 빈 문자열('')로 미리 대체합니다.
+    for role in ['true_labels', 'pred_labels']:
+        col = mapping_dict.get(role)
+        if col and col in df.columns:
+            df[col] = df[col].fillna('')
+            
     # ── 2. 결측치(NaN) 처리 ────────────────────────────────────────────────────────
     # latency 는 선택적 부가 측정이므로, 그 컬럼의 결측이 해당 행의 분류 평가를 무효화하지
     # 않도록 dropna 대상에서 제외한다(평가 샘플 수 보존). latency 미매핑이면 기존과 동일.

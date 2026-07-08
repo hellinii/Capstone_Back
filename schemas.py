@@ -107,6 +107,8 @@ class DataMetadata(BaseModel):
 
     # 공통
     class_distribution: dict[str, int]         = Field(default={}, description="클래스(또는 레이블)별 샘플 수")
+    column_unique_values: dict[str, list[str]] = Field(default={}, description="컬럼별 전체 고유값 목록")
+
 
 
 class ColumnMatchNote(BaseModel):

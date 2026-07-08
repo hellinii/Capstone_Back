@@ -226,6 +226,29 @@ def extract_metadata(
     """
     role_to_col: dict[str, str] = {m.role.value: m.column for m in column_mappings}
 
+    # [설계 개선] 파일 내 모든 컬럼에 대해 전체 유니크값 목록을 미리 계산해 둡니다.
+    # 사용자가 화면에서 컬럼 매핑을 변경(ignore -> y_true)하더라도 누락 없이 전체 클래스 목록을 볼 수 있게 지원합니다.
+    column_unique_values: dict[str, list[str]] = {}
+    for col in df.columns:
+        non_null_series = df[col].dropna()
+        if non_null_series.empty:
+            column_unique_values[col] = []
+            continue
+        unique_set = set()
+        for val in non_null_series:
+            val_str = str(val).strip()
+            if not val_str:
+                continue
+            if task_type == TaskType.multilabel:
+                # 멀티레이블은 파이프로 쪼개서 원소 수집
+                for part in val_str.split('|'):
+                    part = part.strip()
+                    if part:
+                        unique_set.add(part)
+            else:
+                unique_set.add(val_str)
+        column_unique_values[col] = sorted(list(unique_set))
+
     # ── Binary ────────────────────────────────────────────────────────────────
     if task_type == TaskType.binary:
         y_true_col = role_to_col.get(ColumnRole.y_true.value)
@@ -240,47 +263,43 @@ def extract_metadata(
                 negative_class=neg,
                 positive_class_ambiguous=ambiguous,
                 class_distribution=distribution,
+                column_unique_values=column_unique_values,
             )
 
     # ── Multiclass ────────────────────────────────────────────────────────────
     elif task_type == TaskType.multiclass:
         y_true_col = role_to_col.get(ColumnRole.y_true.value)
         if y_true_col and y_true_col in df.columns:
-            # 클래스 감지: 샘플 30행의 unique 값으로
-            classes = sorted({str(v) for v in sample_df[y_true_col].dropna().unique()})
             # 분포: 전체 df로
             distribution = df[y_true_col].value_counts().to_dict()
             distribution = {str(k): int(v) for k, v in distribution.items()}
+            # 전체 분포의 키값들을 기반으로 클래스 목록 감지 (30행 제한 제거)
+            classes = sorted(distribution.keys())
             return DataMetadata(
                 detected_classes=classes,
                 class_distribution=distribution,
+                column_unique_values=column_unique_values,
             )
 
     # ── Multilabel ────────────────────────────────────────────────────────────
     elif task_type == TaskType.multilabel:
         true_col = role_to_col.get(ColumnRole.true_labels.value)
         if true_col and true_col in df.columns:
-            # 클래스 감지: 샘플 30행의 레이블 파싱으로
-            sample_labels: set[str] = set()
-            for cell in sample_df[true_col].dropna():
-                for label in str(cell).split("|"):
-                    label = label.strip()
-                    if label:
-                        sample_labels.add(label)
-            labels = sorted(sample_labels)
-            # 분포: 전체 df로
+            # 분포: 전체 df로 계산하면서 동시에 전체 라벨 감지 (30행 제한 제거)
             label_counts: dict[str, int] = {}
             for cell in df[true_col].dropna():
                 for label in str(cell).split("|"):
                     label = label.strip()
                     if label:
                         label_counts[label] = label_counts.get(label, 0) + 1
+            labels = sorted(label_counts.keys())
             return DataMetadata(
                 detected_labels=labels,
                 class_distribution=label_counts,
+                column_unique_values=column_unique_values,
             )
 
-    return DataMetadata()
+    return DataMetadata(column_unique_values=column_unique_values)
 
 
 async def analyze_columns_with_llm(
