@@ -20,7 +20,7 @@ app/
 ├── main.py            앱 진입점 (uvicorn app.main:app) — 라우터 5개 연결, 시작 시 DB 준비
 │
 ├── core/              🔧 모든 도메인이 공유하는 것
-│   ├── schemas.py       공용 데이터 규격(enum·역할규칙·TC요건·"분석→평가" 인계 모델)
+│   ├── schemas.py       공용 데이터 규격(enum·역할규칙·지표요건·"분석→평가" 인계 모델)
 │   ├── database.py      DB 연결(SQLAlchemy) — 로컬 SQLite / 배포 Postgres
 │   └── parsing.py       업로드 파일(CSV/JSON) → 표(DataFrame) 변환 (공용 유틸)
 │
@@ -31,12 +31,12 @@ app/
 │   ├── validation_service.py  데이터 검증 흐름 조율
 │   ├── llm_mapper.py     LLM으로 컬럼 자동 매핑        fallback_mapper.py  규칙 기반 매핑
 │   ├── reconcile.py      LLM이 준 컬럼명을 실제 헤더에 맞춤   metadata.py  클래스·분포 추출
-│   ├── prompt_builder.py 매핑용 LLM 프롬프트          validator.py  매핑 유효성·계산가능 TC
+│   ├── prompt_builder.py 매핑용 LLM 프롬프트          validator.py  매핑 유효성·계산가능 지표
 │   ├── validation_checks.py  데이터 점검 항목들       schemas.py  이 도메인 데이터 형태
 │
-├── evaluation/        ② 평가 — 지표(TC) 계산
+├── evaluation/        ② 평가 — 지표 계산
 │   ├── router.py        API (/api/evaluate)          service.py  평가 흐름 조율
-│   ├── engine.py        TC → 계산함수로 분배          preprocessor.py  계산 전 데이터 정리
+│   ├── engine.py        지표 → 계산함수로 분배          preprocessor.py  계산 전 데이터 정리
 │   ├── report.py        결과 성공/실패 정리           schemas.py
 │   └── metrics/         실제 지표 계산(sklearn): common·binary·multiclass·multilabel
 │
@@ -69,7 +69,7 @@ app/
 ① /api/confirm-mapping   analysis : 사용자가 고른 매핑 검사 → 계산 가능한 지표 목록
       ▼  (선택) /api/validate-data  analysis : 계산 전 데이터 점검(결측·중복 등)
       ▼
-② /api/evaluate          evaluation : 지표(TC) 계산
+② /api/evaluate          evaluation : 지표 계산
       ▼
 ③ /api/generate-narrative narrative : 계산 결과를 자연어로 서술
       ▼
@@ -130,4 +130,4 @@ pytest -q                          # 테스트 (tests/)
 2. **의존 방향은 항상 도메인 → core** (core는 도메인을 모름 → 순환 없음). 예외: 평가가 분석의 파싱/검증을 재사용(상류 참조)하는 것은 허용.
 3. **`app/__init__.py`·`app/core/__init__.py`에 `import`를 넣지 마세요** — `main.py`의 `load_dotenv()`가 DB import보다 먼저 실행돼야 하는 순서가 깨집니다(파일 주석 참조).
 4. **DB 스키마는 `init_db()`의 `create_all`로 생성**(마이그레이션 도구 없음).
-5. 자세한 계층화 리팩토링 배경은 [DECOMPOSITION_PLAN.md](DECOMPOSITION_PLAN.md), 배포는 [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) 참조.
+5. 배포 구성은 [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) 참조.

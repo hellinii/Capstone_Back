@@ -1,5 +1,7 @@
 # 배포 전환 계획 — Render(무료) + Neon Postgres + Vercel
 
+> 현재 코드 구조는 docs/ARCHITECTURE.md 참조(이 문서는 설계 근거).
+
 > **상태**: 계획 확정, 구현 착수 전
 > **작성일**: 2026-07-07
 > **대상 독자**: 이 문서만 보고 배포를 진행/이어받을 팀원
@@ -36,11 +38,11 @@
 
 ### 이미 전환 친화적인 것 (수정 불필요)
 
-- **채번 동시성 로직이 Postgres 호환**: `services/issuance.py:103-144` — `UNIQUE(year, seq)`(`models.py:59`) + `UNIQUE(report_id, version)`(`models.py:79-81`) 제약과 `IntegrityError`/`OperationalError` 재시도(최대 5회, 시도 간 `rollback()`)로 방어. SQLite의 `BEGIN IMMEDIATE` 직렬화에만 의존하지 않음.
-- **SQLite 전용 코드는 전부 게이트됨**: `database.py`의 PRAGMA/BEGIN IMMEDIATE 리스너·`makedirs`는 `_IS_SQLITE`일 때만 실행 → Postgres URL이면 자동으로 건너뜀.
+- **채번 동시성 로직이 Postgres 호환**: `app/issuance/service.py:103-144` — `UNIQUE(year, seq)`(`app/issuance/models.py:59`) + `UNIQUE(report_id, version)`(`app/issuance/models.py:79-81`) 제약과 `IntegrityError`/`OperationalError` 재시도(최대 5회, 시도 간 `rollback()`)로 방어. SQLite의 `BEGIN IMMEDIATE` 직렬화에만 의존하지 않음.
+- **SQLite 전용 코드는 전부 게이트됨**: `app/core/database.py`의 PRAGMA/BEGIN IMMEDIATE 리스너·`makedirs`는 `_IS_SQLITE`일 때만 실행 → Postgres URL이면 자동으로 건너뜀.
 - **런타임 파일 쓰기 없음**: 업로드 CSV는 `await file.read()` → `io.BytesIO` 인메모리 처리. `Data/`는 테스트 전용 픽스처(커밋됨). → Render의 휘발성 디스크에서 문제없음.
 - **모델 타입 전부 이식 가능**: Integer/String(길이 없음)/DateTime(naive UTC)/FK만 사용. JSON 컬럼·server default·rowid 의존 없음.
-- **스타트업 훅**: `main.py` lifespan에서 `init_db()`(create_all) + `seed_organization()` → Neon 첫 부팅 시 테이블 자동 생성 + 기관 시드. 수동 마이그레이션 불필요.
+- **스타트업 훅**: `app/main.py` lifespan에서 `init_db()`(create_all) + `seed_organization()` → Neon 첫 부팅 시 테이블 자동 생성 + 기관 시드. 수동 마이그레이션 불필요.
 - **CORS**: `allow_origins=["*"]`, credentials 미사용 → Vercel 프로덕션/프리뷰 URL 모두 즉시 동작. 변경 불필요.
 - `GET /health` 엔드포인트 존재 → Render 헬스체크로 사용.
 
@@ -49,10 +51,10 @@
 | 문제 | 위치 | 해결 |
 |---|---|---|
 | Postgres 드라이버 없음 | `requirements.txt` | `psycopg2-binary` 추가 (§3.3) |
-| Neon 절전 시 stale 커넥션 | `database.py` 엔진 | `pool_pre_ping` + `pool_recycle` (§3.1) |
-| `.env`의 `DATABASE_URL`이 무시되는 버그 | `main.py:14-17` | `load_dotenv()` 순서 수정 (§3.2) |
+| Neon 절전 시 stale 커넥션 | `app/core/database.py` 엔진 | `pool_pre_ping` + `pool_recycle` (§3.1) |
+| `.env`의 `DATABASE_URL`이 무시되는 버그 | `app/main.py` | `load_dotenv()` 순서 수정 (§3.2) |
 | 배포 설정 파일 전무 | 레포 루트 | `render.yaml` 신규 (§3.4) |
-| `python main.py`는 포트 8000 하드코딩 | `main.py:73-75` | 시작 커맨드로 uvicorn 직접 실행 (§3.4) — 코드 수정은 안 함 |
+| `python main.py`는 포트 8000 하드코딩 | `app/main.py` | 시작 커맨드로 uvicorn 직접 실행 (§3.4) — 코드 수정은 안 함 |
 | 프론트 API가 전부 상대경로 `/api/...` | 10곳 산재 | `apiUrl()` 헬퍼 + 1줄 래핑 (§4) |
 
 ### 로컬 개발은 아무것도 안 바뀜
@@ -85,7 +87,7 @@
 
 ## 3. 백엔드 코드 변경 (Capstone_Back)
 
-### 3.1 `database.py` — 엔진 블록 교체 (13–22행 부근)
+### 3.1 `app/core/database.py` — 엔진 블록 교체 (13–22행 부근)
 
 변경 이유:
 - **스킴 정규화**: SQLAlchemy 2.0은 legacy `postgres://` 스킴을 거부. Neon은 `postgresql://`을 주지만 Render/Heroku류 URL 대비 방어적으로 처리.
@@ -120,7 +122,7 @@ engine = create_engine(DATABASE_URL, **_ENGINE_KWARGS)
 
 `configure_sqlite` / `if _IS_SQLITE: configure_sqlite(engine)` / `SessionLocal` / `Base` / `get_db` / `init_db` / `seed_organization`은 **그대로 둔다** (테스트가 `configure_sqlite`를 직접 import·호출함).
 
-### 3.2 `main.py` — dotenv 로드 순서 버그 수정
+### 3.2 `app/main.py` — dotenv 로드 순서 버그 수정
 
 **확인된 버그**: `main.py:14`의 `from database import ...`가 `main.py:17`의 `load_dotenv()`보다 먼저 실행되는데, `database.py`는 **import 시점**(모듈 바디)에 `DATABASE_URL`을 읽는다 → `.env`에 넣은 `DATABASE_URL`이 현재 조용히 무시됨. (`OPENAI_API_KEY`는 lifespan 안에서 늦게 읽어서 무사했음.)
 
@@ -171,7 +173,7 @@ services:
     branch: main
     healthCheckPath: /health
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.13         # 로컬(.venv)과 동일 버전 핀
@@ -195,7 +197,7 @@ services:
 
 ### 변경하지 않는 파일
 
-`models.py`, `services/issuance.py`, `routers/*`, 테스트 전체 — Postgres 호환 확인 완료(§1).
+`app/issuance/models.py`, `app/issuance/service.py`, `app/*/router.py`, 테스트 전체 — Postgres 호환 확인 완료(§1).
 
 ---
 
@@ -269,7 +271,7 @@ FormData·JSON·blob 전부 URL 문자열만 바뀌므로 동작 변화 없음. 
 | 2 | 🤖 | Capstone_Front에 §4 적용 → 커밋 (작업 브랜치) |
 | 3 | 🤖 | **로컬 검증(SQLite 경로)**: 백엔드 `pytest` 전부 green / 프론트 `pnpm typecheck && pnpm test && pnpm build` green / `pnpm dev`로 전체 플로우 기존과 동일 확인 |
 | 4 | 👤 | **Neon 생성**: [neon.tech](https://neon.tech) GitHub 로그인 → New Project → 리전 **AWS ap-southeast-1 (Singapore)**, DB 이름 기본값(`neondb`) → Connect 패널에서 **Direct connection** 선택(❗`-pooler`가 붙은 Pooled 아님) → 연결 문자열 복사 (`postgresql://...?sslmode=require&channel_binding=require`) |
-| 5 | 🤖 | **로컬 검증(Postgres 경로)**: `.env`에 `DATABASE_URL=<Neon 문자열>` 추가(§3.2 수정 덕에 동작) → `uvicorn main:app --port 8000` → §6 체크 → 끝나면 `.env`에서 제거(로컬 SQLite 복귀) |
+| 5 | 🤖 | **로컬 검증(Postgres 경로)**: `.env`에 `DATABASE_URL=<Neon 문자열>` 추가(§3.2 수정 덕에 동작) → `uvicorn app.main:app --port 8000` → §6 체크 → 끝나면 `.env`에서 제거(로컬 SQLite 복귀) |
 | 6 | 🤖👤 | 두 레포 push → PR 생성 → **main에 머지**. ⚠️ origin/main이 PR #4 시점으로 오래됐으므로 최신 작업 브랜치 전체가 main에 들어가야 함. render.yaml이 main에 있어야 다음 단계 가능 |
 | 7 | 👤 | **Render 생성**: [render.com](https://render.com) GitHub 로그인 → New + → **Blueprint** → `Capstone_Back` 연결 → render.yaml 자동 인식 → 프롬프트에 `DATABASE_URL`(4단계 문자열)·`OPENAI_API_KEY` 입력 → Apply → 빌드 2~5분 |
 | 8 | 👤🤖 | **배포 확인**: `https://capstone-back.onrender.com/health` → `{"status":"ok"}` / `/docs` Swagger 로드 / Render 로그에 `backend=postgresql` 라인 / Neon 콘솔 Tables에 `organization`·`report`·`issuance` + 기관 시드 1행 |
