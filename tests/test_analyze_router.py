@@ -3,11 +3,11 @@ import io
 
 from fastapi.testclient import TestClient
 
-from app.analysis.analyzer import _reconcile_llm_columns
+from app.analysis.reconcile import reconcile_llm_columns
 from app.core.schemas import ColumnRole
 
 
-# ── D5a: _reconcile_llm_columns (순수 함수) ─────────────────────────────────
+# ── D5a: reconcile_llm_columns (순수 함수) ─────────────────────────────────
 
 def test_reconcile_exact_and_normalized():
     actual = ["id", "label", "prediction", "score"]
@@ -15,7 +15,7 @@ def test_reconcile_exact_and_normalized():
         {"column": "label", "role": "y_true"},       # exact
         {"column": "Prediction", "role": "y_pred"},   # 대소문자 정규화 → prediction
     ]
-    reconciled, notes = _reconcile_llm_columns(llm, actual)
+    reconciled, notes = reconcile_llm_columns(llm, actual)
     by_col = {r["column"]: r["role"] for r in reconciled}
     assert by_col["label"] == "y_true"
     assert by_col["prediction"] == "y_pred"
@@ -25,7 +25,7 @@ def test_reconcile_exact_and_normalized():
 def test_reconcile_unmatched_dropped():
     actual = ["id", "label", "prediction"]
     llm = [{"column": "probability_x", "role": "score_positive"}]  # 환각 컬럼명
-    reconciled, notes = _reconcile_llm_columns(llm, actual)
+    reconciled, notes = reconcile_llm_columns(llm, actual)
     assert all(r["column"] != "probability_x" for r in reconciled)
     assert any(n.status == "unmatched" and n.llm_column == "probability_x" for n in notes)
 
@@ -33,7 +33,7 @@ def test_reconcile_unmatched_dropped():
 def test_reconcile_unmapped_header_added_as_ignore():
     actual = ["id", "label", "prediction", "score"]
     llm = [{"column": "label", "role": "y_true"}, {"column": "prediction", "role": "y_pred"}]
-    reconciled, notes = _reconcile_llm_columns(llm, actual)
+    reconciled, notes = reconcile_llm_columns(llm, actual)
     by_col = {r["column"]: r["role"] for r in reconciled}
     assert by_col.get("id") == ColumnRole.ignore.value
     assert by_col.get("score") == ColumnRole.ignore.value
@@ -70,6 +70,24 @@ def test_analyze_llm_error_falls_back(make_fake_openai_client):
     assert r.status_code == 200  # 500 아님 — 규칙 폴백으로 강등(D5c)
     roles = {m["role"] for m in r.json()["column_mappings"]}
     assert "y_true" in roles and "y_pred" in roles
+
+
+def test_analyze_llm_success_path(make_fake_openai_client):
+    """LLM 성공 경로(llm_mapper): 유효 JSON 반환 → reconcile → metadata → 응답."""
+    from app import main
+    content = {"column_mappings": [
+        {"column": "id", "role": "sample_id"},
+        {"column": "y_true", "role": "y_true"},
+        {"column": "y_pred", "role": "y_pred"},
+    ]}
+    with TestClient(main.app) as c:
+        main.app.state.openai_client = make_fake_openai_client(content)
+        r = _upload(c)
+    assert r.status_code == 200
+    by_col = {m["column"]: m["role"] for m in r.json()["column_mappings"]}
+    assert by_col["id"] == "sample_id"
+    assert by_col["y_true"] == "y_true"
+    assert by_col["y_pred"] == "y_pred"
 
 
 def test_analyze_bad_extension_still_rejected():

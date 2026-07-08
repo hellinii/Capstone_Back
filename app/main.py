@@ -16,7 +16,8 @@ load_dotenv()  # database.py 가 import 시점에 DATABASE_URL 을 읽으므로 
 #    (app.core.database 가 import 시점에 DATABASE_URL 을 읽음. isort/ruff 도입 시 이 순서가
 #     깨지지 않도록 주의 — 필요 시 해당 블록에 `# isort: skip` 가드.)
 
-from app.core.database import DATABASE_URL, init_db, seed_organization
+from app.core.database import DATABASE_URL, init_db
+from app.issuance.bootstrap import seed_organization
 from app.analysis.router import router as analyze_router
 from app.analysis.validation_router import router as validate_router
 from app.evaluation.router import router as evaluate_router

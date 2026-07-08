@@ -84,17 +84,6 @@ def get_db():
         db.close()
 
 
-# ── 기관(organization) 시드 기본값 — 현 프론트 DEFAULT_PERFORMER 와 일치 ───────────
-DEFAULT_ORGANIZATION = {
-    "id": 1,
-    "org_name": "한국 AI 인증원",
-    "department": "평가부",
-    "evaluator": "자동 평가 엔진",
-    "contact": "—",
-    "address": None,
-}
-
-
 def init_db() -> None:
     """테이블 생성(이미 있으면 무시) — 마이그레이션 도구 없이 시작(설계 §8·§11)."""
     if _IS_SQLITE:
@@ -105,16 +94,3 @@ def init_db() -> None:
     # ⚠️ 함수 내부 지연 import 유지 필수 — 최상단으로 올리면 database↔models 순환으로 깨진다.
     import app.issuance.models  # noqa: F401
     Base.metadata.create_all(bind=engine)
-
-
-def seed_organization() -> None:
-    """organization 이 비어 있으면 기본 기관 1행 INSERT(singleton, id=1)."""
-    from app.issuance.models import Organization  # 지연 import (순환 방지) — 위치 유지
-
-    db = SessionLocal()
-    try:
-        if db.get(Organization, 1) is None:
-            db.add(Organization(**DEFAULT_ORGANIZATION))
-            db.commit()
-    finally:
-        db.close()

@@ -16,7 +16,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core import database
-from app.core.database import DEFAULT_ORGANIZATION, Base, configure_sqlite, get_db
+from app.core.database import Base, configure_sqlite, get_db
+from app.issuance.bootstrap import DEFAULT_ORGANIZATION
 from app.issuance.models import Issuance, Organization, Report
 from app.issuance import service as svc
 from app.issuance.service import IssuanceError

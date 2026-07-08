@@ -9,9 +9,10 @@ from app.core.schemas import (
     FactSheet, MetricFact, ConfusionFact, DistributionFact,
     NarrativeRequest, TaskType,
 )
-from app.narrative.narrator import (
-    compute_derived, build_number_whitelist, verify_grounding,
-    generate_narrative, _collect_grounding_texts,
+from app.narrative.narrator import generate_narrative
+from app.narrative.derived import compute_derived
+from app.narrative.grounding import (
+    build_number_whitelist, verify_grounding, _collect_grounding_texts,
 )
 from app.narrative.fallback import build_fallback_narrative
 from app.narrative.baselines import build_benchmark_refs
