@@ -8,7 +8,9 @@ services:
     autoDeploy: false          # 배포는 CI(deploy job)의 Deploy Hook으로만 — 푸시 자체로는 배포 안 됨
     healthCheckPath: /health
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # ⚠️ 이 서비스는 대시보드 수동 생성이라 Render는 render.yaml의 startCommand를 쓰지 않고
+    #    대시보드 Start Command 값을 쓴다. 이 값은 문서 정합용 — 실제 전환은 대시보드에서 수행.
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.13         # 로컬(.venv)과 동일 버전 핀
