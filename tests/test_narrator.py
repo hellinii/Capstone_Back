@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from app.core.schemas import TaskType
 from app.narrative.schemas import ConfusionFact, DistributionFact, FactSheet, MetricFact, NarrativeRequest
-from app.narrative.narrator import generate_narrative
+from app.narrative.service import generate_narrative
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import (
     build_number_whitelist, verify_grounding, _collect_grounding_texts,

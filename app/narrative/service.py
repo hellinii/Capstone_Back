@@ -1,4 +1,4 @@
-"""app/narrative/narrator.py — LLM 서술 생성 오케스트레이션
+"""app/narrative/service.py — LLM 서술 생성 오케스트레이션
 
 fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비하고 LLM 을 호출한 뒤, grounding
 검증(환각 방어)을 거쳐 응답을 조립한다. 키 없음/호출 실패/검증 실패/조립 오류 시 규칙 폴백으로
