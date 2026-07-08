@@ -6,7 +6,7 @@ LLM/IO 의존이 없어 단독 단위 테스트가 가능하다.
 
 상호작용
 - 의존(import): app.core.schemas(ColumnRole, ColumnMatchNote)
-- 사용처: app.analysis.analyzer(analyze_columns_with_llm 이 LLM 응답 보정에 사용), tests
+- 사용처: app.analysis.llm_mapper(analyze_columns_with_llm 이 LLM 응답 보정에 사용), tests
 """
 import re
 

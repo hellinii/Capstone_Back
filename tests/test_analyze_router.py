@@ -72,6 +72,24 @@ def test_analyze_llm_error_falls_back(make_fake_openai_client):
     assert "y_true" in roles and "y_pred" in roles
 
 
+def test_analyze_llm_success_path(make_fake_openai_client):
+    """LLM 성공 경로(llm_mapper): 유효 JSON 반환 → reconcile → metadata → 응답."""
+    from app import main
+    content = {"column_mappings": [
+        {"column": "id", "role": "sample_id"},
+        {"column": "y_true", "role": "y_true"},
+        {"column": "y_pred", "role": "y_pred"},
+    ]}
+    with TestClient(main.app) as c:
+        main.app.state.openai_client = make_fake_openai_client(content)
+        r = _upload(c)
+    assert r.status_code == 200
+    by_col = {m["column"]: m["role"] for m in r.json()["column_mappings"]}
+    assert by_col["id"] == "sample_id"
+    assert by_col["y_true"] == "y_true"
+    assert by_col["y_pred"] == "y_pred"
+
+
 def test_analyze_bad_extension_still_rejected():
     from app import main
     with TestClient(main.app) as c:

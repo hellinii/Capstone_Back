@@ -1,55 +1,15 @@
-"""
-analyzer.py — 파일 파싱 + 메타데이터 추출 + LLM 호출 핵심 로직
-"""
+"""app/analysis/metadata.py — 확정 매핑 기반 데이터 메타데이터 추출
 
-import json
+업로드 데이터에서 task_type 별 클래스/레이블/분포와 컬럼별 유니크값을 계산한다(순수 로직).
+binary 는 양성/음성 클래스 자동 판단(_detect_binary_classes)까지 수행한다.
+
+상호작용
+- 의존(import): pandas, app.core.schemas(ColumnMapping, ColumnRole, DataMetadata, TaskType)
+- 사용처: app.analysis.llm_mapper / app.analysis.fallback_mapper (매핑 후 메타 추출)
+"""
 import pandas as pd
-from openai import AsyncOpenAI
 
-from app.core.schemas import (
-    AnalysisResponse, ColumnMapping, ColumnRole,
-    DataMetadata, TaskType, VALID_ROLES_BY_TASK,
-)
-from app.analysis.prompt_builder import build_system_prompt, build_user_prompt
-from app.analysis.reconcile import reconcile_llm_columns
-
-
-def _build_response_schema(task_type: TaskType, columns: list[str] | None = None) -> dict:
-    """task_type에 맞는 role만 허용하는 JSON Schema 생성.
-
-    columns 를 주면 column 값을 실제 헤더 enum 으로 제약해 LLM 환각 컬럼명을 원천 차단한다(D5a).
-    (동적 enum strict 가 거부되면 호출부가 columns=None 으로 1회 재시도한다.)
-    """
-    valid_roles = [r.value for r in VALID_ROLES_BY_TASK[task_type]]
-    column_prop: dict = {"type": "string"}
-    if columns:
-        column_prop = {"type": "string", "enum": columns}
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "column_mapping_result",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "column_mappings": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "column": column_prop,
-                                "role":   {"type": "string", "enum": valid_roles},
-                            },
-                            "required": ["column", "role"],
-                            "additionalProperties": False,
-                        },
-                    },
-                },
-                "required": ["column_mappings"],
-                "additionalProperties": False,
-            },
-        },
-    }
+from app.core.schemas import ColumnMapping, ColumnRole, DataMetadata, TaskType
 
 
 # ── 양성 클래스 자동 판단 규칙 ────────────────────────────────────────────────
@@ -187,117 +147,3 @@ def extract_metadata(
             )
 
     return DataMetadata(column_unique_values=column_unique_values)
-
-
-async def analyze_columns_with_llm(
-    client: AsyncOpenAI,
-    task_type: TaskType,
-    columns: list[str],
-    df: pd.DataFrame,
-) -> AnalysisResponse:
-    """LLM으로 컬럼 역할을 자동 매핑하고, 데이터 메타데이터를 추출합니다."""
-    # 30행 샘플: LLM 컬럼 매핑 + 클래스 감지용
-    sample_df = df.head(30)
-
-    messages = [
-        {"role": "system", "content": build_system_prompt(task_type)},
-        {"role": "user",   "content": build_user_prompt(columns, sample_df)},
-    ]
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=messages,
-            response_format=_build_response_schema(task_type, columns),
-            temperature=0,
-        )
-    except Exception:
-        # 동적 enum strict 스키마가 거부되면 enum 없는 스키마로 1회 재시도(D5a).
-        # (그래도 실패하면 라우터의 규칙 폴백으로 강등된다.)
-        response = await client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=messages,
-            response_format=_build_response_schema(task_type, None),
-            temperature=0,
-        )
-
-    data = json.loads(response.choices[0].message.content)
-
-    # LLM 반환 컬럼명을 실제 헤더에 정렬(환각/변형 컬럼명 차단, 미반환 헤더 보완) — D5a
-    reconciled, notes = reconcile_llm_columns(data["column_mappings"], columns)
-    column_mappings = []
-    for m in reconciled:
-        col_name = m["column"]
-        samples = []
-        if col_name in df.columns:
-            # 결측치를 제거하고 상위 3개 값을 문자열로 변환하여 예시 데이터 추출
-            samples = [str(v) for v in df[col_name].dropna().head(3).tolist()]
-        column_mappings.append(
-            ColumnMapping(
-                column=col_name,
-                role=ColumnRole(m["role"]),
-                sample_values=samples
-            )
-        )
-
-    # 클래스 감지: sample_df(30행) / 분포 계산: 전체 df
-    metadata = extract_metadata(task_type, df, sample_df, column_mappings)
-
-    return AnalysisResponse(
-        task_type=task_type,
-        column_mappings=column_mappings,
-        metadata=metadata,
-        column_notes=notes,
-    )
-
-
-def analyze_columns_fallback(
-    task_type: TaskType,
-    columns: list[str],
-    df: pd.DataFrame,
-) -> AnalysisResponse:
-    """OpenAI API 키가 없을 때 작동하는 규칙 기반 컬럼 매핑 폴백 함수"""
-    column_mappings = []
-
-    for col in columns:
-        col_lower = col.lower()
-        role = ColumnRole.ignore
-
-        if "id" in col_lower or "index" in col_lower:
-            role = ColumnRole.sample_id
-        elif col_lower in ["y_true", "actual", "ground_truth", "label", "target"]:
-            if task_type == TaskType.multilabel:
-                role = ColumnRole.true_labels
-            else:
-                role = ColumnRole.y_true
-        elif col_lower in ["y_pred", "predicted", "pred", "prediction"]:
-            if task_type == TaskType.multilabel:
-                role = ColumnRole.pred_labels
-            else:
-                role = ColumnRole.y_pred
-        elif task_type == TaskType.binary and ("score" in col_lower or "prob" in col_lower or "pos" in col_lower):
-            role = ColumnRole.score_positive
-        elif task_type == TaskType.multiclass and ("prob" in col_lower or "p_" in col_lower or "class_" in col_lower):
-            role = ColumnRole.prob_per_class
-        elif task_type == TaskType.multilabel and ("score" in col_lower or "prob" in col_lower or "p_" in col_lower):
-            role = ColumnRole.score_per_label
-
-        samples = []
-        if col in df.columns:
-            samples = [str(v) for v in df[col].dropna().head(3).tolist()]
-
-        column_mappings.append(
-            ColumnMapping(
-                column=col,
-                role=role,
-                sample_values=samples
-            )
-        )
-
-    sample_df = df.head(30)
-    metadata = extract_metadata(task_type, df, sample_df, column_mappings)
-
-    return AnalysisResponse(
-        task_type=task_type,
-        column_mappings=column_mappings,
-        metadata=metadata
-    )
