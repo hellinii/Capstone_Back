@@ -11,9 +11,9 @@ from datetime import timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models import Organization, Report
-from schemas import (
+from app.core.database import get_db
+from app.issuance.models import Organization, Report
+from app.core.schemas import (
     IssuanceHistoryItem,
     IssuanceOut,
     IssueRequest,
@@ -21,8 +21,8 @@ from schemas import (
     OrganizationOut,
     ReissueRequest,
 )
-from services import issuance as issuance_service
-from services.issuance import IssuanceError
+from app.issuance import service as issuance_service
+from app.issuance.service import IssuanceError
 
 router = APIRouter(prefix="/api", tags=["Reports"])
 

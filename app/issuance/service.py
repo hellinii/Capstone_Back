@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from models import Issuance, Organization, Report
+from app.issuance.models import Issuance, Organization, Report
 
 _MAX_NUMBERING_RETRIES = 5
 # 동시 쓰기 충돌 시 재시도 대상: UNIQUE 위반(IntegrityError) + 락 경합(OperationalError).

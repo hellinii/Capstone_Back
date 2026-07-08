@@ -3,12 +3,12 @@ from typing import Dict, Any, List
 
 from .metrics import common, binary, multiclass, multilabel
 from .preprocessor import preprocess_data
-from validator import _TC_REQUIREMENTS
+from app.core.schemas import TC_REQUIREMENTS
 
-# Task Type 별로 허용되는 TC 정의 (validator.py의 단일 출처에서 동적 생성)
+# Task Type 별로 허용되는 TC 정의 (core.schemas 의 단일 출처에서 동적 생성)
 VALID_TCS_BY_TASK = {
     task_type.value: set(requirements.keys())
-    for task_type, requirements in _TC_REQUIREMENTS.items()
+    for task_type, requirements in TC_REQUIREMENTS.items()
 }
 
 # TC ID 와 실제 계산 함수 매핑 (Registry)

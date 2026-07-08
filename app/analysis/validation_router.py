@@ -9,14 +9,14 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
-from schemas import (
+from app.core.schemas import (
     EvaluateRequest,
     ValidateDataResponse,
     ValidationCheckItem,
     ExecutionSummaryItem,
 )
-from analyzer import parse_file_content
-from validator import find_column_conflicts
+from app.analysis.analyzer import parse_file_content
+from app.analysis.validator import find_column_conflicts
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])
 

@@ -12,9 +12,16 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()  # database.py 가 import 시점에 DATABASE_URL 을 읽으므로 그보다 먼저 실행해야 함
+# ⚠️ 위 load_dotenv() 는 반드시 아래 app.core.database import 보다 앞에 있어야 한다.
+#    (app.core.database 가 import 시점에 DATABASE_URL 을 읽음. isort/ruff 도입 시 이 순서가
+#     깨지지 않도록 주의 — 필요 시 해당 블록에 `# isort: skip` 가드.)
 
-from database import DATABASE_URL, init_db, seed_organization
-from routers import analyze, evaluate, validate, narrative, reports
+from app.core.database import DATABASE_URL, init_db, seed_organization
+from app.analysis.router import router as analyze_router
+from app.analysis.validation_router import router as validate_router
+from app.evaluation.router import router as evaluate_router
+from app.narrative.router import router as narrative_router
+from app.issuance.router import router as reports_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,12 +71,12 @@ async def health_check():
     return {"status": "ok"}
 
 # ── 라우터(Router) 모듈 연결 ──
-app.include_router(analyze.router)
-app.include_router(evaluate.router)
-app.include_router(validate.router)
-app.include_router(narrative.router)
-app.include_router(reports.router)
+app.include_router(analyze_router)
+app.include_router(evaluate_router)
+app.include_router(validate_router)
+app.include_router(narrative_router)
+app.include_router(reports_router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

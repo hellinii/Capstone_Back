@@ -6,10 +6,10 @@ preprocess(백스톱) 세 방어 지점을 모두 커버한다.
 import pandas as pd
 import pytest
 
-from schemas import ColumnMapping, ColumnRole, ConfirmMappingRequest, TaskType
-from validator import find_column_conflicts, validate_mapping
-from evaluator.preprocessor import preprocess_data
-from evaluator.engine import evaluate as run_evaluation
+from app.core.schemas import ColumnMapping, ColumnRole, ConfirmMappingRequest, TaskType
+from app.analysis.validator import find_column_conflicts, validate_mapping
+from app.evaluation.preprocessor import preprocess_data
+from app.evaluation.engine import evaluate as run_evaluation
 
 
 def _cm(column, role):

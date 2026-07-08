@@ -1,22 +1,26 @@
 """
-test_analyze.py — 컬럼 매핑 + 메타데이터 추출 테스트
+llm_smoke_analyze.py — 컬럼 매핑 + 메타데이터 추출 수동 스모크 스크립트.
+
+pytest 테스트가 아니라 실제 OPENAI_API_KEY 로 LLM 분석을 왕복 확인하는 CLI.
+레포 루트에서: python scripts/llm_smoke_analyze.py
 """
 
 import asyncio
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
+# 레포 루트를 sys.path 에 추가 (app.* 절대 import 를 위해)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-from schemas import TaskType
-from analyzer import parse_file_content, analyze_columns_with_llm
+from app.core.schemas import TaskType
+from app.analysis.analyzer import parse_file_content, analyze_columns_with_llm
 
 load_dotenv()
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "Data")
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tests", "data")
 
 
 def detect_task_type(filepath: str) -> TaskType:

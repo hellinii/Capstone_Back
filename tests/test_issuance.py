@@ -15,11 +15,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-import database
-from database import DEFAULT_ORGANIZATION, Base, configure_sqlite, get_db
-from models import Issuance, Organization, Report
-from services import issuance as svc
-from services.issuance import IssuanceError
+from app.core import database
+from app.core.database import DEFAULT_ORGANIZATION, Base, configure_sqlite, get_db
+from app.issuance.models import Issuance, Organization, Report
+from app.issuance import service as svc
+from app.issuance.service import IssuanceError
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def _make_file_engine(db_path):
 
 @pytest.fixture
 def client(db_session):
-    from main import app
+    from app.main import app
 
     app.dependency_overrides[get_db] = lambda: db_session
     c = TestClient(app)  # context manager 미사용 → lifespan(실제 DB) 미실행

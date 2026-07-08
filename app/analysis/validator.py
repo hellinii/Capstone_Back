@@ -18,71 +18,16 @@ task_type별 필수/선택 역할 규칙을 검사하고,
     true_labels + score_per_label(N개) → TC18
 """
 
-from schemas import (
+from app.core.schemas import (
     ColumnRole, ColumnMapping, ConfirmMappingRequest,
     ConfirmMappingResponse, MappingValidationError, MappingValidationWarning,
-    TaskType,
+    TaskType, TC_REQUIREMENTS,
 )
 
 
 # ── TC 가용성 규칙 정의 ────────────────────────────────────────────────────────
-
-# 각 TC가 계산되려면 어떤 role이 매핑되어 있어야 하는지 정의합니다.
-# value: 필요한 role들의 집합 (모두 있어야 계산 가능)
-_TC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
-    TaskType.binary: {
-        "TC1":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC2":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC3":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC4":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC5":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC6":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC7":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC8":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC9":  {ColumnRole.y_true, ColumnRole.score_positive},
-        "TC10": {ColumnRole.y_true, ColumnRole.score_positive},
-        "TC19": {ColumnRole.y_true, ColumnRole.score_positive},
-        "TC20": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC21": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC22": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC23": {ColumnRole.y_true, ColumnRole.y_pred},
-    },
-    TaskType.multiclass: {
-        "TC1":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC2":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC3":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC4":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC5":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC6":  {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC11": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC12": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC13": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC14": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC21": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC22": {ColumnRole.y_true, ColumnRole.y_pred},
-        "TC23": {ColumnRole.y_true, ColumnRole.y_pred},
-    },
-    TaskType.multilabel: {
-        # TC1(Accuracy)은 multilabel 에서 sklearn subset accuracy(전 라벨 일치 비율)로
-        # 계산된다 — 정의상 TC16(Exact Match Ratio)과 동일 값.
-        "TC1":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC2":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC3":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC4":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC5":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC6":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC11": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC12": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC13": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC15": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC16": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC17": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC18": {ColumnRole.true_labels, ColumnRole.score_per_label},  # 분포 기반
-        "TC21": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC22": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "TC23": {ColumnRole.true_labels, ColumnRole.pred_labels},
-    },
-}
+# TC_REQUIREMENTS(각 TC 계산에 필요한 role 집합)는 evaluator.engine 과 공유하므로
+# app.core.schemas 로 이동했다. 여기서는 import 해서 사용한다.
 
 # task_type별 필수 역할 (없으면 is_valid=False)
 _REQUIRED_ROLES: dict[TaskType, list[ColumnRole]] = {
@@ -246,7 +191,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
             warnings.append(MappingValidationWarning(code=code, message=message))
 
     # ── 4. TC 가용성 계산 및 선택된 TC 검증 ────────────────────────────────────────────────────
-    tc_requirements = _TC_REQUIREMENTS[task_type]
+    tc_requirements = TC_REQUIREMENTS[task_type]
     available_tcs: list[str] = []
     unavailable_tcs: list[str] = []
 

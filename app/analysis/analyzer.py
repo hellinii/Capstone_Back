@@ -8,11 +8,11 @@ import re
 import pandas as pd
 from openai import AsyncOpenAI
 
-from schemas import (
+from app.core.schemas import (
     AnalysisResponse, ColumnMapping, ColumnMatchNote, ColumnRole,
     DataMetadata, TaskType, VALID_ROLES_BY_TASK,
 )
-from prompt_builder import build_system_prompt, build_user_prompt
+from app.analysis.prompt_builder import build_system_prompt, build_user_prompt
 
 
 def _build_response_schema(task_type: TaskType, columns: list[str] | None = None) -> dict:

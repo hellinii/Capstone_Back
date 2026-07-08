@@ -5,7 +5,7 @@ narrative_fallback.py — 규칙 기반 폴백 서술 생성.
 fact_sheet 의 실제 계산값(+ compute_derived 파생값)만 템플릿에 삽입한다(환각 0 보장).
 출력의 모든 숫자는 build_number_whitelist 가 포함하는 값이므로 grounding 검증을 통과한다.
 """
-from schemas import (
+from app.core.schemas import (
     FactSheet,
     NarrativeResponse,
     InterpretationOut,

@@ -11,7 +11,11 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # ── 엔진 ──────────────────────────────────────────────────────────────────────
-_DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "app.db")
+# __file__ = <루트>/app/core/database.py → 상위 3단계가 레포 루트.
+# 이 모듈이 app/core/ 로 이동했으므로 기본 SQLite 는 <루트>/data/app.db 를 가리키도록
+# 루트 기준으로 재앵커한다(.gitignore 의 data/app.db 패턴과 일치, 대소문자도 소문자 통일).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DEFAULT_DB_PATH = os.path.join(_PROJECT_ROOT, "data", "app.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_DEFAULT_DB_PATH}")
 
 # Heroku/Render 스타일 URL 은 legacy "postgres://" 스킴을 쓰는데 SQLAlchemy 2.0 은
@@ -98,13 +102,14 @@ def init_db() -> None:
         if path and path != ":memory:":
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     # Base 에 테이블을 등록하기 위해 지연 import (models 가 이 모듈의 Base 를 import → 순환 방지).
-    import models  # noqa: F401
+    # ⚠️ 함수 내부 지연 import 유지 필수 — 최상단으로 올리면 database↔models 순환으로 깨진다.
+    import app.issuance.models  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
 def seed_organization() -> None:
     """organization 이 비어 있으면 기본 기관 1행 INSERT(singleton, id=1)."""
-    from models import Organization
+    from app.issuance.models import Organization  # 지연 import (순환 방지) — 위치 유지
 
     db = SessionLocal()
     try:

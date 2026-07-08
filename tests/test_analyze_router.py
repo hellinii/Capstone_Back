@@ -3,8 +3,8 @@ import io
 
 from fastapi.testclient import TestClient
 
-from analyzer import _reconcile_llm_columns
-from schemas import ColumnRole
+from app.analysis.analyzer import _reconcile_llm_columns
+from app.core.schemas import ColumnRole
 
 
 # ── D5a: _reconcile_llm_columns (순수 함수) ─────────────────────────────────
@@ -54,7 +54,7 @@ def _upload(client: TestClient):
 
 
 def test_analyze_no_key_falls_back():
-    import main
+    from app import main
     with TestClient(main.app) as c:
         main.app.state.openai_client = None
         r = _upload(c)
@@ -63,7 +63,7 @@ def test_analyze_no_key_falls_back():
 
 
 def test_analyze_llm_error_falls_back(make_fake_openai_client):
-    import main
+    from app import main
     with TestClient(main.app) as c:
         main.app.state.openai_client = make_fake_openai_client(raise_exc=RuntimeError("boom"))
         r = _upload(c)
@@ -73,7 +73,7 @@ def test_analyze_llm_error_falls_back(make_fake_openai_client):
 
 
 def test_analyze_bad_extension_still_rejected():
-    import main
+    from app import main
     with TestClient(main.app) as c:
         main.app.state.openai_client = None
         r = c.post(
@@ -86,7 +86,7 @@ def test_analyze_bad_extension_still_rejected():
 
 def test_openai_client_timeout_configured(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
-    import main
+    from app import main
     with TestClient(main.app):
         client = main.app.state.openai_client
         assert client is not None

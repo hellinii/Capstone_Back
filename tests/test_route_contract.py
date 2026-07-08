@@ -4,7 +4,7 @@
 사라지거나 바뀌면 이 테스트가 실패한다.
 경로를 의도적으로 추가/변경할 때만 EXPECTED_PATHS 스냅샷을 갱신할 것.
 """
-from main import app  # PR1 이후: from app.main import app
+from app.main import app
 
 EXPECTED_PATHS = {
     "/api/analyze-columns",

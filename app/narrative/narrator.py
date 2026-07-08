@@ -14,7 +14,7 @@ import logging
 import re
 from typing import Any
 
-from schemas import (
+from app.core.schemas import (
     FactSheet,
     GroundingInfo,
     NarrativeRequest,
@@ -25,9 +25,9 @@ from schemas import (
     RecommendationOut,
     NarrativeMeta,
 )
-from benchmark_baselines import build_benchmark_refs
-from narrative_fallback import build_fallback_narrative
-from narrative_prompt import build_system_prompt, build_user_prompt, build_response_schema
+from app.narrative.baselines import build_benchmark_refs
+from app.narrative.fallback import build_fallback_narrative
+from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema
 
 _MODEL = "gpt-4.1-nano"
 

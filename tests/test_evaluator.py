@@ -2,14 +2,14 @@ import math
 import pandas as pd
 import pytest
 from pathlib import Path
-from evaluator.engine import evaluate
-from evaluator.preprocessor import preprocess_data
+from app.evaluation.engine import evaluate
+from app.evaluation.preprocessor import preprocess_data
 
-# 7. CSV 경로를 pathlib.Path를 이용해 동적 절대 경로로 지정
+# 7. CSV 경로를 pathlib.Path를 이용해 동적 절대 경로로 지정 (tests/data 하위, 소문자)
 BASE_DIR = Path(__file__).parent
-BINARY_CSV = BASE_DIR / "Data" / "Binary" / "binary_test_data_200.csv"
-MULTICLASS_CSV = BASE_DIR / "Data" / "MultiClass" / "multiclass_200.csv"
-MULTILABEL_CSV = BASE_DIR / "Data" / "MultiLabel" / "multilabel_200.csv"
+BINARY_CSV = BASE_DIR / "data" / "binary" / "binary_test_data_200.csv"
+MULTICLASS_CSV = BASE_DIR / "data" / "multiclass" / "multiclass_200.csv"
+MULTILABEL_CSV = BASE_DIR / "data" / "multilabel" / "multilabel_200.csv"
 
 # 3. 지원 TC 목록을 모듈 상수로 분리하여 유지보수성 향상
 BINARY_SUPPORTED_TCS = ["TC1", "TC2", "TC3", "TC4", "TC5", "TC6", "TC7", "TC8", "TC9", "TC10", "TC19", "TC20", "TC21", "TC22", "TC23"]

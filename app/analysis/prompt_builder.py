@@ -4,7 +4,7 @@ prompt_builder.py — LLM 프롬프트 생성 (간소화 버전)
 """
 
 import pandas as pd
-from schemas import TaskType, VALID_ROLES_BY_TASK
+from app.core.schemas import TaskType, VALID_ROLES_BY_TASK
 
 
 # task_type별 역할 설명 (LLM에게 필요한 최소 정보만)

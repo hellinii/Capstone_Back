@@ -1,10 +1,10 @@
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Request
-from schemas import (
+from app.core.schemas import (
     AnalysisResponse, TaskType,
     ConfirmMappingRequest, ConfirmMappingResponse,
 )
-from analyzer import parse_file_content, analyze_columns_with_llm, analyze_columns_fallback
-from validator import validate_mapping
+from app.analysis.analyzer import parse_file_content, analyze_columns_with_llm, analyze_columns_fallback
+from app.analysis.validator import validate_mapping
 
 router = APIRouter(prefix="/api", tags=["Column Analysis"])
 
