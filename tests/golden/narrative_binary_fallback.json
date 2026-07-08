@@ -1,0 +1,46 @@
+{
+  "conclusion": {
+    "benchmark": "Accuracy 0.94는 내부 참조 기준 0.85~0.92 대비 우수; Recall 0.7는 내부 참조 기준 0.8~0.92 대비 미흡; AUROC 0.88는 내부 참조 기준 0.85~0.95 대비 기준 범위 내. (내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음))",
+    "narrative": "임계값이 설정된 시험항목 3개 중 2개가 기준을 충족하여(통과율 66.7%), 종합 판정은 '조건부 적합'이다. 기준 미달 항목은 Recall이다.",
+    "risks": "기준 미달 지표는 Recall(0.7, 기준 0.8)로, 해당 영역의 성능 저하 위험이 존재한다.",
+    "verdict": "CONDITIONAL_PASS"
+  },
+  "interpretation": {
+    "confusion_analysis": "혼동 행렬 기준 전체 200건 중 25건이 오분류되었다(정분류 175건). 거짓 음성(FN)은 15건, 거짓 양성(FP)은 10건이다.",
+    "distribution_analysis": "평가 데이터셋은 총 200건이며, 클래스 분포는 0 130건(65.0%), 1 70건(35.0%)이다. 불균형 비율은 1.857로 불균형 상태로, 소수 클래스의 성능 지표 해석에 유의가 필요하다."
+  },
+  "meta": {
+    "grounding": {
+      "checked": 0,
+      "passed": true,
+      "violations": []
+    },
+    "model": null,
+    "reason": "no_key",
+    "source": "fallback"
+  },
+  "recommendation_narrative": {
+    "data_quality": "클래스 불균형 비율 1.857가 허용 기준을 초과하므로, 오버샘플링(SMOTE 등) 또는 클래스 가중치 조정을 통한 균형화 후 재평가를 권고한다. 전처리에서 3건이 제외되었으므로, 결측·오류 데이터 정제를 통한 유효 표본 확보를 권고한다.",
+    "model_ops": "기준 미달 지표(Recall)의 개선을 위해 임계값 재조정·재학습을 검토하고, 운영 단계에서 해당 지표의 주기적 모니터링을 권고한다."
+  },
+  "recommendations": [
+    {
+      "action": "Recall 기준 미달(0.7) — 임계값 재조정/재학습/데이터 보강 검토",
+      "category": "Recall 개선",
+      "expected_impact": "Recall 향상 및 종합 판정 개선",
+      "priority": "HIGH"
+    },
+    {
+      "action": "클래스 비율 균형화(불균형 비율 1.857) 후 추가 평가",
+      "category": "데이터 균형",
+      "expected_impact": "불균형에 의한 성능 왜곡 사전 검증",
+      "priority": "MEDIUM"
+    },
+    {
+      "action": "결측·오류 데이터 정제(제외 3건)",
+      "category": "데이터 품질",
+      "expected_impact": "유효 표본 확대 및 평가 신뢰도 향상",
+      "priority": "LOW"
+    }
+  ]
+}

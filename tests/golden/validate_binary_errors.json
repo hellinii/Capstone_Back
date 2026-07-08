@@ -1,0 +1,100 @@
+{
+  "error_count": 2,
+  "execution_summary": [
+    {
+      "label": "Total validated rows",
+      "note": "업로드된 파일의 전체 행 수",
+      "value": "200 rows"
+    },
+    {
+      "label": "Valid prediction rows",
+      "note": "결측치 제거 후 평가에 사용될 행 수",
+      "value": "196 rows"
+    },
+    {
+      "label": "Excluded samples",
+      "note": "결측치·오류로 인해 제외된 행 수",
+      "value": "4 rows"
+    },
+    {
+      "label": "Selected metric count",
+      "note": "선택된 메트릭: TC1, TC2, TC3, TC4, TC5, TC6, TC7, TC8, TC9, TC10, TC19, TC20, TC21, TC22, TC23",
+      "value": "15 items"
+    },
+    {
+      "label": "Validation result",
+      "note": "아래 상세 테이블 참조",
+      "value": "Errors 2 / Warnings 4"
+    }
+  ],
+  "selected_metric_ids": [
+    "TC1",
+    "TC2",
+    "TC3",
+    "TC4",
+    "TC5",
+    "TC6",
+    "TC7",
+    "TC8",
+    "TC9",
+    "TC10",
+    "TC19",
+    "TC20",
+    "TC21",
+    "TC22",
+    "TC23"
+  ],
+  "task_type": "binary",
+  "validation_details": [
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
+      "name": "Missing required column",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude affected rows from evaluation",
+      "name": "Missing value",
+      "result": "4 rows",
+      "status": "warning"
+    },
+    {
+      "group": "common",
+      "handling": "Keep the first row and exclude later duplicates",
+      "name": "Duplicate ID",
+      "result": "2 rows",
+      "status": "warning"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude affected rows from evaluation",
+      "name": "Class mismatch",
+      "result": "Pred has unknown classes: 2, normal",
+      "status": "warning"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude only rows with missing or invalid values",
+      "name": "Excluded samples",
+      "result": "4 rows",
+      "status": "warning"
+    },
+    {
+      "group": "binary",
+      "handling": "Exclude affected rows from evaluation",
+      "name": "Score range error",
+      "result": "3 rows out of [0, 1]",
+      "status": "error"
+    },
+    {
+      "group": "binary",
+      "handling": "Exclude affected rows from evaluation",
+      "name": "Binary class system error",
+      "result": "Expected 2 classes, found 4",
+      "status": "error"
+    }
+  ],
+  "warning_count": 4
+}
