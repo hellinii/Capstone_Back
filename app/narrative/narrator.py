@@ -12,15 +12,7 @@ fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비�
 import json
 import logging
 
-from app.core.schemas import (
-    NarrativeRequest,
-    NarrativeResponse,
-    InterpretationOut,
-    ConclusionOut,
-    RecommendationNarrativeOut,
-    RecommendationOut,
-    NarrativeMeta,
-)
+from app.narrative.schemas import ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.fallback import build_fallback_narrative
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema

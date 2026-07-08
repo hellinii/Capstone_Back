@@ -1,8 +1,6 @@
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Request
-from app.core.schemas import (
-    AnalysisResponse, TaskType,
-    ConfirmMappingRequest, ConfirmMappingResponse,
-)
+from app.core.schemas import TaskType
+from app.analysis.schemas import AnalysisResponse, ConfirmMappingRequest, ConfirmMappingResponse
 from app.analysis.parsing import parse_file_content
 from app.analysis.analysis_service import resolve_column_mapping, AnalysisError
 from app.analysis.validator import validate_mapping

@@ -5,10 +5,8 @@ LLM·API 키 없이 검증 가능한 순수 함수 대상.
 import pytest
 from pydantic import ValidationError
 
-from app.core.schemas import (
-    FactSheet, MetricFact, ConfusionFact, DistributionFact,
-    NarrativeRequest, TaskType,
-)
+from app.core.schemas import TaskType
+from app.narrative.schemas import ConfusionFact, DistributionFact, FactSheet, MetricFact, NarrativeRequest
 from app.narrative.narrator import generate_narrative
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import (

@@ -11,7 +11,8 @@ graceful degrade, 폴백까지 실패하면 도메인 예외(AnalysisError). HTT
 """
 from openai import AsyncOpenAI
 
-from app.core.schemas import AnalysisResponse, TaskType
+from app.core.schemas import TaskType
+from app.analysis.schemas import AnalysisResponse
 from app.analysis.llm_mapper import analyze_columns_with_llm
 from app.analysis.fallback_mapper import analyze_columns_fallback
 

@@ -11,7 +11,7 @@ HTTP 상태코드로 매핑한다. (prefix=/api, tags=["Evaluation"], POST /api/
 """
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
-from app.core.schemas import EvaluateRequest, EvaluateResponse
+from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
 from app.analysis.parsing import parse_file_content
 from app.evaluation.service import run_evaluation_pipeline, EvaluationError
 

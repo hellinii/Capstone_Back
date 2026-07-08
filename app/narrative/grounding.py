@@ -10,7 +10,7 @@ LLM 출력의 모든 숫자가 fact_sheet/파생값 화이트리스트 안에 �
 import re
 from typing import Any
 
-from app.core.schemas import FactSheet, GroundingInfo
+from app.narrative.schemas import FactSheet, GroundingInfo
 
 
 # 문맥상 '수치'가 아닌 고정 토큰(표준 표기·절 번호·오류 유형 서수)은 검증 전에 제거한다.

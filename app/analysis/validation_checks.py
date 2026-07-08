@@ -12,7 +12,7 @@ import ast
 
 import pandas as pd
 
-from app.core.schemas import ValidationCheckItem
+from app.analysis.schemas import ValidationCheckItem
 from app.analysis.validator import find_column_conflicts
 
 

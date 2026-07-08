@@ -18,11 +18,8 @@ task_type별 필수/선택 역할 규칙을 검사하고,
     true_labels + score_per_label(N개) → TC18
 """
 
-from app.core.schemas import (
-    ColumnRole, ColumnMapping, ConfirmMappingRequest,
-    ConfirmMappingResponse, MappingValidationError, MappingValidationWarning,
-    TaskType, TC_REQUIREMENTS,
-)
+from app.core.schemas import ColumnMapping, ColumnRole, TC_REQUIREMENTS, TaskType
+from app.analysis.schemas import ConfirmMappingRequest, ConfirmMappingResponse, MappingValidationError, MappingValidationWarning
 
 
 # ── TC 가용성 규칙 정의 ────────────────────────────────────────────────────────

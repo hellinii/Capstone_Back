@@ -11,7 +11,8 @@
 """
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
-from app.core.schemas import EvaluateRequest, ValidateDataResponse
+from app.analysis.schemas import ValidateDataResponse
+from app.evaluation.schemas import EvaluateRequest
 from app.analysis.parsing import parse_file_content
 from app.analysis.validation_service import validate_dataset
 

@@ -6,13 +6,8 @@ validate-data/evaluate 골든 테스트가 동일한 입력을 재사용하게 �
 """
 from pathlib import Path
 
-from app.core.schemas import (
-    ColumnMapping,
-    ColumnRole,
-    DataMetadata,
-    EvaluateRequest,
-    TaskType,
-)
+from app.core.schemas import ColumnMapping, ColumnRole, DataMetadata, TaskType
+from app.evaluation.schemas import EvaluateRequest
 
 DATA = Path(__file__).parent / "data"
 
