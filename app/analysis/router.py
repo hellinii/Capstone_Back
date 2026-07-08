@@ -3,7 +3,8 @@ from app.core.schemas import (
     AnalysisResponse, TaskType,
     ConfirmMappingRequest, ConfirmMappingResponse,
 )
-from app.analysis.analyzer import parse_file_content, analyze_columns_with_llm, analyze_columns_fallback
+from app.analysis.parsing import parse_file_content
+from app.analysis.analyzer import analyze_columns_with_llm, analyze_columns_fallback
 from app.analysis.validator import validate_mapping
 
 router = APIRouter(prefix="/api", tags=["Column Analysis"])

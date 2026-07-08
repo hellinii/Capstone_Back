@@ -15,7 +15,7 @@ from app.core.schemas import (
     ValidationCheckItem,
     ExecutionSummaryItem,
 )
-from app.analysis.analyzer import parse_file_content
+from app.analysis.parsing import parse_file_content
 from app.analysis.validator import find_column_conflicts
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])

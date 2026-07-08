@@ -3,16 +3,15 @@ analyzer.py — 파일 파싱 + 메타데이터 추출 + LLM 호출 핵심 로�
 """
 
 import json
-import io
-import re
 import pandas as pd
 from openai import AsyncOpenAI
 
 from app.core.schemas import (
-    AnalysisResponse, ColumnMapping, ColumnMatchNote, ColumnRole,
+    AnalysisResponse, ColumnMapping, ColumnRole,
     DataMetadata, TaskType, VALID_ROLES_BY_TASK,
 )
 from app.analysis.prompt_builder import build_system_prompt, build_user_prompt
+from app.analysis.reconcile import reconcile_llm_columns
 
 
 def _build_response_schema(task_type: TaskType, columns: list[str] | None = None) -> dict:
@@ -51,118 +50,6 @@ def _build_response_schema(task_type: TaskType, columns: list[str] | None = None
             },
         },
     }
-
-
-def _norm(s: str) -> str:
-    """컬럼명 정규화: 공백/밑줄/하이픈 제거 + 소문자. (대소문자·구분자 변형 매칭용)"""
-    return re.sub(r"[\s_\-]+", "", str(s).strip().lower())
-
-
-def _reconcile_llm_columns(
-    llm_mappings: list[dict], actual_cols: list[str]
-) -> tuple[list[dict], list[ColumnMatchNote]]:
-    """LLM 반환 컬럼명을 실제 헤더에 정렬한다(신뢰 경계 검증, D5a).
-
-    - 정확 일치 → 그대로. 정규화(대소문자/공백/_/-) 일치 → 실제 헤더로 보정(corrected).
-    - 실제 헤더에 없으면 매핑에서 제외(unmatched) — 환각 컬럼명이 결과에 들어가지 않게.
-    - LLM 이 한 번도 반환하지 않은 실제 헤더는 ignore 로 보완(unmapped_header) — 조용한 컬럼 소실 방지.
-    (difflib 유사 매칭은 무음 오매핑 위험이 있어 advisory 로 분리, 여기서는 자동 치환하지 않음.)
-    """
-    notes: list[ColumnMatchNote] = []
-    actual_set = set(actual_cols)
-
-    # 정규화 사전(충돌 키는 모호하므로 정규화 매칭 대상에서 제외)
-    norm_to_actual: dict[str, str] = {}
-    collisions: set[str] = set()
-    for c in actual_cols:
-        n = _norm(c)
-        if n in norm_to_actual:
-            collisions.add(n)
-        else:
-            norm_to_actual[n] = c
-    for n in collisions:
-        norm_to_actual.pop(n, None)
-
-    used: set[str] = set()
-    reconciled: list[dict] = []
-    for m in llm_mappings:
-        col = m.get("column", "")
-        role = m.get("role", ColumnRole.ignore.value)
-        if col in actual_set and col not in used:
-            reconciled.append({"column": col, "role": role})
-            used.add(col)
-            continue
-        matched = norm_to_actual.get(_norm(col))
-        if matched and matched not in used:
-            reconciled.append({"column": matched, "role": role})
-            used.add(matched)
-            notes.append(ColumnMatchNote(
-                llm_column=col, matched_column=matched, status="corrected",
-                message=f"'{col}'을(를) 실제 컬럼 '{matched}'(으)로 보정했습니다.",
-            ))
-            continue
-        notes.append(ColumnMatchNote(
-            llm_column=col, matched_column=None, status="unmatched",
-            message=f"'{col}'은(는) 파일 헤더에 없어 매핑에서 제외했습니다. 필요 시 직접 지정하세요.",
-        ))
-
-    # 미반환 실제 헤더 → ignore 로 보완(UI 에서 역할 지정 가능)
-    for c in actual_cols:
-        if c not in used:
-            reconciled.append({"column": c, "role": ColumnRole.ignore.value})
-            notes.append(ColumnMatchNote(
-                llm_column="", matched_column=c, status="unmapped_header",
-                message=f"'{c}'은(는) 자동 매핑되지 않아 '무시(ignore)'로 추가했습니다. 필요 시 역할을 지정하세요.",
-            ))
-
-    return reconciled, notes
-
-
-def parse_file_content(file_content: bytes, filename: str) -> tuple[list[str], pd.DataFrame]:
-    """
-    CSV 또는 JSON 파일을 파싱해 컬럼명 목록과 전체 DataFrame을 반환합니다.
-
-    지원 JSON 구조:
-      1. records 배열:  [{col: val, ...}, ...]
-      2. 열 기반 dict:  {col: [val, ...], ...}
-      3. 단일 키 래핑:  {"samples": [{...}, ...]}  ← 자동 언래핑
-    """
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
-    if ext == "csv":
-        # 인코딩 자동 감지: UTF-8 → CP949(한국어 Excel) → latin-1 순으로 시도
-        last_error = None
-        for encoding in ("utf-8", "utf-8-sig", "cp949", "latin-1"):
-            try:
-                df = pd.read_csv(io.BytesIO(file_content), encoding=encoding)
-                break
-            except (UnicodeDecodeError, pd.errors.ParserError) as e:
-                last_error = e
-                continue
-        else:
-            raise ValueError(f"파일 인코딩을 자동으로 감지할 수 없습니다: {last_error}")
-
-    elif ext == "json":
-        raw = json.loads(file_content.decode("utf-8"))
-
-        if isinstance(raw, dict):
-            values = list(raw.values())
-            if len(values) == 1 and isinstance(values[0], list):
-                raw = values[0]
-
-        if isinstance(raw, list):
-            df = pd.DataFrame(raw)
-        elif isinstance(raw, dict):
-            df = pd.DataFrame(raw)
-        else:
-            raise ValueError(
-                "JSON 형식 오류: records 배열([{...}]) 또는 열 기반 dict({col: [...]}) 형태여야 합니다."
-            )
-    else:
-        raise ValueError(f"지원하지 않는 파일 형식: .{ext}  (CSV 또는 JSON만 허용)")
-
-    # 전체 DataFrame 반환 (메타데이터 추출용)
-    return df.columns.tolist(), df
 
 
 # ── 양성 클래스 자동 판단 규칙 ────────────────────────────────────────────────
@@ -336,7 +223,7 @@ async def analyze_columns_with_llm(
     data = json.loads(response.choices[0].message.content)
 
     # LLM 반환 컬럼명을 실제 헤더에 정렬(환각/변형 컬럼명 차단, 미반환 헤더 보완) — D5a
-    reconciled, notes = _reconcile_llm_columns(data["column_mappings"], columns)
+    reconciled, notes = reconcile_llm_columns(data["column_mappings"], columns)
     column_mappings = []
     for m in reconciled:
         col_name = m["column"]
