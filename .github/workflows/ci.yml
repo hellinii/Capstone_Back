@@ -28,6 +28,20 @@ jobs:
         run: pip install -r requirements-dev.txt # -r requirements.txt 포함
       - name: 테스트
         run: pytest -q
+      - name: 앱 부팅 검증 (render.yaml startCommand와 문자 그대로 동일하게 유지할 것)
+        env:
+          DATABASE_URL: sqlite:///./ci-boot.db
+        run: |
+          uvicorn main:app --host 0.0.0.0 --port 8000 &
+          UV_PID=$!
+          ok=0
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:8000/health; then ok=1; break; fi
+            sleep 1
+          done
+          [ "$ok" = "1" ] || { kill $UV_PID; echo "::error::/health 응답 실패"; exit 1; }
+          curl -fsS http://localhost:8000/api/organization   # DB init+seed 왕복 스모크
+          kill $UV_PID
 
   # 팀 main 푸시가 CI를 통과했을 때만: 포크(hellinii) main 미러 → Render Deploy Hook.
   # Render는 hellinii/Capstone_Back main을 추적하며 autoDeploy:false 이므로
