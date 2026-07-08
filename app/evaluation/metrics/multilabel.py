@@ -1,3 +1,12 @@
+"""app/evaluation/metrics/multilabel.py — 다중레이블 전용 지표(sklearn 기반)
+
+Hamming Loss/Exact Match Ratio/Jaccard/분포 차이 계산. 파이프(|) 구분 라벨을 이진화해 계산.
+
+상호작용
+- 의존(import): pandas, sklearn
+- 사용처: app.evaluation.engine(METRIC_REGISTRY)
+"""
+
 import pandas as pd
 import numpy as np
 import ast

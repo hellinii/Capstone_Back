@@ -5,14 +5,14 @@
 HTTP 상태코드로 매핑한다. (prefix=/api, tags=["Evaluation"], POST /api/evaluate.)
 
 상호작용
-- 의존(import): app.core.schemas(EvaluateRequest/Response), app.analysis.parsing(parse_file_content),
+- 의존(import): app.core.schemas(EvaluateRequest/Response), app.core.parsing(parse_file_content),
   app.evaluation.service(run_evaluation_pipeline, EvaluationError)
 - 사용처: app.main(evaluate_router로 등록)
 """
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
 from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
-from app.analysis.parsing import parse_file_content
+from app.core.parsing import parse_file_content
 from app.evaluation.service import run_evaluation_pipeline, EvaluationError
 
 router = APIRouter(prefix="/api", tags=["Evaluation"])

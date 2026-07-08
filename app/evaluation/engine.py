@@ -1,3 +1,13 @@
+"""app/evaluation/engine.py — 평가 지표 계산 오케스트레이션(디스패치)
+
+전처리(preprocess_data) 후 TC_REQUIREMENTS 로부터 계산 가능 TC 를 정하고, METRIC_REGISTRY
+로 각 TC 를 실제 계산 함수(metrics/*)에 디스패치한다. binary ROC/PR 곡선·latency 통계도 부착.
+
+상호작용
+- 의존(import): pandas, app.core.schemas(TC_REQUIREMENTS), .preprocessor, .metrics(common/binary/multiclass/multilabel)
+- 사용처: app.evaluation.service.run_evaluation_pipeline
+"""
+
 import pandas as pd
 from typing import Dict, Any, List
 

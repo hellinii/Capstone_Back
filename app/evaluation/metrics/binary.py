@@ -1,3 +1,12 @@
+"""app/evaluation/metrics/binary.py — 이진 분류 전용 지표(sklearn 기반)
+
+특이도/FPR/AUROC/AUPRC/LogLoss/MCC 및 ROC·PR 곡선 좌표 계산.
+
+상호작용
+- 의존(import): pandas, sklearn
+- 사용처: app.evaluation.engine(METRIC_REGISTRY, 곡선 부착)
+"""
+
 import pandas as pd
 import numpy as np
 from typing import Dict, Any

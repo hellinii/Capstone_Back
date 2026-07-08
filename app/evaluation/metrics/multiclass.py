@@ -1,3 +1,12 @@
+"""app/evaluation/metrics/multiclass.py — 다중클래스 전용 지표(sklearn 기반)
+
+macro/micro/weighted 평균과 분포 차이(distribution_diff) 계산. common 의 헬퍼를 일부 재사용.
+
+상호작용
+- 의존(import): pandas, sklearn, .common
+- 사용처: app.evaluation.engine(METRIC_REGISTRY)
+"""
+
 import pandas as pd
 import numpy as np
 from typing import Dict, Any

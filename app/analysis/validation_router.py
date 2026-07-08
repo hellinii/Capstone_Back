@@ -6,14 +6,14 @@
 
 상호작용
 - 의존(import): app.core.schemas(EvaluateRequest, ValidateDataResponse),
-  app.analysis.parsing(parse_file_content), app.analysis.validation_service(validate_dataset)
+  app.core.parsing(parse_file_content), app.analysis.validation_service(validate_dataset)
 - 사용처: app.main(validate_router로 등록)
 """
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
 from app.analysis.schemas import ValidateDataResponse
 from app.evaluation.schemas import EvaluateRequest
-from app.analysis.parsing import parse_file_content
+from app.core.parsing import parse_file_content
 from app.analysis.validation_service import validate_dataset
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])

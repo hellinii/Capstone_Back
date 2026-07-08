@@ -1,4 +1,4 @@
-"""tests/test_parsing.py — app.analysis.parsing 순수 함수 단위 테스트.
+"""tests/test_parsing.py — app.core.parsing 순수 함수 단위 테스트.
 
 PR-B 에서 analyzer.py 로부터 분리한 파일 파싱 로직의 포맷별 분기(CSV 인코딩 / JSON 3형태 /
 미지원 확장자)를 개별 고정한다. golden(엔드포인트) 테스트를 보완하는 세밀한 안전망.
@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from app.analysis.parsing import parse_file_content
+from app.core.parsing import parse_file_content
 
 
 def test_csv_utf8():

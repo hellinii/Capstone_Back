@@ -1,3 +1,13 @@
+"""app/evaluation/metrics/common.py — task 공통 지표 계산(sklearn 기반)
+
+정확도/정밀도/재현율/F1/Fbeta/혼동행렬/클래스별 지표/불균형비 등 세 task 가 공유하는 지표.
+engine 의 METRIC_REGISTRY 가 TC 별로 호출한다.
+
+상호작용
+- 의존(import): pandas, sklearn
+- 사용처: app.evaluation.engine, 그리고 metrics.multiclass/multilabel 이 일부 헬퍼 재사용
+"""
+
 import pandas as pd
 import numpy as np
 from typing import Dict, Any

@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from app.core.schemas import TaskType
-from app.analysis.parsing import parse_file_content
+from app.core.parsing import parse_file_content
 from app.analysis.llm_mapper import analyze_columns_with_llm
 
 load_dotenv()
