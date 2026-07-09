@@ -1,6 +1,6 @@
 """tests/router_cases.py — 라우터 characterization 테스트용 공용 입력 정의.
 
-각 task_type 별 샘플 데이터셋 경로 + 컬럼 매핑 + 선택 TC 를 한곳에 모아,
+각 task_type 별 샘플 데이터셋 경로 + 컬럼 매핑 + 선택 지표 를 한곳에 모아,
 validate-data/evaluate 골든 테스트가 동일한 입력을 재사용하게 한다.
 (pytest 수집 대상이 아닌 헬퍼 모듈 — test_ 함수 없음.)
 """
@@ -11,7 +11,7 @@ from app.evaluation.schemas import EvaluateRequest
 
 DATA = Path(__file__).parent / "data"
 
-# task_type → (매핑[(컬럼, 역할)], 선택 TC 목록). 선택 TC 는 test_evaluator 의 지원 목록과 동일.
+# task_type → (매핑[(컬럼, 역할)], 선택 지표 목록). 선택 지표 는 test_evaluator 의 지원 목록과 동일.
 CASES = {
     "binary": {
         "csv": DATA / "binary" / "binary_test_data_200.csv",

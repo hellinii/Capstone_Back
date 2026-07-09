@@ -73,7 +73,7 @@ def evaluate(
         평가 결과 (최종 리포트 딕셔너리 형태)
     """
     results = {}
-    valid_tcs = VALID_METRICS_BY_TASK.get(task_type, set())
+    valid_metric_ids = VALID_METRICS_BY_TASK.get(task_type, set())
     
     # ── [전처리 단계 추가] ──
     try:
@@ -92,7 +92,7 @@ def evaluate(
     mapping_dict['_task_type'] = task_type
     
     for metric_id in selected_metric_ids:
-        if metric_id not in valid_tcs:
+        if metric_id not in valid_metric_ids:
             results[metric_id] = {"error": f"{task_type}에서는 지원하지 않는 지표입니다."}
             continue
             
