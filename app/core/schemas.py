@@ -67,7 +67,7 @@ VALID_ROLES_BY_TASK: dict[TaskType, list[ColumnRole]] = {
 }
 
 
-TC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
+METRIC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
     TaskType.binary: {
         "M1":  {ColumnRole.y_true, ColumnRole.y_pred},
         "M2":  {ColumnRole.y_true, ColumnRole.y_pred},

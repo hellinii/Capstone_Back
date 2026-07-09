@@ -67,7 +67,7 @@ def test_validate_mapping_flags_same_column():
     resp = validate_mapping(ConfirmMappingRequest(
         task_type=TaskType.binary,
         column_mappings=[_cm("label", ColumnRole.y_true), _cm("label", ColumnRole.y_pred)],
-        selected_tcs=["M1"],
+        selected_metric_ids=["M1"],
     ))
     assert resp.is_valid is False
     assert any(e.code == "SAME_COLUMN_TRUE_PRED" for e in resp.errors)
@@ -77,7 +77,7 @@ def test_validate_mapping_ok_when_distinct():
     resp = validate_mapping(ConfirmMappingRequest(
         task_type=TaskType.binary,
         column_mappings=[_cm("y", ColumnRole.y_true), _cm("p", ColumnRole.y_pred)],
-        selected_tcs=["M1"],
+        selected_metric_ids=["M1"],
     ))
     assert not any(e.code in ("SAME_COLUMN_TRUE_PRED", "COLUMN_MULTIPLE_ROLES") for e in resp.errors)
 

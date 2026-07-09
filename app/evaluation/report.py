@@ -18,15 +18,15 @@ def generate_report(results: Dict[str, Any]) -> Dict[str, Any]:
     success_metrics = {}
     failed_metrics = {}
     
-    for tc_id, val in results.items():
+    for metric_id, val in results.items():
         # 전처리 메타데이터 등 특수 키는 보존
-        if tc_id.startswith("_"):
+        if metric_id.startswith("_"):
             continue
             
         if isinstance(val, dict) and "error" in val:
-            failed_metrics[tc_id] = val["error"]
+            failed_metrics[metric_id] = val["error"]
         else:
-            success_metrics[tc_id] = val
+            success_metrics[metric_id] = val
             
     return {
         "success_metrics": success_metrics,

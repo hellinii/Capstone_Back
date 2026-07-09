@@ -6,7 +6,7 @@ from app.core.schemas import ReportPurpose, TaskType
 
 class MetricFact(BaseModel):
     """fact_sheet 내 개별 지표 (이미 계산된 값)"""
-    tc_id:        str          = Field(description="Metric 표시 ID (예: M1)")
+    metric_id:        str          = Field(description="Metric 표시 ID (예: M1)")
     display_name: str          = Field(description="지표명 (예: Accuracy)")
     value:        float        = Field(description="산출값")
     threshold:    float | None = Field(default=None, description="합격 임계값(없으면 정보 제공)")

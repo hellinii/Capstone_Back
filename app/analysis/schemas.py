@@ -24,7 +24,7 @@ class ConfirmMappingRequest(BaseModel):
     """[Step 2] 사용자가 검토·수정 후 확정한 매핑 제출"""
     task_type:       TaskType           = Field(description="분류 모델 유형")
     column_mappings: list[ColumnMapping] = Field(description="확정된 컬럼 매핑 목록")
-    selected_tcs:    list[str]          = Field(default=[], description="사전에 선택된 평가 지표 목록")
+    selected_metric_ids:    list[str]          = Field(default=[], description="사전에 선택된 평가 지표 목록")
 
 
 class MappingValidationError(BaseModel):
@@ -42,8 +42,8 @@ class ConfirmMappingResponse(BaseModel):
     is_valid:           bool                          = Field(description="지표 계산 진행 가능 여부")
     errors:             list[MappingValidationError]  = Field(description="치명적 오류 목록")
     warnings:           list[MappingValidationWarning] = Field(description="경고 목록")
-    available_tcs:      list[str]                     = Field(description="계산 가능한 지표 목록")
-    unavailable_tcs:    list[str]                     = Field(description="계산 불가 지표 목록")
+    available_metric_ids:      list[str]                     = Field(description="계산 가능한 지표 목록")
+    unavailable_metric_ids:    list[str]                     = Field(description="계산 불가 지표 목록")
     confirmed_mappings: list[ColumnMapping]           = Field(description="확정된 매핑 (그대로 반환)")
 
 

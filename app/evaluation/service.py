@@ -41,7 +41,7 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
             df=df,
             mappings=mappings,
             task_type=request.task_type.value,
-            selected_tcs=request.selected_tcs,
+            selected_metric_ids=request.selected_metric_ids,
             positive_class=positive_class,
             beta=beta,
         )

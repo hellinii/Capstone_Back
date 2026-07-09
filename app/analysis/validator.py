@@ -18,12 +18,12 @@ task_type별 필수/선택 역할 규칙을 검사하고,
     true_labels + score_per_label(N개) → M18
 """
 
-from app.core.schemas import ColumnMapping, ColumnRole, TC_REQUIREMENTS, TaskType
+from app.core.schemas import ColumnMapping, ColumnRole, METRIC_REQUIREMENTS, TaskType
 from app.analysis.schemas import ConfirmMappingRequest, ConfirmMappingResponse, MappingValidationError, MappingValidationWarning
 
 
 # ── 지표 가용성 규칙 정의 ────────────────────────────────────────────────────────
-# TC_REQUIREMENTS(각 지표 계산에 필요한 role 집합)는 evaluator.engine 과 공유하므로
+# METRIC_REQUIREMENTS(각 지표 계산에 필요한 role 집합)는 evaluator.engine 과 공유하므로
 # app.core.schemas 로 이동했다. 여기서는 import 해서 사용한다.
 
 # task_type별 필수 역할 (없으면 is_valid=False)
@@ -136,7 +136,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     """
     task_type = request.task_type
     mappings = request.column_mappings
-    selected_tcs = request.selected_tcs
+    selected_metric_ids = request.selected_metric_ids
 
     errors: list[MappingValidationError] = []
     warnings: list[MappingValidationWarning] = []
@@ -188,23 +188,23 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
             warnings.append(MappingValidationWarning(code=code, message=message))
 
     # ── 4. 지표 가용성 계산 및 선택된 지표 검증 ────────────────────────────────────────────────────
-    tc_requirements = TC_REQUIREMENTS[task_type]
-    available_tcs: list[str] = []
-    unavailable_tcs: list[str] = []
+    metric_requirements = METRIC_REQUIREMENTS[task_type]
+    available_metric_ids: list[str] = []
+    unavailable_metric_ids: list[str] = []
 
-    for tc_name, required_roles in sorted(tc_requirements.items(), key=lambda x: _tc_sort_key(x[0])):
+    for metric_id, required_roles in sorted(metric_requirements.items(), key=lambda x: _metric_sort_key(x[0])):
         if required_roles.issubset(mapped_roles):
-            available_tcs.append(tc_name)
+            available_metric_ids.append(metric_id)
         else:
             missing = required_roles - mapped_roles
             missing_str = ", ".join(r.value for r in missing)
-            unavailable_tcs.append(f"{tc_name} (누락: {missing_str})")
+            unavailable_metric_ids.append(f"{metric_id} (누락: {missing_str})")
             
             # 🔥 [변경점] 사용자가 계산하겠다고 명시적으로 선택한 지표인데, 필요 역할이 매핑되지 않았다면 Error 처리
-            if tc_name in selected_tcs:
+            if metric_id in selected_metric_ids:
                 errors.append(MappingValidationError(
-                    code="MISSING_TC_REQUIREMENT",
-                    message=f"선택하신 지표 '{tc_name}'를 계산하려면 [{missing_str}] 역할의 컬럼 매핑이 필수입니다."
+                    code="MISSING_METRIC_REQUIREMENT",
+                    message=f"선택하신 지표 '{metric_id}'를 계산하려면 [{missing_str}] 역할의 컬럼 매핑이 필수입니다."
                 ))
 
     is_valid = len(errors) == 0
@@ -213,12 +213,12 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
         is_valid=is_valid,
         errors=errors,
         warnings=warnings,
-        available_tcs=available_tcs,
-        unavailable_tcs=unavailable_tcs,
+        available_metric_ids=available_metric_ids,
+        unavailable_metric_ids=unavailable_metric_ids,
         confirmed_mappings=mappings,
     )
 
 
-def _tc_sort_key(tc_name: str) -> int:
+def _metric_sort_key(metric_id: str) -> int:
     """'M1', 'M23' 같은 지표 ID 문자열을 숫자 기준으로 정렬하기 위한 키(접두사 무관)."""
-    return int("".join(c for c in tc_name if c.isdigit()))
+    return int("".join(c for c in metric_id if c.isdigit()))

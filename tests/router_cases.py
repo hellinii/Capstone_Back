@@ -25,7 +25,7 @@ CASES = {
             ("noise_col1", "ignore"),
             ("noise_col2", "ignore"),
         ],
-        "selected_tcs": ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8",
+        "selected_metric_ids": ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8",
                          "M9", "M10", "M19", "M20", "M21", "M22", "M23"],
     },
     "multiclass": {
@@ -40,7 +40,7 @@ CASES = {
             ("prob_dog", "prob_per_class"),
             ("prob_bird", "prob_per_class"),
         ],
-        "selected_tcs": ["M1", "M2", "M3", "M4", "M5", "M6",
+        "selected_metric_ids": ["M1", "M2", "M3", "M4", "M5", "M6",
                          "M11", "M12", "M13", "M14", "M21", "M22", "M23"],
     },
     "multilabel": {
@@ -56,7 +56,7 @@ CASES = {
             ("score_finance", "score_per_label"),
             ("score_tech", "score_per_label"),
         ],
-        "selected_tcs": ["M1", "M2", "M3", "M4", "M5",
+        "selected_metric_ids": ["M1", "M2", "M3", "M4", "M5",
                          "M15", "M16", "M17", "M18", "M21", "M22", "M23"],
     },
 }
@@ -78,7 +78,7 @@ def request_json(task: str) -> str:
         column_mappings=[
             ColumnMapping(column=col, role=ColumnRole(role)) for col, role in c["mappings"]
         ],
-        selected_tcs=c["selected_tcs"],
+        selected_metric_ids=c["selected_metric_ids"],
         metadata=_METADATA[task],
     )
     return req.model_dump_json()
