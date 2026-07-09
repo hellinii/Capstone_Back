@@ -10,7 +10,8 @@ LLM/IO 의존이 없어 단독 단위 테스트가 가능하다.
 """
 import re
 
-from app.core.schemas import ColumnMatchNote, ColumnRole
+from app.core.schemas import ColumnRole
+from app.analysis.schemas import ColumnMatchNote
 
 
 def _norm(s: str) -> str:

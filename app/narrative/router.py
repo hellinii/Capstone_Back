@@ -7,8 +7,8 @@ LLM(or 규칙 폴백)으로 서술을 생성한다. OpenAI 키가 없거나 호�
 """
 from fastapi import APIRouter, Request
 
-from app.core.schemas import NarrativeRequest, NarrativeResponse
-from app.narrative.narrator import generate_narrative
+from app.narrative.schemas import NarrativeRequest, NarrativeResponse
+from app.narrative.service import generate_narrative
 
 router = APIRouter(prefix="/api", tags=["Narrative"])
 

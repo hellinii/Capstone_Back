@@ -5,12 +5,12 @@ LLM 출력의 모든 숫자가 fact_sheet/파생값 화이트리스트 안에 �
 
 상호작용
 - 의존(import): re, typing.Any, app.core.schemas(FactSheet, GroundingInfo)
-- 사용처: app.narrative.narrator(generate_narrative 의 화이트리스트/검증), tests
+- 사용처: app.narrative.service(generate_narrative 의 화이트리스트/검증), tests
 """
 import re
 from typing import Any
 
-from app.core.schemas import FactSheet, GroundingInfo
+from app.narrative.schemas import FactSheet, GroundingInfo
 
 
 # 문맥상 '수치'가 아닌 고정 토큰(표준 표기·절 번호·오류 유형 서수)은 검증 전에 제거한다.

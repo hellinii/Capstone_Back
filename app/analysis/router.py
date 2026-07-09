@@ -1,9 +1,19 @@
+"""app/analysis/router.py — 컬럼 분석 API 라우터 (얇은 HTTP 계층)
+
+파일 업로드/파싱·확장자 검증만 하고 컬럼 매핑은 analysis_service 에 위임한다.
+- POST /api/analyze-columns : 업로드 파일 → LLM(또는 규칙 폴백) 컬럼 자동 매핑
+- POST /api/confirm-mapping : 사용자가 확정한 매핑 유효성 검사 + 계산 가능 지표 반환
+
+상호작용
+- 의존(import): app.core.parsing, app.core.schemas, app.analysis.schemas,
+  app.analysis.analysis_service(resolve_column_mapping), app.analysis.validator
+- 사용처: app.main(analyze_router 로 등록)
+"""
+
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Request
-from app.core.schemas import (
-    AnalysisResponse, TaskType,
-    ConfirmMappingRequest, ConfirmMappingResponse,
-)
-from app.analysis.parsing import parse_file_content
+from app.core.schemas import TaskType
+from app.analysis.schemas import AnalysisResponse, ConfirmMappingRequest, ConfirmMappingResponse
+from app.core.parsing import parse_file_content
 from app.analysis.analysis_service import resolve_column_mapping, AnalysisError
 from app.analysis.validator import validate_mapping
 
@@ -67,7 +77,7 @@ async def analyze_columns(
         "사용자가 검토·수정한 컬럼 매핑을 서버에 제출합니다.\n\n"
         "- 필수 역할 누락 시 **오류(errors)** 발생\n"
         "- 선택 역할 미설정 시 **경고(warnings)** 반환\n"
-        "- 선택된 TC와 대조하여 **계산 가능성(available_tcs)** 검사"
+        "- 선택된 지표와 대조하여 **계산 가능성(available_tcs)** 검사"
     )
 )
 async def confirm_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:

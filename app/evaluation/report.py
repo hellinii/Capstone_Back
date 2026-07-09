@@ -1,3 +1,13 @@
+"""app/evaluation/report.py — 평가 결과 포매팅
+
+engine 이 계산한 원시 결과(지표별 값/에러)를 성공(success_metrics)/실패(failed_metrics)로
+분류해 응답용 형태로 정리한다.
+
+상호작용
+- 의존(import): 표준 typing 만
+- 사용처: app.evaluation.service (EvaluateResponse 조립 직전)
+"""
+
 from typing import Dict, Any
 
 def generate_report(results: Dict[str, Any]) -> Dict[str, Any]:

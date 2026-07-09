@@ -11,7 +11,7 @@ Report/Organization ORM 객체를 API 응답 Pydantic 모델로 변환한다. DB
 from datetime import timezone
 
 from app.issuance.models import Organization, Report
-from app.core.schemas import IssuanceHistoryItem, IssuanceOut, OrganizationOut
+from app.issuance.schemas import IssuanceHistoryItem, IssuanceOut, OrganizationOut
 
 
 def organization_out(org: Organization) -> OrganizationOut:

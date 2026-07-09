@@ -10,12 +10,8 @@ HTTP(파일 읽기·상태코드) 관심사는 라우터가 담당한다.
   ExecutionSummaryItem), app.analysis.validation_checks(개별 점검 함수 + TASK_CHECKS)
 - 사용처: app.analysis.validation_router.validate_data
 """
-from app.core.schemas import (
-    EvaluateRequest,
-    ExecutionSummaryItem,
-    ValidateDataResponse,
-    ValidationCheckItem,
-)
+from app.analysis.schemas import ExecutionSummaryItem, ValidateDataResponse, ValidationCheckItem
+from app.evaluation.schemas import EvaluateRequest
 from app.analysis import validation_checks as checks
 
 

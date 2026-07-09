@@ -11,14 +11,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.schemas import (
-    ConfusionFact,
-    DistributionFact,
-    FactSheet,
-    MetricFact,
-    NarrativeRequest,
-    TaskType,
-)
+from app.core.schemas import TaskType
+from app.narrative.schemas import ConfusionFact, DistributionFact, FactSheet, MetricFact, NarrativeRequest
 from app.main import app
 from golden_utils import assert_golden
 

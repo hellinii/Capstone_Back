@@ -1,4 +1,4 @@
-"""app/analysis/parsing.py — 업로드 파일(CSV/JSON) → DataFrame 파싱
+"""app/core/parsing.py — 업로드 파일(CSV/JSON) → DataFrame 파싱
 
 확장자에 따라 CSV(인코딩 자동 감지) 또는 JSON(여러 형태 정규화)을 pandas DataFrame 으로
 읽어 컬럼 목록과 함께 반환한다. LLM 의존이 없는 순수 파싱 로직이라 포맷별로 단위 테스트가 가능하다.

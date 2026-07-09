@@ -1,5 +1,7 @@
 # 조직/발급 메타 DB 설계 (P2-11)
 
+> 현재 코드 구조는 docs/ARCHITECTURE.md 참조(이 문서는 설계 근거).
+
 > 작성일: 2026-06-24
 > 범위: 성적서의 **수행기관(performer)·발급정보(signature)·리포트 번호(reportId)** 를 프론트 하드코딩에서 백엔드 DB로 이관
 > 상태: **설계 계획 (구현 전)** — 본 문서 확정 후 구현 착수
@@ -131,7 +133,7 @@ COMMIT
 
 ## 5. API 설계
 
-신규 라우터 [`routers/reports.py`](../routers/reports.py), prefix `/api`.
+신규 라우터 [`app/issuance/router.py`](../app/issuance/router.py), prefix `/api`.
 
 | 메서드·경로 | 용도 | 요청 | 응답 |
 |---|---|---|---|
@@ -205,15 +207,16 @@ class IssuanceOut(BaseModel):
 
 ```
 Capstone_Back/
-  database.py        # SQLAlchemy engine/SessionLocal/Base, get_db 의존성
-  models.py          # ORM: Organization, Report, Issuance
-  schemas.py         # (추가) OrganizationOut, IssueRequest, IssuanceOut ...
-  services/
-    issuance.py      # 채번·발급·재발급 트랜잭션 로직(라우터에서 분리, 단위테스트 용이)
-  routers/reports.py # 발급/조회 API
-  data/app.db        # SQLite 파일 (.gitignore)
-  main.py            # 기동 시 Base.metadata.create_all + 기관 시드(없으면 INSERT)
-  test_issuance.py   # 채번 순번/재발급 버전업/멱등 테스트
+  app/
+    core/database.py      # SQLAlchemy engine/SessionLocal/Base, get_db 의존성
+    issuance/models.py    # ORM: Organization, Report, Issuance
+    issuance/schemas.py   # (추가) OrganizationOut, IssueRequest, IssuanceOut ...
+    issuance/service.py   # 채번·발급·재발급 트랜잭션 로직(라우터에서 분리, 단위테스트 용이)
+    issuance/router.py    # 발급/조회 API
+    issuance/bootstrap.py # 기관 시드(없으면 INSERT): seed_organization / DEFAULT_ORGANIZATION
+    main.py               # 기동 시 init_db(create_all) + seed_organization 호출
+  data/app.db             # SQLite 파일 (.gitignore)
+  tests/test_issuance.py  # 채번 순번/재발급 버전업/멱등 테스트
 ```
 
 - 의존성 추가: `requirements.txt` 에 `SQLAlchemy>=2.0`.
@@ -224,9 +227,9 @@ Capstone_Back/
 
 | Phase | 내용 |
 |---|---|
-| **A. DB 인프라** | `database.py`, `models.py`(3테이블), `create_all`+기관 시드, requirements 갱신 |
-| **B. 발급 서비스+API** | `services/issuance.py`(채번/재발급 트랜잭션), `routers/reports.py`(issue/reissue/get/organization), `schemas` 추가, `main.py` 라우터 등록 |
-| **C. 백엔드 검증** | `test_issuance.py`: 연도별 순번(0001,0002), 멱등(같은 run 재호출), 재발급 v1.0→v1.1+history, 동시 채번 충돌 |
+| **A. DB 인프라** | `app/core/database.py`, `app/issuance/models.py`(3테이블), `create_all`+기관 시드, requirements 갱신 |
+| **B. 발급 서비스+API** | `app/issuance/service.py`(채번/재발급 트랜잭션), `app/issuance/router.py`(issue/reissue/get/organization), `app/issuance/schemas.py` 추가, `app/main.py` 라우터 등록 |
+| **C. 백엔드 검증** | `tests/test_issuance.py`: 연도별 순번(0001,0002), 멱등(같은 run 재호출), 재발급 v1.0→v1.1+history, 동시 채번 충돌 |
 | **D. 프론트 연동** | org 조회, 발급 버튼/상태 배지, `IssuanceOut`→meta/performer/signature 바인딩, 하드코딩 제거, run 병합·영속 |
 | **E. 통합 검증** | 발급→재발급→재오픈 end-to-end, tsc/build, 적대적 검증 워크플로우 |
 
@@ -253,9 +256,9 @@ Capstone_Back/
 | 항목 | 상태 | 비고 |
 |---|---|---|
 | 설계 확정(본 문서) | ✅ 완료 | DB=SQLite, 채번=발급시점, 기관=단일, 재발급=버전업 |
-| Phase A DB 인프라 | ✅ 완료 | `database.py`(엔진·세션·Base·get_db·`configure_sqlite`), `models.py`(3테이블), `main.py` 기동 시 `init_db`+`seed_organization`, `.gitignore`(충돌 정리 + `data/app.db` 무시), `requirements.txt`+SQLAlchemy>=2.0 |
-| Phase B 발급 API | ✅ 완료 | `schemas.py`(+Organization/Issue/Reissue/Issuance 스키마), `services/issuance.py`(채번·멱등·재발급·`bump_version`), `routers/reports.py`(issue/reissue/get/organization·PUT), 라우터 등록 |
-| Phase C 백엔드 테스트 | ✅ 완료 | `test_issuance.py` 18개 통과 (순번·멱등·재발급·연도경계·bump엣지·API·**파일DB FK·2스레드 동시 채번/재발급**) |
+| Phase A DB 인프라 | ✅ 완료 | `app/core/database.py`(엔진·세션·Base·get_db·`configure_sqlite`), `app/issuance/models.py`(3테이블), `app/main.py` 기동 시 `init_db`+`seed_organization`(`app/issuance/bootstrap.py`), `.gitignore`(충돌 정리 + `data/app.db` 무시), `requirements.txt`+SQLAlchemy>=2.0 |
+| Phase B 발급 API | ✅ 완료 | `app/issuance/schemas.py`(+Organization/Issue/Reissue/Issuance 스키마), `app/issuance/service.py`(채번·멱등·재발급·`bump_version`), `app/issuance/router.py`(issue/reissue/get/organization·PUT), 라우터 등록 |
+| Phase C 백엔드 테스트 | ✅ 완료 | `tests/test_issuance.py` 18개 통과 (순번·멱등·재발급·연도경계·bump엣지·API·**파일DB FK·2스레드 동시 채번/재발급**) |
 | Phase D 프론트 연동 | ✅ 완료(라이브 미검증) | `issuanceApi.ts`(발급 API + KST 포맷터), `useIssuance.ts`(상태·스토어 영속), `ReportLayout`(발급/정정 버튼 + 상태 배지), `Report.tsx`, `SignatureSection`/`ReportCoverSection`/`EvalScopeSection`(초안·"미발급" 표기), `mapWorkflowToFinalReport`(가짜 번호/서명 생성기 제거→초안 기본값). `issued_at`→KST 변환으로 날짜 일원화. tsc 신규 오류 0 |
 | Phase E 통합 검증 | 🔄 부분 | 백엔드 end-to-end(발급→재발급→재오픈, TestClient) ✅, 적대적 리뷰 워크플로우(백 5관점·프론트 3관점) ✅, tsc-delta ✅. **미완**: 백+프론트+브라우저 라이브 클릭(현 환경 제약 → `pnpm install` 후 dev 서버로 수동 확인 필요) |
 
