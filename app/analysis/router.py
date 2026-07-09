@@ -77,7 +77,7 @@ async def analyze_columns(
         "사용자가 검토·수정한 컬럼 매핑을 서버에 제출합니다.\n\n"
         "- 필수 역할 누락 시 **오류(errors)** 발생\n"
         "- 선택 역할 미설정 시 **경고(warnings)** 반환\n"
-        "- 선택된 지표와 대조하여 **계산 가능성(available_tcs)** 검사"
+        "- 선택된 지표와 대조하여 **계산 가능성(available_metric_ids)** 검사"
     )
 )
 async def confirm_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:

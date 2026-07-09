@@ -23,7 +23,7 @@
 
 **백엔드가 실제로 채우는 값은 4가지뿐**(`useReportData.ts`):
 
-1. `kpiResults` 값/판정 — `success_metrics[tcId]`
+1. `kpiResults` 값/판정 — `success_metrics[metricId]`
 2. `charts.confusionMatrix` — `success_metrics.M21`
 3. `kpiResults[].perClass` — `success_metrics.M22`
 4. `datasetDiagnosis` 접두 한 줄 + `dataValidation` 중 '제외된 샘플 수'/'누락값' 2개 — `dropped_rows`
@@ -139,7 +139,7 @@
 원시 CSV/DataFrame/확률은 **절대 미주입**. 오직 계산된 fact만:
 
 - `task_type`, `n_samples`, `dropped_rows`, `warnings`
-- `metrics: [{tc_id, display_name, value(round4·문자열), threshold|null, status: pass/fail/warning}]` — 성공한 선택 지표만. 값은 서버가 문자열로 직렬화해 LLM이 자릿수 변경 못 하게 고정
+- `metrics: [{metric_id, display_name, value(round4·문자열), threshold|null, status: pass/fail/warning}]` — 성공한 선택 지표만. 값은 서버가 문자열로 직렬화해 LLM이 자릿수 변경 못 하게 고정
 - `per_class` — M22 classification_report의 클래스별 precision/recall/f1/support
 - `confusion: {labels, matrix}` + `derived: {total_misclassified, fp, fn, per_cell}` — **덧셈은 서버가** 미리 계산
 - `distribution` — `class_distribution` + `imbalance_ratio`(M23)

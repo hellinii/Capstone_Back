@@ -38,9 +38,9 @@ def _sample_request() -> NarrativeRequest:
         verdict="CONDITIONAL_PASS",
         score=66.7,
         metrics=[
-            MetricFact(tc_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass"),
-            MetricFact(tc_id="M3", display_name="Recall", value=0.70, threshold=0.80, status="fail"),
-            MetricFact(tc_id="M9", display_name="AUROC", value=0.88, threshold=0.80, status="pass"),
+            MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass"),
+            MetricFact(metric_id="M3", display_name="Recall", value=0.70, threshold=0.80, status="fail"),
+            MetricFact(metric_id="M9", display_name="AUROC", value=0.88, threshold=0.80, status="pass"),
         ],
         confusion=ConfusionFact(labels=["0", "1"], matrix=[[120, 10], [15, 55]]),
         distribution=DistributionFact(

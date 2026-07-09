@@ -9,7 +9,7 @@ class EvaluateRequest(BaseModel):
     """[Step 3] 평가 실행 요청 스펙"""
     task_type:       TaskType            = Field(description="분류 모델 유형")
     column_mappings: list[ColumnMapping] = Field(description="확정된 컬럼 매핑 목록")
-    selected_tcs:    list[str]           = Field(description="계산할 평가 지표 목록")
+    selected_metric_ids:    list[str]           = Field(description="계산할 평가 지표 목록")
     metadata:        DataMetadata        = Field(description="클래스 및 positive_class 등이 들어있는 메타데이터")
     beta:            float               = Field(default=1.0, description="F-beta score 계산용 가중치 beta 값")
 
