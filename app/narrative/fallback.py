@@ -73,11 +73,14 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
         f"임계값이 설정된 시험항목 {target}개 중 {passed}개가 기준을 충족하여"
         f"(통과율 {fs.score}%), 종합 판정은 '{vlabel}'이다."
     )
-    failed = [m.display_name for m in fs.metrics if m.status == "fail"]
+    failed_metrics = [
+        m for m in fs.metrics
+        if m.status == "fail" and m.threshold is not None and m.threshold > 0
+    ]
+    failed = [m.display_name for m in failed_metrics]
     if failed:
         narrative += f" 기준 미달 항목은 {', '.join(failed)}이다."
 
-    failed_metrics = [m for m in fs.metrics if m.status == "fail"]
     if failed_metrics:
         items = ", ".join(
             f"{m.display_name}({m.value}, 기준 {m.threshold})" for m in failed_metrics
