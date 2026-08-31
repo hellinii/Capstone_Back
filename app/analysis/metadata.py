@@ -18,6 +18,10 @@ from app.core.schemas import ColumnMapping, ColumnRole, DataMetadata, TaskType
 _KNOWN_POSITIVE = {"1", "yes", "true", "positive", "pos", "spam", "malignant", "fraud", "1.0"}
 _KNOWN_NEGATIVE = {"0", "no", "false", "negative", "neg", "ham", "benign", "normal", "0.0"}
 
+# 컬럼별 고유값 목록을 담는 상한. 이 목록은 "이 컬럼을 라벨로 쓰면 어떤 클래스가 있는가"를
+# 보여주기 위한 것이라, 이보다 값이 다양한 컬럼(id, score 등)은 라벨 후보가 아니다.
+MAX_UNIQUE_VALUES_PER_COLUMN = 200
+
 
 def _detect_binary_classes(series: pd.Series) -> tuple[str | None, str | None, bool]:
     """
@@ -73,15 +77,22 @@ def extract_metadata(
     """
     role_to_col: dict[str, str] = {m.role.value: m.column for m in column_mappings}
 
-    # [설계 개선] 파일 내 모든 컬럼에 대해 전체 유니크값 목록을 미리 계산해 둡니다.
+    # [설계 개선] 파일 내 모든 컬럼에 대해 유니크값 목록을 미리 계산해 둡니다.
     # 사용자가 화면에서 컬럼 매핑을 변경(ignore -> y_true)하더라도 누락 없이 전체 클래스 목록을 볼 수 있게 지원합니다.
+    #
+    # 고유값이 상한을 넘는 컬럼은 담지 않습니다. 이 목록의 용도는 "이 컬럼을 라벨로 쓰면
+    # 어떤 클래스가 있는가"를 보여주는 것이라, id·score 처럼 값이 행마다 다른 컬럼은 애초에
+    # 후보가 아닙니다. 상한 없이 담으면 id 컬럼 하나가 행 수만큼 들어가 metadata 가 수백 KB로
+    # 불어나고, 이 값이 평가 run 마다 브라우저 localStorage 에 저장되어 용량 한도를 넘기면
+    # 성적서 생성이 실패합니다. 담지 않은 컬럼은 프론트가 detected_classes/샘플값으로 폴백합니다.
     column_unique_values: dict[str, list[str]] = {}
     for col in df.columns:
         non_null_series = df[col].dropna()
         if non_null_series.empty:
             column_unique_values[col] = []
             continue
-        unique_set = set()
+        unique_set: set[str] = set()
+        overflowed = False
         for val in non_null_series:
             val_str = str(val).strip()
             if not val_str:
@@ -94,7 +105,12 @@ def extract_metadata(
                         unique_set.add(part)
             else:
                 unique_set.add(val_str)
-        column_unique_values[col] = sorted(list(unique_set))
+            if len(unique_set) > MAX_UNIQUE_VALUES_PER_COLUMN:
+                overflowed = True
+                break
+        if overflowed:
+            continue  # 라벨 후보가 아니므로 목록에서 제외
+        column_unique_values[col] = sorted(unique_set)
 
     # ── Binary ────────────────────────────────────────────────────────────────
     if task_type == TaskType.binary:

@@ -24,7 +24,7 @@
     {
       "label": "Validation result",
       "note": "아래 상세 테이블 참조",
-      "value": "Errors 0 / Warnings 4"
+      "value": "Errors 0 / Warnings 3"
     }
   ],
   "selected_metric_ids": [
@@ -82,9 +82,9 @@
       "group": "multilabel",
       "handling": "Exclude affected rows from evaluation",
       "name": "Label format mismatch",
-      "result": "27 rows (sampled first 100)",
-      "status": "warning"
+      "result": "None",
+      "status": "pass"
     }
   ],
-  "warning_count": 4
+  "warning_count": 3
 }

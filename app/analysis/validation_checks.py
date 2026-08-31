@@ -289,25 +289,37 @@ def check_multiclass(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list
                 argmax_indices = prob_df.values.argmax(axis=1)
                 # 클래스명 추출 (prob_className 형태 가정)
                 class_names = [c.replace("prob_", "") for c in prob_in_df]
-                argmax_labels = [class_names[i] for i in argmax_indices]
                 pred_values = df_clean[y_pred_col].astype(str).values
-                mismatch_count = int(sum(1 for a, p in zip(argmax_labels, pred_values) if a != p))
-                if mismatch_count > 0:
-                    items.append(ValidationCheckItem(
-                        name="Argmax and y_pred mismatch",
-                        result=f"{mismatch_count} rows",
-                        handling="Warn and continue",
-                        status="warning",
-                        group="multiclass",
-                    ))
-                else:
-                    items.append(ValidationCheckItem(
-                        name="Argmax and y_pred mismatch",
-                        result="0 rows",
-                        handling="Warn and continue",
-                        status="pass",
-                        group="multiclass",
-                    ))
+
+                # 이 검사는 컬럼명이 'prob_<클래스>' 규칙을 따를 때만 클래스를 알아낼 수 있다.
+                # 규칙을 따르지 않는 데이터셋(p_cat, score_1 …)에서는 추출한 이름이 실제 클래스와
+                # 하나도 맞지 않아 전 행이 불일치로 집계되는 허위 경고가 나온다.
+                # 시스템이 컬럼↔클래스 대응을 매핑 단계에서 수집하지 않으므로,
+                # 이름으로 클래스를 확정할 수 없으면 잘못된 정보를 주는 대신 검사를 건너뛴다.
+                known_classes = set(pred_values)
+                if y_true_col and y_true_col in df_clean.columns:
+                    known_classes |= set(df_clean[y_true_col].astype(str))
+                class_names_resolved = set(class_names) <= known_classes
+
+                if class_names_resolved:
+                    argmax_labels = [class_names[i] for i in argmax_indices]
+                    mismatch_count = int(sum(1 for a, p in zip(argmax_labels, pred_values) if a != p))
+                    if mismatch_count > 0:
+                        items.append(ValidationCheckItem(
+                            name="Argmax and y_pred mismatch",
+                            result=f"{mismatch_count} rows",
+                            handling="Warn and continue",
+                            status="warning",
+                            group="multiclass",
+                        ))
+                    else:
+                        items.append(ValidationCheckItem(
+                            name="Argmax and y_pred mismatch",
+                            result="0 rows",
+                            handling="Warn and continue",
+                            status="pass",
+                            group="multiclass",
+                        ))
             except Exception:
                 items.append(ValidationCheckItem(
                     name="Argmax and y_pred mismatch",
@@ -347,16 +359,24 @@ def check_multilabel(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list
     true_labels_col = mapping_dict.get("true_labels")
 
     if true_labels_col and true_labels_col in df_clean.columns:
+        # 형식 오류의 기준은 평가 파서(preprocessor._parse_multilabel_value)와 일치시킨다.
+        # 파서는 "A|B" / "A,B" / "['A','B']" / 단일 라벨 "A" 를 모두 정상 처리하므로,
+        # 구분자가 없다는 이유만으로 단일 라벨 행을 오류로 세면 안 된다(거의 모든
+        # 멀티레이블 데이터셋에 단일 라벨 행이 있어 허위 경고가 항상 인쇄됐다).
+        # 실제 오류는 "내용은 있는데 라벨을 하나도 뽑아낼 수 없는" 값뿐이다(예: "|", ",").
         format_errors = 0
         for val in df_clean[true_labels_col].head(100):
-            if isinstance(val, str):
-                try:
-                    parsed = ast.literal_eval(val)
-                    if not isinstance(parsed, list):
-                        format_errors += 1
-                except (ValueError, SyntaxError):
-                    if '|' not in val and ',' not in val:
-                        format_errors += 1
+            if not isinstance(val, str) or val.strip() == "":
+                continue  # 빈 셀 = '해당 라벨 없음' (정상 입력)
+            try:
+                parsed = ast.literal_eval(val)
+                if isinstance(parsed, list):
+                    continue
+            except (ValueError, SyntaxError):
+                pass
+            separator = '|' if '|' in val else ','
+            if not [x for x in val.split(separator) if x.strip()]:
+                format_errors += 1
         if format_errors > 0:
             items.append(ValidationCheckItem(
                 name="Label format mismatch",
