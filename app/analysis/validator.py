@@ -4,18 +4,26 @@ validator.py — 사용자가 확정한 컬럼 매핑의 유효성 검사
 task_type별 필수/선택 역할 규칙을 검사하고,
 현재 매핑으로 계산 가능한 지표 목록을 반환합니다.
 
-이미지 기준 지표 가용성 규칙:
+정답 역할(y_true/true_labels)은 항상 필수이고, 예측 역할은 "선택한 지표 중 하나라도
+예측을 쓸 때"만 필수입니다. 예컨대 M23(Imbalance Ratio)만 선택하면 정답 분포만으로
+계산되므로 예측 컬럼 없이도 진행할 수 있습니다. selected_metric_ids 를 보내지 않는
+호출자는 어떤 지표가 필요한지 알 수 없으므로 종전대로 예측 역할을 필수로 유지합니다.
+
+지표 가용성 규칙(app.core.schemas.METRIC_REQUIREMENTS 와 동일한 내용):
   [Binary]
-    y_true + y_pred        → M1~M8, M20~M23
+    y_true                 → M23
+    y_true + y_pred        → M1~M8, M20~M22
     y_true + score_positive→ M9, M10, M19
     (y_pred OR score_positive 중 최소 하나 필수)
 
   [Multiclass]
-    y_true + y_pred        → M1~M6, M11~M14, M21~M23
+    y_true                 → M23
+    y_true + y_pred        → M1~M6, M11~M14, M21, M22
 
   [Multilabel]
-    true_labels + pred_labels          → M1~M6, M11~M13, M15~M17, M21~M23
-    true_labels + score_per_label(N개) → M18
+    true_labels                → M23
+    true_labels + pred_labels  → M1~M5, M11~M13, M15~M18, M21, M22
+    (score_per_label 을 요구하는 지표는 없다 — 확률 범위 검증용 선택 컬럼)
 """
 
 from app.core.schemas import ColumnMapping, ColumnRole, METRIC_REQUIREMENTS, TaskType
@@ -26,20 +34,20 @@ from app.analysis.schemas import ConfirmMappingRequest, ConfirmMappingResponse, 
 # METRIC_REQUIREMENTS(각 지표 계산에 필요한 role 집합)는 evaluator.engine 과 공유하므로
 # app.core.schemas 로 이동했다. 여기서는 import 해서 사용한다.
 
-# task_type별 필수 역할 (없으면 is_valid=False)
-_REQUIRED_ROLES: dict[TaskType, list[ColumnRole]] = {
-    TaskType.binary: [
-        ColumnRole.y_true,
-        # y_pred와 score_positive 중 최소 하나 (아래 별도 체크)
-    ],
-    TaskType.multiclass: [
-        ColumnRole.y_true,
-        ColumnRole.y_pred,
-    ],
-    TaskType.multilabel: [
-        ColumnRole.true_labels,
-        ColumnRole.pred_labels,
-    ],
+# task_type별 "정답" 역할 — 어떤 지표를 고르든 항상 필수 (없으면 is_valid=False)
+_TRUTH_ROLE: dict[TaskType, ColumnRole] = {
+    TaskType.binary:     ColumnRole.y_true,
+    TaskType.multiclass: ColumnRole.y_true,
+    TaskType.multilabel: ColumnRole.true_labels,
+}
+
+# task_type별 "예측" 역할 후보 — 하나라도 매핑돼 있으면 충족.
+# 단, 선택한 지표가 모두 예측 역할을 쓰지 않으면(예: M23 만 선택) 이 요구는 면제된다.
+# 면제 여부는 METRIC_REQUIREMENTS 에서 파생시키므로 특정 지표 ID 를 하드코딩하지 않는다.
+_PRED_ROLES: dict[TaskType, list[ColumnRole]] = {
+    TaskType.binary:     [ColumnRole.y_pred, ColumnRole.score_positive],
+    TaskType.multiclass: [ColumnRole.y_pred],
+    TaskType.multilabel: [ColumnRole.pred_labels],
 }
 
 # task_type별 경고 조건: (없을 때 경고할 role, 경고 코드, 메시지)
@@ -53,7 +61,7 @@ _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
         (
             ColumnRole.y_pred,
             "MISSING_Y_PRED",
-            "y_pred가 없어 M1~M8, M20~M23 (예측 기반 지표)를 계산할 수 없습니다.",
+            "y_pred가 없어 M1~M8, M20~M22 (예측 기반 지표)를 계산할 수 없습니다.",
         ),
     ],
     TaskType.multiclass: [
@@ -63,13 +71,9 @@ _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
             "prob_per_class가 없어 클래스별 확률 기반 세부 지표를 계산할 수 없습니다.",
         ),
     ],
-    TaskType.multilabel: [
-        (
-            ColumnRole.score_per_label,
-            "MISSING_SCORE_PER_LABEL",
-            "score_per_label이 없어 M18 (Distribution Diff ML)을 계산할 수 없습니다.",
-        ),
-    ],
+    # multilabel: score_per_label 을 요구하는 지표가 없다(M18 도 true_labels/pred_labels 기반).
+    # 확률 범위 검증(preprocessor._validate_score_columns)에만 쓰이는 선택 컬럼이라 경고하지 않는다.
+    TaskType.multilabel: [],
 }
 
 
@@ -165,21 +169,35 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     errors.extend(find_column_conflicts(mappings, task_type))
 
     # ── 2. 필수 역할 누락 체크 ────────────────────────────────────────────────
-    for required_role in _REQUIRED_ROLES[task_type]:
-        if required_role not in mapped_roles:
-            errors.append(MappingValidationError(
-                code="MISSING_REQUIRED",
-                message=f"필수 역할 '{required_role.value}'이 매핑되지 않았습니다.",
-            ))
+    metric_requirements = METRIC_REQUIREMENTS[task_type]
+    pred_roles = _PRED_ROLES[task_type]
 
-    # Binary 전용: y_pred와 score_positive 중 최소 하나 필수
-    if task_type == TaskType.binary:
-        has_pred = ColumnRole.y_pred in mapped_roles
-        has_score = ColumnRole.score_positive in mapped_roles
-        if not has_pred and not has_score:
+    # 정답 역할은 무조건 필수
+    truth_role = _TRUTH_ROLE[task_type]
+    if truth_role not in mapped_roles:
+        errors.append(MappingValidationError(
+            code="MISSING_REQUIRED",
+            message=f"필수 역할 '{truth_role.value}'이 매핑되지 않았습니다.",
+        ))
+
+    # 예측 역할은 "선택한 지표 중 하나라도 예측을 쓸 때"만 필수.
+    # selected_metric_ids 는 기본값 [] (app.analysis.schemas) 이므로, 지표를 명시하지 않는
+    # 호출자는 종전과 동일하게 예측 역할을 필수로 유지한다(가용 지표를 알 수 없으므로 엄격).
+    known_selected = [m for m in selected_metric_ids if m in metric_requirements]
+    pred_required = not known_selected or any(
+        any(role in pred_roles for role in metric_requirements[m]) for m in known_selected
+    )
+
+    if pred_required and not (set(pred_roles) & mapped_roles):
+        if task_type == TaskType.binary:
             errors.append(MappingValidationError(
                 code="MISSING_PRED_OR_SCORE",
                 message="Binary 평가는 y_pred 또는 score_positive 중 최소 하나가 필요합니다.",
+            ))
+        else:
+            errors.append(MappingValidationError(
+                code="MISSING_REQUIRED",
+                message=f"필수 역할 '{pred_roles[0].value}'이 매핑되지 않았습니다.",
             ))
 
     # ── 3. 선택 역할 누락 → 경고 ─────────────────────────────────────────────
@@ -188,7 +206,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
             warnings.append(MappingValidationWarning(code=code, message=message))
 
     # ── 4. 지표 가용성 계산 및 선택된 지표 검증 ────────────────────────────────────────────────────
-    metric_requirements = METRIC_REQUIREMENTS[task_type]
+    # metric_requirements 는 위 2단계에서 이미 조회했다.
     available_metric_ids: list[str] = []
     unavailable_metric_ids: list[str] = []
 

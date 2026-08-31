@@ -14,21 +14,23 @@ _ROLE_HINTS: dict[TaskType, str] = {
         "y_true: 실제 정답 레이블 (0/1)\n"
         "y_pred: 예측 레이블 (0/1)\n"
         "score_positive: 양성 클래스 확률 (0~1 실수, 단일 컬럼)\n"
+        "latency: 추론 지연시간 (ms)\n"
         "ignore: 평가와 무관한 컬럼"
     ),
+    # multiclass/multilabel 은 확률 컬럼을 평가에 쓰지 않으므로 ignore 로 보내도록 안내한다.
     TaskType.multiclass: (
         "sample_id: 샘플 식별자\n"
         "y_true: 실제 정답 클래스명 (예: cat, dog)\n"
         "y_pred: 예측 클래스명\n"
-        "prob_per_class: 클래스별 예측 확률 (prob_cat, prob_dog 같은 여러 컬럼)\n"
-        "ignore: 평가와 무관한 컬럼"
+        "latency: 추론 지연시간 (ms)\n"
+        "ignore: 평가와 무관한 컬럼 (클래스별 확률 컬럼도 여기에 해당)"
     ),
     TaskType.multilabel: (
         "sample_id: 샘플 식별자\n"
         "true_labels: 실제 정답 레이블 집합 (| 구분자, 예: sports|news)\n"
         "pred_labels: 예측 레이블 집합 (| 구분자)\n"
-        "score_per_label: 레이블별 예측 확률 (score_sports 같은 여러 컬럼)\n"
-        "ignore: 평가와 무관한 컬럼"
+        "latency: 추론 지연시간 (ms)\n"
+        "ignore: 평가와 무관한 컬럼 (레이블별 확률 컬럼도 여기에 해당)"
     ),
 }
 

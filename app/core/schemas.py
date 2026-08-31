@@ -56,13 +56,18 @@ VALID_ROLES_BY_TASK: dict[TaskType, list[ColumnRole]] = {
         ColumnRole.sample_id, ColumnRole.y_true, ColumnRole.y_pred,
         ColumnRole.score_positive, ColumnRole.latency, ColumnRole.ignore,
     ],
+    # multiclass/multilabel 은 확률 역할(prob_per_class, score_per_label)을 받지 않는다.
+    # 두 task 의 지표 중 확률을 읽는 것이 하나도 없어(METRIC_REQUIREMENTS 참조) 값을 주지
+    # 못하면서, 매핑되면 해당 컬럼의 결측이 평가 표본을 깎고 범위 이탈은 평가를 중단시킨다.
+    # 확률만으로 예측을 파생하는 경로(argmax/threshold)가 구현되거나 순위 기반 지표가
+    # 추가되면 그때 다시 넣는다. binary 의 score_positive 는 M9/M10/M19 가 실제로 사용한다.
     TaskType.multiclass: [
         ColumnRole.sample_id, ColumnRole.y_true, ColumnRole.y_pred,
-        ColumnRole.prob_per_class, ColumnRole.latency, ColumnRole.ignore,
+        ColumnRole.latency, ColumnRole.ignore,
     ],
     TaskType.multilabel: [
         ColumnRole.sample_id, ColumnRole.true_labels, ColumnRole.pred_labels,
-        ColumnRole.score_per_label, ColumnRole.latency, ColumnRole.ignore,
+        ColumnRole.latency, ColumnRole.ignore,
     ],
 }
 
@@ -83,7 +88,8 @@ METRIC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
         "M20": {ColumnRole.y_true, ColumnRole.y_pred},
         "M21": {ColumnRole.y_true, ColumnRole.y_pred},
         "M22": {ColumnRole.y_true, ColumnRole.y_pred},
-        "M23": {ColumnRole.y_true, ColumnRole.y_pred},
+        # M23 은 정답 분포만으로 계산된다(common.calculate_imbalance_ratio) — 예측 컬럼 불필요.
+        "M23": {ColumnRole.y_true},
     },
     TaskType.multiclass: {
         "M1":  {ColumnRole.y_true, ColumnRole.y_pred},
@@ -98,7 +104,8 @@ METRIC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
         "M14": {ColumnRole.y_true, ColumnRole.y_pred},
         "M21": {ColumnRole.y_true, ColumnRole.y_pred},
         "M22": {ColumnRole.y_true, ColumnRole.y_pred},
-        "M23": {ColumnRole.y_true, ColumnRole.y_pred},
+        # M23 은 정답 분포만으로 계산된다(common.calculate_imbalance_ratio) — 예측 컬럼 불필요.
+        "M23": {ColumnRole.y_true},
     },
     TaskType.multilabel: {
         # M1(Accuracy)은 multilabel 에서 sklearn subset accuracy(전 라벨 일치 비율)로
@@ -108,17 +115,21 @@ METRIC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
         "M3":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M4":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M5":  {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "M6":  {ColumnRole.true_labels, ColumnRole.pred_labels},
+        # M6 는 multilabel 미지원 — common.calculate_kl_divergence 는 1-D 라벨만 처리한다
+        # (이진화된 2-D 배열에 pd.Series() 를 호출해 ValueError). 프론트도 노출하지 않는다.
         "M11": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M12": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M13": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M15": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M16": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M17": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "M18": {ColumnRole.true_labels, ColumnRole.score_per_label},  # 분포 기반
+        # M18 은 정답/예측 라벨의 빈도 벡터 간 코사인 거리다(multilabel.calculate_distribution_diff_ml).
+        # 확률(score_per_label)은 읽지 않는다.
+        "M18": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M21": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M22": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "M23": {ColumnRole.true_labels, ColumnRole.pred_labels},
+        # M23 은 정답 분포만으로 계산된다(common.calculate_imbalance_ratio) — 예측 컬럼 불필요.
+        "M23": {ColumnRole.true_labels},
     },
 }
 

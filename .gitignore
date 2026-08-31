@@ -19,5 +19,8 @@ data/app.db-shm
 *.sqlite
 *.sqlite3
 
+# 에디터 / 도구 로컬 설정
+.claude/
+
 # macOS
 .DS_Store

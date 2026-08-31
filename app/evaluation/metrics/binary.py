@@ -34,42 +34,58 @@ def _get_true_score(df: pd.DataFrame, mapping_dict: dict):
         raise ValueError("y_true 및 score_positive 컬럼 매핑이 필요합니다.")
     return df[true_col], df[score_col]
 
-def _binarize_true_labels(y_true, positive_class=None):
-    """문자열 등 비숫자형 라벨을 0, 1로 안전하게 변환"""
+def _resolve_positive_value(y_true, positive_class=None):
+    """양성으로 간주할 실제 값을 결정한다.
+
+    positive_class 가 주어지면 원래 데이터 타입에 맞춰 변환해 쓰고,
+    없으면 정렬상 마지막 값을 양성으로 본다(e.g. 'Yes', 1).
+    """
     if positive_class is not None:
         # positive_class가 문자열 형태일 수 있으므로 원래 데이터 타입과 맞춤 비교
         try:
             if np.issubdtype(y_true.dtype, np.number):
-                pos_val = type(y_true.iloc[0])(positive_class)
-            else:
-                pos_val = str(positive_class)
+                return type(y_true.iloc[0])(positive_class)
+            return str(positive_class)
         except Exception:
-            pos_val = positive_class
-        return (y_true == pos_val).astype(int)
+            return positive_class
+
+    classes = np.sort(np.unique(y_true))
+    return classes[-1] if len(classes) > 0 else 1
+
+def _binarize_true_labels(y_true, positive_class=None):
+    """문자열 등 비숫자형 라벨을 0, 1로 안전하게 변환"""
+    if positive_class is not None:
+        return (y_true == _resolve_positive_value(y_true, positive_class)).astype(int)
 
     classes = np.sort(np.unique(y_true))
     if len(classes) <= 2:
-        pos_label = classes[-1]  # 정렬 시 마지막 값을 positive(1)로 간주 (e.g. 'Yes', 1)
-        return (y_true == pos_label).astype(int)
+        return (y_true == _resolve_positive_value(y_true)).astype(int)
     return y_true
+
+def _binary_confusion_counts(df: pd.DataFrame, mapping_dict: dict):
+    """M7/M8 공용. positive_class 기준으로 0/1 이진화 후 labels=[0,1] 고정 혼동행렬.
+
+    labels 를 고정하지 않으면 관측 클래스가 1종일 때(희귀 양성 필터링 데이터 등) 행렬이
+    1x1 이 되어 tn/fp/fn/tp 분해가 불가능하다. 종전에는 그 경우 지표를 0.0 으로 반환했는데,
+    M8(FPR)은 낮을수록 좋은 지표라 "오탐률 0%"라는 허위 우수 판정이 됐다.
+    y_pred 에 미지 라벨이 섞이는 경우도 여기서 '양성 아님(=음성)'으로 일관 처리된다.
+    """
+    y_true, y_pred = _get_true_pred(df, mapping_dict)
+    pos_val = _resolve_positive_value(y_true, mapping_dict.get('_positive_class'))
+    y_true_bin = (y_true == pos_val).astype(int)
+    y_pred_bin = (y_pred == pos_val).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true_bin, y_pred_bin, labels=[0, 1]).ravel()
+    return int(tn), int(fp), int(fn), int(tp)
 
 def calculate_specificity(df: pd.DataFrame, mapping_dict: dict) -> float:
     """M7: Specificity (True Negative Rate)"""
-    y_true, y_pred = _get_true_pred(df, mapping_dict)
-    cm = confusion_matrix(y_true, y_pred)
-    if cm.shape == (2, 2):
-        tn, fp, fn, tp = cm.ravel()
-        return float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
-    return 0.0
+    tn, fp, _fn, _tp = _binary_confusion_counts(df, mapping_dict)
+    return float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
 
 def calculate_fpr(df: pd.DataFrame, mapping_dict: dict) -> float:
     """M8: False Positive Rate (FPR)"""
-    y_true, y_pred = _get_true_pred(df, mapping_dict)
-    cm = confusion_matrix(y_true, y_pred)
-    if cm.shape == (2, 2):
-        tn, fp, fn, tp = cm.ravel()
-        return float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
-    return 0.0
+    tn, fp, _fn, _tp = _binary_confusion_counts(df, mapping_dict)
+    return float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
 
 def calculate_auroc(df: pd.DataFrame, mapping_dict: dict) -> float:
     """M9: Area Under the Receiver Operating Characteristic Curve (AUROC)"""
