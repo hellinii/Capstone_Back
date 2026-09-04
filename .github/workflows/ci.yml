@@ -12,8 +12,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# 이 워크플로 파일 자체도 포크(hellinii)로 미러된다. 미러는 PAT 푸시라
+# 포크에서도 push 이벤트가 발생해 CI가 한 번 더 돈다 — 그런데 포크에는
+# FORK_SYNC_TOKEN / RENDER_DEPLOY_HOOK 시크릿이 없어 deploy가 빈 토큰으로
+# 자기 자신에게 푸시하다 항상 인증 실패(exit 128)한다. 포크 main은 배포
+# 미러일 뿐이고 내용은 이미 팀 repo CI를 통과했으므로, 팀 repo에서만 실행한다.
 jobs:
   test:
+    if: github.repository == 'hwanginyong02/Capstone_Back'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +64,10 @@ jobs:
   # 이 훅 호출이 유일한 배포 경로다. 포크 main은 순수 배포 미러 — 직접 커밋 금지.
   deploy:
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'hwanginyong02/Capstone_Back'
+      && github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,10 +78,21 @@ jobs:
           persist-credentials: false
       - name: 팀 main → 포크 main 미러
         run: |
+          if [ -z "${FORK_SYNC_TOKEN}" ]; then
+            echo "::error::FORK_SYNC_TOKEN 시크릿이 비어 있습니다. Settings → Secrets and variables → Actions 에서 등록하세요."
+            exit 1
+          fi
           git push --force \
             "https://x-access-token:${FORK_SYNC_TOKEN}@github.com/hellinii/Capstone_Back.git" \
             HEAD:main
         env:
           FORK_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
       - name: Render 배포 트리거
-        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "${RENDER_DEPLOY_HOOK}" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK 시크릿이 비어 있습니다. Settings → Secrets and variables → Actions 에서 등록하세요."
+            exit 1
+          fi
+          curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
