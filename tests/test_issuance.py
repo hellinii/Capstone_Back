@@ -96,6 +96,36 @@ def test_year_boundary_resets_seq(db_session):
     assert r.report_no == "RPT-2027-0001"
 
 
+# ── F-07: 채번 연도는 성적서에 인쇄되는 발급일(KST)과 같은 해여야 한다 ──────────
+
+def test_numbering_year_follows_kst_not_utc(db_session):
+    """[F-07] 12/31 15:00 UTC 는 KST 로 이미 새해다 — 번호도 새해여야 한다.
+
+    발급 시각은 UTC 로 저장되지만 성적서에 인쇄되는 발급일은 프론트가 KST 로 변환한다
+    (issuanceApi.ts formatKstDate). 채번만 UTC 연도를 쓰면 매년 12/31 15:00~24:00 UTC
+    (= 1/1 00:00~09:00 KST) 구간에서 **번호는 전년도, 인쇄된 발급일은 새해**가 된다.
+    연도별 채번 대장과 문서를 대조할 수 없게 된다.
+    """
+    r = svc.issue_report(db_session, run_id="r-newyear", now=datetime(2026, 12, 31, 15, 0))
+    assert r.report_no == "RPT-2027-0001"
+    assert r.year == 2027
+
+
+def test_numbering_year_is_still_previous_year_just_before_kst_midnight(db_session):
+    """[F-07] 12/31 14:59 UTC 는 KST 로 아직 12/31 23:59 다 — 전년도 번호가 맞다."""
+    r = svc.issue_report(db_session, run_id="r-eve", now=datetime(2026, 12, 31, 14, 59))
+    assert r.report_no == "RPT-2026-0001"
+    assert r.year == 2026
+
+
+def test_kst_boundary_starts_a_new_sequence(db_session):
+    """[F-07] KST 연 경계를 넘으면 순번이 1 로 리셋된다(경계 양쪽을 한 테스트에서)."""
+    a = svc.issue_report(db_session, run_id="r-a", now=datetime(2026, 12, 31, 14, 0))
+    b = svc.issue_report(db_session, run_id="r-b", now=datetime(2026, 12, 31, 16, 0))
+    assert a.report_no == "RPT-2026-0001"
+    assert b.report_no == "RPT-2027-0001"
+
+
 # ── 서비스 레벨: 멱등 ──────────────────────────────────────────────────────────
 
 def test_issue_idempotent_same_run(db_session):
@@ -223,6 +253,49 @@ def test_api_issue_rejects_blank_run_id(client):
     # 빈/공백 run_id → 422 (서로 다른 평가가 한 번호로 병합되는 것 차단)
     assert client.post("/api/reports/issue", json={"run_id": ""}).status_code == 422
     assert client.post("/api/reports/issue", json={"run_id": "   "}).status_code == 422
+
+
+# ── F-06(a): 정정 사유 공란이 API 로 통과하던 문제 ────────────────────────────
+
+def test_api_reissue_rejects_blank_note(client):
+    """[F-06] 공란 정정 사유는 422 로 막는다.
+
+    재발급은 이전 차수를 superseded 로 만들고 이력에 새 행을 남긴다. 그 이력은
+    SignatureSection 을 통해 성적서에 그대로 인쇄되므로, 사유 없는 정정 이력이
+    남으면 제3자가 무엇이 왜 바뀌었는지 판별할 근거가 사라진다.
+    UI 는 ReportLayout.tsx:42 에서 note.trim() 으로 막고 있었지만 API 는 통과했다.
+    """
+    issued = client.post("/api/reports/issue", json={"run_id": "run-note"}).json()
+    no = issued["report_no"]
+
+    assert client.post(f"/api/reports/{no}/reissue", json={"note": ""}).status_code == 422
+    assert client.post(f"/api/reports/{no}/reissue", json={"note": "   "}).status_code == 422
+
+    # 막혔으므로 버전과 이력이 그대로여야 한다
+    after = client.get(f"/api/reports/{no}").json()
+    assert after["version"] == "v1.0"
+    assert len(after["history"]) == 1
+
+
+def test_api_reissue_accepts_real_note(client):
+    """[F-06] 정상 사유는 그대로 통과한다(수정이 기능을 막지 않는다)."""
+    issued = client.post("/api/reports/issue", json={"run_id": "run-note-ok"}).json()
+    no = issued["report_no"]
+
+    r = client.post(f"/api/reports/{no}/reissue", json={"note": "지표 표기 오류 정정"})
+    assert r.status_code == 200
+    assert r.json()["version"] == "v1.1"
+    assert r.json()["history"][-1]["note"] == "지표 표기 오류 정정"
+
+
+def test_api_reissue_note_is_trimmed(client):
+    """[F-06] 앞뒤 공백은 제거해 저장한다 — 인쇄물에 들쭉날쭉한 여백이 남지 않게."""
+    issued = client.post("/api/reports/issue", json={"run_id": "run-note-trim"}).json()
+    no = issued["report_no"]
+
+    r = client.post(f"/api/reports/{no}/reissue", json={"note": "  오탈자 정정  "})
+    assert r.status_code == 200
+    assert r.json()["history"][-1]["note"] == "오탈자 정정"
 
 
 # ── 파일 DB(프로덕션 배선) 레벨 — 리뷰 #7, 설계 §9 ────────────────────────────

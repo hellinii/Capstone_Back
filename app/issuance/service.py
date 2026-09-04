@@ -4,7 +4,7 @@
 동시성: SQLite 는 쓰기를 직렬화하고, UNIQUE(year, seq) + UNIQUE(run_id) 로 이중 방어한다.
 충돌(IntegrityError) 시 seq 를 재계산해 재시도하고, run_id 충돌은 기존 발급본으로 수렴한다.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -28,6 +28,22 @@ class IssuanceError(Exception):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# 채번 연도의 기준 시간대. 성적서에 인쇄되는 발급일이 KST 이므로 번호도 KST 를 따른다.
+# KST 는 DST 가 없는 고정 오프셋(+09:00)이라 zoneinfo/tzdata 에 의존하지 않는다
+# (배포 이미지에 tzdata 가 없어도 동작한다).
+KST = timezone(timedelta(hours=9))
+
+
+def _numbering_year(now: datetime) -> int:
+    """채번 연도(KST 기준). now 는 tz 없는 UTC(_utcnow 규약).
+
+    UTC 연도를 쓰면 매년 12/31 15:00~24:00 UTC(= 1/1 00:00~09:00 KST)에 발급한 문서가
+    **번호는 전년도, 인쇄된 발급일은 새해**가 되어 연도별 채번 대장과 대조되지 않는다
+    (ISSUES.md F-07).
+    """
+    return now.replace(tzinfo=timezone.utc).astimezone(KST).year
 
 
 def bump_version(version: str) -> str:
@@ -96,7 +112,7 @@ def issue_report(
     get_organization(db)
 
     now = now or _utcnow()
-    year = now.year
+    year = _numbering_year(now)
     resolved_issuer = _issuer_or_default(db, issuer)
 
     last_err: Exception | None = None

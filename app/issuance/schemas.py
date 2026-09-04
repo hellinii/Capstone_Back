@@ -40,8 +40,19 @@ class IssueRequest(BaseModel):
 
 class ReissueRequest(BaseModel):
     """[재발급] 정정 발급 요청. 같은 번호 유지 + 버전 차수 증가(v1.0→v1.1)."""
-    note:   str        = Field(description="정정 사유(필수)")
+    note:   str        = Field(min_length=1, description="정정 사유(필수)")
     issuer: str | None = Field(default=None, description="발급자(미지정 시 기관 기본값)")
+
+    @field_validator("note")
+    @classmethod
+    def _note_not_blank(cls, v: str) -> str:
+        # 재발급은 이전 차수를 superseded 로 만들고 이력 행을 남기며, 그 이력은
+        # SignatureSection 을 통해 성적서에 그대로 인쇄된다. 사유가 공란이면 제3자가
+        # 무엇이 왜 정정됐는지 판별할 근거가 사라진다(ISSUES.md F-06).
+        # UI 는 ReportLayout.tsx 에서 이미 막고 있었으나 API 는 통과했다.
+        if not v.strip():
+            raise ValueError("정정 사유(note)는 비어 있을 수 없습니다.")
+        return v.strip()
 
 
 class IssuanceHistoryItem(BaseModel):
