@@ -1,3 +1,12 @@
+"""app/evaluation/metrics/multilabel.py — 다중레이블 전용 지표(sklearn 기반)
+
+Hamming Loss/Exact Match Ratio/Jaccard/분포 차이 계산. 파이프(|) 구분 라벨을 이진화해 계산.
+
+상호작용
+- 의존(import): pandas, sklearn
+- 사용처: app.evaluation.engine(METRIC_REGISTRY)
+"""
+
 import pandas as pd
 import numpy as np
 import ast
@@ -9,6 +18,11 @@ def _parse_multilabel_col(series: pd.Series):
     """
     CSV 등에 저장될 때 '["A", "B"]' 형태의 문자열로 들어오는 경우
     실제 파이썬 리스트로 안전하게 파싱합니다.
+
+    구분자 처리는 preprocessor._parse_multilabel_value 와 동일해야 한다.
+    (종전에는 '|' 분기가 없어 "A|B" 가 라벨 하나로 취급됐다. 실행 경로에서는 항상
+     전처리가 먼저 리스트로 바꿔주므로 드러나지 않았지만, 지표 함수를 직접 호출하면
+     두 파서가 서로 다른 라벨 집합을 만들어냈다.)
     """
     def parse_item(item):
         if isinstance(item, list): return item
@@ -16,10 +30,12 @@ def _parse_multilabel_col(series: pd.Series):
             try:
                 parsed = ast.literal_eval(item)
                 if isinstance(parsed, list): return parsed
-            except:
-                return [x.strip() for x in item.split(',') if x.strip()]
+            except Exception:
+                pass
+            separator = '|' if '|' in item else ','
+            return [x.strip() for x in item.split(separator) if x.strip()]
         return [item]
-    
+
     return series.apply(parse_item).tolist()
 
 def _get_binarized_true_pred(df: pd.DataFrame, mapping_dict: dict):
@@ -41,22 +57,27 @@ def _get_binarized_true_pred(df: pd.DataFrame, mapping_dict: dict):
     return mlb.transform(y_true_list), mlb.transform(y_pred_list)
 
 def calculate_hamming_loss(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC15: Hamming Loss"""
+    """M15: Hamming Loss"""
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
     return float(hamming_loss(y_true_bin, y_pred_bin))
 
 def calculate_exact_match_ratio(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC16: Exact Match Ratio (Subset Accuracy)"""
+    """M16: Exact Match Ratio (Subset Accuracy)"""
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
     return float(accuracy_score(y_true_bin, y_pred_bin))
 
 def calculate_jaccard_index(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC17: Jaccard Index (Samples Average)"""
+    """M17: Jaccard Index (Samples Average)
+
+    zero_division=1: 정답·예측이 모두 빈 레이블 집합인 샘플(0/0)은 '일치'로 센다.
+    전처리가 결측을 ''로 채워 살려두므로 빈 레이블 행은 이 시스템의 정상 입력이고,
+    zero_division=0 이면 완벽 예측인데도 M17만 깎이는 모순이 생긴다(M16 은 일치로 셈).
+    """
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
-    return float(jaccard_score(y_true_bin, y_pred_bin, average='samples', zero_division=0))
+    return float(jaccard_score(y_true_bin, y_pred_bin, average='samples', zero_division=1))
 
 def calculate_distribution_diff_ml(df: pd.DataFrame, mapping_dict: dict) -> float:
-    """TC18: Distribution Diff (ML) - 레이블 빈도수 벡터 간의 코사인 거리 사용"""
+    """M18: Distribution Diff (ML) - 레이블 빈도수 벡터 간의 코사인 거리 사용"""
     y_true_bin, y_pred_bin = _get_binarized_true_pred(df, mapping_dict)
     
     p_freq = np.sum(y_true_bin, axis=0)

@@ -5,16 +5,7 @@ narrative_fallback.py — 규칙 기반 폴백 서술 생성.
 fact_sheet 의 실제 계산값(+ compute_derived 파생값)만 템플릿에 삽입한다(환각 0 보장).
 출력의 모든 숫자는 build_number_whitelist 가 포함하는 값이므로 grounding 검증을 통과한다.
 """
-from app.core.schemas import (
-    FactSheet,
-    NarrativeResponse,
-    InterpretationOut,
-    ConclusionOut,
-    RecommendationNarrativeOut,
-    RecommendationOut,
-    NarrativeMeta,
-    GroundingInfo,
-)
+from app.narrative.schemas import ConclusionOut, FactSheet, GroundingInfo, InterpretationOut, NarrativeMeta, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
 
 _VERDICT_LABEL = {
     "PASS": "적합(합격)",
@@ -82,11 +73,14 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
         f"임계값이 설정된 시험항목 {target}개 중 {passed}개가 기준을 충족하여"
         f"(통과율 {fs.score}%), 종합 판정은 '{vlabel}'이다."
     )
-    failed = [m.display_name for m in fs.metrics if m.status == "fail"]
+    failed_metrics = [
+        m for m in fs.metrics
+        if m.status == "fail" and m.threshold is not None and m.threshold > 0
+    ]
+    failed = [m.display_name for m in failed_metrics]
     if failed:
         narrative += f" 기준 미달 항목은 {', '.join(failed)}이다."
 
-    failed_metrics = [m for m in fs.metrics if m.status == "fail"]
     if failed_metrics:
         items = ", ".join(
             f"{m.display_name}({m.value}, 기준 {m.threshold})" for m in failed_metrics

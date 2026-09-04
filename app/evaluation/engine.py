@@ -1,41 +1,51 @@
+"""app/evaluation/engine.py — 평가 지표 계산 오케스트레이션(디스패치)
+
+전처리(preprocess_data) 후 METRIC_REQUIREMENTS 로부터 계산 가능 지표 를 정하고, METRIC_REGISTRY
+로 각 지표 를 실제 계산 함수(metrics/*)에 디스패치한다. binary ROC/PR 곡선·latency 통계도 부착.
+
+상호작용
+- 의존(import): pandas, app.core.schemas(METRIC_REQUIREMENTS), .preprocessor, .metrics(common/binary/multiclass/multilabel)
+- 사용처: app.evaluation.service.run_evaluation_pipeline
+"""
+
 import pandas as pd
 from typing import Dict, Any, List
 
 from .metrics import common, binary, multiclass, multilabel
 from .preprocessor import preprocess_data
-from app.core.schemas import TC_REQUIREMENTS
+from app.core.schemas import METRIC_REQUIREMENTS
 
-# Task Type 별로 허용되는 TC 정의 (core.schemas 의 단일 출처에서 동적 생성)
-VALID_TCS_BY_TASK = {
+# Task Type 별로 허용되는 지표 정의 (core.schemas 의 단일 출처에서 동적 생성)
+VALID_METRICS_BY_TASK = {
     task_type.value: set(requirements.keys())
-    for task_type, requirements in TC_REQUIREMENTS.items()
+    for task_type, requirements in METRIC_REQUIREMENTS.items()
 }
 
-# TC ID 와 실제 계산 함수 매핑 (Registry)
+# 지표 ID 와 실제 계산 함수 매핑 (Registry)
 METRIC_REGISTRY = {
-    "TC1": common.calculate_accuracy,
-    "TC2": common.calculate_precision,
-    "TC3": common.calculate_recall,
-    "TC4": common.calculate_f1_score,
-    "TC5": common.calculate_fbeta_score,
-    "TC6": common.calculate_kl_divergence,
-    "TC7": binary.calculate_specificity,
-    "TC8": binary.calculate_fpr,
-    "TC9": binary.calculate_auroc,
-    "TC10": binary.calculate_auprc,
-    "TC11": multiclass.calculate_macro_average,
-    "TC12": multiclass.calculate_micro_average,
-    "TC13": multiclass.calculate_weighted_average,
-    "TC14": multiclass.calculate_distribution_diff_mc,
-    "TC15": multilabel.calculate_hamming_loss,
-    "TC16": multilabel.calculate_exact_match_ratio,
-    "TC17": multilabel.calculate_jaccard_index,
-    "TC18": multilabel.calculate_distribution_diff_ml,
-    "TC19": binary.calculate_log_loss,
-    "TC20": binary.calculate_mcc,
-    "TC21": common.calculate_confusion_matrix,
-    "TC22": common.calculate_class_metrics,
-    "TC23": common.calculate_imbalance_ratio,
+    "M1": common.calculate_accuracy,
+    "M2": common.calculate_precision,
+    "M3": common.calculate_recall,
+    "M4": common.calculate_f1_score,
+    "M5": common.calculate_fbeta_score,
+    "M6": common.calculate_kl_divergence,
+    "M7": binary.calculate_specificity,
+    "M8": binary.calculate_fpr,
+    "M9": binary.calculate_auroc,
+    "M10": binary.calculate_auprc,
+    "M11": multiclass.calculate_macro_average,
+    "M12": multiclass.calculate_micro_average,
+    "M13": multiclass.calculate_weighted_average,
+    "M14": multiclass.calculate_distribution_diff_mc,
+    "M15": multilabel.calculate_hamming_loss,
+    "M16": multilabel.calculate_exact_match_ratio,
+    "M17": multilabel.calculate_jaccard_index,
+    "M18": multilabel.calculate_distribution_diff_ml,
+    "M19": binary.calculate_log_loss,
+    "M20": binary.calculate_mcc,
+    "M21": common.calculate_confusion_matrix,
+    "M22": common.calculate_class_metrics,
+    "M23": common.calculate_imbalance_ratio,
 }
 
 
@@ -43,19 +53,19 @@ def evaluate(
     df: pd.DataFrame, 
     mappings: List[Dict[str, str]], 
     task_type: str, 
-    selected_tcs: List[str],
+    selected_metric_ids: List[str],
     positive_class: str | None = None,
     beta: float = 1.0
 ) -> Dict[str, Any]:
     """
     메인 평가 엔진 진입점.
-    Task Type에 검증된 TC들만 필터링하여 동적으로 실행합니다.
+    Task Type에 검증된 지표들만 필터링하여 동적으로 실행합니다.
     
     Args:
         df: 전처리/검증이 완료된 DataFrame
         mappings: 프론트에서 확정하여 전달한 역할 매핑 리스트 [{"column": "col_A", "role": "true_class"}, ...]
         task_type: "binary" | "multiclass" | "multilabel"
-        selected_tcs: 클라이언트가 요청한 평가 지표 리스트 ["TC1", "TC7"]
+        selected_metric_ids: 클라이언트가 요청한 평가 지표 리스트 ["M1", "M7"]
         positive_class: Binary 평가 시 양성(Positive)으로 간주할 값
         beta: F-beta score 계산용 가중치 beta 값
         
@@ -63,7 +73,7 @@ def evaluate(
         평가 결과 (최종 리포트 딕셔너리 형태)
     """
     results = {}
-    valid_tcs = VALID_TCS_BY_TASK.get(task_type, set())
+    valid_metric_ids = VALID_METRICS_BY_TASK.get(task_type, set())
     
     # ── [전처리 단계 추가] ──
     try:
@@ -81,38 +91,38 @@ def evaluate(
     mapping_dict['_beta'] = beta
     mapping_dict['_task_type'] = task_type
     
-    for tc_id in selected_tcs:
-        if tc_id not in valid_tcs:
-            results[tc_id] = {"error": f"{task_type}에서는 지원하지 않는 지표입니다."}
+    for metric_id in selected_metric_ids:
+        if metric_id not in valid_metric_ids:
+            results[metric_id] = {"error": f"{task_type}에서는 지원하지 않는 지표입니다."}
             continue
             
-        if tc_id in METRIC_REGISTRY:
-            func = METRIC_REGISTRY[tc_id]
+        if metric_id in METRIC_REGISTRY:
+            func = METRIC_REGISTRY[metric_id]
             try:
                 # 매핑된 계산 함수 실행
-                results[tc_id] = func(df, mapping_dict)
+                results[metric_id] = func(df, mapping_dict)
             except Exception as e:
                 # 에러가 나더라도 다른 지표 계산에 영향을 주지 않도록 격리
-                results[tc_id] = {"error": str(e)}
+                results[metric_id] = {"error": str(e)}
         else:
-            results[tc_id] = {"error": "구현되지 않은 지표입니다."}
+            results[metric_id] = {"error": "구현되지 않은 지표입니다."}
 
     # ── 차트용 곡선 좌표 (binary, 스칼라 AUROC/AUPRC 산출 성공 시 함께 제공) ──
-    # 별도 TC가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다.
+    # 별도 지표가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다.
     if task_type == "binary":
-        if "TC9" in selected_tcs and isinstance(results.get("TC9"), (int, float)):
+        if "M9" in selected_metric_ids and isinstance(results.get("M9"), (int, float)):
             try:
                 results["roc_curve"] = binary.calculate_roc_curve(df, mapping_dict)
             except Exception:
                 pass
-        if "TC10" in selected_tcs and isinstance(results.get("TC10"), (int, float)):
+        if "M10" in selected_metric_ids and isinstance(results.get("M10"), (int, float)):
             try:
                 results["pr_curve"] = binary.calculate_pr_curve(df, mapping_dict)
             except Exception:
                 pass
 
     # ── 지연시간(Latency) 통계 (선택 컬럼, 모든 task_type, 단위 ms 가정) ──
-    # 별도 TC가 아니라 success_metrics 의 latency_stats 키로 내려보낸다.
+    # 별도 지표가 아니라 success_metrics 의 latency_stats 키로 내려보낸다.
     latency_col = mapping_dict.get("latency")
     if latency_col and latency_col in df.columns:
         try:

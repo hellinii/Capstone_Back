@@ -8,7 +8,8 @@ OpenAI 키가 없거나 LLM 호출이 실패했을 때 컬럼명 패턴으로 �
 """
 import pandas as pd
 
-from app.core.schemas import AnalysisResponse, ColumnMapping, ColumnRole, TaskType
+from app.core.schemas import ColumnMapping, ColumnRole, TaskType
+from app.analysis.schemas import AnalysisResponse
 from app.analysis.metadata import extract_metadata
 
 

@@ -10,7 +10,7 @@
   app.evaluation.engine(evaluate), app.evaluation.report(generate_report)
 - 사용처: app.evaluation.router.evaluate_dataset
 """
-from app.core.schemas import EvaluateRequest, EvaluateResponse
+from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
 from app.analysis.validator import find_column_conflicts
 from app.evaluation.engine import evaluate as run_evaluation
 from app.evaluation.report import generate_report
@@ -41,7 +41,7 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
             df=df,
             mappings=mappings,
             task_type=request.task_type.value,
-            selected_tcs=request.selected_tcs,
+            selected_metric_ids=request.selected_metric_ids,
             positive_class=positive_class,
             beta=beta,
         )

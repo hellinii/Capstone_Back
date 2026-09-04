@@ -18,28 +18,28 @@
     },
     {
       "label": "Selected metric count",
-      "note": "선택된 메트릭: TC1, TC2, TC3, TC4, TC5, TC15, TC16, TC17, TC18, TC21, TC22, TC23",
+      "note": "선택된 메트릭: M1, M2, M3, M4, M5, M15, M16, M17, M18, M21, M22, M23",
       "value": "12 items"
     },
     {
       "label": "Validation result",
       "note": "아래 상세 테이블 참조",
-      "value": "Errors 0 / Warnings 1"
+      "value": "Errors 0 / Warnings 0"
     }
   ],
   "selected_metric_ids": [
-    "TC1",
-    "TC2",
-    "TC3",
-    "TC4",
-    "TC5",
-    "TC15",
-    "TC16",
-    "TC17",
-    "TC18",
-    "TC21",
-    "TC22",
-    "TC23"
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M15",
+    "M16",
+    "M17",
+    "M18",
+    "M21",
+    "M22",
+    "M23"
   ],
   "task_type": "multilabel",
   "validation_details": [
@@ -82,9 +82,9 @@
       "group": "multilabel",
       "handling": "Exclude affected rows from evaluation",
       "name": "Label format mismatch",
-      "result": "26 rows (sampled first 100)",
-      "status": "warning"
+      "result": "None",
+      "status": "pass"
     }
   ],
-  "warning_count": 1
+  "warning_count": 0
 }

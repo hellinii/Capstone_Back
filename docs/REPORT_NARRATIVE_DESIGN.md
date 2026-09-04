@@ -3,6 +3,7 @@
 > 작성일: 2026-06-23
 > 범위: 프론트(`Capstone_Front`) 리포트 ↔ 백엔드(`Capstone_Back`) 연동, LLM 기반 서술(7·8·9절) 자동 생성 모듈 설계
 > 상태: **LLM 서술 모듈 Phase 0~4 + P2-10(latency 컬럼 매핑) 완료**. 잔여: P2-11 조직/발급 메타 DB
+> 현재 코드 구조는 docs/ARCHITECTURE.md 참조(이 문서는 설계 근거).
 
 ---
 
@@ -22,9 +23,9 @@
 
 **백엔드가 실제로 채우는 값은 4가지뿐**(`useReportData.ts`):
 
-1. `kpiResults` 값/판정 — `success_metrics[tcId]`
-2. `charts.confusionMatrix` — `success_metrics.TC21`
-3. `kpiResults[].perClass` — `success_metrics.TC22`
+1. `kpiResults` 값/판정 — `success_metrics[metricId]`
+2. `charts.confusionMatrix` — `success_metrics.M21`
+3. `kpiResults[].perClass` — `success_metrics.M22`
 4. `datasetDiagnosis` 접두 한 줄 + `dataValidation` 중 '제외된 샘플 수'/'누락값' 2개 — `dropped_rows`
 
 → 나머지(지연시간, ROC/PR 곡선, 7·8·9절 서술, 검증 표 대부분, 데이터 샘플, 종합 판정 등)는 전부 MOCK.
@@ -44,13 +45,13 @@
 |---|---|---|
 | `kpiResults` 값/판정 | 백엔드(preview 경로만) / 그 외 MOCK | 백엔드 (전 경로) |
 | `charts.confusionMatrix` | 백엔드(preview 경로만) | 백엔드 (전 경로) |
-| `kpiResults[].perClass` | 백엔드 TC22(preview 경로만) | 백엔드 (전 경로) |
+| `kpiResults[].perClass` | 백엔드 M22(preview 경로만) | 백엔드 (전 경로) |
 | `dataValidation` (8항목) | MOCK (2항목만 백엔드) | **`/api/validate-data` (이미 완성됨)** |
 | `charts.rocCurve` / `prCurve` | MOCK | 백엔드 신규(곡선 좌표) |
-| AUROC/AUPRC 라벨 수치 | JSX 리터럴 `0.962`/`0.951` | `success_metrics`(TC9/TC10) |
+| AUROC/AUPRC 라벨 수치 | JSX 리터럴 `0.962`/`0.951` | `success_metrics`(M9/M10) |
 | `latency` | MOCK | **컬럼 매핑 기반 산출 (본 문서 §6)** |
 | `datasetSamples` | MOCK 10행 | 업로드 파일 실제 상위 N행 |
-| `datasetDiagnosis` 본문 | MOCK | `class_distribution` + TC23 실수치 |
+| `datasetDiagnosis` 본문 | MOCK | `class_distribution` + M23 실수치 |
 | `interpretation` (7절) | MOCK (환각 수치) | **LLM 서술 모듈 (§4)** |
 | `conclusion` (8절) | MOCK (`PASS`/94.4 고정) | **verdict/score=규칙(§5) + 서술=LLM(§4)** |
 | `recommendations` + `recommendationNarrative` (9절) | MOCK | **LLM 서술 모듈 (§4)** |
@@ -63,17 +64,17 @@
 
 ### 🔴 P0 — 즉시 (백엔드 데이터 이미 존재 / 저비용·고임팩트)
 
-1. ✅ **데이터 검증 연동 (완료)** — `dataValidation` MOCK 8항목 제거하고 **이미 완성된** `POST /api/validate-data`(`routers/validate.py`) 결과를 리포트로 연결. (`ValidateDataResponse.validation_details` / `execution_summary`)
+1. ✅ **데이터 검증 연동 (완료)** — `dataValidation` MOCK 8항목 제거하고 **이미 완성된** `POST /api/validate-data`(`app/analysis/validation_router.py`) 결과를 리포트로 연결. (`ValidateDataResponse.validation_details` / `execution_summary`)
 2. ✅ **"제외된 샘플 수 = 0건" 버그 수정 (완료)** — `DataValidationSection.tsx`의 `<td>0건</td>`를 실측 `validationSummary.excludedRows`로 교체.
 3. ⏸ **리포트 데이터 경로 통일 (재평가: 범위 축소)** — 코드 확인 결과 신선한 run은 `rawFile`이 store에 남아 이미 `/api/evaluate`를 호출함. 실제 잔여 문제는 "백엔드가 절대 교체하지 않는 MOCK 필드"(latency·ROC/PR·interpretation·conclusion·recommendations)이며 이는 P1/P2 소관. 쇼케이스(파일 없음) 폴백만 여전히 MOCK base 사용 → P1/P2에서 정리.
-4. ⏸ **누락 지표 연동 (재평가: 대부분 이미 동작)** — `useReportData.ts`의 success_metrics 매핑 루프가 선택된 모든 TC를 일반 처리하므로 MCC(TC20)/ImbalanceRatio(TC23)는 평가 경로에서 이미 반영됨. KPI 그룹 화이트리스트(M1/M4/M20/M23, `KpiResultSection.tsx:10`)는 표시용 고정값으로 현행 유지(추후 사용자 선택 반영 검토).
+4. ⏸ **누락 지표 연동 (재평가: 대부분 이미 동작)** — `useReportData.ts`의 success_metrics 매핑 루프가 선택된 모든 지표를 일반 처리하므로 MCC(M20)/ImbalanceRatio(M23)는 평가 경로에서 이미 반영됨. KPI 그룹 화이트리스트(M1/M4/M20/M23, `KpiResultSection.tsx:10`)는 표시용 고정값으로 현행 유지(추후 사용자 선택 반영 검토).
 5. 🔜 **`conclusion.verdict`/`score` 규칙 산출** — 가짜 `PASS`/`94.4` 제거 (§5 규칙). verdict_rules.py(백엔드)에 속하며 §11 "핵심 지표 정의" 확정 필요 → Phase 0에서 진행.
 
 ### 🟠 P1 — 백엔드 소규모 추가 필요
 
-6. **ROC/PR 곡선** — `evaluator/metrics/binary.py`에 `sklearn.metrics.roc_curve`/`precision_recall_curve` 기반 곡선 좌표 함수 추가. `ChartSection.tsx:21-24`의 `auroc={0.962}`/`auprc={0.951}` 하드코딩 제거 → `success_metrics`(TC9/TC10).
+6. **ROC/PR 곡선** — `app/evaluation/metrics/binary.py`에 `sklearn.metrics.roc_curve`/`precision_recall_curve` 기반 곡선 좌표 함수 추가. `ChartSection.tsx:21-24`의 `auroc={0.962}`/`auprc={0.951}` 하드코딩 제거 → `success_metrics`(M9/M10).
 7. **`datasetSamples`** — 가짜 10행 → 업로드 파일 실제 상위 N행 (프론트가 `rawFile` 보유 → 파싱 가능).
-8. **`datasetDiagnosis` 본문** — 가짜 수치 → `metadata.class_distribution` + TC23 실수치 기반 재구성.
+8. **`datasetDiagnosis` 본문** — 가짜 수치 → `metadata.class_distribution` + M23 실수치 기반 재구성.
 
 ### 🟡 P2 — LLM 서술 모듈 + 인프라
 
@@ -87,7 +88,7 @@
 
 ### 4.1 핵심 철학: LLM은 "수치 생산자"가 아니라 "번역기"
 
-> 모든 숫자는 `evaluator/`가 계산한 값에서만 나오고, LLM은 그것을 한국어 산문으로 **옮기기만** 한다.
+> 모든 숫자는 `app/evaluation/`이 계산한 값에서만 나오고, LLM은 그것을 한국어 산문으로 **옮기기만** 한다.
 > 덧셈·반올림·백분율 환산조차 서버가 미리 계산해서 LLM에 먹인다.
 
 이것이 현재 MOCK이 "329건/61.8%/Imbalance 1.14" 같은 **환각 수치를 성적서에 박는 문제**를 원천 차단한다.
@@ -95,15 +96,15 @@
 ### 4.2 아키텍처
 
 ```
-[POST /api/evaluate] ── 결정적 계산(빠름) ──> success_metrics, TC21/22, metadata, latency stats
+[POST /api/evaluate] ── 결정적 계산(빠름) ──> success_metrics, M21/22, metadata, latency stats
         │  (프론트 useReportData가 fact_sheet 조립)
         ▼
 [POST /api/generate-narrative]   ← 별도 엔드포인트 (확정)
    1. build_fact_sheet — 정규화·반올림·파생합계(오분류수/FP/FN) 서버가 미리 계산
    2. compute_verdict_and_score — 결정론적 규칙 (LLM 아님, §5)
-   3. benchmark position — 정적 기준표(benchmark_baselines.py) 룩업
+   3. benchmark position — 정적 기준표(app/narrative/baselines.py) 룩업
    4. LLM 호출 — gpt-4.1-nano + strict json_schema + temperature=0 + seed
-   5. _verify_grounding — 출력 숫자 화이트리스트 검증 ──위반시──> 규칙기반 폴백
+   5. verify_grounding — 출력 숫자 화이트리스트 검증 ──위반시──> 규칙기반 폴백
 ```
 
 **평가와 서술을 분리**하는 이유:
@@ -123,23 +124,25 @@
 
 | 파일 | 역할 |
 |---|---|
-| `routers/narrative.py` | `POST /api/generate-narrative` 라우터 (`request.app.state.openai_client` 재사용) |
-| `narrator.py` | 핵심 로직: fact_sheet 빌드, LLM 호출, grounding 검증, 폴백 분기 |
-| `narrative_prompt.py` | system/user 프롬프트 (환각금지·latency규칙·verdict echo·source_note 의무) |
-| `narrative_fallback.py` | 규칙기반 템플릿 서술 (`analyzer.analyze_columns_fallback` 동형) |
+| `app/narrative/router.py` | `POST /api/generate-narrative` 라우터 (`request.app.state.openai_client` 재사용) |
+| `app/narrative/service.py` | 오케스트레이션: LLM 호출·폴백 분기·verdict 서버 강제 (grounding/derived 는 별도 모듈) |
+| `app/narrative/derived.py` | 파생 계산: 혼동행렬 합계·분포 백분율 등 (`compute_derived`) |
+| `app/narrative/grounding.py` | 환각 방어: 숫자 화이트리스트 구축·검증 (`build_number_whitelist`/`verify_grounding`) |
+| `app/narrative/prompt.py` | system/user 프롬프트 (환각금지·latency규칙·verdict echo·source_note 의무) |
+| `app/narrative/fallback.py` | 규칙기반 템플릿 서술 (`analyzer.analyze_columns_fallback` 동형) |
 | `verdict_rules.py` | `compute_verdict_and_score(fact_sheet)` 순수함수 (§5) |
-| `benchmark_baselines.py` | `task_type × metric → {range, source_note}` 정적표 + `get_baseline()` |
-| `schemas.py` (추가) | `FactSheet`, `NarrativeRequest`, `NarrativeResponse` pydantic 모델 |
+| `app/narrative/baselines.py` | `task_type × metric → {range, source_note}` 정적표 + `get_baseline()` |
+| `app/narrative/schemas.py` (추가) | `FactSheet`, `NarrativeRequest`, `NarrativeResponse` pydantic 모델 |
 
 ### 4.5 입력 — FactSheet (LLM에 주입할 "사실 시트")
 
 원시 CSV/DataFrame/확률은 **절대 미주입**. 오직 계산된 fact만:
 
 - `task_type`, `n_samples`, `dropped_rows`, `warnings`
-- `metrics: [{tc_id, display_name, value(round4·문자열), threshold|null, status: pass/fail/warning}]` — 성공한 선택 지표만. 값은 서버가 문자열로 직렬화해 LLM이 자릿수 변경 못 하게 고정
-- `per_class` — TC22 classification_report의 클래스별 precision/recall/f1/support
+- `metrics: [{metric_id, display_name, value(round4·문자열), threshold|null, status: pass/fail/warning}]` — 성공한 선택 지표만. 값은 서버가 문자열로 직렬화해 LLM이 자릿수 변경 못 하게 고정
+- `per_class` — M22 classification_report의 클래스별 precision/recall/f1/support
 - `confusion: {labels, matrix}` + `derived: {total_misclassified, fp, fn, per_cell}` — **덧셈은 서버가** 미리 계산
-- `distribution` — `class_distribution` + `imbalance_ratio`(TC23)
+- `distribution` — `class_distribution` + `imbalance_ratio`(M23)
 - `thresholds_table` — 지표별 기준치 (프론트 `metricDetails`)
 - `benchmark_refs: [{metric, model_value, ref_low, ref_high, position, source_note}]` — §4.8
 - `verdict_decision: {verdict, score, reasons}` — §5에서 서버가 미리 산출해 주입
@@ -184,7 +187,7 @@
 
 1. **입력측**: `fact_sheet` 외 미주입 + system prompt 강제 규칙
    ("이 JSON 안의 숫자만 사용. 새 숫자 계산·반올림·백분율 환산·추정 절대 금지. 없는 지표·latency 언급 금지.")
-2. **출력측** (`narrator._verify_grounding`, 순수 파이썬·테스트 가능):
+2. **출력측** (`grounding.verify_grounding`, 순수 파이썬·테스트 가능):
    - `fact_sheet`의 모든 value를 다중 표기로 전개한 화이트리스트 구축
      예: `0.944` → `{"0.944","0.94","94.4","94"}`, `support=173` → `{"173"}`, matrix 셀·derived 합계·distribution·imbalance·threshold 전부 (정수/소수/×100/반올림 1~2자리 변형 포함)
    - 출력 텍스트 블록에서 정규식 `\d+(?:[.,]\d+)?%?`로 숫자 토큰 추출 → 정규화 후 화이트리스트 대조
@@ -197,7 +200,7 @@
 
 동적 RAG(웹/벡터DB)는 **거부** — 캡스톤 범위 초과 + 재현성 파괴 + 출처불명 환각으로 신뢰성에 정면 위배.
 
-대신 **정적 기준표** `benchmark_baselines.py`:
+대신 **정적 기준표** `app/narrative/baselines.py`:
 
 - `{task_type × metric → {range_low, range_high, source_note}}` 상수 dict
 - 값은 "공개 벤치마크 평균"이라 단정하지 않고 **"내부 참조 기준치"로 라벨링** (허위 권위 방지)
@@ -206,7 +209,7 @@
 - 기준표에 없는 metric은 `benchmark_refs`에서 제외 + LLM에 "비교 데이터 없음 → 비교 주장 금지" 지시
 - 향후 실 RAG 교체 자리는 `get_baseline()` 1곳에 격리
 
-### 4.9 폴백 (`narrative_fallback.build_fallback_narrative`)
+### 4.9 폴백 (`fallback.build_fallback_narrative`)
 
 발동 3조건(동일 경로): ① `client is None`(무키) ② LLM 호출 예외 ③ grounding 검증 실패
 
@@ -255,7 +258,7 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 
 예측 결과 CSV에 **행별 응답시간 컬럼**이 있으면 컬럼 매핑 단계에서 "응답시간" 역할로 지정 → 백엔드가 그 컬럼을 분석해 통계 산출.
 
-- **컬럼 역할 추가**: `schemas.py`의 `ColumnRole`에 `latency`(예: `response_time`) 추가 + `VALID_ROLES_BY_TASK` 3개 task 모두 등록
+- **컬럼 역할 추가**: `app/core/schemas.py`의 `ColumnRole`에 `latency`(예: `response_time`) 추가 + `VALID_ROLES_BY_TASK` 3개 task 모두 등록
 - **백엔드 계산**: 해당 컬럼에서 `mean/min/p50/p95/p99/max` 산출 (`numpy.percentile`) → evaluate 응답 포함. **단위는 ms로 가정.**
 - **프론트**: 컬럼 매핑 UI(`src/components/column-mapping/`)에 "응답시간" 역할 추가, `latency` MOCK 제거
 - **컬럼 미매핑 시**: 섹션을 "측정 안 됨(N/A)"으로 렌더 + LLM에 미주입(`fact_sheet.latency = {available:false}`)
@@ -295,9 +298,9 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 | Phase | 내용 |
 |---|---|
 | **P0 (선행 가능)** | LLM과 독립: `/api/validate-data` 연동, "제외 샘플 0건" 버그, MCC 누락 연동, 데이터 경로 통일 |
-| **Phase 0** | 결정론 코어(LLM 무관): `verdict_rules.py`, `benchmark_baselines.py`, `FactSheet` 스키마, `build_fact_sheet` |
-| **Phase 1** | 환각 방어선: `build_fallback_narrative()` + `_verify_grounding()` + pytest(환각 주입→폴백 전환 고정) |
-| **Phase 2** | LLM 경로: `narrative_prompt.py` + `narrator.generate_narrative()` + `routers/narrative.py` + `test_narrator.py` |
+| **Phase 0** | 결정론 코어(LLM 무관): `verdict_rules.py`, `app/narrative/baselines.py`, `FactSheet` 스키마, `build_fact_sheet` |
+| **Phase 1** | 환각 방어선: `build_fallback_narrative()` + `verify_grounding()` + pytest(환각 주입→폴백 전환 고정) |
+| **Phase 2** | LLM 경로: `app/narrative/prompt.py` + `service.generate_narrative()` + `app/narrative/router.py` + `test_narrator.py` |
 | **Phase 3** | 프론트 연결: 타입 구조화, MOCK 주입 제거, `useReportData` 조립·병합, 섹션 컴포넌트 수정 |
 | **Phase 4** | 통합 검증: 3경로(무키/LLM/환각주입) + 실 CSV e2e(evaluate→narrative→렌더) + FAIL/CONDITIONAL 케이스 verdict 일관성 |
 
@@ -334,11 +337,11 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 | P0-1 데이터 검증 실연동 | ✅ 완료 | `/api/validate-data` 결과를 store→매퍼→리포트로 연결 |
 | P0-2 제외 샘플 0건 버그 | ✅ 완료 | 실측 `excludedRows` 표시 |
 | P0-3 데이터 경로 통일 | ⏸ 재평가 | 신선한 run은 이미 백엔드 호출. 잔여는 P1/P2 MOCK 필드 |
-| P0-4 누락 지표(MCC/TC23) | ⏸ 재평가 | 평가 경로 일반 루프가 이미 처리. 코드 변경 불요 |
+| P0-4 누락 지표(MCC/M23) | ⏸ 재평가 | 평가 경로 일반 루프가 이미 처리. 코드 변경 불요 |
 | P0-5 verdict/score 규칙 | ✅ 완료 | 프론트 `computeVerdict.ts`. 가짜 PASS/94.4 + 가짜 서술 제거 |
 | P1-6 ROC/PR 곡선 | ✅ 완료 | 백엔드 곡선 좌표(success_metrics.roc_curve/pr_curve) + 프론트 AUROC/AUPRC 하드코딩 제거 |
 | P1-7 datasetSamples 실데이터 | 🟡 부분 | 가짜 10행 제거(안내 대체). 풀 구현(실샘플)은 후속 |
-| P1-8 datasetDiagnosis 실수치 | ✅ 완료 | class_distribution + TC23 imbalance 기반 사실 진단문 |
+| P1-8 datasetDiagnosis 실수치 | ✅ 완료 | class_distribution + M23 imbalance 기반 사실 진단문 |
 | 가짜 서술 제거(7·9절) | ✅ 완료 | interpretation/recommendations 플레이스홀더 → 리포트 가짜데이터 0 |
 | P2-9 LLM 모듈 Phase 0~2 (백엔드) | ✅ 완료 | 스키마·benchmark·폴백·grounding·프롬프트·`/api/generate-narrative` (폴백 검증) |
 | P2-9 LLM 모듈 Phase 3 (프론트 연결) | ✅ 완료 | `buildFactSheet`/`fetchNarrative` 신규, useReportData→generate-narrative 조립·병합, interpretation 구조화, fallback 배지, persist v2 마이그레이션 |
@@ -412,13 +415,13 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 
 **P1-6 ROC/PR 곡선 (완료)**
 
-- 백엔드: `evaluator/metrics/binary.py`에 `calculate_roc_curve`/`calculate_pr_curve` 추가(`sklearn.roc_curve`/`precision_recall_curve`), 60점 균등 다운샘플(`_downsample_pair`). `evaluator/engine.py`에서 binary + AUROC(TC9)/AUPRC(TC10) 산출 성공 시 `success_metrics.roc_curve`/`pr_curve` 키로 추가(별도 TC·validator 변경 없음).
-- 프론트: `charts.rocCurve`에 `auroc?`, `prCurve`에 `auprc?` 추가. `useReportData`가 `success_metrics.roc_curve/pr_curve` + 스칼라 `TC9/TC10`을 차트에 연결. `ChartSection`의 하드코딩 `auroc={0.962}`/`auprc={0.951}` 제거 → 실제 값 바인딩. 미평가/비binary 경로는 곡선 null + 안내.
-- 검증: 백엔드 `engine.evaluate()` 직접 실행으로 곡선 60점·단조성·AUC 스칼라 확인. 기존 pytest 8/9 통과(1건 실패는 **pre-existing** — multilabel TC1 미지원, git stash로 확인). 프론트 tsc 0 에러 / vite build 성공.
+- 백엔드: `evaluator/metrics/binary.py`에 `calculate_roc_curve`/`calculate_pr_curve` 추가(`sklearn.roc_curve`/`precision_recall_curve`), 60점 균등 다운샘플(`_downsample_pair`). `evaluator/engine.py`에서 binary + AUROC(M9)/AUPRC(M10) 산출 성공 시 `success_metrics.roc_curve`/`pr_curve` 키로 추가(별도 지표·validator 변경 없음).
+- 프론트: `charts.rocCurve`에 `auroc?`, `prCurve`에 `auprc?` 추가. `useReportData`가 `success_metrics.roc_curve/pr_curve` + 스칼라 `M9/M10`을 차트에 연결. `ChartSection`의 하드코딩 `auroc={0.962}`/`auprc={0.951}` 제거 → 실제 값 바인딩. 미평가/비binary 경로는 곡선 null + 안내.
+- 검증: 백엔드 `engine.evaluate()` 직접 실행으로 곡선 60점·단조성·AUC 스칼라 확인. 기존 pytest 8/9 통과(1건 실패는 **pre-existing** — multilabel M1 미지원, git stash로 확인). 프론트 tsc 0 에러 / vite build 성공.
 
 **P1-8 datasetDiagnosis 실수치 (완료)**
 
-- `lib/report/buildDatasetDiagnosis.ts` 추가 — `metadata.class_distribution`(분포)·imbalance(TC23 또는 max/min)·dropped_rows로 사실 기반 진단문 생성. 가짜 MOCK("0.80:0.20, 61.8%, Imbalance 1.14") 제거.
+- `lib/report/buildDatasetDiagnosis.ts` 추가 — `metadata.class_distribution`(분포)·imbalance(M23 또는 max/min)·dropped_rows로 사실 기반 진단문 생성. 가짜 MOCK("0.80:0.20, 61.8%, Imbalance 1.14") 제거.
 - `mapWorkflowToFinalReport`는 `datasetDiagnosis: ""`로 두고, `useReportData`(미평가/평가 양 경로)가 실데이터로 채움.
 
 **P1-7 datasetSamples (부분)**
@@ -430,7 +433,7 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 
 **남은 P1**: P1-7 풀 구현(실샘플). 이후 P2(LLM 모듈, latency 컬럼, DB).
 
-**별건(기존 이슈)**: `test_evaluator.py::test_engine_multilabel_evaluation` 실패 — 백엔드 validator의 multilabel 허용 TC에 TC1(Accuracy)이 빠져 있어 발생(프론트 METRICS는 multilabel에 TC1 포함). P1과 무관하나 정합성 점검 대상으로 기록.
+**별건(기존 이슈)**: `test_evaluator.py::test_engine_multilabel_evaluation` 실패 — 백엔드 validator의 multilabel 허용 지표에 M1(Accuracy)이 빠져 있어 발생(프론트 METRICS는 multilabel에 M1 포함). P1과 무관하나 정합성 점검 대상으로 기록.
 
 #### 2026-06-24 — 가짜 서술 제거 + LLM 모듈 Phase 0~2(백엔드) 완료
 
@@ -454,7 +457,7 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 
 **구현한 것**
 
-- `lib/report/buildFactSheet.ts`(신규) — 평가 결과를 백엔드 `FactSheet`(snake_case)로 조립. KPI→`metrics`(임계값 없으면 `threshold:null, status:"info"`), TC21→`confusion`, TC22→`per_class`(sklearn `f1-score` 키 처리), metadata→`distribution`, TC23→`imbalance_ratio`, verdict/score는 규칙 산출값. n_samples는 혼동행렬 합계>분포 합계 순으로 도출. latency는 `available:false`(P2-10 후속).
+- `lib/report/buildFactSheet.ts`(신규) — 평가 결과를 백엔드 `FactSheet`(snake_case)로 조립. KPI→`metrics`(임계값 없으면 `threshold:null, status:"info"`), M21→`confusion`, M22→`per_class`(sklearn `f1-score` 키 처리), metadata→`distribution`, M23→`imbalance_ratio`, verdict/score는 규칙 산출값. n_samples는 혼동행렬 합계>분포 합계 순으로 도출. latency는 `available:false`(P2-10 후속).
 - `lib/report/fetchNarrative.ts`(신규) — `POST /api/generate-narrative` 호출 + 응답 snake_case→camelCase 매핑. 호출 실패/비정상 응답 시 빈 서술 반환(**graceful degradation — KPI·차트 렌더는 절대 영향 없음**). priority 값 정규화(HIGH/MEDIUM/LOW). `meta.source`(llm/fallback/error) 전달.
 - `hooks/useReportData.ts` — evaluate 후 fact_sheet 조립→`fetchNarrative` 호출→`conclusion={...규칙판정, ...LLM서술}`(verdict/score는 규칙 권위 유지, 백엔드도 강제)·interpretation·recommendationNarrative·recommendations·narrativeSource 병합. await 뒤 `active` 언마운트 가드 추가.
 - `types/finalReport.types.ts` — `interpretation: string → InterpretationData {confusionAnalysis, distributionAnalysis}`(백엔드 `InterpretationOut`과 1:1). `NarrativeSource` 타입 + `FinalReportData.narrativeSource?` 추가.
@@ -479,7 +482,7 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 
 **구현한 것**
 
-- (백엔드) `schemas.py`: `ColumnRole.latency` 추가 + `VALID_ROLES_BY_TASK` 3개 task_type 모두 허용(선택 역할). `LatencyFact`/`FactSheet.latency`는 기존 정의 재사용. `validator.py`는 무변경(선택 역할이라 필수/TC 요구에 영향 없음).
+- (백엔드) `schemas.py`: `ColumnRole.latency` 추가 + `VALID_ROLES_BY_TASK` 3개 task_type 모두 허용(선택 역할). `LatencyFact`/`FactSheet.latency`는 기존 정의 재사용. `validator.py`는 무변경(선택 역할이라 필수/지표 요구에 영향 없음).
 - (백엔드) `evaluator/preprocessor.py`: latency를 `dropna` 대상에서 제외 → **결측이 분류 평가 샘플을 줄이지 않음**(샘플 보존). latency 컬럼은 `pd.to_numeric(errors="coerce")`로 best-effort 변환(비숫자→NaN, 평가는 계속, 경고). 음수는 경고.
 - (백엔드) `evaluator/engine.py`: 메트릭 루프 뒤 `results["latency_stats"]`(count/mean/min/p50/p95/p99/max, unit=ms) 산출(모든 task_type). `report.py`는 무변경(`latency_stats`가 자동으로 success_metrics에 포함).
 - (백엔드) `routers/validate.py`: latency 검증 항목(group="latency") 추가 — **결측 제거 후(df_clean) 기준**으로 검사해 평가 결과와 일치. 비숫자/음수는 **error 아닌 warning**(best-effort이므로 평가 진행을 막지 않음).

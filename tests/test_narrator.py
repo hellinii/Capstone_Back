@@ -5,11 +5,9 @@ LLM·API 키 없이 검증 가능한 순수 함수 대상.
 import pytest
 from pydantic import ValidationError
 
-from app.core.schemas import (
-    FactSheet, MetricFact, ConfusionFact, DistributionFact,
-    NarrativeRequest, TaskType,
-)
-from app.narrative.narrator import generate_narrative
+from app.core.schemas import TaskType
+from app.narrative.schemas import ConfusionFact, DistributionFact, FactSheet, MetricFact, NarrativeRequest
+from app.narrative.service import generate_narrative
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import (
     build_number_whitelist, verify_grounding, _collect_grounding_texts,
@@ -25,9 +23,9 @@ def _sample_fact_sheet() -> FactSheet:
         verdict="CONDITIONAL_PASS",
         score=66.7,
         metrics=[
-            MetricFact(tc_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass"),
-            MetricFact(tc_id="M3", display_name="Recall", value=0.70, threshold=0.80, status="fail"),
-            MetricFact(tc_id="M9", display_name="AUROC", value=0.88, threshold=0.80, status="pass"),
+            MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass"),
+            MetricFact(metric_id="M3", display_name="Recall", value=0.70, threshold=0.80, status="fail"),
+            MetricFact(metric_id="M9", display_name="AUROC", value=0.88, threshold=0.80, status="pass"),
         ],
         confusion=ConfusionFact(labels=["0", "1"], matrix=[[120, 10], [15, 55]]),
         distribution=DistributionFact(
@@ -152,9 +150,9 @@ def _no_special_fact_sheet() -> FactSheet:
     return FactSheet(
         n_samples=200, dropped_rows=3, verdict="PASS", score=72.0,
         metrics=[
-            MetricFact(tc_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass"),
-            MetricFact(tc_id="M3", display_name="Recall", value=0.88, threshold=0.80, status="pass"),
-            MetricFact(tc_id="M4", display_name="F1 Score", value=0.90, threshold=0.80, status="pass"),
+            MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass"),
+            MetricFact(metric_id="M3", display_name="Recall", value=0.88, threshold=0.80, status="pass"),
+            MetricFact(metric_id="M4", display_name="F1 Score", value=0.90, threshold=0.80, status="pass"),
         ],
         confusion=ConfusionFact(labels=["A", "B"], matrix=[[130, 12], [11, 47]], positive_class="B"),
         distribution=DistributionFact(class_distribution={"A": 130, "B": 70}, imbalance_ratio=1.857),
@@ -174,7 +172,7 @@ def test_genuine_perfect_and_zero_pass():
     """실측 100%(=1.0)·0건이 fact_sheet 근거이면 통과한다(과차단 방지)."""
     fs = FactSheet(
         n_samples=100, dropped_rows=0, verdict="PASS", score=100.0,
-        metrics=[MetricFact(tc_id="M1", display_name="Accuracy", value=1.0, threshold=0.9, status="pass")],
+        metrics=[MetricFact(metric_id="M1", display_name="Accuracy", value=1.0, threshold=0.9, status="pass")],
     )
     wl = build_number_whitelist(fs, [], compute_derived(fs))
     g = verify_grounding(["정확도 100%, 제외 0건, 점수 1.0"], wl)
@@ -257,10 +255,10 @@ def test_report_purpose_enum_rejects_invalid():
 def test_benchmark_direction_lower_is_better():
     """Hamming Loss(낮을수록 좋음): 범위 아래=우수, 위=미흡 (D7[3])."""
     good = build_benchmark_refs(
-        "multilabel", [MetricFact(tc_id="M15", display_name="Hamming Loss", value=0.02, threshold=0.1, status="pass")]
+        "multilabel", [MetricFact(metric_id="M15", display_name="Hamming Loss", value=0.02, threshold=0.1, status="pass")]
     )[0]
     bad = build_benchmark_refs(
-        "multilabel", [MetricFact(tc_id="M15", display_name="Hamming Loss", value=0.30, threshold=0.1, status="fail")]
+        "multilabel", [MetricFact(metric_id="M15", display_name="Hamming Loss", value=0.30, threshold=0.1, status="fail")]
     )[0]
     assert good["direction"] == "lower" and good["quality"] == "better"
     assert bad["quality"] == "worse"
@@ -269,7 +267,7 @@ def test_benchmark_direction_lower_is_better():
 def test_benchmark_direction_higher_is_better():
     """Accuracy(높을수록 좋음): 범위 위=우수 (D7[3])."""
     ref = build_benchmark_refs(
-        "binary", [MetricFact(tc_id="M1", display_name="Accuracy", value=0.95, threshold=0.85, status="pass")]
+        "binary", [MetricFact(metric_id="M1", display_name="Accuracy", value=0.95, threshold=0.85, status="pass")]
     )[0]
     assert ref["direction"] == "higher" and ref["quality"] == "better"
 

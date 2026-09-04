@@ -3,7 +3,14 @@ main.py — FastAPI 앱의 진입점
 """
 
 import os
+import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
+
+# VS Code ▶ 실행 버튼 클릭 시 (python app/main.py) 프로젝트 루트 경로 자동 등록
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 import httpx
 from fastapi import FastAPI

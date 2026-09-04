@@ -5,14 +5,14 @@
 HTTP 상태코드로 매핑한다. (prefix=/api, tags=["Evaluation"], POST /api/evaluate.)
 
 상호작용
-- 의존(import): app.core.schemas(EvaluateRequest/Response), app.analysis.parsing(parse_file_content),
+- 의존(import): app.core.schemas(EvaluateRequest/Response), app.core.parsing(parse_file_content),
   app.evaluation.service(run_evaluation_pipeline, EvaluationError)
 - 사용처: app.main(evaluate_router로 등록)
 """
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
-from app.core.schemas import EvaluateRequest, EvaluateResponse
-from app.analysis.parsing import parse_file_content
+from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
+from app.core.parsing import parse_file_content
 from app.evaluation.service import run_evaluation_pipeline, EvaluationError
 
 router = APIRouter(prefix="/api", tags=["Evaluation"])
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api", tags=["Evaluation"])
     summary="평가 연산 실행",
     description=(
         "업로드된 데이터셋 파일과 매핑 설정을 받아, "
-        "선택된 ISO/IEC 4213 평가지표(TC)를 계산하여 결과를 반환합니다."
+        "선택된 ISO/IEC 4213 평가지표를 계산하여 결과를 반환합니다."
     )
 )
 async def evaluate_dataset(

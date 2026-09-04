@@ -5,9 +5,9 @@ fact_sheet 로부터 미리 계산한다. LLM 은 계산하지 않으며 이 값
 
 상호작용
 - 의존(import): app.core.schemas(FactSheet)
-- 사용처: app.narrative.narrator(generate_narrative 가 서술 전 파생값 준비)
+- 사용처: app.narrative.service(generate_narrative 가 서술 전 파생값 준비)
 """
-from app.core.schemas import FactSheet
+from app.narrative.schemas import FactSheet
 
 
 def _find_pos_idx(labels: list, positive_class) -> int:

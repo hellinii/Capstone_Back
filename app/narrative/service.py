@@ -1,4 +1,4 @@
-"""app/narrative/narrator.py — LLM 서술 생성 오케스트레이션
+"""app/narrative/service.py — LLM 서술 생성 오케스트레이션
 
 fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비하고 LLM 을 호출한 뒤, grounding
 검증(환각 방어)을 거쳐 응답을 조립한다. 키 없음/호출 실패/검증 실패/조립 오류 시 규칙 폴백으로
@@ -12,15 +12,7 @@ fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비�
 import json
 import logging
 
-from app.core.schemas import (
-    NarrativeRequest,
-    NarrativeResponse,
-    InterpretationOut,
-    ConclusionOut,
-    RecommendationNarrativeOut,
-    RecommendationOut,
-    NarrativeMeta,
-)
+from app.narrative.schemas import ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.fallback import build_fallback_narrative
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema

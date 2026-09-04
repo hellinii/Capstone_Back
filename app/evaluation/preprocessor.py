@@ -67,8 +67,23 @@ def _coerce_label_types(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
     y_pred_col = mapping_dict.get('y_pred') or mapping_dict.get('predicted_class')
     if y_true_col and y_pred_col:
         true_type = df[y_true_col].dtype
+        pred_series = df[y_pred_col]
+
+        # 정수형으로 캐스팅할 때 소수값은 astype 이 예외 없이 잘라낸다(0.6 → 0).
+        # 확률 컬럼을 y_pred 로 잘못 매핑한 경우가 대표적이며, 그대로 두면 모든 예측이
+        # 0 으로 뭉개진 채 겉보기 정상인 성적서가 발급된다. 조용한 절단 대신 차단한다.
+        if pd.api.types.is_integer_dtype(true_type) and pd.api.types.is_float_dtype(pred_series):
+            fractional = pred_series.dropna() % 1 != 0
+            if fractional.any():
+                sample = pred_series[fractional].iloc[0]
+                raise ValueError(
+                    f"예측 라벨 '{y_pred_col}'에 소수값({sample})이 있어 정답 라벨 '{y_true_col}'의 "
+                    f"정수 타입으로 변환하면 값이 잘립니다. 확률 컬럼을 예측(y_pred) 컬럼으로 "
+                    f"매핑하지 않았는지 확인해주세요."
+                )
+
         try:
-            df[y_pred_col] = df[y_pred_col].astype(true_type)
+            df[y_pred_col] = pred_series.astype(true_type)
         except Exception:
             raise ValueError(f"예측 라벨 '{y_pred_col}'을 정답 라벨 '{y_true_col}'의 타입({true_type})으로 강제 변환할 수 없습니다.")
     return df

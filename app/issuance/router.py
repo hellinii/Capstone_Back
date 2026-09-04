@@ -10,13 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.schemas import (
-    IssuanceOut,
-    IssueRequest,
-    OrganizationIn,
-    OrganizationOut,
-    ReissueRequest,
-)
+from app.issuance.schemas import IssuanceOut, IssueRequest, OrganizationIn, OrganizationOut, ReissueRequest
 from app.issuance import service as issuance_service
 from app.issuance.service import IssuanceError
 from app.issuance.serializers import organization_out, issuance_out

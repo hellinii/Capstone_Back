@@ -13,9 +13,8 @@ import json
 import pandas as pd
 from openai import AsyncOpenAI
 
-from app.core.schemas import (
-    AnalysisResponse, ColumnMapping, ColumnRole, TaskType, VALID_ROLES_BY_TASK,
-)
+from app.core.schemas import ColumnMapping, ColumnRole, TaskType, VALID_ROLES_BY_TASK
+from app.analysis.schemas import AnalysisResponse
 from app.analysis.prompt_builder import build_system_prompt, build_user_prompt
 from app.analysis.reconcile import reconcile_llm_columns
 from app.analysis.metadata import extract_metadata
