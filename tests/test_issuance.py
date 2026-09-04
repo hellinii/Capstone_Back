@@ -228,7 +228,7 @@ def test_api_issue_reissue_reopen_flow(client):
     assert g.json()["report_no"] == report_no
 
     # 정정 발급
-    rr = client.post(f"/api/reports/{report_no}/reissue", json={"note": "정정"})
+    rr = client.post(f"/api/reports/{report_no}/reissue", json={"run_id": "run-1", "note": "정정"})
     assert rr.status_code == 200
     rd = rr.json()
     assert rd["report_no"] == report_no
@@ -239,7 +239,7 @@ def test_api_issue_reissue_reopen_flow(client):
 def test_api_not_found(client):
     assert client.get("/api/reports/RPT-2099-9999").status_code == 404
     assert (
-        client.post("/api/reports/RPT-2099-9999/reissue", json={"note": "x"}).status_code
+        client.post("/api/reports/RPT-2099-9999/reissue", json={"run_id": "run-x", "note": "x"}).status_code
         == 404
     )
 
@@ -268,8 +268,8 @@ def test_api_reissue_rejects_blank_note(client):
     issued = client.post("/api/reports/issue", json={"run_id": "run-note"}).json()
     no = issued["report_no"]
 
-    assert client.post(f"/api/reports/{no}/reissue", json={"note": ""}).status_code == 422
-    assert client.post(f"/api/reports/{no}/reissue", json={"note": "   "}).status_code == 422
+    assert client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-note", "note": ""}).status_code == 422
+    assert client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-note", "note": "   "}).status_code == 422
 
     # 막혔으므로 버전과 이력이 그대로여야 한다
     after = client.get(f"/api/reports/{no}").json()
@@ -282,7 +282,7 @@ def test_api_reissue_accepts_real_note(client):
     issued = client.post("/api/reports/issue", json={"run_id": "run-note-ok"}).json()
     no = issued["report_no"]
 
-    r = client.post(f"/api/reports/{no}/reissue", json={"note": "지표 표기 오류 정정"})
+    r = client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-note-ok", "note": "지표 표기 오류 정정"})
     assert r.status_code == 200
     assert r.json()["version"] == "v1.1"
     assert r.json()["history"][-1]["note"] == "지표 표기 오류 정정"
@@ -293,7 +293,7 @@ def test_api_reissue_note_is_trimmed(client):
     issued = client.post("/api/reports/issue", json={"run_id": "run-note-trim"}).json()
     no = issued["report_no"]
 
-    r = client.post(f"/api/reports/{no}/reissue", json={"note": "  오탈자 정정  "})
+    r = client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-note-trim", "note": "  오탈자 정정  "})
     assert r.status_code == 200
     assert r.json()["history"][-1]["note"] == "오탈자 정정"
 
@@ -400,3 +400,185 @@ def test_concurrent_reissue_no_duplicate_version(tmp_path):
     assert versions == ["v1.0", "v1.1", "v1.2"]
     assert len(issued) == 1 and issued[0].version == "v1.2"
     assert report.current_version == "v1.2"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# F-01 — 발급 DB 가 성적서 내용을 저장한다
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _content(accuracy: float = 0.944, verdict: str = "PASS") -> dict:
+    """성적서 내용의 축소판(실물 FinalReportData 는 최상위 25필드)."""
+    return {
+        "meta": {"taskType": "binary", "taskTypeLabel": "이진 분류"},
+        "kpiResults": [
+            {"metricId": "M1", "name": "Accuracy", "value": accuracy,
+             "threshold": 0.9, "status": "pass"}
+        ],
+        "conclusion": {"verdict": verdict, "score": 92},
+        "datasetInfo": {"sampleCount": 200},
+    }
+
+
+def test_issue_stores_and_returns_report_content(client):
+    """[F-01] 발급 시 보낸 성적서 내용을 번호로 되찾을 수 있어야 한다.
+
+    지금까지 발급 DB 에 남는 것은 번호·연도·순번·모델명·발급자·시각뿐이라
+    "RPT-2026-0001 의 M1 값이 0.944 였는가"에 서버가 답할 수 없었다.
+    """
+    issued = client.post(
+        "/api/reports/issue",
+        json={"run_id": "run-content", "model_name": "M", "content": _content()},
+    )
+    assert issued.status_code == 200, issued.text
+    no = issued.json()["report_no"]
+
+    got = client.get(f"/api/reports/{no}/content")
+    assert got.status_code == 200, got.text
+    body = got.json()
+
+    assert body["report_no"] == no
+    assert body["version"] == "v1.0"
+    assert body["content"]["kpiResults"][0]["value"] == 0.944
+    assert body["content"]["conclusion"]["verdict"] == "PASS"
+    assert len(body["content_hash"]) == 64  # sha256 hex
+
+
+def test_content_hash_is_stable_for_same_content(client):
+    """[F-01] 같은 내용이면 같은 해시 — 인쇄물 진위 대조의 근거."""
+    a = client.post("/api/reports/issue", json={"run_id": "h-1", "content": _content()}).json()
+    b = client.post("/api/reports/issue", json={"run_id": "h-2", "content": _content()}).json()
+
+    ha = client.get(f"/api/reports/{a['report_no']}/content").json()["content_hash"]
+    hb = client.get(f"/api/reports/{b['report_no']}/content").json()["content_hash"]
+    assert ha == hb
+
+    c = client.post("/api/reports/issue",
+                    json={"run_id": "h-3", "content": _content(accuracy=0.5)}).json()
+    hc = client.get(f"/api/reports/{c['report_no']}/content").json()["content_hash"]
+    assert hc != ha
+
+
+def test_reissue_preserves_previous_version_snapshot(client):
+    """[F-01][F-06] 정정 발급 후에도 이전 차수의 내용이 남아야 정정 전후를 대조할 수 있다."""
+    issued = client.post(
+        "/api/reports/issue", json={"run_id": "run-reissue", "content": _content(0.944)}
+    ).json()
+    no = issued["report_no"]
+
+    r = client.post(
+        f"/api/reports/{no}/reissue",
+        json={"run_id": "run-reissue", "note": "지표 정정", "content": _content(0.955)},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == "v1.1"
+
+    latest = client.get(f"/api/reports/{no}/content").json()
+    assert latest["version"] == "v1.1"
+    assert latest["content"]["kpiResults"][0]["value"] == 0.955
+
+    prior = client.get(f"/api/reports/{no}/content", params={"version": "v1.0"}).json()
+    assert prior["version"] == "v1.0"
+    assert prior["content"]["kpiResults"][0]["value"] == 0.944
+
+
+def test_issue_without_content_still_succeeds(client):
+    """[F-01] content 는 선택 — 기존 클라이언트 호환(하위호환 계약)."""
+    r = client.post("/api/reports/issue", json={"run_id": "run-nocontent"})
+    assert r.status_code == 200
+    no = r.json()["report_no"]
+
+    got = client.get(f"/api/reports/{no}/content")
+    assert got.status_code == 404  # 저장된 내용이 없다는 사실을 정직하게 알린다
+    assert "내용" in got.json()["detail"]
+
+
+def test_content_over_size_limit_is_rejected(client):
+    """[F-01][G-03] 무인증 POST 로 임의 크기 JSON 이 DB 에 영구 저장되는 것을 막는다."""
+    huge = {"blob": "x" * (2 * 1024 * 1024)}  # 2MB
+    r = client.post("/api/reports/issue", json={"run_id": "run-huge", "content": huge})
+    assert r.status_code == 422, r.text
+
+
+def test_content_unknown_report_no_is_404(client):
+    r = client.get("/api/reports/RPT-2099-9999/content")
+    assert r.status_code == 404
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# G-01 — 발급 시점 기관 스냅샷 / 무인가 PUT 제거
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_organization_is_frozen_at_issue_time(db_session, client):
+    """[G-01] 발급 후 기관 정보를 바꿔도 이미 발급된 성적서의 기관 표기는 그대로여야 한다.
+
+    종전에는 issuance_out() 이 조회할 때마다 현재 singleton 행을 조인해 조립했다.
+    한 응답 안에서 issuer 는 발급 당시 값, organization 은 현재 값이라 두 필드가
+    서로 다른 시점을 가리켰다.
+    """
+    issued = client.post("/api/reports/issue", json={"run_id": "run-org", "content": _content()}).json()
+    no = issued["report_no"]
+    original_org = issued["organization"]["org_name"]
+
+    svc.update_organization(db_session, {"org_name": "변경된 기관", "evaluator": "다른 평가자"})
+
+    after = client.get(f"/api/reports/{no}").json()
+    assert after["organization"]["org_name"] == original_org, (
+        "이미 발급된 성적서의 기관 표기가 소급 변경됐다"
+    )
+    assert after["organization"]["org_name"] != "변경된 기관"
+
+
+def test_new_issue_uses_current_organization(db_session, client):
+    """[G-01] 기관을 바꾼 뒤 새로 발급하면 새 기관이 찍힌다(동결이 갱신을 막지 않는다)."""
+    svc.update_organization(db_session, {"org_name": "새 기관", "evaluator": "평가자"})
+    issued = client.post("/api/reports/issue", json={"run_id": "run-neworg"}).json()
+    assert issued["organization"]["org_name"] == "새 기관"
+
+
+def test_put_organization_endpoint_is_removed(client):
+    """[G-01] 무인가 기관 수정 엔드포인트는 더 이상 존재하지 않는다.
+
+    curl 한 줄로 발급기관명을 바꾸면 이미 발급된 모든 성적서 표기가 함께 바뀌었다.
+    프론트는 이 API 를 한 번도 호출하지 않으므로(issuanceApi.ts 전수 확인) 제거한다.
+    """
+    r = client.put("/api/organization", json={"org_name": "HACKED", "evaluator": "attacker"})
+    assert r.status_code == 405, f"PUT 이 아직 살아 있다: {r.status_code}"
+
+    # GET 은 그대로 동작해야 한다
+    assert client.get("/api/organization").status_code == 200
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# G-02 — 재발급에 run_id 소지 증명 요구
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_reissue_requires_matching_run_id(client):
+    """[G-02] 번호만 알아도 남의 성적서에 강제 재발급 이력을 남길 수 없어야 한다.
+
+    report_no 는 RPT-{year}-{seq:04d} 로 전수 열거 가능하지만, run_id 는
+    crypto.randomUUID 라 추측할 수 없다. 소지 증명으로 쓴다.
+    """
+    issued = client.post("/api/reports/issue", json={"run_id": "run-secret"}).json()
+    no = issued["report_no"]
+
+    r = client.post(
+        f"/api/reports/{no}/reissue",
+        json={"run_id": "run-guessed", "note": "attacker forced reissue"},
+    )
+    assert r.status_code == 403, r.text
+
+    # 버전과 이력이 오염되지 않았는지 확인
+    after = client.get(f"/api/reports/{no}").json()
+    assert after["version"] == "v1.0"
+    assert len(after["history"]) == 1
+    assert all("attacker" not in (h["note"] or "") for h in after["history"])
+
+
+def test_reissue_with_correct_run_id_succeeds(client):
+    """[G-02] 정당한 소지자는 그대로 재발급할 수 있다."""
+    issued = client.post("/api/reports/issue", json={"run_id": "run-owner"}).json()
+    no = issued["report_no"]
+
+    r = client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-owner", "note": "정정"})
+    assert r.status_code == 200
+    assert r.json()["version"] == "v1.1"
