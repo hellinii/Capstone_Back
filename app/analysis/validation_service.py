@@ -22,16 +22,17 @@ def _counts(details: list[ValidationCheckItem]) -> tuple[int, int]:
 
 
 def _build_missing_required_response(
-    task_type: str, selected_metric_ids: list[str], details: list[ValidationCheckItem], total_rows: int
+    task_type: str, selected_metric_ids: list[str], details: list[ValidationCheckItem], total_rows: int,
+    reason: str = "필수 컬럼 누락으로 평가 진행 불가",
 ) -> ValidateDataResponse:
-    """필수 컬럼 누락 시 조기 반환 응답(이하 검증 불가)."""
+    """이하 검증이 불가능할 때의 조기 반환 응답(필수 컬럼 누락 · 0행 등)."""
     error_count, warning_count = _counts(details)
     return ValidateDataResponse(
         task_type=task_type,
         selected_metric_ids=selected_metric_ids,
         execution_summary=[
             ExecutionSummaryItem(label="Total validated rows", value=f"{total_rows} rows", note="업로드된 전체 행 수"),
-            ExecutionSummaryItem(label="Validation result", value=f"Errors {error_count} / Warnings {warning_count}", note="필수 컬럼 누락으로 평가 진행 불가"),
+            ExecutionSummaryItem(label="Validation result", value=f"Errors {error_count} / Warnings {warning_count}", note=reason),
         ],
         validation_details=details,
         error_count=error_count,
@@ -97,6 +98,14 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
 
     # 3-0. 컬럼 상호배타
     details += checks.check_column_conflicts(request.column_mappings, request.task_type)
+
+    # 3-0b. 데이터 행 수 (0행이면 이하 검증이 전부 무의미하므로 조기 반환)
+    details += checks.check_row_count(total_rows)
+    if total_rows == 0:
+        return _build_missing_required_response(
+            task_type, selected_metric_ids, details, total_rows,
+            reason="데이터 행이 없어 평가 진행 불가",
+        )
 
     # 3-1. 필수 컬럼 존재 (누락 시 조기 반환)
     missing_cols = [col for col in required_cols if col not in df.columns]

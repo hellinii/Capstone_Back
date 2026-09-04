@@ -31,6 +31,32 @@ def check_column_conflicts(column_mappings, task_type) -> list[ValidationCheckIt
     return items
 
 
+def check_row_count(total_rows: int) -> list[ValidationCheckItem]:
+    """3-0b. 데이터 행 수 검사. 헤더만 있는 파일(0행)은 평가 자체가 성립하지 않는다.
+
+    종전에는 0행이 error_count=0 으로 검증을 통과해, 사용자가 6단계를 다 지난 뒤
+    /api/evaluate 가 400 으로 실패했다. 그 시점에는 어디로 돌아가야 하는지 안내가
+    없다(ISSUES.md D-12). 검증 단계에서 error 로 막아 프론트 게이트가 잡게 한다.
+
+    지표별 최소 행 수 하한은 지표마다 다르므로 여기서 정하지 않는다 — 0행만 막는다.
+    """
+    if total_rows == 0:
+        return [ValidationCheckItem(
+            name="Empty dataset (no data rows)",
+            result="0 rows",
+            handling="Stop evaluation",
+            status="error",
+            group="common",
+        )]
+    return [ValidationCheckItem(
+        name="Empty dataset (no data rows)",
+        result=f"{total_rows} rows",
+        handling="Stop evaluation",
+        status="pass",
+        group="common",
+    )]
+
+
 def check_missing_required(missing_cols: list[str]) -> list[ValidationCheckItem]:
     """3-1. 필수 컬럼 존재 확인."""
     if missing_cols:
