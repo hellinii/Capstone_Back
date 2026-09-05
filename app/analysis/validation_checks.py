@@ -76,10 +76,14 @@ def check_missing_required(missing_cols: list[str]) -> list[ValidationCheckItem]
     )]
 
 
-def check_missing_values(df_work: pd.DataFrame, latency_col: str | None) -> list[ValidationCheckItem]:
-    """3-2. 결측치(NaN) 검사. latency 는 부가 측정이라 제외해 '제외 행 수'를 평가와 정합화(D5d)."""
-    nan_cols = [c for c in df_work.columns if c != latency_col]
-    nan_count = int(df_work[nan_cols].isna().any(axis=1).sum()) if nan_cols else 0
+def check_missing_values(dropped_rows: int) -> list[ValidationCheckItem]:
+    """3-2. 결측치(NaN) 검사.
+
+    자체 계산하지 않고 **평가 프레임이 확정한 제외 행 수를 그대로 보고한다**.
+    종전에는 여기서 따로 세느라 같은 응답 안에서 "Missing value: None" 과
+    "Excluded samples: 2 rows" 가 동시에 나오는 자기모순이 있었다(ISSUES.md D-01).
+    """
+    nan_count = dropped_rows
     if nan_count > 0:
         return [ValidationCheckItem(
             name="Missing value",
