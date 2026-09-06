@@ -14,6 +14,7 @@ from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 from app.analysis.schemas import ValidateDataResponse
 from app.evaluation.schemas import EvaluateRequest
 from app.core.parsing import parse_file_content
+from app.core.upload import read_upload_guarded
 from app.analysis.validation_service import validate_dataset
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])
@@ -33,12 +34,8 @@ async def validate_data(
     file: UploadFile = File(..., description="검증할 데이터셋 파일 (.csv 또는 .json)"),
     data: str = Form(..., description="EvaluateRequest 데이터의 JSON 문자열"),
 ) -> ValidateDataResponse:
-    # 1. 파일 파싱 (HTTP 경계)
-    file_content = await file.read()
-    if not file_content:
-        raise HTTPException(status_code=400, detail="빈 파일은 처리할 수 없습니다.")
-
-    filename = file.filename or ""
+    # 1. 파일 파싱 (HTTP 경계) — 확장자·크기·빈 파일은 공용 가드가 검사한다(G-04a·G-08).
+    filename, file_content = await read_upload_guarded(file)
     try:
         _, df = parse_file_content(file_content, filename)
     except Exception as e:

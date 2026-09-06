@@ -14,12 +14,11 @@ from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Request
 from app.core.schemas import TaskType
 from app.analysis.schemas import AnalysisResponse, ConfirmMappingRequest, ConfirmMappingResponse
 from app.core.parsing import parse_file_content
+from app.core.upload import read_upload_guarded
 from app.analysis.analysis_service import resolve_column_mapping, AnalysisError
 from app.analysis.validator import validate_mapping
 
 router = APIRouter(prefix="/api", tags=["Column Analysis"])
-
-ALLOWED_EXTENSIONS = {"csv", "json"}
 
 @router.post(
     "/analyze-columns",
@@ -36,19 +35,8 @@ async def analyze_columns(
     task_type: TaskType = Form(..., description="분류 모델 유형: binary / multiclass / multilabel"),
     file: UploadFile = File(..., description="분석할 파일 (.csv 또는 .json)"),
 ) -> AnalysisResponse:
-    # 파일 확장자 검증
-    filename = file.filename or ""
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"지원하지 않는 파일 형식입니다: .{ext or '(없음)'}. CSV 또는 JSON 파일을 업로드해주세요."
-        )
-
-    # 파일 내용 읽기
-    file_content = await file.read()
-    if not file_content:
-        raise HTTPException(status_code=400, detail="빈 파일은 처리할 수 없습니다.")
+    # 확장자 · 크기 상한 · 빈 파일 검사는 세 업로드 라우터 공용 가드가 소유한다(G-04a·G-08).
+    filename, file_content = await read_upload_guarded(file)
 
     # 파일 파싱 (CSV / JSON 공통 처리)
     try:
