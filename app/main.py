@@ -14,7 +14,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -84,9 +84,26 @@ app.add_middleware(
 )
 
 @app.get("/health", tags=["System"])
-async def health_check():
-    """서버 상태 확인"""
-    return {"status": "ok"}
+async def health_check(request: Request):
+    """서버 상태 확인.
+
+    DIAG=1 일 때만 진단 필드를 싣는다(G-07). 무인증 공개 엔드포인트이므로 평시에는
+    응답이 종전과 동일하고, 배포 환경을 확인해야 할 때만 잠시 켠다. 이 진단은
+    두 가지 관측을 curl 한 줄로 조달한다 —
+      · 현재 프로덕션이 Postgres 로 붙어 있는지(REQUIRE_PERSISTENT_DB 를 켜기 전 필수)
+      · 프록시 뒤에서 request.client.host 가 실제로 무엇인지(IP 기반 레이트리밋의 전제.
+        레포 전체에 FORWARDED_ALLOW_IPS/--proxy-headers 가 0건이라, 모든 요청이 같은
+        IP 로 보이면 IP 리밋이 전역 리밋으로 붕괴해 정상 사용자 1명이 전체를 막는다)
+    """
+    body = {"status": "ok"}
+    if os.getenv("DIAG") == "1":
+        body["diagnostics"] = {
+            "db": "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql",
+            "client_host": request.client.host if request.client else None,
+            "forwarded_for": request.headers.get("x-forwarded-for"),
+            "forwarded_proto": request.headers.get("x-forwarded-proto"),
+        }
+    return body
 
 # ── 라우터(Router) 모듈 연결 ──
 app.include_router(analyze_router)
