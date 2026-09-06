@@ -9,7 +9,14 @@ class EvaluateRequest(BaseModel):
     """[Step 3] 평가 실행 요청 스펙"""
     task_type:       TaskType            = Field(description="분류 모델 유형")
     column_mappings: list[ColumnMapping] = Field(description="확정된 컬럼 매핑 목록")
-    selected_metric_ids:    list[str]           = Field(description="계산할 평가 지표 목록")
+    selected_metric_ids:    list[str]           = Field(
+        min_length=1,
+        description=(
+            "계산할 평가 지표 목록. **빈 목록은 거절한다** — 어떤 컬럼을 읽는지가 "
+            "정해지지 않아 결측 제거 범위를 좁힐 수 없다(ISSUES.md D-06). 조용히 "
+            "전 컬럼으로 되돌리면 사용자는 좁혀진 줄 알고 넓은 규칙을 받는다."
+        ),
+    )
     metadata:        DataMetadata        = Field(description="클래스 및 positive_class 등이 들어있는 메타데이터")
     beta:            float               = Field(default=1.0, description="F-beta score 계산용 가중치 beta 값")
     decision_threshold: float | dict[str, float] | None = Field(

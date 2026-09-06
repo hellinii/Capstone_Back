@@ -9,12 +9,12 @@
     {
       "label": "Valid prediction rows",
       "note": "결측치 제거 후 평가에 사용될 행 수",
-      "value": "196 rows"
+      "value": "197 rows"
     },
     {
       "label": "Excluded samples",
       "note": "결측치·오류로 인해 제외된 행 수",
-      "value": "4 rows"
+      "value": "3 rows"
     },
     {
       "label": "Selected metric count",
@@ -64,7 +64,7 @@
       "group": "common",
       "handling": "Rows with missing values are excluded from evaluation",
       "name": "Missing value",
-      "result": "4 rows",
+      "result": "3 rows",
       "status": "warning"
     },
     {
@@ -85,7 +85,7 @@
       "group": "common",
       "handling": "Exclude only rows with missing or invalid values",
       "name": "Excluded samples",
-      "result": "4 rows",
+      "result": "3 rows",
       "status": "warning"
     },
     {

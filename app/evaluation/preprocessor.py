@@ -392,7 +392,7 @@ def preprocess_data(
 
     # 필수 컬럼 확인 + 멀티레이블 빈 셀 보존 + 결측 행 제거를 공용 헬퍼에 위임한다.
     # 검증(validation_service)이 같은 함수를 호출해 **같은 프레임**을 쓴다(ISSUES.md D-01).
-    df, dropped, notes = build_evaluation_frame(df, mappings, task_type)
+    df, dropped, notes = build_evaluation_frame(df, mappings, task_type, selected_metric_ids)
     if dropped > 0:
         logs["dropped_rows"] = dropped
         logs["warnings"].extend(notes)
