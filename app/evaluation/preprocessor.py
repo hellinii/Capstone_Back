@@ -1,17 +1,23 @@
 """app/evaluation/preprocessor.py — 지표 계산 전 데이터 정리/검증 전처리
 
-preprocess_data 는 단계별 헬퍼(_guard/_prune/_drop/_coerce/_validate/_check/_extract)를 순서대로
+preprocess_data 는 단계별 헬퍼(_guard/_coerce/_validate/_check/_extract)를 순서대로
 호출하는 얇은 파이프라인이다. 각 헬퍼는 한 가지 정리·검증 책임만 가진다.
-(구 preprocess_data 150줄 단일 함수를 단계 함수로 분해, 동작·경고 메시지·순서 불변.)
+
+"어떤 행이 평가에 들어가는가"(필수 컬럼 확인 · 멀티레이블 빈 셀 보존 · 결측 행 제거)는
+`frame.build_evaluation_frame` 이 정본이며, **검증(validation_service)도 같은 함수를
+호출한다** — 종전에는 두 계층이 서로 다른 결측 기준을 써서 성적서에 인쇄되는 표본 수가
+지표를 만든 표본 수와 달랐다(ISSUES.md D-01).
 
 상호작용
-- 의존(import): pandas
+- 의존(import): pandas, .frame
 - 사용처: app.evaluation.engine.evaluate (지표 계산 직전 호출)
 """
 import ast
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
+
+from .frame import build_evaluation_frame
 
 
 def _guard_identical_true_pred(mapping_dict: dict) -> None:
@@ -25,40 +31,6 @@ def _guard_identical_true_pred(mapping_dict: dict) -> None:
                 f"정답('{true_role}')과 예측('{pred_role}')에 동일한 컬럼 '{t_col}'이 매핑되어 "
                 "모든 지표가 100%로 산출됩니다(평가 무의미). 서로 다른 컬럼을 지정해주세요."
             )
-
-
-def _prune_to_required(df: pd.DataFrame, required_cols: List[str]) -> pd.DataFrame:
-    """1. 필수 컬럼 존재 확인 및 필요한 컬럼만 남기기."""
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        raise ValueError(f"데이터셋에 매핑된 필수 컬럼이 없습니다: {missing_cols}")
-    return df[required_cols].copy()
-
-
-def _fill_multilabel_missing(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
-    """멀티레이블 컬럼 결측치는 '해당 레이블 없음'의 유효 데이터 → dropna 유실 방지 위해 '' 대체."""
-    for role in ['true_labels', 'pred_labels']:
-        col = mapping_dict.get(role)
-        if col and col in df.columns:
-            df[col] = df[col].fillna('')
-    return df
-
-
-def _drop_missing_rows(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, Any]) -> pd.DataFrame:
-    """2. 결측치(NaN) 처리. latency 는 부가 측정이라 dropna 대상 제외(평가 샘플 수 보존)."""
-    latency_col = mapping_dict.get('latency')
-    dropna_subset = (
-        [c for c in df.columns if c != latency_col] if latency_col in df.columns else None
-    )
-    initial_len = len(df)
-    df.dropna(subset=dropna_subset, inplace=True)
-    dropped = initial_len - len(df)
-    if dropped > 0:
-        logs["dropped_rows"] = dropped
-        logs["warnings"].append(f"{dropped}개 행이 결측치(NaN)로 인해 제외되었습니다 (전체 {initial_len}개 중 {len(df)}개 평가).")
-    if len(df) == 0:
-        raise ValueError("결측치를 제외하고 나니 평가할 데이터가 하나도 남지 않았습니다.")
-    return df
 
 
 def _coerce_label_types(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
@@ -187,11 +159,15 @@ def preprocess_data(df: pd.DataFrame, mappings: List[Dict[str, str]], task_type:
     _guard_identical_true_pred(mapping_dict)
 
     prob_cols = [m['column'] for m in mappings if m['role'] == 'prob_per_class']
-    required_cols = list(set([m['column'] for m in mappings if m['role'] != 'ignore']))
 
-    df = _prune_to_required(df, required_cols)
-    df = _fill_multilabel_missing(df, mapping_dict)
-    df = _drop_missing_rows(df, mapping_dict, logs)
+    # 필수 컬럼 확인 + 멀티레이블 빈 셀 보존 + 결측 행 제거를 공용 헬퍼에 위임한다.
+    # 검증(validation_service)이 같은 함수를 호출해 **같은 프레임**을 쓴다(ISSUES.md D-01).
+    df, dropped, notes = build_evaluation_frame(df, mappings, task_type)
+    if dropped > 0:
+        logs["dropped_rows"] = dropped
+        logs["warnings"].extend(notes)
+    if len(df) == 0:
+        raise ValueError("결측치를 제외하고 나니 평가할 데이터가 하나도 남지 않았습니다.")
     df = _coerce_label_types(df, mapping_dict)
     df = _parse_multilabel_columns(df, mapping_dict)
     df = _validate_score_columns(df, mapping_dict, prob_cols)

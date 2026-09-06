@@ -25,6 +25,29 @@ if DATABASE_URL.startswith("postgres://"):
 
 _IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
+
+def assert_persistent_backend(database_url: str, require: bool) -> None:
+    """영속 DB 를 요구하는 환경에서 휘발성 SQLite 로의 조용한 강등을 막는다(G-07).
+
+    `DATABASE_URL` 이 없으면 이 모듈은 예외 없이 로컬 SQLite 로 내려가고 기동을
+    계속한다. 그 상태에서는 채번 시퀀스가 재시작마다 초기화돼 **성적서 번호가
+    중복 발급**된다.
+
+    가드는 기본으로 꺼져 있다. 무조건 켜면 위험하기 때문이다 — 지금 프로덕션이
+    SQLite 로 돌고 있다면 켜는 순간 '조용히 열화된 채 살아 있는 서비스'가
+    '기동 실패로 죽은 서비스'가 된다. 코드만 봐서는 어느 경우인지 알 수 없으므로,
+    `/health` 진단(DIAG=1)으로 실제 백엔드를 확인한 뒤 켜는 순서를 따른다.
+    """
+    if require and database_url.startswith("sqlite"):
+        raise RuntimeError(
+            "REQUIRE_PERSISTENT_DB=1 인데 DATABASE_URL 이 없거나 sqlite 입니다. "
+            "휘발성 DB 로 기동하면 채번 시퀀스가 초기화되어 성적서 번호가 중복 발급됩니다."
+        )
+
+# 엔진을 만들기 전에 검사한다 — postgres URL 이면 create_engine 이 드라이버를 요구하므로
+# 가드가 그 뒤에 있으면 진단 메시지 대신 ModuleNotFoundError 가 먼저 나온다.
+assert_persistent_backend(DATABASE_URL, require=os.getenv("REQUIRE_PERSISTENT_DB") == "1")
+
 if _IS_SQLITE:
     _ENGINE_KWARGS: dict = {
         # check_same_thread=False: FastAPI 스레드풀에서 세션 사용 허용(요청별 세션이라 안전).

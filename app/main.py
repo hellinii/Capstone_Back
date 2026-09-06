@@ -2,6 +2,7 @@
 main.py — FastAPI 앱의 진입점
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -13,7 +14,8 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -31,19 +33,28 @@ from app.evaluation.router import router as evaluate_router
 from app.narrative.router import router as narrative_router
 from app.issuance.router import router as reports_router
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 루트 로거를 한 번만 구성한다. 종전에는 print 만 있어 레벨도 필터링도 없었고
+    # 조용한 강등이 아무 흔적을 남기지 않았다(G-06).
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+    )
     # 발급 메타 DB 준비: 테이블 생성(없으면) + 기관 시드(없으면). 설계 문서 §8.
     init_db()
     seed_organization()
-    print(f"✅ 발급 메타 DB 초기화 완료 (backend={'sqlite' if DATABASE_URL.startswith('sqlite') else 'postgresql'})")
+    logger.info("발급 메타 DB 초기화 완료 (backend=%s)",
+                "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print(
-            "⚠️  경고: OPENAI_API_KEY 환경변수가 설정되지 않았습니다.\n"
-            "LLM 기반 컬럼 자동 매핑 대신 룰 기반(Rule-based) 매핑이 작동하며, "
-            "7, 8, 9절의 정성적 분석 서술 기능도 Fallback 문구로 대체됩니다."
+        logger.warning(
+            "OPENAI_API_KEY 미설정 — LLM 컬럼 자동 매핑 대신 규칙 기반 매핑이 동작하고 "
+            "7·8·9절 서술도 폴백 문구로 대체됩니다."
         )
         app.state.openai_client = None
     else:
@@ -54,9 +65,9 @@ async def lifespan(app: FastAPI):
             timeout=httpx.Timeout(45.0, connect=5.0),  # 전체 45s / 연결 5s
             max_retries=2,
         )
-        print("✅ OpenAI 클라이언트 초기화 완료")
+        logger.info("OpenAI 클라이언트 초기화 완료")
     yield
-    print("🛑 서버 종료")
+    logger.info("서버 종료")
 
 
 app = FastAPI(
@@ -66,6 +77,54 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 순수 JSON 본문 상한(G-03). 필드 단위 상한만으로는 부족하다 — 상한 위반을 판정하려면
+# pydantic 이 본문을 **전부 파싱해야** 하고, 그 파싱이 이벤트 루프에서 일어난다.
+# 실측: 18.8 MB JSON 이 422 로 거절되면서도 /health 를 3,179 ms 밀어냈다.
+# 정상 서술 요청은 클래스 256개 상한에서도 1 MB 를 넘지 않는다.
+MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_json_body_size(request: Request, call_next):
+    """선언된 Content-Length 가 상한을 넘는 JSON 요청을 **파싱 전에** 끊는다.
+
+    멀티파트 업로드는 대상이 아니다 — 라우터의 공용 가드(G-04a)가 청크 단위로 읽으며
+    이미 처리 전에 막는다. 여기서 또 재면 상한이 두 벌이 되고, 아래 '본문 비우기'가
+    20 MB 파일에 대해서도 돌아 이득 없이 비용만 든다.
+
+    응답 전에 본문을 읽어 버린다. 읽지 않고 닫으면 클라이언트가 전송 도중
+    broken pipe 를 맞아 413 대신 네트워크 오류를 보게 된다(실측 확인). 비용이 컸던
+    것은 읽기가 아니라 파싱·검증이므로, 읽고 버려도 방어 효과는 그대로다.
+
+    Content-Length 가 없거나(chunked) 거짓이면 판단하지 않는다 — 그 경로는 스키마의
+    필드 상한이 계속 막는다. 이것은 앞단 방어일 뿐이다.
+    """
+    declared = request.headers.get("content-length")
+    content_type = request.headers.get("content-type", "")
+    if (
+        declared
+        and declared.isdigit()
+        and content_type.startswith("application/json")
+        and int(declared) > MAX_JSON_BODY_BYTES
+    ):
+        logger.warning(
+            "JSON 본문 크기 상한 초과로 거절 (path=%s, declared=%s, limit=%s)",
+            request.url.path, declared, MAX_JSON_BODY_BYTES,
+        )
+        async for _ in request.stream():
+            pass  # 파싱하지 않고 흘려보낸다
+        return JSONResponse(
+            status_code=413,
+            content={
+                "detail": f"요청 본문이 너무 큽니다. JSON 은 최대 "
+                          f"{MAX_JSON_BODY_BYTES // (1024 * 1024)} MB 입니다."
+            },
+        )
+    return await call_next(request)
+
+
+# ⚠️ CORS 는 **이 아래에서** 등록해야 한다. Starlette 은 나중에 추가된 미들웨어를 바깥에
+#    두므로, 위 413 응답이 CORS 헤더를 달고 나가려면 CORS 가 가장 바깥이어야 한다.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -74,9 +133,26 @@ app.add_middleware(
 )
 
 @app.get("/health", tags=["System"])
-async def health_check():
-    """서버 상태 확인"""
-    return {"status": "ok"}
+async def health_check(request: Request):
+    """서버 상태 확인.
+
+    DIAG=1 일 때만 진단 필드를 싣는다(G-07). 무인증 공개 엔드포인트이므로 평시에는
+    응답이 종전과 동일하고, 배포 환경을 확인해야 할 때만 잠시 켠다. 이 진단은
+    두 가지 관측을 curl 한 줄로 조달한다 —
+      · 현재 프로덕션이 Postgres 로 붙어 있는지(REQUIRE_PERSISTENT_DB 를 켜기 전 필수)
+      · 프록시 뒤에서 request.client.host 가 실제로 무엇인지(IP 기반 레이트리밋의 전제.
+        레포 전체에 FORWARDED_ALLOW_IPS/--proxy-headers 가 0건이라, 모든 요청이 같은
+        IP 로 보이면 IP 리밋이 전역 리밋으로 붕괴해 정상 사용자 1명이 전체를 막는다)
+    """
+    body = {"status": "ok"}
+    if os.getenv("DIAG") == "1":
+        body["diagnostics"] = {
+            "db": "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql",
+            "client_host": request.client.host if request.client else None,
+            "forwarded_for": request.headers.get("x-forwarded-for"),
+            "forwarded_proto": request.headers.get("x-forwarded-proto"),
+        }
+    return body
 
 # ── 라우터(Router) 모듈 연결 ──
 app.include_router(analyze_router)

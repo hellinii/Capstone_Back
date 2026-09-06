@@ -49,6 +49,13 @@
     {
       "group": "common",
       "handling": "Stop evaluation",
+      "name": "Empty dataset (no data rows)",
+      "result": "200 rows",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
       "name": "Missing required column",
       "result": "None",
       "status": "pass"

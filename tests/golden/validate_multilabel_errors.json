@@ -9,12 +9,12 @@
     {
       "label": "Valid prediction rows",
       "note": "결측치 제거 후 평가에 사용될 행 수",
-      "value": "198 rows"
+      "value": "199 rows"
     },
     {
       "label": "Excluded samples",
       "note": "결측치·오류로 인해 제외된 행 수",
-      "value": "2 rows"
+      "value": "1 rows"
     },
     {
       "label": "Selected metric count",
@@ -46,6 +46,13 @@
     {
       "group": "common",
       "handling": "Stop evaluation",
+      "name": "Empty dataset (no data rows)",
+      "result": "200 rows",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
       "name": "Missing required column",
       "result": "None",
       "status": "pass"
@@ -54,7 +61,7 @@
       "group": "common",
       "handling": "Exclude affected rows from evaluation",
       "name": "Missing value",
-      "result": "2 rows",
+      "result": "1 rows",
       "status": "warning"
     },
     {
@@ -75,7 +82,7 @@
       "group": "common",
       "handling": "Exclude only rows with missing or invalid values",
       "name": "Excluded samples",
-      "result": "2 rows",
+      "result": "1 rows",
       "status": "warning"
     },
     {

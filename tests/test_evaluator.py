@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 from pathlib import Path
 from app.evaluation.engine import evaluate
+from app.evaluation.errors import METRIC_ERROR_KEY
 from app.evaluation.preprocessor import preprocess_data
 
 # 7. CSV 경로를 pathlib.Path를 이용해 동적 절대 경로로 지정 (tests/data 하위, 소문자)
@@ -133,7 +134,7 @@ def test_engine_binary_evaluation(binary_df):
     # 지원하지 않는 M15는 에러를 반환해야 함
     results_invalid = evaluate(binary_df, mappings, "binary", ["M15"])
     assert "M15" in results_invalid
-    assert "error" in results_invalid["M15"]
+    assert METRIC_ERROR_KEY in results_invalid["M15"]
 
 def test_engine_binary_evaluation_with_positive_class(binary_df):
     mappings = [
@@ -194,6 +195,6 @@ def test_edge_case_missing_mapping(binary_df):
     results = evaluate(binary_df, mappings, "binary", ["M1"])
     # 엔진 설계상, 매핑 누락 등은 개별 지표 계산 중 잡혀서 지표 내부에 에러로 반환됨
     assert "M1" in results
-    assert "error" in results["M1"]
-    assert "매핑" in results["M1"]["error"] or "필수" in results["M1"]["error"]
+    assert METRIC_ERROR_KEY in results["M1"]
+    assert "매핑" in results["M1"][METRIC_ERROR_KEY] or "필수" in results["M1"][METRIC_ERROR_KEY]
     print("  [OK] 필수 매핑 누락 시 개별 지표 에러 반환 정상 동작")
