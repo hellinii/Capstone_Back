@@ -9,34 +9,21 @@ Hamming Loss/Exact Match Ratio/Jaccard/분포 차이 계산. 파이프(|) 구분
 
 import pandas as pd
 import numpy as np
-import ast
 from typing import Dict, Any
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.metrics import hamming_loss, accuracy_score, jaccard_score
 
+from app.evaluation.labels import parse_label_cell, sort_labels
+
 def _parse_multilabel_col(series: pd.Series):
-    """
-    CSV 등에 저장될 때 '["A", "B"]' 형태의 문자열로 들어오는 경우
-    실제 파이썬 리스트로 안전하게 파싱합니다.
+    """멀티레이블 컬럼 → 라벨 리스트의 리스트.
 
-    구분자 처리는 preprocessor._parse_multilabel_value 와 동일해야 한다.
-    (종전에는 '|' 분기가 없어 "A|B" 가 라벨 하나로 취급됐다. 실행 경로에서는 항상
-     전처리가 먼저 리스트로 바꿔주므로 드러나지 않았지만, 지표 함수를 직접 호출하면
-     두 파서가 서로 다른 라벨 집합을 만들어냈다.)
+    파싱 규칙은 `evaluation.labels.parse_label_cell` 하나뿐이다(ISSUES.md D-04).
+    종전에는 여기에 같은 규칙의 사본이 있었고, 구분자 처리가 조금씩 달라 같은 셀이
+    계층마다 다른 라벨 집합이 됐다.
     """
-    def parse_item(item):
-        if isinstance(item, list): return item
-        if isinstance(item, str):
-            try:
-                parsed = ast.literal_eval(item)
-                if isinstance(parsed, list): return parsed
-            except Exception:
-                pass
-            separator = '|' if '|' in item else ','
-            return [x.strip() for x in item.split(separator) if x.strip()]
-        return [item]
+    return series.apply(parse_label_cell).tolist()
 
-    return series.apply(parse_item).tolist()
 
 def _get_binarized_true_pred(df: pd.DataFrame, mapping_dict: dict):
     """

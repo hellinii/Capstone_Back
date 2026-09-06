@@ -62,21 +62,21 @@
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Rows with missing values are excluded from evaluation",
       "name": "Missing value",
       "result": "4 rows",
       "status": "warning"
     },
     {
       "group": "common",
-      "handling": "Keep the first row and exclude later duplicates",
+      "handling": "Reported only — duplicate rows are still evaluated",
       "name": "Duplicate ID",
       "result": "2 rows",
       "status": "warning"
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Counted as a misclassification of the true class (rows are kept)",
       "name": "Class mismatch",
       "result": "Pred has unknown classes: 2, normal",
       "status": "warning"
@@ -97,7 +97,7 @@
     },
     {
       "group": "binary",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Stop evaluation",
       "name": "Binary class system error",
       "result": "Expected 2 classes, found 4",
       "status": "error"

@@ -14,6 +14,7 @@ from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
 from app.analysis.validator import find_column_conflicts, find_invalid_roles
 from app.evaluation.engine import evaluate as run_evaluation
 from app.evaluation.report import generate_report
+from app.evaluation.labels import normalize_distribution
 
 
 class EvaluationError(Exception):
@@ -65,7 +66,9 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
     warnings = metadata.get("warnings", [])
     dropped_rows = metadata.get("dropped_rows", 0)
     n_samples = metadata.get("n_samples", 0)
-    class_distribution = {str(k): v for k, v in metadata.get("class_distribution", {}).items()}
+    # 표현형·순서 정규화는 labels.normalize_distribution 이 정본이다(D-04).
+    # 종전 `{str(k): v}` 는 int 1 과 str '1' 을 뭉개며 카운트를 덮어썼다.
+    class_distribution = normalize_distribution(metadata.get("class_distribution", {}))
 
     formatted_results = generate_report(eval_results)
 

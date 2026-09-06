@@ -60,21 +60,21 @@
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Rows with missing values are excluded from evaluation",
       "name": "Missing value",
       "result": "2 rows",
       "status": "warning"
     },
     {
       "group": "common",
-      "handling": "Keep the first row and exclude later duplicates",
+      "handling": "Reported only — duplicate rows are still evaluated",
       "name": "Duplicate ID",
       "result": "1 rows",
       "status": "warning"
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Counted as a misclassification of the true class (rows are kept)",
       "name": "Class mismatch",
       "result": "Pred has unknown classes: lion",
       "status": "warning"
@@ -109,7 +109,7 @@
     },
     {
       "group": "multiclass",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Counted as a misclassification of the true class (rows are kept)",
       "name": "Unknown class detected",
       "result": "lion",
       "status": "warning"

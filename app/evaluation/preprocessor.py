@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 
 from app.core.schemas import METRIC_REQUIREMENTS, PREDICTION_ROLES_BY_TASK, TaskType
+from app.evaluation.labels import normalize_distribution, normalize_label, parse_label_cell, sort_labels
 
 from .frame import build_evaluation_frame
 
@@ -63,21 +64,9 @@ def _coerce_label_types(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
     return df
 
 
-def _parse_multilabel_value(item):
-    """멀티레이블 셀 → 리스트 (ast.literal_eval + '|' 또는 ',' 구분자)."""
-    if isinstance(item, list):
-        return item
-    if isinstance(item, str):
-        try:
-            parsed = ast.literal_eval(item)
-            if isinstance(parsed, list):
-                return parsed
-        except Exception:
-            pass
-        if '|' in item:
-            return [x.strip() for x in item.split('|') if x.strip()]
-        return [x.strip() for x in item.split(',') if x.strip()]
-    return [item]
+# 파서는 labels.parse_label_cell 하나뿐이다(ISSUES.md D-04). 종전에는 라벨을 만드는
+# 코드가 넷이었고 구분자 처리와 산출 타입이 서로 달랐다.
+_parse_multilabel_value = parse_label_cell
 
 
 def _parse_multilabel_columns(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
@@ -329,20 +318,40 @@ def _check_prob_sum(df: pd.DataFrame, task_type: str, prob_cols: List[str], logs
             logs["warnings"].append(f"Multiclass 확률합 경고: {len(invalid_sums)}개 행에서 확률의 합이 1.0(±0.01) 범위를 벗어났습니다. 결과의 신뢰도가 낮을 수 있습니다.")
 
 
+def _warn_ghost_classes(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, Any]) -> None:
+    """5-1. 예측에만 등장한 클래스를 알린다 (ISSUES.md C-03).
+
+    클래스 집합은 `y_true` 기준으로 고정되므로 이 클래스들은 어떤 지표의 분모도 되지
+    않고, 그렇게 예측한 행은 정답 클래스의 오분류(FN)로 남는다. **표본 수는 변하지
+    않는다.** 조용히 처리하면 사용자는 자기 예측의 일부가 어떻게 셈해졌는지 알 수 없다.
+    """
+    from app.evaluation.metrics.common import ghost_classes
+
+    ghosts = ghost_classes(df, mapping_dict)
+    if ghosts:
+        logs["warnings"].append(
+            f"정답에 없는 클래스가 예측에만 등장했습니다: {', '.join(ghosts)}. "
+            "평가 클래스 집합은 정답(y_true) 기준으로 고정되며, 해당 예측은 정답 클래스의 "
+            "오분류로 계산됩니다(표본 수는 변하지 않습니다)."
+        )
+
+
 def _extract_class_distribution(df: pd.DataFrame, mapping_dict: dict, task_type: str, logs: Dict[str, Any]) -> None:
     """6. 클래스 분포 추출."""
-    class_dist = {}
+    class_dist: Dict[str, int] = {}
     y_true_col_for_dist = mapping_dict.get('y_true') or mapping_dict.get('true_class') or mapping_dict.get('true_labels')
     if y_true_col_for_dist and y_true_col_for_dist in df.columns:
         if task_type == 'multilabel':
-            # df[y_true_col_for_dist]는 이미 _parse_multilabel_value 를 거쳐 리스트 형태임
+            # df[y_true_col_for_dist]는 이미 파서를 거쳐 리스트 형태임
             for labels in df[y_true_col_for_dist].dropna():
                 if isinstance(labels, list):
                     for label in labels:
                         class_dist[label] = class_dist.get(label, 0) + 1
         else:
             class_dist = df[y_true_col_for_dist].value_counts().to_dict()
-    logs["class_distribution"] = class_dist
+    # 키 표현형과 순서를 표준화한다 — 종전 `{str(k): v}` 는 int 1 과 str '1' 을 뭉개며
+    # 카운트를 **덮어썼고**, 사전순 정렬이 ['1','10','2'] 로 클래스 순서를 뒤집었다(D-04).
+    logs["class_distribution"] = normalize_distribution(class_dist)
 
 
 def collect_role_columns(mappings: List[Dict[str, str]]) -> Dict[str, List[str]]:
@@ -400,6 +409,7 @@ def preprocess_data(
     )
     _coerce_latency(df, mapping_dict, logs)
     _check_prob_sum(df, task_type, prob_cols, logs)
+    _warn_ghost_classes(df, mapping_dict, logs)
     _extract_class_distribution(df, mapping_dict, task_type, logs)
 
     # 실제로 지표를 계산한 행 수. 프론트가 분포 합계로 추측하던 값을 서버가 확정한다

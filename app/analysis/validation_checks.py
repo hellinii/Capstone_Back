@@ -1,6 +1,11 @@
 """app/analysis/validation_checks.py — 데이터 검증 개별 점검 함수 모음.
 
-/api/validate-data 의 각 점검 항목을 단일 책임 순수 함수로 분리한다. 각 함수는
+/api/validate-data 의 각 점검 항목을 단일 책임 순수 함수로 분리한다.
+
+**`handling` 은 실제로 하는 일만 적는다**(ISSUES.md D-03, 결정 6-④). 종전에는
+"중복 ID 제거"·"미지 클래스 행 제외" 같은 문구가 있었으나 `app/` 어디에도 그 구현이
+없었다(`drop_duplicates`·`isin` 0건). 구현하는 쪽을 택하면 표본 수가 줄어 모든 골든과
+이미 발급된 성적서가 어긋나므로, 구현하지 않고 문구를 사실대로 정정했다. 각 함수는
 ValidationCheckItem 리스트를 반환하며, 오케스트레이션(순서·조기반환·요약)은
 validation_service 가 담당한다. (구 validation_router.validate_data 490줄에서 추출, 동작 불변.)
 
@@ -100,14 +105,14 @@ def check_missing_values(dropped_rows: int) -> list[ValidationCheckItem]:
         return [ValidationCheckItem(
             name="Missing value",
             result=f"{nan_count} rows",
-            handling="Exclude affected rows from evaluation",
+            handling="Rows with missing values are excluded from evaluation",
             status="warning",
             group="common",
         )]
     return [ValidationCheckItem(
         name="Missing value",
         result="None",
-        handling="Exclude affected rows from evaluation",
+        handling="Rows with missing values are excluded from evaluation",
         status="pass",
         group="common",
     )]
@@ -122,21 +127,21 @@ def check_duplicate_id(df_clean: pd.DataFrame, mapping_dict: dict) -> list[Valid
             return [ValidationCheckItem(
                 name="Duplicate ID",
                 result=f"{dup_count} rows",
-                handling="Keep the first row and exclude later duplicates",
+                handling="Reported only — duplicate rows are still evaluated",
                 status="warning",
                 group="common",
             )]
         return [ValidationCheckItem(
             name="Duplicate ID",
             result="None",
-            handling="Keep the first row and exclude later duplicates",
+            handling="Reported only — duplicate rows are still evaluated",
             status="pass",
             group="common",
         )]
     return [ValidationCheckItem(
         name="Duplicate ID",
         result="N/A (no sample_id mapped)",
-        handling="Keep the first row and exclude later duplicates",
+        handling="Reported only — duplicate rows are still evaluated",
         status="pass",
         group="common",
     )]
@@ -155,21 +160,21 @@ def check_class_mismatch(df_clean: pd.DataFrame, mapping_dict: dict) -> list[Val
             return [ValidationCheckItem(
                 name="Class mismatch",
                 result=f"Pred has unknown classes: {', '.join(sorted(extra_in_pred))}",
-                handling="Exclude affected rows from evaluation",
+                handling="Counted as a misclassification of the true class (rows are kept)",
                 status="warning",
                 group="common",
             )]
         return [ValidationCheckItem(
             name="Class mismatch",
             result="None",
-            handling="Exclude affected rows from evaluation",
+            handling="Counted as a misclassification of the true class (rows are kept)",
             status="pass",
             group="common",
         )]
     return [ValidationCheckItem(
         name="Class mismatch",
         result="N/A",
-        handling="Exclude affected rows from evaluation",
+        handling="Counted as a misclassification of the true class (rows are kept)",
         status="pass",
         group="common",
     )]
@@ -287,7 +292,7 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: dict[
             items.append(ValidationCheckItem(
                 name="Binary class system error",
                 result=f"Expected 2 classes, found {n_classes}",
-                handling="Exclude affected rows from evaluation",
+                handling="Stop evaluation" if n_classes > 2 else "Reported only — evaluation continues",
                 status="error" if n_classes > 2 else "warning",
                 group="binary",
             ))
@@ -295,7 +300,7 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: dict[
             items.append(ValidationCheckItem(
                 name="Binary class system error",
                 result="None",
-                handling="Exclude affected rows from evaluation",
+                handling="Exactly 2 classes required",
                 status="pass",
                 group="binary",
             ))
@@ -431,7 +436,7 @@ def check_multiclass(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: d
             items.append(ValidationCheckItem(
                 name="Unknown class detected",
                 result=f"{', '.join(sorted(unknown))}",
-                handling="Exclude affected rows from evaluation",
+                handling="Counted as a misclassification of the true class (rows are kept)",
                 status="warning",
                 group="multiclass",
             ))
@@ -439,7 +444,7 @@ def check_multiclass(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: d
             items.append(ValidationCheckItem(
                 name="Unknown class detected",
                 result="None",
-                handling="Exclude affected rows from evaluation",
+                handling="Counted as a misclassification of the true class (rows are kept)",
                 status="pass",
                 group="multiclass",
             ))
@@ -475,7 +480,7 @@ def check_multilabel(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: d
             items.append(ValidationCheckItem(
                 name="Label format mismatch",
                 result=f"{format_errors} rows (sampled first 100)",
-                handling="Exclude affected rows from evaluation",
+                handling="Reported only — the row is parsed as having no labels",
                 status="warning",
                 group="multilabel",
             ))
@@ -483,7 +488,7 @@ def check_multilabel(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: d
             items.append(ValidationCheckItem(
                 name="Label format mismatch",
                 result="None",
-                handling="Exclude affected rows from evaluation",
+                handling="Reported only — the row is parsed as having no labels",
                 status="pass",
                 group="multilabel",
             ))
