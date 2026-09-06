@@ -71,23 +71,24 @@ def test_prediction_roles_table_lists_probability_alternatives():
 # ── confirm-mapping 이 확률 전용 매핑을 통과시킨다 (A-01·A-02) ──────────────
 
 @pytest.mark.parametrize(
-    "task, truth_role, prob_mappings",
+    "task, truth_role, prob_mappings, metric_id",
     [
-        (TaskType.binary, ColumnRole.y_true, [("s", ColumnRole.score_positive)]),
+        (TaskType.binary, ColumnRole.y_true, [("s", ColumnRole.score_positive)], "M1"),
         (TaskType.multiclass, ColumnRole.y_true,
-         [("p_a", ColumnRole.prob_per_class), ("p_b", ColumnRole.prob_per_class)]),
+         [("p_a", ColumnRole.prob_per_class), ("p_b", ColumnRole.prob_per_class)], "M1"),
+        # multilabel 은 M1 을 노출하지 않는다(결정 2 — M16 과 값이 같다).
         (TaskType.multilabel, ColumnRole.true_labels,
-         [("s_a", ColumnRole.score_per_label), ("s_b", ColumnRole.score_per_label)]),
+         [("s_a", ColumnRole.score_per_label), ("s_b", ColumnRole.score_per_label)], "M16"),
     ],
 )
-def test_confirm_mapping_accepts_probability_only(task, truth_role, prob_mappings):
+def test_confirm_mapping_accepts_probability_only(task, truth_role, prob_mappings, metric_id):
     """하드 예측 없이 확률만 매핑해도 진행 가능해야 한다(종전에는 MISSING_METRIC_REQUIREMENT)."""
     mappings = [_cm("t", truth_role)] + [_cm(c, r) for c, r in prob_mappings]
     resp = validate_mapping(ConfirmMappingRequest(
-        task_type=task, column_mappings=mappings, selected_metric_ids=["M1"],
+        task_type=task, column_mappings=mappings, selected_metric_ids=[metric_id],
     ))
     assert resp.is_valid, [e.model_dump() for e in resp.errors]
-    assert "M1" in resp.available_metric_ids
+    assert metric_id in resp.available_metric_ids
 
 
 def test_confirm_mapping_still_requires_some_prediction_source():

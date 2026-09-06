@@ -136,19 +136,20 @@ METRIC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {
         # M23 은 정답 분포만으로 계산된다(common.calculate_imbalance_ratio) — 예측 컬럼 불필요.
         "M23": {ColumnRole.y_true},
     },
+    # multilabel 은 값이 다른 지표와 완전히 겹치는 넷(M1·M11·M12·M13)을 노출하지 않는다
+    # (2026-09-07 결정 2). 근거는 셋이 서로 다르다:
+    #   M1(subset accuracy) == M16(Exact Match Ratio) — 정의상 같은 값
+    #   M11(macro) == M2·M3·M4 — multilabel 의 M2~M4 가 이미 macro 평균이다(SPEC §3 규칙 5)
+    #   M12(micro)·M13(weighted) == M22(classification_report)의 micro avg·weighted avg 행
+    # 같은 수를 두 이름으로 인쇄하면 독자는 서로 다른 측정이라고 읽는다.
+    # multiclass 에서는 넷 다 유지한다 — 거기서는 M2~M4 가 macro 가 아니라 값이 다르다.
     TaskType.multilabel: {
-        # M1(Accuracy)은 multilabel 에서 sklearn subset accuracy(전 라벨 일치 비율)로
-        # 계산된다 — 정의상 M16(Exact Match Ratio)과 동일 값.
-        "M1":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M2":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M3":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M4":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M5":  {ColumnRole.true_labels, ColumnRole.pred_labels},
         # M6 는 multilabel 미지원 — common.calculate_kl_divergence 는 1-D 라벨만 처리한다
         # (이진화된 2-D 배열에 pd.Series() 를 호출해 ValueError). 프론트도 노출하지 않는다.
-        "M11": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "M12": {ColumnRole.true_labels, ColumnRole.pred_labels},
-        "M13": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M15": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M16": {ColumnRole.true_labels, ColumnRole.pred_labels},
         "M17": {ColumnRole.true_labels, ColumnRole.pred_labels},

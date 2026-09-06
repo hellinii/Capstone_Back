@@ -18,8 +18,8 @@
     },
     {
       "label": "Selected metric count",
-      "note": "선택된 메트릭: M1, M2, M3, M4, M5, M15, M16, M17, M18, M21, M22, M23",
-      "value": "12 items"
+      "note": "선택된 메트릭: M2, M3, M4, M5, M15, M16, M17, M18, M21, M22, M23",
+      "value": "11 items"
     },
     {
       "label": "Validation result",
@@ -28,7 +28,6 @@
     }
   ],
   "selected_metric_ids": [
-    "M1",
     "M2",
     "M3",
     "M4",

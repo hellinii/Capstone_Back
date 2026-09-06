@@ -10,7 +10,6 @@
   "results": {
     "failed_metrics": {},
     "success_metrics": {
-      "M1": 0.065,
       "M15": 0.52,
       "M16": 0.065,
       "M17": 0.33625,

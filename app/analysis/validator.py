@@ -22,8 +22,9 @@ task_type별 필수/선택 역할 규칙을 검사하고,
 
   [Multilabel]
     true_labels                → M23
-    true_labels + pred_labels  → M1~M5, M11~M13, M15~M18, M21, M22
-    (score_per_label 을 요구하는 지표는 없다 — 확률 범위 검증용 선택 컬럼)
+    true_labels + pred_labels  → M2~M5, M15~M18, M21, M22
+    (M1·M11·M12·M13 은 값이 M16·M2~M4·M22 와 겹쳐 노출하지 않는다 — 결정 2)
+    (score_per_label 은 pred_labels 의 대체 입력이다 — 없으면 임계값으로 파생한다)
 """
 
 from app.core.schemas import (

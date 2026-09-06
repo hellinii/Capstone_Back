@@ -56,7 +56,9 @@ CASES = {
             ("score_finance", "score_per_label"),
             ("score_tech", "score_per_label"),
         ],
-        "selected_metric_ids": ["M1", "M2", "M3", "M4", "M5",
+        # M1 은 multilabel 에서 M16 과 값이 같아 제거됐다(결정 2). 픽스처가 지원하지 않는
+        # 지표를 일부러 요청하면 그 이상한 상태가 골든에 영구 고정된다.
+        "selected_metric_ids": ["M2", "M3", "M4", "M5",
                          "M15", "M16", "M17", "M18", "M21", "M22", "M23"],
     },
 }
