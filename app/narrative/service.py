@@ -18,8 +18,27 @@ from app.narrative.fallback import build_fallback_narrative
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import build_number_whitelist, verify_grounding, _collect_grounding_texts
+from app.core.concurrency import run_cpu_bound
 
 _MODEL = "gpt-4.1-nano"
+
+
+def _prepare_facts(fs, task_type_value: str):
+    """파생값·기준치·숫자 화이트리스트 준비 — 순수 CPU 구간(스레드풀로 오프로드된다).
+
+    build_number_whitelist 는 혼동행렬을 행x열 이중 루프로 돌며 셀마다 문자열을
+    여러 개 만들므로 행렬 차원에 대해 제곱으로 커진다(G-04b 실측: 2500x2500 입력이
+    이벤트 루프를 15.1 초 막았다).
+    """
+    derived = compute_derived(fs)
+    benchmark_refs = build_benchmark_refs(task_type_value, fs.metrics)
+    whitelist = build_number_whitelist(fs, benchmark_refs, derived)
+    return derived, benchmark_refs, whitelist
+
+
+def _verify_llm_output(data: dict, whitelist):
+    """LLM 출력 전수 수집 + grounding 검증 — 순수 CPU 구간."""
+    return verify_grounding(_collect_grounding_texts(data), whitelist)
 
 
 async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse:
@@ -29,9 +48,9 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
     - verdict 는 항상 fact_sheet 값으로 강제(LLM echo 무시).
     """
     fs = req.fact_sheet
-    derived = compute_derived(fs)
-    benchmark_refs = build_benchmark_refs(req.task_type.value, fs.metrics)
-    whitelist = build_number_whitelist(fs, benchmark_refs, derived)
+    derived, benchmark_refs, whitelist = await run_cpu_bound(
+        _prepare_facts, fs, req.task_type.value
+    )
 
     # 1. 무키 → 폴백
     if client is None:
@@ -62,7 +81,7 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
         recs = data.get("recommendations", [])
 
         # LLM 이 생성한 모든 문자열 필드를 전수 수집해 검증(수동 나열 제거 — D3b).
-        grounding = verify_grounding(_collect_grounding_texts(data), whitelist)
+        grounding = await run_cpu_bound(_verify_llm_output, data, whitelist)
 
         # 위반 시 report_purpose 무관하게 폴백(internal fail-open 제거 — D3c).
         if not grounding.passed:

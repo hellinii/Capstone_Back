@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.core import upload as upload_mod
 from app.main import app
+from router_cases import request_json
 
 client = TestClient(app)
 
@@ -28,15 +29,7 @@ def _no_llm_client():
     app.state.openai_client = None
 
 # 세 업로드 라우터 — (경로, 추가 폼 필드)
-_EVAL_DATA = json.dumps({
-    "task_type": "binary",
-    "column_mappings": [
-        {"column_name": "id", "role": "sample_id"},
-        {"column_name": "y_true", "role": "y_true"},
-        {"column_name": "y_pred", "role": "y_pred"},
-    ],
-    "selected_metric_ids": ["M1"],
-})
+_EVAL_DATA = request_json("binary")
 UPLOAD_ROUTES = [
     ("/api/analyze-columns", {"task_type": "binary"}),
     ("/api/validate-data", {"data": _EVAL_DATA}),

@@ -14,6 +14,7 @@ from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
 from app.core.parsing import parse_file_content
 from app.core.upload import read_upload_guarded
+from app.core.concurrency import run_cpu_bound
 from app.evaluation.service import run_evaluation_pipeline, EvaluationError
 
 router = APIRouter(prefix="/api", tags=["Evaluation"])
@@ -37,7 +38,7 @@ async def evaluate_dataset(
 
     # 2. 파일 파싱
     try:
-        _, df = parse_file_content(file_content, filename)
+        _, df = await run_cpu_bound(parse_file_content, file_content, filename)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {str(e)}")
 
@@ -52,7 +53,7 @@ async def evaluate_dataset(
 
     # 4. 평가 파이프라인은 서비스에 위임 (도메인 오류 → 상태코드 매핑)
     try:
-        return run_evaluation_pipeline(df, request_data)
+        return await run_cpu_bound(run_evaluation_pipeline, df, request_data)
     except EvaluationError as e:
         status_code = 500 if e.code == "compute_error" else 400
         raise HTTPException(status_code=status_code, detail=e.message)

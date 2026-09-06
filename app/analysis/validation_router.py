@@ -15,6 +15,7 @@ from app.analysis.schemas import ValidateDataResponse
 from app.evaluation.schemas import EvaluateRequest
 from app.core.parsing import parse_file_content
 from app.core.upload import read_upload_guarded
+from app.core.concurrency import run_cpu_bound
 from app.analysis.validation_service import validate_dataset
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])
@@ -37,7 +38,7 @@ async def validate_data(
     # 1. 파일 파싱 (HTTP 경계) — 확장자·크기·빈 파일은 공용 가드가 검사한다(G-04a·G-08).
     filename, file_content = await read_upload_guarded(file)
     try:
-        _, df = parse_file_content(file_content, filename)
+        _, df = await run_cpu_bound(parse_file_content, file_content, filename)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {str(e)}")
 
@@ -48,4 +49,4 @@ async def validate_data(
         raise HTTPException(status_code=422, detail=f"설정 데이터 파싱 실패: {str(e)}")
 
     # 3. 검증 파이프라인은 서비스에 위임
-    return validate_dataset(df, request_data)
+    return await run_cpu_bound(validate_dataset, df, request_data)

@@ -15,6 +15,7 @@ from app.core.schemas import TaskType
 from app.analysis.schemas import AnalysisResponse, ConfirmMappingRequest, ConfirmMappingResponse
 from app.core.parsing import parse_file_content
 from app.core.upload import read_upload_guarded
+from app.core.concurrency import run_cpu_bound
 from app.analysis.analysis_service import resolve_column_mapping, AnalysisError
 from app.analysis.validator import validate_mapping
 
@@ -40,7 +41,7 @@ async def analyze_columns(
 
     # 파일 파싱 (CSV / JSON 공통 처리)
     try:
-        columns, df = parse_file_content(file_content, filename)
+        columns, df = await run_cpu_bound(parse_file_content, file_content, filename)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {str(e)}")
 
