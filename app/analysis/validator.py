@@ -34,6 +34,7 @@ from app.core.schemas import (
     PREDICTION_ROLES_BY_TASK,
     TRUTH_ROLE_BY_TASK,
     TaskType,
+    VALID_ROLES_BY_TASK,
 )
 from app.analysis.schemas import ConfirmMappingRequest, ConfirmMappingResponse, MappingValidationError, MappingValidationWarning
 
@@ -141,11 +142,46 @@ def find_column_conflicts(
     return errors
 
 
+def find_invalid_roles(
+    mappings: list[ColumnMapping], task_type: TaskType
+) -> list[MappingValidationError]:
+    """task_type 에 허용되지 않는 역할이 매핑됐는지 검사한다 (SPEC §4, ISSUES.md A-10).
+
+    SPEC §4 는 "Binary 인데 prob_class_*", "Multiclass 인데 score", "Multilabel 인데
+    score 또는 prob_class_*" 세 가지를 진행 차단 Error 로 규정한다. 세 가지를 손으로
+    나열하는 대신 `VALID_ROLES_BY_TASK` 를 유일 기준으로 삼아 일반화한다 — 규칙 사본을
+    하나 더 만들지 않기 위해서다(뿌리 ①). 그러면 SPEC 이 열거하지 않은 조합
+    (예: binary 에 true_labels)도 같은 이유로 함께 막힌다.
+
+    **왜 무시로 끝내면 안 되는가.** `frame.required_columns` 가 ignore 가 아닌 모든
+    역할의 컬럼을 dropna 대상에 넣는다. 잘못된 역할로 매핑된 컬럼의 결측이 평가 표본을
+    조용히 깎으므로, 사용자는 자기가 지정한 역할이 무시됐다는 사실도, 표본이 줄었다는
+    사실도 모른 채 성적서를 받는다.
+
+    confirm-mapping 과 evaluate·validate-data 세 경로가 공유한다 — 프론트 드롭다운
+    제한은 UI 경로만 막고, API 를 직접 호출하면 그대로 통과했다.
+    """
+    allowed = set(VALID_ROLES_BY_TASK[task_type])
+    errors: list[MappingValidationError] = []
+    for m in mappings:
+        if m.role in allowed:
+            continue
+        errors.append(MappingValidationError(
+            code="INVALID_ROLE_FOR_TASK",
+            message=(
+                f"'{task_type.value}' 평가에서는 '{m.role.value}' 역할을 사용할 수 없습니다"
+                f"(컬럼 '{m.column}'). 사용 가능한 역할: "
+                f"{', '.join(r.value for r in VALID_ROLES_BY_TASK[task_type])}."
+            ),
+        ))
+    return errors
+
+
 def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     """
     사용자가 확정한 매핑을 검증하고 계산 가능한 지표 목록을 반환합니다.
 
-    검사 순서:
+    검사 순서(코드의 번호 주석과 일치한다):
     1. 역할 유효성: task_type에 허용되지 않는 role 사용 여부
     2. 중복 체크: 단일 역할(y_true, y_pred 등)에 여러 컬럼 매핑 여부
     3. 필수 역할 누락 체크 → is_valid 결정
@@ -162,7 +198,12 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     # 현재 매핑에서 어떤 role들이 사용됐는지 추출
     mapped_roles = {m.role for m in mappings}
 
-    # ── 1. 역할 중복 체크 (ignore/확률 역할처럼 여러 개 허용되는 것 제외) ──
+    # ── 1. 역할 유효성 — task_type 에 허용되지 않는 역할 (SPEC §4, ISSUES.md A-10) ──
+    # 중복 체크보다 **앞**에 둔다. 잘못된 역할을 두 컬럼에 준 경우 사용자가 고쳐야 할 것은
+    # 중복이 아니라 역할 자체인데, 뒤에 두면 DUPLICATE_ROLE 이 먼저 보고돼 안내가 어긋난다.
+    errors.extend(find_invalid_roles(mappings, task_type))
+
+    # ── 2. 역할 중복 체크 (ignore/확률 역할처럼 여러 개 허용되는 것 제외) ──
     _MULTI_ALLOWED = MULTI_COLUMN_ROLES
     role_counts: dict[ColumnRole, int] = {}
     for m in mappings:
@@ -175,10 +216,10 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
                 message=f"'{role.value}' 역할이 {count}개 컬럼에 중복 매핑되어 있습니다. 하나만 지정해주세요.",
             ))
 
-    # ── 1-2. 컬럼 단위 상호배타 체크 (정답=예측 동일 컬럼 등) ────────────────────
+    # ── 2-1. 컬럼 단위 상호배타 체크 (정답=예측 동일 컬럼 등) ────────────────────
     errors.extend(find_column_conflicts(mappings, task_type))
 
-    # ── 2. 필수 역할 누락 체크 ────────────────────────────────────────────────
+    # ── 3. 필수 역할 누락 체크 ────────────────────────────────────────────────
     metric_requirements = METRIC_REQUIREMENTS[task_type]
     pred_roles = _PRED_ROLES[task_type]
 
@@ -210,13 +251,13 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
                 message=f"필수 역할 '{pred_roles[0].value}'이 매핑되지 않았습니다.",
             ))
 
-    # ── 3. 선택 역할 누락 → 경고 ─────────────────────────────────────────────
+    # ── 4. 선택 역할 누락 → 경고 ─────────────────────────────────────────────
     for (role, code, message) in _WARNING_CONDITIONS.get(task_type, []):
         if role not in mapped_roles:
             warnings.append(MappingValidationWarning(code=code, message=message))
 
-    # ── 4. 지표 가용성 계산 및 선택된 지표 검증 ────────────────────────────────────────────────────
-    # metric_requirements 는 위 2단계에서 이미 조회했다.
+    # ── 5. 지표 가용성 계산 및 선택된 지표 검증 ────────────────────────────────────────────────────
+    # metric_requirements 는 위 3단계에서 이미 조회했다.
     available_metric_ids: list[str] = []
     unavailable_metric_ids: list[str] = []
 

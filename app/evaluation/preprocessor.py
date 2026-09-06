@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
+from app.core.schemas import METRIC_REQUIREMENTS, PREDICTION_ROLES_BY_TASK, TaskType
+
 from .frame import build_evaluation_frame
 
 
@@ -177,6 +179,29 @@ def _threshold_for(decision_threshold, col: str) -> float:
     return float(decision_threshold)
 
 
+def prediction_is_needed(task_type: str, selected_metric_ids: List[str] | None) -> bool:
+    """선택한 지표 중 예측 역할을 쓰는 것이 하나라도 있는가.
+
+    M23(불균형비)처럼 정답 분포만으로 계산되는 지표만 골랐다면 예측이 필요 없다 —
+    그때는 확률이 매핑돼 있어도 파생하지 않는다. 파생은 공짜가 아니다: 확률 컬럼명에서
+    클래스를 확정할 수 없으면 400 으로 막으므로, 쓰지도 않을 예측을 만들려다 정답
+    컬럼만으로 진행 가능한 요청을 거절하게 된다.
+
+    지표 ID 를 하드코딩하지 않고 METRIC_REQUIREMENTS 에서 유도한다.
+    """
+    if not selected_metric_ids:
+        return True  # 지표를 모르면 종전대로 보수적으로 파생한다.
+    try:
+        task = TaskType(task_type)
+    except ValueError:
+        return True
+    primary, _ = PREDICTION_ROLES_BY_TASK[task]
+    requirements = METRIC_REQUIREMENTS[task]
+    return any(
+        primary in requirements[m] for m in selected_metric_ids if m in requirements
+    )
+
+
 def _derive_predictions(
     df: pd.DataFrame,
     role_columns: Dict[str, List[str]],
@@ -184,6 +209,7 @@ def _derive_predictions(
     decision_threshold,
     metadata: Dict[str, Any],
     logs: Dict[str, Any],
+    selected_metric_ids: List[str] | None = None,
 ) -> pd.DataFrame:
     """4-2. 하드 예측이 없을 때 확률에서 예측을 파생한다(ISSUES.md A-01·A-02, 결정 1).
 
@@ -195,6 +221,8 @@ def _derive_predictions(
     """
     primary = 'pred_labels' if task_type == 'multilabel' else 'y_pred'
     if role_columns.get(primary):
+        return df
+    if not prediction_is_needed(task_type, selected_metric_ids):
         return df
 
     source = role_columns.get(
@@ -339,6 +367,7 @@ def preprocess_data(
     task_type: str,
     decision_threshold=None,
     metadata: Dict[str, Any] | None = None,
+    selected_metric_ids: List[str] | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """평가(Metric) 계산 전 데이터를 정리·검증하는 전처리 파이프라인(단계 헬퍼 순차 호출)."""
     if df.empty:
@@ -365,7 +394,10 @@ def preprocess_data(
     df = _validate_score_columns(df, role_columns)
     # 확률이 float 로 강제되고 [0,1] 로 검증된 **뒤에** 파생한다 — 그 전에는 비교 연산이
     # object dtype 위에서 돌고 범위 이탈값이 그대로 예측이 된다.
-    df = _derive_predictions(df, role_columns, task_type, decision_threshold, metadata or {}, logs)
+    df = _derive_predictions(
+        df, role_columns, task_type, decision_threshold, metadata or {}, logs,
+        selected_metric_ids,
+    )
     _coerce_latency(df, mapping_dict, logs)
     _check_prob_sum(df, task_type, prob_cols, logs)
     _extract_class_distribution(df, mapping_dict, task_type, logs)

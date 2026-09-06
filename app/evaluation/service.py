@@ -11,7 +11,7 @@
 - 사용처: app.evaluation.router.evaluate_dataset
 """
 from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
-from app.analysis.validator import find_column_conflicts
+from app.analysis.validator import find_column_conflicts, find_invalid_roles
 from app.evaluation.engine import evaluate as run_evaluation
 from app.evaluation.report import generate_report
 
@@ -27,6 +27,13 @@ class EvaluationError(Exception):
 
 def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
     """충돌검사 → 매핑변환 → engine.evaluate → 전처리오류 → 리포트 조립 → EvaluateResponse."""
+    # task_type 에 허용되지 않는 역할 차단 (SPEC §4, ISSUES.md A-10).
+    # confirm-mapping 을 건너뛰고 이 엔드포인트를 직접 호출하는 경로의 백스톱이다 —
+    # 프론트 드롭다운 제한은 UI 경로만 막는다.
+    invalid_roles = find_invalid_roles(request.column_mappings, request.task_type)
+    if invalid_roles:
+        raise EvaluationError("mapping_conflict", "; ".join(e.message for e in invalid_roles))
+
     # 컬럼 매핑 충돌 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단)
     conflicts = find_column_conflicts(request.column_mappings, request.task_type)
     if conflicts:

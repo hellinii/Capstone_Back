@@ -13,7 +13,7 @@ HTTP(파일 읽기·상태코드) 관심사는 라우터가 담당한다.
 from app.analysis.schemas import ExecutionSummaryItem, ValidateDataResponse, ValidationCheckItem
 from app.evaluation.schemas import EvaluateRequest
 from app.analysis import validation_checks as checks
-from app.evaluation.frame import build_evaluation_frame
+from app.evaluation.frame import build_evaluation_frame, required_columns
 from app.evaluation.preprocessor import collect_role_columns
 
 
@@ -96,7 +96,9 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     # 않게 한다(ISSUES.md D-08). 평가 전처리와 같은 헬퍼를 써서 두 계층이 같은 시야를 갖는다.
     role_columns = collect_role_columns(mappings)
     mapping_dict = {role: cols[0] for role, cols in role_columns.items()}
-    required_cols = list(set([m["column"] for m in mappings if m["role"] != "ignore"]))
+    # 순서를 보존한다 — `list(set(...))` 은 실행마다 순서가 달라져 누락 컬럼 안내
+    # 문구가 비결정적이었다(ISSUES.md D-17·H-07). 평가와 같은 헬퍼를 쓴다.
+    required_cols = required_columns(mappings)
 
     details: list[ValidationCheckItem] = []
 

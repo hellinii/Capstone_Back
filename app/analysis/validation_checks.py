@@ -13,12 +13,24 @@ import ast
 import pandas as pd
 
 from app.analysis.schemas import ValidationCheckItem
-from app.analysis.validator import find_column_conflicts
+from app.analysis.validator import find_column_conflicts, find_invalid_roles
 
 
 def check_column_conflicts(column_mappings, task_type) -> list[ValidationCheckItem]:
-    """3-0. 컬럼 단위 상호배타 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단)."""
+    """3-0. 역할 유효성 + 컬럼 단위 상호배타 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단).
+
+    역할 유효성(ISSUES.md A-10)을 먼저 본다. task_type 에 맞지 않는 역할로 매핑된 컬럼은
+    무시되는 것이 아니라 dropna 대상에 들어가 평가 표본을 조용히 깎는다.
+    """
     items: list[ValidationCheckItem] = []
+    for invalid in find_invalid_roles(column_mappings, task_type):
+        items.append(ValidationCheckItem(
+            name="Invalid role for task type",
+            result=invalid.message,
+            handling="Stop evaluation",
+            status="error",
+            group="common",
+        ))
     for conflict in find_column_conflicts(column_mappings, task_type):
         items.append(ValidationCheckItem(
             name="Same column for true/pred" if conflict.code == "SAME_COLUMN_TRUE_PRED"

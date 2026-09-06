@@ -83,6 +83,7 @@ def evaluate(
         df, pre_logs = preprocess_data(
             df, mappings, task_type,
             decision_threshold=decision_threshold, metadata=metadata,
+            selected_metric_ids=selected_metric_ids,
         )
         results["_metadata"] = pre_logs
     except Exception as e:
