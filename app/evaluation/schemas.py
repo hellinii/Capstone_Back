@@ -19,4 +19,12 @@ class EvaluateResponse(BaseModel):
     results:            dict[str, Any] = Field(description="지표별 연산 결과 수치 맵 (예: {'M1': 0.95})")
     warnings:           list[str]      = Field(default=[], description="전처리 단계에서 발생한 경고 로그 목록")
     dropped_rows:       int            = Field(default=0, description="제거된 결측치 행 수")
-    class_distribution: dict[str, int] = Field(default={}, description="클래스별 샘플 수")
+    n_samples:          int            = Field(default=0, description="실제로 지표를 계산한 행 수(결측 제거 후)")
+    class_distribution: dict[str, int] = Field(
+        default={},
+        description=(
+            "클래스별 등장 횟수. binary/multiclass 는 각 클래스의 샘플 수와 같지만, "
+            "multilabel 은 **레이블 등장 횟수**라 합계가 n_samples 를 넘는다. "
+            "표본 수가 필요하면 n_samples 를 쓸 것."
+        ),
+    )

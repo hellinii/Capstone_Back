@@ -175,4 +175,9 @@ def preprocess_data(df: pd.DataFrame, mappings: List[Dict[str, str]], task_type:
     _check_prob_sum(df, task_type, prob_cols, logs)
     _extract_class_distribution(df, mapping_dict, task_type, logs)
 
+    # 실제로 지표를 계산한 행 수. 프론트가 분포 합계로 추측하던 값을 서버가 확정한다
+    # (ISSUES.md B-02). 멀티레이블에서 class_distribution 은 '레이블 등장 횟수'라
+    # 합계가 행 수를 넘는다 — 두 값은 같은 것이 아니다.
+    logs["n_samples"] = len(df)
+
     return df, logs

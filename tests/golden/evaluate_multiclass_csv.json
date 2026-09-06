@@ -5,6 +5,7 @@
     "dog": 74
   },
   "dropped_rows": 0,
+  "n_samples": 200,
   "results": {
     "failed_metrics": {},
     "success_metrics": {

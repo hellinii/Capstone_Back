@@ -44,7 +44,13 @@ class ConfusionFact(BaseModel):
 
 
 class DistributionFact(BaseModel):
-    class_distribution: dict[str, int] = Field(default={}, description="클래스별 샘플 수")
+    class_distribution: dict[str, int] = Field(
+        default={},
+        description=(
+            "클래스별 등장 횟수. multilabel 은 레이블 등장 횟수라 합계가 표본 수를 넘는다 "
+            "— 표본 수는 FactSheet.n_samples 를 쓸 것(ISSUES.md B-02)."
+        ),
+    )
     imbalance_ratio:    float | None   = Field(default=None, description="불균형 비율")
 
     @field_validator("class_distribution")

@@ -55,6 +55,7 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
     metadata = eval_results.pop("_metadata", {})
     warnings = metadata.get("warnings", [])
     dropped_rows = metadata.get("dropped_rows", 0)
+    n_samples = metadata.get("n_samples", 0)
     class_distribution = {str(k): v for k, v in metadata.get("class_distribution", {}).items()}
 
     formatted_results = generate_report(eval_results)
@@ -63,5 +64,6 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
         results=formatted_results,
         warnings=warnings,
         dropped_rows=dropped_rows,
+        n_samples=n_samples,
         class_distribution=class_distribution,
     )
