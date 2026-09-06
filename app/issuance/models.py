@@ -4,7 +4,7 @@
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -54,9 +54,52 @@ class Report(Base):
         order_by="Issuance.id",
         cascade="all, delete-orphan",
     )
+    snapshots: Mapped[list["ReportSnapshot"]] = relationship(
+        back_populates="report",
+        order_by="ReportSnapshot.id",
+        cascade="all, delete-orphan",
+    )
 
     # 채번 충돌 이중 방어: 같은 연도에 동일 seq 두 번 커밋 불가.
     __table_args__ = (UniqueConstraint("year", "seq", name="uq_report_year_seq"),)
+
+
+class ReportSnapshot(Base):
+    """발급 시점의 성적서 원본 + 기관 스냅샷 — 발급 차수(version)마다 한 행.
+
+    왜 **신규 테이블**인가 — 기존 report/issuance 테이블에 컬럼을 추가하면 스키마
+    마이그레이션 도구가 필요하다. `Base.metadata.create_all` 은 기존 테이블에 컬럼을
+    추가하지 못하고(앱은 기동한 뒤 첫 SELECT 에서 죽는다), 이 프로젝트에는 Alembic 이
+    없다(ISSUES.md F-11). 반면 **신규 테이블은 create_all 이 정상 생성**하므로,
+    마이그레이션 인프라 없이 F-01 을 닫을 수 있다(실증 확인).
+
+    보관 형식은 dialect 중립을 위해 JSON 문자열(Text)이다. SQLite/PostgreSQL 어느
+    쪽에서도 같은 DDL 로 동작한다.
+
+    - content_json    : 발급 시 클라이언트가 보낸 성적서 원본(FinalReportData). 선택.
+    - content_hash    : content_json 의 SHA-256. 인쇄물 진위 대조용.
+    - org_snapshot_json: **발급 시점**의 수행기관 정보. 이것이 없으면 조회 시점의
+                        기관 행을 조인하게 되어, 기관명을 바꾸는 순간 이미 발급된
+                        모든 성적서의 기관 표기가 소급 변경된다(ISSUES.md G-01).
+    """
+    __tablename__ = "report_snapshot"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    report_id: Mapped[int] = mapped_column(
+        ForeignKey("report.id"), nullable=False, index=True
+    )
+    version: Mapped[str] = mapped_column(String, nullable=False)  # "v1.0" — Issuance.version 대응
+    content_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    org_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    report: Mapped["Report"] = relationship(back_populates="snapshots")
+
+    # 같은 성적서의 같은 차수에 스냅샷이 두 번 생기지 않도록.
+    __table_args__ = (
+        UniqueConstraint("report_id", "version", name="uq_snapshot_report_version"),
+    )
 
 
 class Issuance(Base):

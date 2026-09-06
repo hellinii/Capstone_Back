@@ -10,12 +10,14 @@ reconcile 로 실제 헤더에 정렬한 뒤 메타데이터를 붙여 AnalysisR
 """
 import json
 
+import openai
 import pandas as pd
 from openai import AsyncOpenAI
 
 from app.core.schemas import ColumnMapping, ColumnRole, TaskType, VALID_ROLES_BY_TASK
 from app.analysis.schemas import AnalysisResponse
-from app.analysis.prompt_builder import build_system_prompt, build_user_prompt
+from app.analysis.prompt_builder import build_system_prompt, build_user_prompt, MAX_PROMPT_COLUMNS
+from app.core.concurrency import llm_slot
 from app.analysis.reconcile import reconcile_llm_columns
 from app.analysis.metadata import extract_metadata
 
@@ -72,22 +74,31 @@ async def analyze_columns_with_llm(
         {"role": "system", "content": build_system_prompt(task_type)},
         {"role": "user",   "content": build_user_prompt(columns, sample_df)},
     ]
+    # 컬럼이 지나치게 많으면 동적 enum 자체가 증폭 수단이 된다 — enum 을 포기하고
+    # reconcile 의 컬럼명 정렬에 맡긴다(G-03).
+    schema_columns = columns if len(columns) <= MAX_PROMPT_COLUMNS else None
+
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=messages,
-            response_format=_build_response_schema(task_type, columns),
-            temperature=0,
-        )
-    except Exception:
-        # 동적 enum strict 스키마가 거부되면 enum 없는 스키마로 1회 재시도(D5a).
-        # (그래도 실패하면 라우터의 규칙 폴백으로 강등된다.)
-        response = await client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=messages,
-            response_format=_build_response_schema(task_type, None),
-            temperature=0,
-        )
+        async with llm_slot():
+            response = await client.chat.completions.create(
+                model="gpt-4.1-nano",
+                messages=messages,
+                response_format=_build_response_schema(task_type, schema_columns),
+                temperature=0,
+            )
+    except (openai.BadRequestError, openai.UnprocessableEntityError):
+        # 동적 enum strict 스키마가 **거부된 경우에만** enum 없는 스키마로 1회 재시도(D5a).
+        # 종전에는 blanket `except Exception` 이라 타임아웃·레이트리밋까지 재시도해
+        # SDK max_retries=2 와 곱해지면서 익명 요청 1건의 과금 호출이 최대 6회,
+        # 최악 벽시계가 약 270초였다(E-18). 그런 실패는 그대로 위로 던져
+        # analysis_service 의 규칙 폴백으로 즉시 강등시킨다.
+        async with llm_slot():
+            response = await client.chat.completions.create(
+                model="gpt-4.1-nano",
+                messages=messages,
+                response_format=_build_response_schema(task_type, None),
+                temperature=0,
+            )
 
     data = json.loads(response.choices[0].message.content)
 

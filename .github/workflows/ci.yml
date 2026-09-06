@@ -47,6 +47,16 @@ jobs:
           done
           [ "$ok" = "1" ] || { kill $UV_PID; echo "::error::/health 응답 실패"; exit 1; }
           curl -fsS http://localhost:8000/api/organization   # DB init+seed 왕복 스모크
+          # report/report_snapshot 테이블 왕복 스모크.
+          # organization 만 치면 report 계열 스키마 드리프트가 그대로 통과한다 —
+          # create_all 은 기존 테이블에 컬럼을 추가하지 못하므로(마이그레이션 도구 부재),
+          # 그 사고는 배포 후 첫 쿼리에서야 드러난다. 여기서 잡는다.
+          curl -fsS -X POST http://localhost:8000/api/reports/issue \
+            -H 'Content-Type: application/json' \
+            -d '{"run_id":"ci-smoke","model_name":"ci","content":{"smoke":true}}' > /tmp/issued.json
+          NO=$(python -c "import json;print(json.load(open('/tmp/issued.json'))['report_no'])")
+          curl -fsS "http://localhost:8000/api/reports/${NO}"          # 발급정보 조회
+          curl -fsS "http://localhost:8000/api/reports/${NO}/content"  # 성적서 원본 복원
           kill $UV_PID
 
   # 팀 main 푸시가 CI를 통과했을 때만: 포크(hellinii) main 미러 → Render Deploy Hook.

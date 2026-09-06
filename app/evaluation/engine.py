@@ -13,6 +13,7 @@ from typing import Dict, Any, List
 
 from .metrics import common, binary, multiclass, multilabel
 from .preprocessor import preprocess_data
+from .errors import metric_error
 from app.core.schemas import METRIC_REQUIREMENTS
 
 # Task Type 별로 허용되는 지표 정의 (core.schemas 의 단일 출처에서 동적 생성)
@@ -93,7 +94,7 @@ def evaluate(
     
     for metric_id in selected_metric_ids:
         if metric_id not in valid_metric_ids:
-            results[metric_id] = {"error": f"{task_type}에서는 지원하지 않는 지표입니다."}
+            results[metric_id] = metric_error(f"{task_type}에서는 지원하지 않는 지표입니다.")
             continue
             
         if metric_id in METRIC_REGISTRY:
@@ -103,9 +104,9 @@ def evaluate(
                 results[metric_id] = func(df, mapping_dict)
             except Exception as e:
                 # 에러가 나더라도 다른 지표 계산에 영향을 주지 않도록 격리
-                results[metric_id] = {"error": str(e)}
+                results[metric_id] = metric_error(str(e))
         else:
-            results[metric_id] = {"error": "구현되지 않은 지표입니다."}
+            results[metric_id] = metric_error("구현되지 않은 지표입니다.")
 
     # ── 차트용 곡선 좌표 (binary, 스칼라 AUROC/AUPRC 산출 성공 시 함께 제공) ──
     # 별도 지표가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다.

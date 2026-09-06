@@ -13,6 +13,7 @@ HTTP(파일 읽기·상태코드) 관심사는 라우터가 담당한다.
 from app.analysis.schemas import ExecutionSummaryItem, ValidateDataResponse, ValidationCheckItem
 from app.evaluation.schemas import EvaluateRequest
 from app.analysis import validation_checks as checks
+from app.evaluation.frame import build_evaluation_frame
 
 
 def _counts(details: list[ValidationCheckItem]) -> tuple[int, int]:
@@ -22,16 +23,17 @@ def _counts(details: list[ValidationCheckItem]) -> tuple[int, int]:
 
 
 def _build_missing_required_response(
-    task_type: str, selected_metric_ids: list[str], details: list[ValidationCheckItem], total_rows: int
+    task_type: str, selected_metric_ids: list[str], details: list[ValidationCheckItem], total_rows: int,
+    reason: str = "필수 컬럼 누락으로 평가 진행 불가",
 ) -> ValidateDataResponse:
-    """필수 컬럼 누락 시 조기 반환 응답(이하 검증 불가)."""
+    """이하 검증이 불가능할 때의 조기 반환 응답(필수 컬럼 누락 · 0행 등)."""
     error_count, warning_count = _counts(details)
     return ValidateDataResponse(
         task_type=task_type,
         selected_metric_ids=selected_metric_ids,
         execution_summary=[
             ExecutionSummaryItem(label="Total validated rows", value=f"{total_rows} rows", note="업로드된 전체 행 수"),
-            ExecutionSummaryItem(label="Validation result", value=f"Errors {error_count} / Warnings {warning_count}", note="필수 컬럼 누락으로 평가 진행 불가"),
+            ExecutionSummaryItem(label="Validation result", value=f"Errors {error_count} / Warnings {warning_count}", note=reason),
         ],
         validation_details=details,
         error_count=error_count,
@@ -98,21 +100,32 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     # 3-0. 컬럼 상호배타
     details += checks.check_column_conflicts(request.column_mappings, request.task_type)
 
+    # 3-0b. 데이터 행 수 (0행이면 이하 검증이 전부 무의미하므로 조기 반환)
+    details += checks.check_row_count(total_rows)
+    if total_rows == 0:
+        return _build_missing_required_response(
+            task_type, selected_metric_ids, details, total_rows,
+            reason="데이터 행이 없어 평가 진행 불가",
+        )
+
     # 3-1. 필수 컬럼 존재 (누락 시 조기 반환)
     missing_cols = [col for col in required_cols if col not in df.columns]
     details += checks.check_missing_required(missing_cols)
     if missing_cols:
         return _build_missing_required_response(task_type, selected_metric_ids, details, total_rows)
 
-    # 이하 검증은 필수 컬럼이 모두 존재하는 상태
-    df_work = df[required_cols].copy()
-    latency_col = mapping_dict.get("latency")
-
-    # 3-2. 결측치 → df_clean 확정
-    details += checks.check_missing_values(df_work, latency_col)
-    df_clean = df_work.dropna()
+    # 3-2. 결측치 → df_clean 확정.
+    # **평가와 같은 함수로 프레임을 만든다**(ISSUES.md D-01). 종전에는 여기서 따로
+    # `df_work.dropna()` 를 했는데, 그 기준은 latency 를 포함하고 멀티레이블 빈 셀을
+    # 결측으로 셌다. 평가는 latency 를 제외하고 빈 셀을 살리므로 두 표본 수가 어긋났고,
+    # 성적서 6절에 인쇄되는 수와 지표를 만든 수가 달랐다.
+    # 후속 검사(3-3~3-7)가 이 프레임을 그대로 받으므로 D-02(과다 축소된 데이터 위의
+    # 허위 경고)도 함께 해소된다.
+    df_clean, excluded_rows, _notes = build_evaluation_frame(
+        df, mappings, task_type, selected_metric_ids
+    )
     valid_rows = len(df_clean)
-    excluded_rows = total_rows - valid_rows
+    details += checks.check_missing_values(excluded_rows)
 
     # 3-3~3-5. 공통 검사
     details += checks.check_duplicate_id(df_clean, mapping_dict)

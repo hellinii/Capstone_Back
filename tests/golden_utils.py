@@ -46,14 +46,73 @@ def assert_golden(name: str, actual) -> None:
         return
 
     expected = json.loads(path.read_text(encoding="utf-8"))
-    if _canon(expected) != _canon(actual):
-        # 실패 시 어디가 다른지 빠르게 보이도록 요약
+    exp_canon, act_canon = _canon(expected), _canon(actual)
+    if exp_canon != act_canon:
         raise AssertionError(
             f"golden mismatch for '{name}'. "
             f"의도된 변경이면 `UPDATE_GOLDEN=1 pytest`로 갱신하세요.\n"
-            f"expected keys={_keys(expected)}\n  actual keys={_keys(actual)}"
+            + _format_diff(exp_canon, act_canon)
         )
 
 
-def _keys(o):
-    return sorted(o.keys()) if isinstance(o, dict) else type(o).__name__
+# ── 진단 ──────────────────────────────────────────────────────────────────────
+# ISSUES.md H-02 — 이전 구현은 최상위 키 목록만 출력해서, 중첩된 값 하나가 바뀐 경우
+# expected/actual 두 줄이 글자 그대로 같았다(A-08 패치 시 실제로 그랬다). 골든이 흔들리는
+# 변경(A-08·D-01·D-06·C-03)에서 회귀 신호가 판독 불가능했으므로 경로 단위 diff 로 교체한다.
+
+_MAX_DIFFS = 25
+_MISSING = object()  # "이쪽에는 키/원소가 없음" 을 None 과 구분하기 위한 sentinel
+
+
+def _diff_paths(expected, actual, path="", out=None):
+    """expected/actual 의 차이를 (경로, 기대값, 실제값) 목록으로 재귀 수집.
+
+    비교는 호출부에서 _canon 을 거친 값에 대해 수행한다(6자리 반올림 허용 오차 유지).
+    """
+    if out is None:
+        out = []
+    if len(out) >= _MAX_DIFFS:
+        return out
+
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        for key in sorted(set(expected) | set(actual)):
+            _diff_paths(
+                expected.get(key, _MISSING),
+                actual.get(key, _MISSING),
+                f"{path}.{key}" if path else str(key),
+                out,
+            )
+        return out
+
+    if isinstance(expected, list) and isinstance(actual, list):
+        if len(expected) != len(actual):
+            out.append((f"{path} (len)", len(expected), len(actual)))
+        for i in range(max(len(expected), len(actual))):
+            _diff_paths(
+                expected[i] if i < len(expected) else _MISSING,
+                actual[i] if i < len(actual) else _MISSING,
+                f"{path}[{i}]",
+                out,
+            )
+        return out
+
+    if expected != actual:
+        out.append((path or "$", expected, actual))
+    return out
+
+
+def _show(v):
+    if v is _MISSING:
+        return "<없음>"
+    return json.dumps(v, ensure_ascii=False, default=str)
+
+
+def _format_diff(expected, actual) -> str:
+    diffs = _diff_paths(expected, actual)
+    if not diffs:  # 최상위 타입 자체가 다른 경우 등
+        return f"expected={_show(expected)}\n  actual={_show(actual)}"
+
+    lines = [f"차이 {len(diffs)}건" + (f" (앞 {_MAX_DIFFS}건만 표시)" if len(diffs) >= _MAX_DIFFS else "") + ":"]
+    for p, exp, act in diffs:
+        lines.append(f"  {p}: expected={_show(exp)}  actual={_show(act)}")
+    return "\n".join(lines)
