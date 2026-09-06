@@ -15,6 +15,7 @@ if str(_ROOT) not in sys.path:
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -76,6 +77,54 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 순수 JSON 본문 상한(G-03). 필드 단위 상한만으로는 부족하다 — 상한 위반을 판정하려면
+# pydantic 이 본문을 **전부 파싱해야** 하고, 그 파싱이 이벤트 루프에서 일어난다.
+# 실측: 18.8 MB JSON 이 422 로 거절되면서도 /health 를 3,179 ms 밀어냈다.
+# 정상 서술 요청은 클래스 256개 상한에서도 1 MB 를 넘지 않는다.
+MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_json_body_size(request: Request, call_next):
+    """선언된 Content-Length 가 상한을 넘는 JSON 요청을 **파싱 전에** 끊는다.
+
+    멀티파트 업로드는 대상이 아니다 — 라우터의 공용 가드(G-04a)가 청크 단위로 읽으며
+    이미 처리 전에 막는다. 여기서 또 재면 상한이 두 벌이 되고, 아래 '본문 비우기'가
+    20 MB 파일에 대해서도 돌아 이득 없이 비용만 든다.
+
+    응답 전에 본문을 읽어 버린다. 읽지 않고 닫으면 클라이언트가 전송 도중
+    broken pipe 를 맞아 413 대신 네트워크 오류를 보게 된다(실측 확인). 비용이 컸던
+    것은 읽기가 아니라 파싱·검증이므로, 읽고 버려도 방어 효과는 그대로다.
+
+    Content-Length 가 없거나(chunked) 거짓이면 판단하지 않는다 — 그 경로는 스키마의
+    필드 상한이 계속 막는다. 이것은 앞단 방어일 뿐이다.
+    """
+    declared = request.headers.get("content-length")
+    content_type = request.headers.get("content-type", "")
+    if (
+        declared
+        and declared.isdigit()
+        and content_type.startswith("application/json")
+        and int(declared) > MAX_JSON_BODY_BYTES
+    ):
+        logger.warning(
+            "JSON 본문 크기 상한 초과로 거절 (path=%s, declared=%s, limit=%s)",
+            request.url.path, declared, MAX_JSON_BODY_BYTES,
+        )
+        async for _ in request.stream():
+            pass  # 파싱하지 않고 흘려보낸다
+        return JSONResponse(
+            status_code=413,
+            content={
+                "detail": f"요청 본문이 너무 큽니다. JSON 은 최대 "
+                          f"{MAX_JSON_BODY_BYTES // (1024 * 1024)} MB 입니다."
+            },
+        )
+    return await call_next(request)
+
+
+# ⚠️ CORS 는 **이 아래에서** 등록해야 한다. Starlette 은 나중에 추가된 미들웨어를 바깥에
+#    두므로, 위 413 응답이 CORS 헤더를 달고 나가려면 CORS 가 가장 바깥이어야 한다.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

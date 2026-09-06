@@ -493,10 +493,20 @@ def test_issue_without_content_still_succeeds(client):
 
 
 def test_content_over_size_limit_is_rejected(client):
-    """[F-01][G-03] 무인증 POST 로 임의 크기 JSON 이 DB 에 영구 저장되는 것을 막는다."""
-    huge = {"blob": "x" * (2 * 1024 * 1024)}  # 2MB
-    r = client.post("/api/reports/issue", json={"run_id": "run-huge", "content": huge})
+    """[F-01][G-03] 무인증 POST 로 임의 크기 JSON 이 DB 에 영구 저장되는 것을 막는다.
+
+    2026-09-06 갱신 — 이제 상한이 두 겹이다. 본문 크기 미들웨어(2 MiB, G-03)가 앞에
+    있고 content 필드 상한(1 MiB, F-01)이 뒤에 있다. 두 경로를 모두 고정한다.
+    """
+    # ① 필드 상한 경로 — 본문 상한 아래이지만 content 상한을 넘는다 → 422
+    over_field = {"blob": "x" * (int(1.5 * 1024 * 1024))}
+    r = client.post("/api/reports/issue", json={"run_id": "run-huge", "content": over_field})
     assert r.status_code == 422, r.text
+
+    # ② 본문 상한 경로 — 파싱에 들어가기도 전에 끊긴다 → 413
+    over_body = {"blob": "x" * (3 * 1024 * 1024)}
+    r = client.post("/api/reports/issue", json={"run_id": "run-huge2", "content": over_body})
+    assert r.status_code == 413, r.text
 
 
 def test_content_unknown_report_no_is_404(client):
