@@ -14,6 +14,7 @@ from app.analysis.schemas import ExecutionSummaryItem, ValidateDataResponse, Val
 from app.evaluation.schemas import EvaluateRequest
 from app.analysis import validation_checks as checks
 from app.evaluation.frame import build_evaluation_frame
+from app.evaluation.preprocessor import collect_role_columns
 
 
 def _counts(details: list[ValidationCheckItem]) -> tuple[int, int]:
@@ -91,8 +92,10 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     selected_metric_ids = request.selected_metric_ids
 
     total_rows = len(df)
-    mapping_dict = {m["role"]: m["column"] for m in mappings}
-    prob_cols = [m["column"] for m in mappings if m["role"] == "prob_per_class"]
+    # 역할 → 컬럼 **목록**. 확률 역할처럼 여러 컬럼을 갖는 역할이 마지막 하나로 뭉개지지
+    # 않게 한다(ISSUES.md D-08). 평가 전처리와 같은 헬퍼를 써서 두 계층이 같은 시야를 갖는다.
+    role_columns = collect_role_columns(mappings)
+    mapping_dict = {role: cols[0] for role, cols in role_columns.items()}
     required_cols = list(set([m["column"] for m in mappings if m["role"] != "ignore"]))
 
     details: list[ValidationCheckItem] = []
@@ -135,7 +138,7 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     # 3-6. task_type 별 추가 검사 (레지스트리 디스패치)
     task_check = checks.TASK_CHECKS.get(task_type)
     if task_check:
-        details += task_check(df_clean, mapping_dict, prob_cols)
+        details += task_check(df_clean, mapping_dict, role_columns)
 
     # 3-7. latency
     details += checks.check_latency(df_clean, mapping_dict)

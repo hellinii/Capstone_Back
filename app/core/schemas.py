@@ -56,20 +56,49 @@ VALID_ROLES_BY_TASK: dict[TaskType, list[ColumnRole]] = {
         ColumnRole.sample_id, ColumnRole.y_true, ColumnRole.y_pred,
         ColumnRole.score_positive, ColumnRole.latency, ColumnRole.ignore,
     ],
-    # multiclass/multilabel 은 확률 역할(prob_per_class, score_per_label)을 받지 않는다.
-    # 두 task 의 지표 중 확률을 읽는 것이 하나도 없어(METRIC_REQUIREMENTS 참조) 값을 주지
-    # 못하면서, 매핑되면 해당 컬럼의 결측이 평가 표본을 깎고 범위 이탈은 평가를 중단시킨다.
-    # 확률만으로 예측을 파생하는 경로(argmax/threshold)가 구현되거나 순위 기반 지표가
-    # 추가되면 그때 다시 넣는다. binary 의 score_positive 는 M9/M10/M19 가 실제로 사용한다.
+    # 확률 역할은 세 task 모두에서 정식 입력이다(2026-09-07 결정 1).
+    # 하드 예측이 없으면 확률에서 예측을 파생한다 — binary 는 임계값, multiclass 는 argmax,
+    # multilabel 은 레이블별 임계값(PREDICTION_ROLES_BY_TASK 참조). 종전에는 "확률을 읽는
+    # 지표가 없다"는 이유로 multiclass/multilabel 에서 뺐으나, 그 판단은 확률을 **예측의
+    # 대체 입력**으로 보지 않고 지표의 직접 입력으로만 본 데서 나왔다.
     TaskType.multiclass: [
         ColumnRole.sample_id, ColumnRole.y_true, ColumnRole.y_pred,
-        ColumnRole.latency, ColumnRole.ignore,
+        ColumnRole.prob_per_class, ColumnRole.latency, ColumnRole.ignore,
     ],
     TaskType.multilabel: [
         ColumnRole.sample_id, ColumnRole.true_labels, ColumnRole.pred_labels,
-        ColumnRole.latency, ColumnRole.ignore,
+        ColumnRole.score_per_label, ColumnRole.latency, ColumnRole.ignore,
     ],
 }
+
+
+# task 별 "예측 역할"과 그것을 대신할 수 있는 확률 역할 — (주 역할, 대체 역할들).
+#
+# **왜 별도 표인가.** METRIC_REQUIREMENTS 의 값은 set 이라 AND 만 표현한다. SPEC §1~§3 이
+# 규정한 "y_pred **또는** 확률"이라는 택일을 그 표에 넣으려면 자료구조를 바꿔야 하고,
+# 그러면 프론트 계약 테스트의 고정 사본까지 재설계된다. 대신 택일을 이 표 하나로 분리해
+# "예측 역할은 주 역할 또는 대체 역할 중 하나로 충족된다"는 규칙을 단일 출처로 둔다.
+# validator(가용 지표 판정)와 preprocessor(파생)가 함께 읽는다.
+#
+# 대체 역할이 매핑되면 preprocess 단계에서 주 역할 컬럼을 **파생**해 붙인다. 파생값은
+# 모델의 실제 출력이 아니므로 파생 사실과 임계값을 응답에 실어 성적서가 인쇄한다(SPEC §0).
+PREDICTION_ROLES_BY_TASK: dict[TaskType, tuple[ColumnRole, tuple[ColumnRole, ...]]] = {
+    TaskType.binary:     (ColumnRole.y_pred,      (ColumnRole.score_positive,)),
+    TaskType.multiclass: (ColumnRole.y_pred,      (ColumnRole.prob_per_class,)),
+    TaskType.multilabel: (ColumnRole.pred_labels, (ColumnRole.score_per_label,)),
+}
+
+# task 별 "정답 역할" — 어떤 지표를 고르든 항상 필수.
+TRUTH_ROLE_BY_TASK: dict[TaskType, ColumnRole] = {
+    TaskType.binary:     ColumnRole.y_true,
+    TaskType.multiclass: ColumnRole.y_true,
+    TaskType.multilabel: ColumnRole.true_labels,
+}
+
+# 한 역할에 여러 컬럼이 매핑될 수 있는 역할(확률 컬럼은 클래스·레이블마다 하나씩).
+MULTI_COLUMN_ROLES: frozenset[ColumnRole] = frozenset({
+    ColumnRole.ignore, ColumnRole.prob_per_class, ColumnRole.score_per_label,
+})
 
 
 METRIC_REQUIREMENTS: dict[TaskType, dict[str, set[ColumnRole]]] = {

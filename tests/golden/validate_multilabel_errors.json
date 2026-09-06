@@ -1,5 +1,5 @@
 {
-  "error_count": 0,
+  "error_count": 1,
   "execution_summary": [
     {
       "label": "Total validated rows",
@@ -24,7 +24,7 @@
     {
       "label": "Validation result",
       "note": "아래 상세 테이블 참조",
-      "value": "Errors 0 / Warnings 3"
+      "value": "Errors 1 / Warnings 3"
     }
   ],
   "selected_metric_ids": [
@@ -84,6 +84,13 @@
       "name": "Excluded samples",
       "result": "1 rows",
       "status": "warning"
+    },
+    {
+      "group": "multilabel",
+      "handling": "Stop evaluation — values must be in [0.0, 1.0]",
+      "name": "Score range error",
+      "result": "2 rows out of [0, 1] (score_news, score_sports)",
+      "status": "error"
     },
     {
       "group": "multilabel",

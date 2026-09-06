@@ -90,7 +90,7 @@
     },
     {
       "group": "binary",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Stop evaluation — values must be in [0.0, 1.0]",
       "name": "Score range error",
       "result": "3 rows out of [0, 1]",
       "status": "error"

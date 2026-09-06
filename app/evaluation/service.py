@@ -44,6 +44,8 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
             selected_metric_ids=request.selected_metric_ids,
             positive_class=positive_class,
             beta=beta,
+            decision_threshold=request.decision_threshold,
+            metadata=request.metadata.model_dump(),
         )
     except Exception as e:
         raise EvaluationError("compute_error", f"평가 연산 실행 오류: {str(e)}")

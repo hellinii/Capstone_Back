@@ -174,13 +174,63 @@ def check_excluded_samples(excluded_rows: int) -> list[ValidationCheckItem]:
     )]
 
 
-def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list[str]) -> list[ValidationCheckItem]:
+def _check_score_range(
+    df_clean: pd.DataFrame, cols: list[str], group: str, role_name: str
+) -> list[ValidationCheckItem]:
+    """확률·점수 컬럼이 [0,1] 안에 있는지 — 매핑된 **전** 컬럼을 검사한다.
+
+    종전 multilabel 검증에는 이 검사가 아예 없었다. 그래서 `/api/validate-data` 는
+    errors 0 으로 통과시키고 `/api/evaluate` 만 400 을 냈다 — 프론트 게이트는
+    error_count 만 보므로 사용자를 6단계까지 보낸 뒤 성적서 직전에 막았다(ISSUES.md D-09).
+    검사 대상을 역할당 1컬럼이 아니라 전 컬럼으로 두는 것은 D-08 과 같은 이유다.
+    """
+    if not cols:
+        return [ValidationCheckItem(
+            name="Score range error",
+            result=f"N/A (no {role_name} mapped)",
+            handling="All score values within [0.0, 1.0]",
+            status="pass",
+            group=group,
+        )]
+    present = [c for c in cols if c in df_clean.columns]
+    if not present:
+        return []
+    try:
+        values = df_clean[present].astype(float)
+    except (ValueError, TypeError):
+        return [ValidationCheckItem(
+            name="Score range error",
+            result=f"Non-numeric values in {role_name} columns",
+            handling="Stop evaluation",
+            status="error",
+            group=group,
+        )]
+    out_of_range = int(((values < 0.0) | (values > 1.0)).any(axis=1).sum())
+    if out_of_range > 0:
+        offenders = [c for c in present if ((values[c] < 0.0) | (values[c] > 1.0)).any()]
+        return [ValidationCheckItem(
+            name="Score range error",
+            result=f"{out_of_range} rows out of [0, 1] ({', '.join(sorted(offenders))})",
+            handling="Stop evaluation — values must be in [0.0, 1.0]",
+            status="error",
+            group=group,
+        )]
+    return [ValidationCheckItem(
+        name="Score range error",
+        result="0 rows",
+        handling="All score values within [0.0, 1.0]",
+        status="pass",
+        group=group,
+    )]
+
+
+def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: dict[str, list[str]]) -> list[ValidationCheckItem]:
     """3-6(binary). score_positive 범위 + 이진 클래스 수 검사."""
     items: list[ValidationCheckItem] = []
     y_true_col = mapping_dict.get("y_true") or mapping_dict.get("true_class")
 
     # score_positive 범위 검사
-    score_col = mapping_dict.get("score_positive")
+    score_col = (role_columns.get("score_positive") or [None])[0]
     if score_col and score_col in df_clean.columns:
         try:
             scores = df_clean[score_col].astype(float)
@@ -189,7 +239,7 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list[str
                 items.append(ValidationCheckItem(
                     name="Score range error",
                     result=f"{out_of_range} rows out of [0, 1]",
-                    handling="Exclude affected rows from evaluation",
+                    handling="Stop evaluation — values must be in [0.0, 1.0]",
                     status="error",
                     group="binary",
                 ))
@@ -197,7 +247,7 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list[str
                 items.append(ValidationCheckItem(
                     name="Score range error",
                     result="0 rows",
-                    handling="Exclude affected rows from evaluation",
+                    handling="All score values within [0.0, 1.0]",
                     status="pass",
                     group="binary",
                 ))
@@ -213,7 +263,7 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list[str
         items.append(ValidationCheckItem(
             name="Score range error",
             result="N/A (no score_positive mapped)",
-            handling="Exclude affected rows from evaluation",
+            handling="All score values within [0.0, 1.0]",
             status="pass",
             group="binary",
         ))
@@ -240,9 +290,10 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list[str
     return items
 
 
-def check_multiclass(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list[str]) -> list[ValidationCheckItem]:
+def check_multiclass(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: dict[str, list[str]]) -> list[ValidationCheckItem]:
     """3-6(multiclass). 확률 범위/합/argmax 불일치 + 미지 클래스 검사."""
     items: list[ValidationCheckItem] = []
+    prob_cols = role_columns.get("prob_per_class", [])
     y_pred_col = mapping_dict.get("y_pred") or mapping_dict.get("predicted_class")
     y_true_col = mapping_dict.get("y_true") or mapping_dict.get("true_class")
 
@@ -383,9 +434,10 @@ def check_multiclass(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list
     return items
 
 
-def check_multilabel(df_clean: pd.DataFrame, mapping_dict: dict, prob_cols: list[str]) -> list[ValidationCheckItem]:
-    """3-6(multilabel). 라벨 형식 검사(앞 100행 샘플)."""
+def check_multilabel(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: dict[str, list[str]]) -> list[ValidationCheckItem]:
+    """3-6(multilabel). 점수 범위 + 라벨 형식 검사(앞 100행 샘플)."""
     items: list[ValidationCheckItem] = []
+    items += _check_score_range(df_clean, role_columns.get("score_per_label", []), "multilabel", "score_per_label")
     true_labels_col = mapping_dict.get("true_labels")
 
     if true_labels_col and true_labels_col in df_clean.columns:

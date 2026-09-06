@@ -26,31 +26,38 @@ task_type별 필수/선택 역할 규칙을 검사하고,
     (score_per_label 을 요구하는 지표는 없다 — 확률 범위 검증용 선택 컬럼)
 """
 
-from app.core.schemas import ColumnMapping, ColumnRole, METRIC_REQUIREMENTS, TaskType
+from app.core.schemas import (
+    ColumnMapping,
+    ColumnRole,
+    METRIC_REQUIREMENTS,
+    MULTI_COLUMN_ROLES,
+    PREDICTION_ROLES_BY_TASK,
+    TRUTH_ROLE_BY_TASK,
+    TaskType,
+)
 from app.analysis.schemas import ConfirmMappingRequest, ConfirmMappingResponse, MappingValidationError, MappingValidationWarning
 
 
 # ── 지표 가용성 규칙 정의 ────────────────────────────────────────────────────────
-# METRIC_REQUIREMENTS(각 지표 계산에 필요한 role 집합)는 evaluator.engine 과 공유하므로
-# app.core.schemas 로 이동했다. 여기서는 import 해서 사용한다.
+# METRIC_REQUIREMENTS(각 지표 계산에 필요한 role 집합)와 예측 역할의 대체 규칙
+# (PREDICTION_ROLES_BY_TASK)은 evaluator.engine·preprocessor 와 공유하므로
+# app.core.schemas 가 단일 출처다. 여기서는 import 해서 사용한다.
 
-# task_type별 "정답" 역할 — 어떤 지표를 고르든 항상 필수 (없으면 is_valid=False)
-_TRUTH_ROLE: dict[TaskType, ColumnRole] = {
-    TaskType.binary:     ColumnRole.y_true,
-    TaskType.multiclass: ColumnRole.y_true,
-    TaskType.multilabel: ColumnRole.true_labels,
-}
+_TRUTH_ROLE = TRUTH_ROLE_BY_TASK
 
-# task_type별 "예측" 역할 후보 — 하나라도 매핑돼 있으면 충족.
+# task_type별 "예측" 역할 후보 — 주 역할 또는 그것을 파생할 수 있는 확률 역할.
 # 단, 선택한 지표가 모두 예측 역할을 쓰지 않으면(예: M23 만 선택) 이 요구는 면제된다.
 # 면제 여부는 METRIC_REQUIREMENTS 에서 파생시키므로 특정 지표 ID 를 하드코딩하지 않는다.
 _PRED_ROLES: dict[TaskType, list[ColumnRole]] = {
-    TaskType.binary:     [ColumnRole.y_pred, ColumnRole.score_positive],
-    TaskType.multiclass: [ColumnRole.y_pred],
-    TaskType.multilabel: [ColumnRole.pred_labels],
+    task: [primary, *alternatives]
+    for task, (primary, alternatives) in PREDICTION_ROLES_BY_TASK.items()
 }
 
 # task_type별 경고 조건: (없을 때 경고할 role, 경고 코드, 메시지)
+#
+# 문구는 **사실이어야 한다.** 종전 multiclass 의 MISSING_PROB_PER_CLASS 는 "확률 기반 세부
+# 지표를 계산할 수 없다"고 했으나 multiclass 에는 확률을 읽는 지표가 하나도 없어 정상 매핑
+# 에서도 항상 뜨는 거짓 경고였다(ISSUES.md A-11). 확률의 실제 쓸모는 '예측의 대체 입력'이다.
 _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
     TaskType.binary: [
         (
@@ -61,19 +68,26 @@ _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
         (
             ColumnRole.y_pred,
             "MISSING_Y_PRED",
-            "y_pred가 없어 M1~M8, M20~M22 (예측 기반 지표)를 계산할 수 없습니다.",
+            "y_pred가 없어 score_positive와 결정 임계값으로 예측을 파생합니다. "
+            "파생값은 모델의 실제 출력이 아니며 성적서에 그 사실이 기재됩니다.",
         ),
     ],
     TaskType.multiclass: [
         (
-            ColumnRole.prob_per_class,
-            "MISSING_PROB_PER_CLASS",
-            "prob_per_class가 없어 클래스별 확률 기반 세부 지표를 계산할 수 없습니다.",
+            ColumnRole.y_pred,
+            "MISSING_Y_PRED",
+            "y_pred가 없어 prob_per_class의 argmax로 예측을 파생합니다. "
+            "파생값은 모델의 실제 출력이 아니며 성적서에 그 사실이 기재됩니다.",
         ),
     ],
-    # multilabel: score_per_label 을 요구하는 지표가 없다(M18 도 true_labels/pred_labels 기반).
-    # 확률 범위 검증(preprocessor._validate_score_columns)에만 쓰이는 선택 컬럼이라 경고하지 않는다.
-    TaskType.multilabel: [],
+    TaskType.multilabel: [
+        (
+            ColumnRole.pred_labels,
+            "MISSING_PRED_LABELS",
+            "pred_labels가 없어 score_per_label과 레이블별 결정 임계값으로 예측을 파생합니다. "
+            "파생값은 모델의 실제 출력이 아니며 성적서에 그 사실이 기재됩니다.",
+        ),
+    ],
 }
 
 
@@ -148,12 +162,8 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     # 현재 매핑에서 어떤 role들이 사용됐는지 추출
     mapped_roles = {m.role for m in mappings}
 
-    # ── 1. 역할 중복 체크 (ignore/score_per_class처럼 여러 개 허용되는 것 제외) ──
-    _MULTI_ALLOWED = {
-        ColumnRole.ignore,
-        ColumnRole.prob_per_class,
-        ColumnRole.score_per_label,
-    }
+    # ── 1. 역할 중복 체크 (ignore/확률 역할처럼 여러 개 허용되는 것 제외) ──
+    _MULTI_ALLOWED = MULTI_COLUMN_ROLES
     role_counts: dict[ColumnRole, int] = {}
     for m in mappings:
         role_counts[m.role] = role_counts.get(m.role, 0) + 1
@@ -211,11 +221,13 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     unavailable_metric_ids: list[str] = []
 
     for metric_id, required_roles in sorted(metric_requirements.items(), key=lambda x: _metric_sort_key(x[0])):
-        if required_roles.issubset(mapped_roles):
+        missing = _unsatisfied_roles(required_roles, mapped_roles, task_type)
+        if not missing:
             available_metric_ids.append(metric_id)
         else:
-            missing = required_roles - mapped_roles
-            missing_str = ", ".join(r.value for r in missing)
+            # 순서를 정렬로 고정한다 — str-Enum set 의 iteration 순서는 PYTHONHASHSEED 에
+            # 따라 달라져 같은 입력이 실행마다 다른 문구를 만들었다(ISSUES.md H-07).
+            missing_str = ", ".join(sorted(r.value for r in missing))
             unavailable_metric_ids.append(f"{metric_id} (누락: {missing_str})")
             
             # 🔥 [변경점] 사용자가 계산하겠다고 명시적으로 선택한 지표인데, 필요 역할이 매핑되지 않았다면 Error 처리
@@ -235,6 +247,27 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
         unavailable_metric_ids=unavailable_metric_ids,
         confirmed_mappings=mappings,
     )
+
+
+def _unsatisfied_roles(
+    required_roles: set[ColumnRole], mapped_roles: set[ColumnRole], task_type: TaskType
+) -> set[ColumnRole]:
+    """요구 역할 중 매핑으로 충족되지 않은 것.
+
+    예측 역할(y_pred/pred_labels)은 **확률 역할로도 충족된다** — 하드 예측이 없으면
+    전처리가 확률에서 파생하기 때문이다(PREDICTION_ROLES_BY_TASK, ISSUES.md A-01·A-02).
+    종전에는 단순 issubset 이라 확률만 제출한 사용자가 `MISSING_METRIC_REQUIREMENT` 로
+    막혔다 — SPEC §5 가 '계산 가능'이라고 적은 조합인데도.
+    """
+    primary, alternatives = PREDICTION_ROLES_BY_TASK[task_type]
+    unsatisfied = set()
+    for role in required_roles:
+        if role in mapped_roles:
+            continue
+        if role == primary and any(alt in mapped_roles for alt in alternatives):
+            continue
+        unsatisfied.add(role)
+    return unsatisfied
 
 
 def _metric_sort_key(metric_id: str) -> int:

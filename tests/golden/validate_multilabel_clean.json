@@ -87,6 +87,13 @@
     },
     {
       "group": "multilabel",
+      "handling": "All score values within [0.0, 1.0]",
+      "name": "Score range error",
+      "result": "0 rows",
+      "status": "pass"
+    },
+    {
+      "group": "multilabel",
       "handling": "Exclude affected rows from evaluation",
       "name": "Label format mismatch",
       "result": "None",
