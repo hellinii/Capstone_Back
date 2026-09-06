@@ -25,6 +25,7 @@
 """
 import asyncio
 import weakref
+from contextlib import asynccontextmanager
 from typing import Any, Callable, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
@@ -35,21 +36,29 @@ T = TypeVar("T")
 # 512 MB 한도에서 DataFrame 이 여러 벌 상주해도 견딜 수 있는 값으로 잡았다.
 MAX_CONCURRENT_CPU_TASKS = 2
 
+# 동시에 진행할 수 있는 외부 LLM 호출 수(G-03). 워커 수를 알 수 없는 환경에서
+# 프로세스 로컬 세마포어는 **과허용 방향으로만 틀리는** 유일한 총량 장치다 —
+# 워커가 N개면 실효 상한이 N배로 느슨해질 뿐 정상 사용자를 잘못 막지 않는다.
+MAX_CONCURRENT_LLM_CALLS = 4
+
 # asyncio.Semaphore 는 처음 대기가 발생할 때 실행 중인 이벤트 루프에 묶인다. 테스트는
 # TestClient 마다 새 루프를 만들 수 있으므로 모듈 전역에 하나를 두면 'bound to a
 # different event loop' 로 깨진다. 루프별로 하나씩 만들되 루프가 사라지면 함께
 # 수거되도록 WeakKeyDictionary 를 쓴다. 프로덕션에는 루프가 하나뿐이다.
-_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+_cpu_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+    weakref.WeakKeyDictionary()
+)
+_llm_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
     weakref.WeakKeyDictionary()
 )
 
 
-def _get_semaphore() -> asyncio.Semaphore:
+def _get_semaphore(registry, limit: int) -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
-    sem = _semaphores.get(loop)
+    sem = registry.get(loop)
     if sem is None:
-        sem = asyncio.Semaphore(MAX_CONCURRENT_CPU_TASKS)
-        _semaphores[loop] = sem
+        sem = asyncio.Semaphore(limit)
+        registry[loop] = sem
     return sem
 
 
@@ -58,5 +67,16 @@ async def run_cpu_bound(func: Callable[..., T], /, *args: Any, **kwargs: Any) ->
 
     예외는 그대로 전파되므로 호출부의 기존 try/except 구조를 바꾸지 않는다.
     """
-    async with _get_semaphore():
+    async with _get_semaphore(_cpu_semaphores, MAX_CONCURRENT_CPU_TASKS):
         return await run_in_threadpool(func, *args, **kwargs)
+
+
+@asynccontextmanager
+async def llm_slot():
+    """외부 LLM 호출 하나를 점유한다. 무인증 과금 경로의 총량 장치(G-03).
+
+    거절이 아니라 대기다 — 정상 사용자를 잘못 막지 않는 것이 우선이고, 남용은
+    입력 상한·재시도 축소가 함께 맡는다.
+    """
+    async with _get_semaphore(_llm_semaphores, MAX_CONCURRENT_LLM_CALLS):
+        yield

@@ -18,7 +18,7 @@ from app.narrative.fallback import build_fallback_narrative
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import build_number_whitelist, verify_grounding, _collect_grounding_texts
-from app.core.concurrency import run_cpu_bound
+from app.core.concurrency import llm_slot, run_cpu_bound
 
 _MODEL = "gpt-4.1-nano"
 
@@ -58,16 +58,17 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
 
     # 2. LLM 호출
     try:
-        response = await client.chat.completions.create(
-            model=_MODEL,
-            messages=[
-                {"role": "system", "content": build_system_prompt(req.report_purpose.value)},
-                {"role": "user", "content": build_user_prompt(fs.model_dump(), benchmark_refs, derived)},
-            ],
-            response_format=build_response_schema(),
-            temperature=0,
-            seed=4213,
-        )
+        async with llm_slot():
+            response = await client.chat.completions.create(
+                model=_MODEL,
+                messages=[
+                    {"role": "system", "content": build_system_prompt(req.report_purpose.value)},
+                    {"role": "user", "content": build_user_prompt(fs.model_dump(), benchmark_refs, derived)},
+                ],
+                response_format=build_response_schema(),
+                temperature=0,
+                seed=4213,
+            )
         data = json.loads(response.choices[0].message.content)
     except Exception:
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="api_error")
