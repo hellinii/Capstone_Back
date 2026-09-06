@@ -9,6 +9,8 @@ HTTP 상태코드로 매핑한다. (prefix=/api, tags=["Evaluation"], POST /api/
   app.evaluation.service(run_evaluation_pipeline, EvaluationError)
 - 사용처: app.main(evaluate_router로 등록)
 """
+import logging
+
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
 from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
@@ -16,6 +18,8 @@ from app.core.parsing import parse_file_content
 from app.core.upload import read_upload_guarded
 from app.core.concurrency import run_cpu_bound
 from app.evaluation.service import run_evaluation_pipeline, EvaluationError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Evaluation"])
 
@@ -40,6 +44,7 @@ async def evaluate_dataset(
     try:
         _, df = await run_cpu_bound(parse_file_content, file_content, filename)
     except Exception as e:
+        logger.warning("evaluate 파일 파싱 실패 (filename=%s): %r", filename, e)
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {str(e)}")
 
     # 3. 요청 데이터 파싱 및 검증 (EvaluateRequest)
@@ -55,5 +60,6 @@ async def evaluate_dataset(
     try:
         return await run_cpu_bound(run_evaluation_pipeline, df, request_data)
     except EvaluationError as e:
+        logger.warning("평가 파이프라인 실패 (code=%s): %s", e.code, e.message)
         status_code = 500 if e.code == "compute_error" else 400
         raise HTTPException(status_code=status_code, detail=e.message)

@@ -9,6 +9,8 @@
   app.core.parsing(parse_file_content), app.analysis.validation_service(validate_dataset)
 - 사용처: app.main(validate_router로 등록)
 """
+import logging
+
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 
 from app.analysis.schemas import ValidateDataResponse
@@ -17,6 +19,8 @@ from app.core.parsing import parse_file_content
 from app.core.upload import read_upload_guarded
 from app.core.concurrency import run_cpu_bound
 from app.analysis.validation_service import validate_dataset
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Data Validation"])
 
@@ -40,6 +44,7 @@ async def validate_data(
     try:
         _, df = await run_cpu_bound(parse_file_content, file_content, filename)
     except Exception as e:
+        logger.warning("validate 파일 파싱 실패 (filename=%s): %r", filename, e)
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {str(e)}")
 
     # 2. 요청 데이터 파싱 (HTTP 경계)

@@ -10,6 +10,8 @@
 - 사용처: app.main(analyze_router 로 등록)
 """
 
+import logging
+
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Request
 from app.core.schemas import TaskType
 from app.analysis.schemas import AnalysisResponse, ConfirmMappingRequest, ConfirmMappingResponse
@@ -18,6 +20,8 @@ from app.core.upload import read_upload_guarded
 from app.core.concurrency import run_cpu_bound
 from app.analysis.analysis_service import resolve_column_mapping, AnalysisError
 from app.analysis.validator import validate_mapping
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Column Analysis"])
 
@@ -43,6 +47,7 @@ async def analyze_columns(
     try:
         columns, df = await run_cpu_bound(parse_file_content, file_content, filename)
     except Exception as e:
+        logger.warning("analyze 파일 파싱 실패 (filename=%s): %r", filename, e)
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {str(e)}")
 
     if not columns:
@@ -55,6 +60,7 @@ async def analyze_columns(
     try:
         return await resolve_column_mapping(client, task_type, columns, df)
     except AnalysisError as e:
+        logger.error("컬럼 매핑이 LLM·규칙 폴백 모두 실패: %s", e.message)
         raise HTTPException(status_code=500, detail=e.message)
 
 

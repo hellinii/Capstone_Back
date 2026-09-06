@@ -20,6 +20,8 @@ from app.narrative.derived import compute_derived
 from app.narrative.grounding import build_number_whitelist, verify_grounding, _collect_grounding_texts
 from app.core.concurrency import llm_slot, run_cpu_bound
 
+logger = logging.getLogger(__name__)
+
 _MODEL = "gpt-4.1-nano"
 
 
@@ -70,7 +72,10 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
                 seed=4213,
             )
         data = json.loads(response.choices[0].message.content)
-    except Exception:
+    except Exception as exc:
+        # 조용한 품질 강등 지점(G-06). 종전에는 아무 흔적도 남지 않아, 남용으로 인한
+        # 키 소진과 일시적 장애를 사후에 구분할 수 없었다.
+        logger.warning("LLM 서술 호출 실패 → 규칙 폴백(api_error): %r", exc)
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="api_error")
 
     # 3~5. grounding 검증 + 응답 조립. 스키마 불일치/누락으로 조립이 실패해도
@@ -86,6 +91,11 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
 
         # 위반 시 report_purpose 무관하게 폴백(internal fail-open 제거 — D3c).
         if not grounding.passed:
+            # 어떤 숫자가 걸렸는지까지 남긴다 — '환각이 있었다'만으로는 원인을 못 찾는다.
+            logger.warning(
+                "서술 grounding 위반 → 규칙 폴백(grounding_failed). 검사 %d건, 위반 토큰 %s",
+                grounding.checked, grounding.violations,
+            )
             fb = build_fallback_narrative(fs, benchmark_refs, derived, reason="grounding_failed")
             fb.meta.grounding = grounding  # 어떤 환각이 잡혔는지 추적성 보존
             return fb
@@ -104,5 +114,5 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
             meta=NarrativeMeta(source="llm", model=_MODEL, grounding=grounding),
         )
     except Exception:
-        logging.exception("narrative 조립/검증 실패 → 규칙 폴백(assembly_error)")
+        logger.exception("narrative 조립/검증 실패 → 규칙 폴백(assembly_error)")
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")

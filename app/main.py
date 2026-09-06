@@ -2,6 +2,7 @@
 main.py — FastAPI 앱의 진입점
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -31,19 +32,28 @@ from app.evaluation.router import router as evaluate_router
 from app.narrative.router import router as narrative_router
 from app.issuance.router import router as reports_router
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 루트 로거를 한 번만 구성한다. 종전에는 print 만 있어 레벨도 필터링도 없었고
+    # 조용한 강등이 아무 흔적을 남기지 않았다(G-06).
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+    )
     # 발급 메타 DB 준비: 테이블 생성(없으면) + 기관 시드(없으면). 설계 문서 §8.
     init_db()
     seed_organization()
-    print(f"✅ 발급 메타 DB 초기화 완료 (backend={'sqlite' if DATABASE_URL.startswith('sqlite') else 'postgresql'})")
+    logger.info("발급 메타 DB 초기화 완료 (backend=%s)",
+                "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print(
-            "⚠️  경고: OPENAI_API_KEY 환경변수가 설정되지 않았습니다.\n"
-            "LLM 기반 컬럼 자동 매핑 대신 룰 기반(Rule-based) 매핑이 작동하며, "
-            "7, 8, 9절의 정성적 분석 서술 기능도 Fallback 문구로 대체됩니다."
+        logger.warning(
+            "OPENAI_API_KEY 미설정 — LLM 컬럼 자동 매핑 대신 규칙 기반 매핑이 동작하고 "
+            "7·8·9절 서술도 폴백 문구로 대체됩니다."
         )
         app.state.openai_client = None
     else:
@@ -54,9 +64,9 @@ async def lifespan(app: FastAPI):
             timeout=httpx.Timeout(45.0, connect=5.0),  # 전체 45s / 연결 5s
             max_retries=2,
         )
-        print("✅ OpenAI 클라이언트 초기화 완료")
+        logger.info("OpenAI 클라이언트 초기화 완료")
     yield
-    print("🛑 서버 종료")
+    logger.info("서버 종료")
 
 
 app = FastAPI(
