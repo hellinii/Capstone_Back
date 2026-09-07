@@ -40,9 +40,24 @@ class EvaluateRequest(BaseModel):
         return v
 
 
+class EvaluationEnvironment(BaseModel):
+    """평가를 실제로 수행한 환경 (ISSUES.md F-09).
+
+    성적서 4절의 '평가 도구'와 '평가 일시'는 종전에 프론트 상수에 박혀 있어
+    (예: "scikit-learn 1.4.0") 실제로 계산에 쓰인 버전과 무관했다. 버전을 아는 곳은
+    계산을 수행한 프로세스뿐이므로 서버가 확정해 내려보낸다.
+    """
+    libraries:    dict[str, str] = Field(description="지표 계산에 쓰인 라이브러리 버전")
+    evaluated_at: str            = Field(description="평가 수행 시각(KST, ISO 8601)")
+
+
 class EvaluateResponse(BaseModel):
     """[Step 3] 평가 결과 응답 스펙"""
     results:            dict[str, Any] = Field(description="지표별 연산 결과 수치 맵 (예: {'M1': 0.95})")
+    environment:        EvaluationEnvironment | None = Field(
+        default=None,
+        description="평가를 실제로 수행한 환경(라이브러리 버전·수행 시각). F-09.",
+    )
     warnings:           list[str]      = Field(default=[], description="전처리 단계에서 발생한 경고 로그 목록")
     dropped_rows:       int            = Field(default=0, description="제거된 결측치 행 수")
     n_samples:          int            = Field(default=0, description="실제로 지표를 계산한 행 수(결측 제거 후)")

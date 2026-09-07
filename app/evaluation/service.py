@@ -10,7 +10,8 @@
   app.evaluation.engine(evaluate), app.evaluation.report(generate_report)
 - 사용처: app.evaluation.router.evaluate_dataset
 """
-from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
+from app.evaluation.schemas import EvaluateRequest, EvaluateResponse, EvaluationEnvironment
+from app.evaluation.environment import evaluated_at, library_versions
 from app.analysis.validator import find_column_conflicts, find_invalid_roles
 from app.evaluation.engine import evaluate as run_evaluation
 from app.evaluation.report import generate_report
@@ -74,6 +75,10 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
 
     return EvaluateResponse(
         results=formatted_results,
+        # 성적서 4절이 인쇄하는 '평가 도구·일시'를 서버가 확정한다(ISSUES.md F-09).
+        environment=EvaluationEnvironment(
+            libraries=library_versions(), evaluated_at=evaluated_at()
+        ),
         warnings=warnings,
         dropped_rows=dropped_rows,
         n_samples=n_samples,

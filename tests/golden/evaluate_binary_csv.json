@@ -4,6 +4,10 @@
     "1": 95
   },
   "dropped_rows": 0,
+  "environment": {
+    "evaluated_at": "<비결정적 값 — 존재만 고정>",
+    "libraries": "<비결정적 값 — 존재만 고정>"
+  },
   "n_samples": 200,
   "results": {
     "failed_metrics": {},
