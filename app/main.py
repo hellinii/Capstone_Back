@@ -25,7 +25,7 @@ load_dotenv()  # database.py 가 import 시점에 DATABASE_URL 을 읽으므로 
 #    (app.core.database 가 import 시점에 DATABASE_URL 을 읽음. isort/ruff 도입 시 이 순서가
 #     깨지지 않도록 주의 — 필요 시 해당 블록에 `# isort: skip` 가드.)
 
-from app.core.database import DATABASE_URL, init_db
+from app.core.database import describe_backend, DATABASE_URL, init_db
 from app.issuance.bootstrap import seed_organization
 from app.analysis.router import router as analyze_router
 from app.analysis.validation_router import router as validate_router
@@ -144,10 +144,14 @@ async def health_check(request: Request):
         레포 전체에 FORWARDED_ALLOW_IPS/--proxy-headers 가 0건이라, 모든 요청이 같은
         IP 로 보이면 IP 리밋이 전역 리밋으로 붕괴해 정상 사용자 1명이 전체를 막는다)
     """
-    body = {"status": "ok"}
+    # 영속 여부는 **평시에도** 싣는다(ISSUES.md G-07). 종전에는 DIAG=1 을 켜야만 볼 수
+    # 있었는데, 그것은 운영자가 특별한 절차를 밟아야 강등 사실을 안다는 뜻이었다.
+    # 1차 라운드가 성적서 원본을 DB 에 넣은 뒤로 휘발성 DB 는 채번 중복만이 아니라
+    # **발급된 성적서 자체를 잃는다.** 연결 문자열은 노출하지 않고 종류만 알린다.
+    backend, persistent = describe_backend(DATABASE_URL)
+    body = {"status": "ok", "db_backend": backend, "persistent": persistent}
     if os.getenv("DIAG") == "1":
         body["diagnostics"] = {
-            "db": "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql",
             "client_host": request.client.host if request.client else None,
             "forwarded_for": request.headers.get("x-forwarded-for"),
             "forwarded_proto": request.headers.get("x-forwarded-proto"),
