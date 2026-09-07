@@ -14,6 +14,10 @@ from app.issuance.models import Organization
 # ── 기관(organization) 시드 기본값 — 현 프론트 DEFAULT_PERFORMER 와 일치 ───────────
 DEFAULT_ORGANIZATION = {
     "id": 1,
+    # 이 값이 수행기관의 **정본**이다(ISSUES.md F-10). 프론트
+    # `src/lib/report/reportConstants.ts` 의 DEFAULT_PERFORMER 는 발급 전 초안 화면에만
+    # 쓰이는 자리표시자이며 같은 값을 갖는다 — 별도 배포 단위라 사본을 피할 수 없다.
+    # **기관 정보를 바꿀 때는 여기를 먼저 고치고 프론트 자리표시자를 맞춘다.**
     "org_name": "한국 AI 인증원",
     "department": "평가부",
     "evaluator": "자동 평가 엔진",
