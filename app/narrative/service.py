@@ -17,7 +17,13 @@ from app.narrative.baselines import build_benchmark_refs
 from app.narrative.fallback import build_fallback_narrative
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema
 from app.narrative.derived import compute_derived
-from app.narrative.grounding import build_number_whitelist, verify_grounding, _collect_grounding_texts
+from app.narrative.grounding import (
+    build_number_whitelist,
+    find_verdict_contradictions,
+    verify_grounding,
+    _collect_grounding_texts,
+)
+from app.core import llm_budget
 from app.core.concurrency import llm_slot, run_cpu_bound
 
 logger = logging.getLogger(__name__)
@@ -57,6 +63,16 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
     # 1. 무키 → 폴백
     if client is None:
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="no_key")
+
+    # 1-1. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
+    #      **429 가 아니라 200 + 폴백이다** — 프론트는 비 200 을 폴백이 아니라 오류로
+    #      처리해 7·8·9절이 '생성 예정' 안내로 인쇄된다(사용자에게는 서비스 고장으로 보인다).
+    if not llm_budget.try_consume():
+        logger.warning(
+            "LLM 시간당 예산 소진(%d회) → 규칙 폴백으로 강등합니다.",
+            llm_budget.MAX_LLM_CALLS_PER_HOUR,
+        )
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason="budget_exceeded")
 
     # 2. LLM 호출
     try:
@@ -99,6 +115,19 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
             fb = build_fallback_narrative(fs, benchmark_refs, derived, reason="grounding_failed")
             fb.meta.grounding = grounding  # 어떤 환각이 잡혔는지 추적성 보존
             return fb
+
+        # 숫자가 없는 정성 서술은 위 검사를 **무조건 통과**한다(ISSUES.md G-05).
+        # 강제된 판정과 직접 모순되는 주장만 따로 잡는다 — 판정이 FAIL 인 성적서에
+        # "모든 항목이 충족되었다"가 실리면 독자는 정반대 결론을 읽는다.
+        contradictions = find_verdict_contradictions(_collect_grounding_texts(data), fs.verdict)
+        if contradictions:
+            logger.warning(
+                "서술이 판정(%s)과 모순 → 규칙 폴백(verdict_contradiction): %s",
+                fs.verdict, contradictions,
+            )
+            return build_fallback_narrative(
+                fs, benchmark_refs, derived, reason="verdict_contradiction"
+            )
 
         # 정상 — verdict 는 서버값으로 강제
         return NarrativeResponse(

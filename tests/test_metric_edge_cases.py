@@ -118,7 +118,7 @@ def test_integer_valued_float_pred_is_still_accepted():
 
 def _multilabel_check(true_values):
     df = pd.DataFrame({"t": true_values, "p": true_values})
-    items = validation_checks.check_multilabel(df, {"true_labels": "t", "pred_labels": "p"}, [])
+    items = validation_checks.check_multilabel(df, {"true_labels": "t", "pred_labels": "p"}, {})
     return next(i for i in items if i.name == "Label format mismatch")
 
 
@@ -134,7 +134,8 @@ def test_multilabel_format_check_still_passes_on_delimited_rows():
 # ── D-07: argmax 검사가 컬럼 작명에 좌우되지 않는다 ─────────────────────────
 
 def _argmax_item(df, prob_cols):
-    items = validation_checks.check_multiclass(df, {"y_true": "t", "y_pred": "p"}, prob_cols)
+    items = validation_checks.check_multiclass(df, {"y_true": "t", "y_pred": "p"},
+                                              {"prob_per_class": prob_cols})
     return next((i for i in items if i.name == "Argmax and y_pred mismatch"), None)
 
 

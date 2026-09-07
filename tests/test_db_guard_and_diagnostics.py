@@ -75,12 +75,26 @@ def test_startup_is_unchanged_without_the_flag():
 
 # ── /health 진단 ──────────────────────────────────────────────────────────
 
-def test_health_body_unchanged_without_diag(monkeypatch):
-    """[G-07] DIAG 를 켜지 않으면 응답 본문이 종전 그대로여야 한다."""
+def test_health_reports_persistence_without_diag(monkeypatch):
+    """[G-07] DIAG 없이도 **영속 여부**는 보인다.
+
+    종전에는 DIAG=1 을 켜야만 실태를 볼 수 있었다. 그것은 운영자가 특별한 절차를 밟아야
+    조용한 강등을 안다는 뜻이었고, 1차 라운드가 성적서 원본을 DB 에 넣은 뒤로 휘발성
+    DB 는 채번 중복만이 아니라 **발급된 성적서 자체를 잃는다**. 위험이 커졌으므로
+    강등 사실은 평시에도 보여야 한다.
+
+    진단 상세(client_host·forwarded_for)는 여전히 DIAG 뒤에 둔다 — 그쪽은 운영 관측용
+    이지 상시 필요한 정보가 아니다.
+    """
     monkeypatch.delenv("DIAG", raising=False)
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["db_backend"] in ("sqlite", "postgresql")
+    assert isinstance(body["persistent"], bool)
+    assert "diagnostics" not in body
 
 
 def test_health_exposes_diagnostics_when_enabled(monkeypatch):
@@ -90,6 +104,5 @@ def test_health_exposes_diagnostics_when_enabled(monkeypatch):
     assert r.status_code == 200
     diag = r.json().get("diagnostics")
     assert diag is not None, "DIAG=1 인데 진단이 없다"
-    assert diag["db"] in ("sqlite", "postgresql")
     assert diag["forwarded_for"] == "203.0.113.7, 10.0.0.1"
     assert "client_host" in diag

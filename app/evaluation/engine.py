@@ -51,12 +51,14 @@ METRIC_REGISTRY = {
 
 
 def evaluate(
-    df: pd.DataFrame, 
-    mappings: List[Dict[str, str]], 
-    task_type: str, 
+    df: pd.DataFrame,
+    mappings: List[Dict[str, str]],
+    task_type: str,
     selected_metric_ids: List[str],
     positive_class: str | None = None,
-    beta: float = 1.0
+    beta: float = 1.0,
+    decision_threshold=None,
+    metadata: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     메인 평가 엔진 진입점.
@@ -78,7 +80,11 @@ def evaluate(
     
     # ── [전처리 단계 추가] ──
     try:
-        df, pre_logs = preprocess_data(df, mappings, task_type)
+        df, pre_logs = preprocess_data(
+            df, mappings, task_type,
+            decision_threshold=decision_threshold, metadata=metadata,
+            selected_metric_ids=selected_metric_ids,
+        )
         results["_metadata"] = pre_logs
     except Exception as e:
         # 전처리 단계에서 에러(예: 필수 컬럼 누락, 확률 범위 초과)가 나면 즉시 반환
@@ -86,7 +92,17 @@ def evaluate(
 
     # mappings 리스트를 딕셔너리로 변환 ({"y_true": "col_A", ...} 형태)
     mapping_dict = {item['role']: item['column'] for item in mappings}
-    
+
+    # 전처리가 확률에서 예측을 파생했다면 그 컬럼을 예측 역할로 등록한다.
+    # 이 mapping_dict 는 preprocess **이후에** 다시 만들어지므로, df 에 컬럼만 붙여서는
+    # metrics 가 그것을 찾지 못한다(ISSUES.md A-01).
+    derived = pre_logs.get("derived_prediction")
+    if derived:
+        mapping_dict[derived["target_role"]] = derived["column"]
+        results["derived_prediction"] = {
+            k: v for k, v in derived.items() if k != "column"
+        }
+
     # 파라미터 전달용 내부 변수 설정
     mapping_dict['_positive_class'] = positive_class
     mapping_dict['_beta'] = beta

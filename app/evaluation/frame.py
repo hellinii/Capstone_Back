@@ -44,8 +44,55 @@ def required_columns(mappings: List[dict]) -> List[str]:
     return list(seen)
 
 
+def dropna_roles(
+    task_type: str, selected_metric_ids: List[str] | None, mapped_roles: set
+) -> set:
+    """결측 시 행을 버리는 대상 **역할**.
+
+    "선택한 지표가 실제로 읽는 컬럼"으로 좁힌다(ISSUES.md D-06). 종전에는 ignore 가
+    아닌 모든 매핑 컬럼이 대상이라, 고른 지표와 무관한 컬럼(샘플 ID, 쓰지 않는 확률
+    컬럼) 하나의 빈 칸이 행을 통째로 버렸다.
+
+    좁히되 **정답·예측 역할은 언제나 대상으로 둔다.** M23 처럼 예측을 읽지 않는 지표만
+    골라도 y_pred 의 NaN 이 남으면 `_coerce_label_types` 의 `astype` 이
+    `IntCastingNaNError` 로 죽는다 — 그 경로를 원천 차단한다.
+
+    확률 역할은 **파생에 쓰일 때만** 대상이다. 하드 예측이 있으면 확률은 읽히지 않으므로
+    그 결측이 표본을 깎을 이유가 없다.
+
+    `selected_metric_ids` 가 없으면 종전대로(전 컬럼) 동작한다 — 무엇을 읽는지 모르는
+    호출자에게는 보수적인 쪽이 안전하다.
+    """
+    from app.core.schemas import (
+        METRIC_REQUIREMENTS,
+        PREDICTION_ROLES_BY_TASK,
+        TRUTH_ROLE_BY_TASK,
+        TaskType,
+    )
+    from app.evaluation.preprocessor import prediction_is_needed
+
+    try:
+        task = TaskType(task_type)
+    except ValueError:
+        return set(mapped_roles) - {_LATENCY_ROLE}
+
+    requirements = METRIC_REQUIREMENTS[task]
+    primary, alternatives = PREDICTION_ROLES_BY_TASK[task]
+
+    roles = {TRUTH_ROLE_BY_TASK[task].value, primary.value}
+    for metric_id in selected_metric_ids or []:
+        roles |= {r.value for r in requirements.get(metric_id, set())}
+
+    # 예측을 파생해야 하면 그 출처 확률 컬럼도 '읽는 컬럼'이다.
+    if primary.value not in mapped_roles and prediction_is_needed(task_type, selected_metric_ids):
+        roles |= {r.value for r in alternatives}
+
+    roles.discard(_LATENCY_ROLE)   # 부가 측정 — 못 잰 샘플을 지표에서 뺄 이유가 없다
+    return roles & set(mapped_roles)
+
+
 def dropna_columns(df: pd.DataFrame, mapping_dict: dict) -> List[str]:
-    """결측 시 행을 버리는 대상 컬럼."""
+    """결측 시 행을 버리는 대상 컬럼(역할 목록을 모를 때의 보수적 기본값)."""
     latency_col = mapping_dict.get(_LATENCY_ROLE)
     return [c for c in df.columns if c != latency_col]
 
@@ -62,11 +109,10 @@ def build_evaluation_frame(
         df: 원본 데이터프레임
         mappings: [{"column": ..., "role": ...}, ...]
         task_type: "binary" | "multiclass" | "multilabel"
-        selected_metric_ids: 선택된 지표. **현재는 사용하지 않는다** —
-            결측 제거 대상을 '선택 지표가 실제로 읽는 컬럼'으로 좁히는 것은 D-06 이고,
-            그것은 골든 값을 또 다른 이유로 바꾼다. 한 변경에 골든이 서로 무관한 두
-            이유로 흔들리지 않도록 분리했다. 나중에 붙일 때 **호출부와 시그니처를 다시
-            고치지 않도록** 지금부터 받아 둔다.
+        selected_metric_ids: 선택된 지표. 결측 제거 대상을 이 지표들이 실제로 읽는
+            컬럼으로 좁힌다(ISSUES.md D-06). None/빈 목록이면 종전대로 전 컬럼을
+            대상으로 삼는다 — 무엇을 읽는지 모르는 호출자에게는 보수적인 쪽이 안전하다.
+            (API 경로는 빈 목록을 422 로 거절하므로 여기 도달하지 않는다.)
 
     Returns:
         (df_clean, dropped_rows, notes)
@@ -74,8 +120,6 @@ def build_evaluation_frame(
     Raises:
         ValueError: 매핑된 필수 컬럼이 데이터에 없을 때.
     """
-    del selected_metric_ids  # D-06 예약 — 위 docstring 참조
-
     required = required_columns(mappings)
     missing = [col for col in required if col not in df.columns]
     if missing:
@@ -91,8 +135,15 @@ def build_evaluation_frame(
         if col and col in work.columns:
             work[col] = work[col].fillna("")
 
+    # 결측으로 행을 버리는 대상을 선택 지표가 읽는 역할로 좁힌다(D-06).
+    roles = dropna_roles(task_type, selected_metric_ids, set(mapping_dict))
+    if selected_metric_ids:
+        subset = [mapping_dict[r] for r in roles if mapping_dict.get(r) in work.columns]
+    else:
+        subset = dropna_columns(work, mapping_dict)
+
     before = len(work)
-    work = work.dropna(subset=dropna_columns(work, mapping_dict))
+    work = work.dropna(subset=subset) if subset else work
     dropped = before - len(work)
 
     notes: List[str] = []

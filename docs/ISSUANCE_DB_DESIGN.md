@@ -1,5 +1,15 @@
 # 조직/발급 메타 DB 설계 (P2-11)
 
+> **⚠ 이 문서는 2026-09-07 자로 이력으로 동결되었습니다.**
+>
+> 여기 적힌 계획·설계는 **이미 구현되어 배포됐습니다.** 문서의 '상태' 표기와 세부
+> 서술은 작성 시점(구현 전)의 것이므로 **현재 코드의 근거로 삼지 마십시오.**
+> 현행 구조는 `docs/ARCHITECTURE.md` 와 코드가 정본입니다.
+>
+> 이 문서를 남겨 두는 이유는 **왜 그렇게 만들었는가**를 잃지 않기 위해서입니다.
+> 앞으로 갱신하지 않습니다(ISSUES.md H-09, 2026-09-07 ★결정 11).
+
+
 > 현재 코드 구조는 docs/ARCHITECTURE.md 참조(이 문서는 설계 근거).
 
 > 작성일: 2026-06-24
@@ -141,7 +151,7 @@ COMMIT
 | `POST /api/reports/issue` | 발급(채번) | `IssueRequest{run_id, model_name, model_version, note?, issuer?}` | `IssuanceOut` |
 | `POST /api/reports/{report_no}/reissue` | 재발급(정정) | `ReissueRequest{note}` | `IssuanceOut` |
 | `GET /api/reports/{report_no}` | 발급정보 조회(재오픈) | — | `IssuanceOut` |
-| `PUT /api/organization` *(선택)* | 기관 정보 수정(관리) | `OrganizationIn` | `OrganizationOut` |
+| ~~`PUT /api/organization`~~ *(설계에만 존재)* | **구현되지 않았고 앞으로도 만들지 않습니다** — 무인증 상태에서 이 엔드포인트 하나로 이미 발급된 모든 성적서의 기관 표기가 소급 변경됩니다(ISSUES.md G-01) | — | — |
 
 ### 응답 스키마(pydantic)
 

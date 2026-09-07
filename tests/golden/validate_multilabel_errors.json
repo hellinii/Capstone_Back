@@ -1,5 +1,5 @@
 {
-  "error_count": 0,
+  "error_count": 1,
   "execution_summary": [
     {
       "label": "Total validated rows",
@@ -9,26 +9,25 @@
     {
       "label": "Valid prediction rows",
       "note": "결측치 제거 후 평가에 사용될 행 수",
-      "value": "199 rows"
+      "value": "200 rows"
     },
     {
       "label": "Excluded samples",
       "note": "결측치·오류로 인해 제외된 행 수",
-      "value": "1 rows"
+      "value": "0 rows"
     },
     {
       "label": "Selected metric count",
-      "note": "선택된 메트릭: M1, M2, M3, M4, M5, M15, M16, M17, M18, M21, M22, M23",
-      "value": "12 items"
+      "note": "선택된 메트릭: M2, M3, M4, M5, M15, M16, M17, M18, M21, M22, M23",
+      "value": "11 items"
     },
     {
       "label": "Validation result",
       "note": "아래 상세 테이블 참조",
-      "value": "Errors 0 / Warnings 3"
+      "value": "Errors 1 / Warnings 1"
     }
   ],
   "selected_metric_ids": [
-    "M1",
     "M2",
     "M3",
     "M4",
@@ -59,21 +58,21 @@
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Rows with missing values are excluded from evaluation",
       "name": "Missing value",
-      "result": "1 rows",
-      "status": "warning"
+      "result": "None",
+      "status": "pass"
     },
     {
       "group": "common",
-      "handling": "Keep the first row and exclude later duplicates",
+      "handling": "Reported only — duplicate rows are still evaluated",
       "name": "Duplicate ID",
       "result": "1 rows",
       "status": "warning"
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Counted as a misclassification of the true class (rows are kept)",
       "name": "Class mismatch",
       "result": "N/A",
       "status": "pass"
@@ -82,16 +81,23 @@
       "group": "common",
       "handling": "Exclude only rows with missing or invalid values",
       "name": "Excluded samples",
-      "result": "1 rows",
-      "status": "warning"
+      "result": "0 rows",
+      "status": "pass"
     },
     {
       "group": "multilabel",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Stop evaluation — values must be in [0.0, 1.0]",
+      "name": "Score range error",
+      "result": "2 rows out of [0, 1] (score_news, score_sports)",
+      "status": "error"
+    },
+    {
+      "group": "multilabel",
+      "handling": "Reported only — the row is parsed as having no labels",
       "name": "Label format mismatch",
       "result": "None",
       "status": "pass"
     }
   ],
-  "warning_count": 3
+  "warning_count": 1
 }
