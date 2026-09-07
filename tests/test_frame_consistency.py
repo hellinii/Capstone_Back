@@ -84,16 +84,32 @@ def test_clean_dataset_sample_counts_agree(task):
     assert _rows(s["Valid prediction rows"]) == total - e["dropped_rows"]
 
 
-def test_multilabel_errors_sample_counts_agree():
+def test_multilabel_missing_values_sample_counts_agree():
     """[D-01] 결측이 섞인 데이터셋에서 두 숫자가 어긋나던 것을 고정한다.
 
-    저장소 픽스처(multilabel_200_errors.csv)로 재현되던 상태:
-      검증 → "Valid prediction rows: 198 rows" (성적서 6절에 인쇄)
-      평가 → dropped_rows=1 → 실제 199행으로 지표 계산
-    한 문서가 두 개의 표본 수를 갖는다.
+    검증이 성적서 6절에 인쇄하는 "유효 예측 건수"와 평가가 실제로 쓴 행 수가 같아야 한다.
+    (저장소의 multilabel_200_errors.csv 는 점수 범위 위반도 함께 갖고 있어 이제 평가가
+     정당하게 거절하므로 — 아래 D-09 테스트 참조 — 결측만 있는 데이터로 이 성질을 고정한다.)
     """
-    v = _validate("multilabel", "csv_errors").json()
-    e = _evaluate("multilabel", "csv_errors").json()
+    csv = (
+        "id,true_labels,pred_labels,score_a\n"
+        "1,a|b,a|b,0.9\n"
+        "2,a,a,\n"          # score_a 결측 → 행 제외
+        "3,b,b,0.4\n"
+    )
+    data = _payload(
+        "multilabel",
+        [
+            {"column": "id", "role": "sample_id"},
+            {"column": "true_labels", "role": "true_labels"},
+            {"column": "pred_labels", "role": "pred_labels"},
+            {"column": "score_a", "role": "score_per_label"},
+        ],
+        ["M16"],
+    )
+    files = {"file": ("ml.csv", csv.encode("utf-8"), "text/csv")}
+    v = client.post("/api/validate-data", files=files, data={"data": data}).json()
+    e = client.post("/api/evaluate", files=files, data={"data": data}).json()
 
     s = _summary(v)
     total = _rows(s["Total validated rows"])
@@ -104,6 +120,26 @@ def test_multilabel_errors_sample_counts_agree():
         f"지표는 {eval_rows}행으로 계산됐다"
     )
     assert _rows(s["Excluded samples"]) == e["dropped_rows"]
+
+
+def test_out_of_range_scores_are_refused_by_both_layers():
+    """[D-09·D-08] 검증이 통과시킨 데이터를 평가가 거절하면 안 된다.
+
+    종전 multilabel 검증에는 점수 범위 검사가 아예 없어서 `/api/validate-data` 는
+    errors 0 을 돌려주고 `/api/evaluate` 만 400 을 냈다. 프론트 게이트는 error_count 만
+    보므로 사용자는 6단계를 다 지난 뒤 성적서 직전에 막혔다.
+
+    게다가 평가 쪽 검사는 역할당 마지막 컬럼 하나만 봐서(D-08), 같은 파일이 매핑 순서에
+    따라 200/400 으로 갈렸다. 두 결함이 함께 닫혔는지 실제 픽스처로 확인한다.
+    """
+    v = _validate("multilabel", "csv_errors").json()
+    e = _evaluate("multilabel", "csv_errors")
+
+    score_items = [i for i in v["validation_details"] if i["name"] == "Score range error"]
+    assert score_items, "multilabel 검증이 점수 범위를 아예 검사하지 않는다"
+    assert score_items[0]["status"] == "error"
+    assert v["error_count"] >= 1, "검증이 통과시키면 프론트 게이트가 사용자를 통과시킨다"
+    assert e.status_code == 400, "검증이 error 라고 한 데이터를 평가가 받아들이면 안 된다"
 
 
 def test_multilabel_empty_labels_are_not_counted_as_missing():

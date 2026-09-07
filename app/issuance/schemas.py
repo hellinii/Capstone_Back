@@ -102,6 +102,14 @@ class IssuanceHistoryItem(BaseModel):
     version:   str        = Field(description="발급 버전")
     issued_at: str        = Field(description="발급 일시(ISO8601)")
     note:      str | None = Field(default=None, description="비고")
+    changed_sections: list[str] | None = Field(
+        default=None,
+        description=(
+            "직전 차수 대비 값이 달라진 성적서 최상위 절 목록(ISSUES.md F-06). "
+            "최초 발급이거나 이전 차수 스냅샷이 없으면 null — 모르는 것을 '변경 없음'으로 "
+            "말하지 않는다(이 라운드 이전 발급본은 소급 백필하지 않았다)."
+        ),
+    )
 
 
 class IssuanceOut(BaseModel):

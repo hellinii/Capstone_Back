@@ -9,7 +9,7 @@ OpenAI 키가 없거나 LLM 호출이 실패했을 때 컬럼명 패턴으로 �
 import pandas as pd
 
 from app.core.schemas import ColumnMapping, ColumnRole, TaskType
-from app.analysis.schemas import AnalysisResponse
+from app.analysis.schemas import AnalysisResponse, ColumnMatchNote
 from app.analysis.metadata import extract_metadata
 
 
@@ -59,8 +59,27 @@ def analyze_columns_fallback(
     sample_df = df.head(30)
     metadata = extract_metadata(task_type, df, sample_df, column_mappings)
 
+    # 어느 규칙에도 걸리지 않은 컬럼은 조용히 ignore 가 된다 — 그 사실을 알린다
+    # (ISSUES.md B-03). elif 사슬에 else 가 없어 종전에는 안내가 **항상 비어 있었고**,
+    # 무키·예산 소진처럼 **가장 안내가 필요한 순간에** 사용자는 아무 설명도 못 받았다.
+    # (LLM 경로의 reconcile 은 오히려 성실히 안내를 만든다 — 비어 있던 것은 이쪽이다.)
+    column_notes = [
+        ColumnMatchNote(
+            llm_column=m.column,
+            matched_column=None,
+            status="unmapped_header",
+            message=(
+                f"'{m.column}' 컬럼의 역할을 규칙으로 판단하지 못해 평가에서 제외했습니다"
+                "(자동 매핑이 규칙 기반으로 동작했습니다). 필요하면 매핑 화면에서 직접 지정해 주세요."
+            ),
+        )
+        for m in column_mappings
+        if m.role == ColumnRole.ignore
+    ]
+
     return AnalysisResponse(
         task_type=task_type,
         column_mappings=column_mappings,
-        metadata=metadata
+        metadata=metadata,
+        column_notes=column_notes,
     )

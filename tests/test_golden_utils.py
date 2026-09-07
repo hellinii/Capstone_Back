@@ -97,3 +97,67 @@ def test_bootstrap_still_writes_when_missing(golden_dir):
     golden_utils.assert_golden("brand_new", {"a": 1})
 
     assert json.loads((golden_dir / "brand_new.json").read_text(encoding="utf-8")) == {"a": 1}
+
+
+# ── 비결정적 필드 리댁션 (ISSUES.md F-09 로 도입) ──────────────────────────
+
+def test_redaction_keeps_golden_stable_across_runs(tmp_path, monkeypatch):
+    """평가 시각·라이브러리 버전이 달라져도 골든이 깨지지 않는다."""
+    import golden_utils
+
+    monkeypatch.setattr(golden_utils, "GOLDEN_DIR", tmp_path)
+    first = {"results": {"M1": 1.0}, "environment": {"evaluated_at": "2026-01-01T00:00:00+09:00",
+                                                    "libraries": {"pandas": "2.2.0"}}}
+    golden_utils.assert_golden("redact_case", first)
+
+    second = {"results": {"M1": 1.0}, "environment": {"evaluated_at": "2026-09-07T12:34:56+09:00",
+                                                     "libraries": {"pandas": "9.9.9"}}}
+    golden_utils.assert_golden("redact_case", second)   # 예외가 나면 실패
+
+
+def test_redaction_still_catches_a_missing_field(tmp_path, monkeypatch):
+    """값은 안 보되 **필드가 통째로 사라지면** 잡아야 한다."""
+    import pytest
+    import golden_utils
+
+    monkeypatch.setattr(golden_utils, "GOLDEN_DIR", tmp_path)
+    golden_utils.assert_golden("redact_missing", {
+        "results": {}, "environment": {"evaluated_at": "x", "libraries": {}},
+    })
+
+    with pytest.raises(AssertionError):
+        golden_utils.assert_golden("redact_missing", {"results": {}})
+
+
+def test_redaction_does_not_hide_other_changes(tmp_path, monkeypatch):
+    """리댁션이 다른 경로의 회귀를 가리면 안 된다."""
+    import pytest
+    import golden_utils
+
+    monkeypatch.setattr(golden_utils, "GOLDEN_DIR", tmp_path)
+    golden_utils.assert_golden("redact_other", {
+        "results": {"M1": 1.0}, "environment": {"evaluated_at": "x", "libraries": {}},
+    })
+
+    with pytest.raises(AssertionError):
+        golden_utils.assert_golden("redact_other", {
+            "results": {"M1": 0.5}, "environment": {"evaluated_at": "y", "libraries": {}},
+        })
+
+
+def test_redaction_catches_a_missing_subfield(tmp_path, monkeypatch):
+    """리댁션 범위가 너무 넓으면 **하위 필드**가 사라져도 못 잡는다.
+
+    `environment` 를 통째로 자리표시자로 바꾸면 `libraries` 가 빠져도 같은 문자열이라
+    비교가 통과한다. 값만 가리고 **구조는 남겨야** 한다.
+    """
+    import pytest
+    import golden_utils
+
+    monkeypatch.setattr(golden_utils, "GOLDEN_DIR", tmp_path)
+    golden_utils.assert_golden("redact_subfield", {
+        "environment": {"evaluated_at": "x", "libraries": {"pandas": "2.0"}},
+    })
+
+    with pytest.raises(AssertionError):
+        golden_utils.assert_golden("redact_subfield", {"environment": {"evaluated_at": "y"}})

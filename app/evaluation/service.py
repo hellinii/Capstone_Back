@@ -10,10 +10,12 @@
   app.evaluation.engine(evaluate), app.evaluation.report(generate_report)
 - 사용처: app.evaluation.router.evaluate_dataset
 """
-from app.evaluation.schemas import EvaluateRequest, EvaluateResponse
-from app.analysis.validator import find_column_conflicts
+from app.evaluation.schemas import EvaluateRequest, EvaluateResponse, EvaluationEnvironment
+from app.evaluation.environment import evaluated_at, library_versions
+from app.analysis.validator import find_column_conflicts, find_invalid_roles
 from app.evaluation.engine import evaluate as run_evaluation
 from app.evaluation.report import generate_report
+from app.evaluation.labels import normalize_distribution
 
 
 class EvaluationError(Exception):
@@ -27,6 +29,13 @@ class EvaluationError(Exception):
 
 def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
     """충돌검사 → 매핑변환 → engine.evaluate → 전처리오류 → 리포트 조립 → EvaluateResponse."""
+    # task_type 에 허용되지 않는 역할 차단 (SPEC §4, ISSUES.md A-10).
+    # confirm-mapping 을 건너뛰고 이 엔드포인트를 직접 호출하는 경로의 백스톱이다 —
+    # 프론트 드롭다운 제한은 UI 경로만 막는다.
+    invalid_roles = find_invalid_roles(request.column_mappings, request.task_type)
+    if invalid_roles:
+        raise EvaluationError("mapping_conflict", "; ".join(e.message for e in invalid_roles))
+
     # 컬럼 매핑 충돌 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단)
     conflicts = find_column_conflicts(request.column_mappings, request.task_type)
     if conflicts:
@@ -44,6 +53,8 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
             selected_metric_ids=request.selected_metric_ids,
             positive_class=positive_class,
             beta=beta,
+            decision_threshold=request.decision_threshold,
+            metadata=request.metadata.model_dump(),
         )
     except Exception as e:
         raise EvaluationError("compute_error", f"평가 연산 실행 오류: {str(e)}")
@@ -55,13 +66,21 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
     metadata = eval_results.pop("_metadata", {})
     warnings = metadata.get("warnings", [])
     dropped_rows = metadata.get("dropped_rows", 0)
-    class_distribution = {str(k): v for k, v in metadata.get("class_distribution", {}).items()}
+    n_samples = metadata.get("n_samples", 0)
+    # 표현형·순서 정규화는 labels.normalize_distribution 이 정본이다(D-04).
+    # 종전 `{str(k): v}` 는 int 1 과 str '1' 을 뭉개며 카운트를 덮어썼다.
+    class_distribution = normalize_distribution(metadata.get("class_distribution", {}))
 
     formatted_results = generate_report(eval_results)
 
     return EvaluateResponse(
         results=formatted_results,
+        # 성적서 4절이 인쇄하는 '평가 도구·일시'를 서버가 확정한다(ISSUES.md F-09).
+        environment=EvaluationEnvironment(
+            libraries=library_versions(), evaluated_at=evaluated_at()
+        ),
         warnings=warnings,
         dropped_rows=dropped_rows,
+        n_samples=n_samples,
         class_distribution=class_distribution,
     )

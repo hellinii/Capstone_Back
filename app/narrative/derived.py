@@ -76,7 +76,12 @@ def compute_derived(fs: FactSheet) -> dict:
 
     if fs.distribution and fs.distribution.class_distribution:
         dist = fs.distribution.class_distribution
-        total = sum(dist.values())
+        # 분모는 '표본 수'이지 '등장 횟수 합'이 아니다(ISSUES.md B-02). 멀티레이블에서
+        # 둘은 갈린다 — 200행이 408 로 서술되던 원인이다. binary/multiclass 는
+        # value_counts() 가 프레임 행을 그대로 세므로 두 값이 구조적으로 같아
+        # task_type 을 알 필요가 없다. n_samples 가 없는 구 클라이언트는 종전대로 합계.
+        # 멀티레이블에서는 백분율 합이 100% 를 넘을 수 있다(buildDatasetDiagnosis 와 같은 규약).
+        total = fs.n_samples if fs.n_samples > 0 else sum(dist.values())
         derived["distribution"] = {
             "total": total,
             "percentages": {

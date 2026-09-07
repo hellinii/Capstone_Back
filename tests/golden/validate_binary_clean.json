@@ -62,21 +62,21 @@
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Rows with missing values are excluded from evaluation",
       "name": "Missing value",
       "result": "None",
       "status": "pass"
     },
     {
       "group": "common",
-      "handling": "Keep the first row and exclude later duplicates",
+      "handling": "Reported only — duplicate rows are still evaluated",
       "name": "Duplicate ID",
       "result": "None",
       "status": "pass"
     },
     {
       "group": "common",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Counted as a misclassification of the true class (rows are kept)",
       "name": "Class mismatch",
       "result": "None",
       "status": "pass"
@@ -90,14 +90,14 @@
     },
     {
       "group": "binary",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "All score values within [0.0, 1.0]",
       "name": "Score range error",
       "result": "0 rows",
       "status": "pass"
     },
     {
       "group": "binary",
-      "handling": "Exclude affected rows from evaluation",
+      "handling": "Exactly 2 classes required",
       "name": "Binary class system error",
       "result": "None",
       "status": "pass"

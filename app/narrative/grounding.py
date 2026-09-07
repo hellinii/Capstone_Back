@@ -152,3 +152,50 @@ def _collect_grounding_texts(data: dict) -> list:
     texts: list = []
     _collect_strings(grounded, texts)
     return texts
+
+
+# ── 판정 모순 검사 (ISSUES.md G-05) ────────────────────────────────────────
+#
+# grounding 은 **숫자 토큰만** 대조한다. 그래서 "모든 시험항목이 합격 기준을 충족하였다"
+# 처럼 수치가 없는 문장은 검증 대상이 아니었고 **무조건 통과**했다. 판정이 FAIL 인
+# 성적서에 그 문장이 실리면 독자는 정반대 결론을 읽는다 — 숫자가 없다는 이유로 가장
+# 위험한 문장이 무검증으로 통과한 것이다.
+#
+# **범위를 좁게 잡는다.** 일반적인 '금지 표현 사전'은 문체 취향의 문제라 여기서 다루지
+# 않는다. 이 검사는 오직 **강제된 판정(verdict)과 직접 모순되는 주장**만 본다 — 판정은
+# fact_sheet 값으로 이미 강제되므로(LLM echo 무시) 그것과 어긋나는 문장은 정의상 근거가
+# 없다. 문체가 아니라 사실 관계다.
+#
+# 한계: 완곡한 표현("아쉬움이 남는다")이나 영어 서술은 잡지 못한다. 서술의 정성적
+# 품질 전반을 보증하지 않는다.
+
+# "전부 통과했다"는 주장. FAIL·CONDITIONAL_PASS 판정과 모순된다.
+_CLAIMS_ALL_PASSED = re.compile(
+    r"(모든|전\s*항목|전체)[^.]{0,20}(충족|합격|통과)(하|되|였|했|함|됨)"
+    r"|목표\s*성능을\s*달성"
+    r"|기준을\s*모두\s*(충족|만족)"
+)
+
+# "미달했다"는 주장. PASS 판정과 모순된다.
+_CLAIMS_SOME_FAILED = re.compile(
+    r"(미달|불합격|미충족)"
+    r"|충족하지\s*못"
+    r"|기준에\s*이르지\s*못"
+)
+
+
+def find_verdict_contradictions(texts: list[str], verdict: str) -> list[str]:
+    """강제된 판정과 직접 모순되는 문장을 돌려준다(없으면 빈 목록).
+
+    - FAIL / CONDITIONAL_PASS 인데 "모두 충족했다" → 모순
+    - PASS 인데 "미달했다" → 모순
+    """
+    contradictions: list[str] = []
+    for text in texts:
+        if not isinstance(text, str) or not text.strip():
+            continue
+        if verdict in ("FAIL", "CONDITIONAL_PASS") and _CLAIMS_ALL_PASSED.search(text):
+            contradictions.append(text)
+        elif verdict == "PASS" and _CLAIMS_SOME_FAILED.search(text):
+            contradictions.append(text)
+    return contradictions

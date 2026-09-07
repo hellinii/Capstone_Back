@@ -10,6 +10,7 @@ binary 는 양성/음성 클래스 자동 판단(_detect_binary_classes)까지 �
 import pandas as pd
 
 from app.core.schemas import ColumnMapping, ColumnRole, DataMetadata, TaskType
+from app.evaluation.labels import normalize_distribution, normalize_label, parse_label_cell, sort_labels
 
 
 # ── 양성 클래스 자동 판단 규칙 ────────────────────────────────────────────────
@@ -98,19 +99,17 @@ def extract_metadata(
             if not val_str:
                 continue
             if task_type == TaskType.multilabel:
-                # 멀티레이블은 파이프로 쪼개서 원소 수집
-                for part in val_str.split('|'):
-                    part = part.strip()
-                    if part:
-                        unique_set.add(part)
+                # 파싱 규칙은 evaluation.labels 하나뿐이다(ISSUES.md D-04). 종전에는 여기가
+                # '|' 만 쪼개서, 평가 파서가 라벨 2개로 읽는 "a,b" 를 라벨 1개로 셌다.
+                unique_set.update(parse_label_cell(val))
             else:
-                unique_set.add(val_str)
+                unique_set.add(normalize_label(val))
             if len(unique_set) > MAX_UNIQUE_VALUES_PER_COLUMN:
                 overflowed = True
                 break
         if overflowed:
             continue  # 라벨 후보가 아니므로 목록에서 제외
-        column_unique_values[col] = sorted(unique_set)
+        column_unique_values[col] = sort_labels(unique_set)
 
     # ── Binary ────────────────────────────────────────────────────────────────
     if task_type == TaskType.binary:
@@ -119,8 +118,7 @@ def extract_metadata(
             # 클래스 감지: 샘플 30행으로
             pos, neg, ambiguous = _detect_binary_classes(sample_df[y_true_col])
             # 분포: 전체 df로
-            distribution = df[y_true_col].value_counts().to_dict()
-            distribution = {str(k): int(v) for k, v in distribution.items()}
+            distribution = normalize_distribution(df[y_true_col].value_counts().to_dict())
             return DataMetadata(
                 positive_class=pos,
                 negative_class=neg,
@@ -134,10 +132,10 @@ def extract_metadata(
         y_true_col = role_to_col.get(ColumnRole.y_true.value)
         if y_true_col and y_true_col in df.columns:
             # 분포: 전체 df로
-            distribution = df[y_true_col].value_counts().to_dict()
-            distribution = {str(k): int(v) for k, v in distribution.items()}
-            # 전체 분포의 키값들을 기반으로 클래스 목록 감지 (30행 제한 제거)
-            classes = sorted(distribution.keys())
+            distribution = normalize_distribution(df[y_true_col].value_counts().to_dict())
+            # 전체 분포의 키값들을 기반으로 클래스 목록 감지 (30행 제한 제거).
+            # 정렬은 sort_labels 가 정본 — 숫자 클래스가 ['1','10','2'] 로 뒤집히지 않는다.
+            classes = sort_labels(distribution.keys())
             return DataMetadata(
                 detected_classes=classes,
                 class_distribution=distribution,
@@ -151,11 +149,10 @@ def extract_metadata(
             # 분포: 전체 df로 계산하면서 동시에 전체 라벨 감지 (30행 제한 제거)
             label_counts: dict[str, int] = {}
             for cell in df[true_col].dropna():
-                for label in str(cell).split("|"):
-                    label = label.strip()
-                    if label:
-                        label_counts[label] = label_counts.get(label, 0) + 1
-            labels = sorted(label_counts.keys())
+                for label in parse_label_cell(cell):
+                    label_counts[label] = label_counts.get(label, 0) + 1
+            label_counts = normalize_distribution(label_counts)
+            labels = sort_labels(label_counts.keys())
             return DataMetadata(
                 detected_labels=labels,
                 class_distribution=label_counts,

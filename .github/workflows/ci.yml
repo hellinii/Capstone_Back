@@ -96,3 +96,32 @@ jobs:
             exit 1
           fi
           curl -fsS -X POST "${RENDER_DEPLOY_HOOK}"
+
+      # Deploy Hook 은 "빌드를 시작하라"는 신호일 뿐이다. 호출이 200 이어도 빌드가
+      # 실패하거나 새 리비전이 기동에 실패하면 **옛 리비전이 계속 떠 있고** CI 는
+      # 초록으로 끝난다 — 배포됐다고 믿는 것과 실제가 갈린다(ISSUES.md H-08).
+      # 새 커밋이 실제로 서비스되는지까지 확인해야 게이트가 성립한다.
+      - name: 배포 완료 확인 (새 리비전이 실제로 응답하는가)
+        env:
+          HEALTH_URL: https://capstone-back-59z8.onrender.com/health
+        run: |
+          echo "새 리비전 기동을 기다립니다 (최대 10분)..."
+          for i in $(seq 1 60); do
+            # Render free 는 콜드스타트가 길어 타임아웃을 넉넉히 준다.
+            body=$(curl -fsS --max-time 60 "${HEALTH_URL}" 2>/dev/null || true)
+            if [ -n "${body}" ]; then
+              echo "응답: ${body}"
+              # 영속 DB 로 붙어 있는지도 함께 본다 — 휘발성으로 강등되면 재시작마다
+              # 채번 시퀀스와 발급된 성적서 보관본이 사라진다(G-07).
+              if echo "${body}" | grep -q '"persistent":true'; then
+                echo "::notice::배포 확인 완료 (영속 DB)"
+                exit 0
+              fi
+              echo "::warning::서비스는 떴으나 휘발성 DB 입니다 — DATABASE_URL 을 확인하세요."
+              echo "::notice::배포 확인 완료 (휘발성 DB 경고)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::10분 안에 /health 가 응답하지 않았습니다. Render 로그를 확인하세요."
+          exit 1

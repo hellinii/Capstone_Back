@@ -5,6 +5,7 @@
 - ORM 추상화로 추후 PostgreSQL 전환 용이.
 - DATABASE_URL 환경변수로 경로 재정의 가능(테스트는 인메모리/임시 파일 DB 사용).
 """
+import logging
 import os
 
 from sqlalchemy import create_engine, event
@@ -16,6 +17,8 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 # 루트 기준으로 재앵커한다(.gitignore 의 data/app.db 패턴과 일치, 대소문자도 소문자 통일).
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _DEFAULT_DB_PATH = os.path.join(_PROJECT_ROOT, "data", "app.db")
+logger = logging.getLogger(__name__)
+
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_DEFAULT_DB_PATH}")
 
 # Heroku/Render 스타일 URL 은 legacy "postgres://" 스킴을 쓰는데 SQLAlchemy 2.0 은
@@ -24,6 +27,29 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
 
 _IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+
+def describe_backend(database_url: str) -> tuple[str, bool]:
+    """(백엔드 이름, 영속 여부). 연결 문자열 자체는 절대 밖으로 내보내지 않는다."""
+    if database_url.startswith("sqlite"):
+        return "sqlite", False
+    return "postgresql", True
+
+
+def warn_if_volatile(database_url: str) -> None:
+    """휘발성 백엔드로 내려갔으면 기동 시점에 경고를 남긴다 (ISSUES.md G-07).
+
+    하드 실패 가드는 기본 꺼짐이 옳다(아래 참조). 그렇다고 강등이 **아무 흔적도 남기지
+    않아서는** 안 된다 — 1차 라운드가 성적서 원본을 DB 에 넣은 뒤로 휘발성 DB 는 채번
+    중복만이 아니라 **발급된 성적서 자체를 잃는다.**
+    """
+    name, persistent = describe_backend(database_url)
+    if not persistent:
+        logger.warning(
+            "DATABASE_URL 이 없거나 sqlite 입니다(backend=%s). 재시작하면 채번 시퀀스와 "
+            "발급된 성적서 보관본이 사라집니다. 프로덕션이라면 영속 DB 를 연결하세요.",
+            name,
+        )
 
 
 def assert_persistent_backend(database_url: str, require: bool) -> None:
@@ -47,6 +73,7 @@ def assert_persistent_backend(database_url: str, require: bool) -> None:
 # 엔진을 만들기 전에 검사한다 — postgres URL 이면 create_engine 이 드라이버를 요구하므로
 # 가드가 그 뒤에 있으면 진단 메시지 대신 ModuleNotFoundError 가 먼저 나온다.
 assert_persistent_backend(DATABASE_URL, require=os.getenv("REQUIRE_PERSISTENT_DB") == "1")
+warn_if_volatile(DATABASE_URL)
 
 if _IS_SQLITE:
     _ENGINE_KWARGS: dict = {

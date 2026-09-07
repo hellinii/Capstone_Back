@@ -24,7 +24,7 @@ app/
 ```
 
 ## 주요 API (prefix `/api`)
-`POST /api/analyze-columns` · `POST /api/confirm-mapping` · `POST /api/validate-data` · `POST /api/evaluate` · `POST /api/generate-narrative` · `GET/PUT /api/organization` · `POST /api/reports/issue`·`{no}/reissue` · `GET /api/reports/{no}` · `GET /health`
+`POST /api/analyze-columns` · `POST /api/confirm-mapping` · `POST /api/validate-data` · `POST /api/evaluate` · `POST /api/generate-narrative` · `GET /api/organization` · `POST /api/reports/issue`·`{no}/reissue` · `GET /api/reports/{no}` · `GET /health`
 
 ## 로컬 실행
 ```bash
@@ -39,4 +39,4 @@ pytest                                # 테스트 (pytest.ini: asyncio_mode=auto
 Render web service(`capstone-back`) + Neon PostgreSQL. `autoDeploy:false` — 배포는 CI(`.github/workflows/ci.yml`)의 Render Deploy Hook 호출로 이루어집니다. 자세히는 `docs/DEPLOYMENT_PLAN.md`.
 
 ## 라이선스
-© 2026 서울과학기술대학교
+© 2026 Kim Minseo, Hwang Inyong (서울과학기술대학교 졸업과제)
