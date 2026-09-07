@@ -416,3 +416,128 @@ def test_m7_m8_specificity_and_fpr_are_complementary():
     assert spec == pytest.approx(3 / 4)
     assert fpr == pytest.approx(1 / 4)
     assert spec + fpr == pytest.approx(1.0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 확률 기반 지표 4개 — M6·M9·M10·M19 (ISSUES.md H-01 의 마지막 잔여)
+#
+# 이 넷은 "근사 유도가 필요하다"는 이유로 앞선 라운드에서 미착수로 남았다. 그러나 넷 다
+# 작은 픽스처에서는 손으로 끝까지 계산된다. 남겨 두면 값 검증이 되는 지표가 19/23 에
+# 머무르고, 특히 M9·M10·M19 는 **확률 전용 경로(결정 1)의 핵심 지표**라 이번 라운드에서
+# 회귀 위험이 가장 큰 자리다.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _score_df():
+    """binary 4행. 양성 하나가 음성 하나보다 낮은 점수를 받게 해 AUROC 를 비퇴화로 만든다.
+
+        y_true : 1     1     0     0
+        score  : 0.9   0.3   0.35  0.1
+
+    양성 {0.9, 0.3}, 음성 {0.35, 0.1}.
+    """
+    return pd.DataFrame({
+        "y_true": [1, 1, 0, 0],
+        "score": [0.9, 0.3, 0.35, 0.1],
+    })
+
+
+_SCORE_MAP = {"y_true": "y_true", "score_positive": "score", "_positive_class": 1,
+              "_task_type": "binary"}
+
+
+def test_m9_auroc_is_the_share_of_correctly_ordered_pairs():
+    """AUROC = (양성, 음성) 쌍 중 양성 점수가 더 높은 쌍의 비율.
+
+    쌍 4개: (0.9,0.35)✓ (0.9,0.1)✓ (0.3,0.35)✗ (0.3,0.1)✓ → 3/4 = 0.75.
+    무작위 노이즈 픽스처에서는 0.5 근처가 나와 공식이 틀려도 그럴듯하다 —
+    여기서는 0.75 라는 특정 값이 어긋나면 곧바로 드러난다.
+    """
+    assert binary.calculate_auroc(_score_df(), _SCORE_MAP) == pytest.approx(0.75)
+
+
+def test_m9_auroc_is_one_for_perfect_ranking():
+    df = pd.DataFrame({"y_true": [1, 1, 0, 0], "score": [0.9, 0.8, 0.2, 0.1]})
+    assert binary.calculate_auroc(df, _SCORE_MAP) == pytest.approx(1.0)
+
+
+def test_m9_auroc_is_zero_for_inverted_ranking():
+    """순위를 뒤집으면 0 이다 — 0.5(무작위)와 구분되는지 확인한다."""
+    df = pd.DataFrame({"y_true": [1, 1, 0, 0], "score": [0.1, 0.2, 0.8, 0.9]})
+    assert binary.calculate_auroc(df, _SCORE_MAP) == pytest.approx(0.0)
+
+
+def test_m10_auprc_is_the_step_wise_precision_recall_area():
+    """AP = Σ (R_n − R_{n−1}) · P_n. 점수 내림차순으로 훑는다.
+
+        0.9  (양성) → TP1 FP0 → P=1,   R=1/2   ΔR=1/2 → 1 × 1/2   = 1/2
+        0.35 (음성) → TP1 FP1 → P=1/2, R=1/2   ΔR=0   → 0
+        0.3  (양성) → TP2 FP1 → P=2/3, R=1     ΔR=1/2 → 2/3 × 1/2 = 1/3
+        0.1  (음성) → TP2 FP2 → P=1/2, R=1     ΔR=0   → 0
+        AP = 1/2 + 1/3 = 5/6
+    """
+    assert binary.calculate_auprc(_score_df(), _SCORE_MAP) == pytest.approx(5 / 6)
+
+
+def test_m10_auprc_baseline_is_the_positive_rate_when_scores_carry_no_signal():
+    """점수가 정보를 주지 못하면 AP 는 양성 비율로 수렴한다 — 0.5 가 아니다.
+
+    AUROC 의 무정보 기준선(0.5)과 다르다는 사실을 고정한다. 둘을 혼동한 구현은
+    이 단정에서 걸린다.
+    """
+    df = pd.DataFrame({"y_true": [1, 0, 0, 0], "score": [0.5, 0.5, 0.5, 0.5]})
+    assert binary.calculate_auprc(df, _SCORE_MAP) == pytest.approx(0.25)
+
+
+def test_m19_log_loss_expected_value():
+    """LogLoss = −(1/N) Σ [y·ln(p) + (1−y)·ln(1−p)].
+
+        −(1/4)[ ln(0.9) + ln(0.3) + ln(0.65) + ln(0.9) ]
+        = −(1/4)[ −0.1053605 − 1.2039728 − 0.4307829 − 0.1053605 ]
+        = 1.8454767 / 4 = 0.4613692
+    """
+    assert binary.calculate_log_loss(_score_df(), _SCORE_MAP) == pytest.approx(0.4613692, abs=1e-6)
+
+
+def test_m19_log_loss_grows_when_a_confident_prediction_is_wrong():
+    """자신 있게 틀린 예측이 더 크게 벌점을 받는다 — 방향성을 고정한다."""
+    mild = pd.DataFrame({"y_true": [1, 0], "score": [0.6, 0.4]})
+    confident_wrong = pd.DataFrame({"y_true": [1, 0], "score": [0.1, 0.9]})
+
+    assert binary.calculate_log_loss(confident_wrong, _SCORE_MAP) > binary.calculate_log_loss(mild, _SCORE_MAP)
+
+
+def test_m6_kl_divergence_between_label_distributions():
+    """M6 는 확률이 아니라 **정답/예측 라벨의 빈도 분포** 사이의 KL 이다(A-09·SPEC §2 규칙 3).
+
+        y_true = A A B C  →  p = {A:1/2, B:1/4, C:1/4}
+        y_pred = A B B C  →  q = {A:1/4, B:1/2, C:1/4}
+
+        KL(p‖q) = 1/2·ln(2) + 1/4·ln(1/2) + 1/4·ln(1)
+                = 1/4·ln(2) = 0.1732868
+    """
+    df = pd.DataFrame({"y_true": ["A", "A", "B", "C"], "y_pred": ["A", "B", "B", "C"]})
+    mapping = {"y_true": "y_true", "y_pred": "y_pred", "_task_type": "multiclass"}
+
+    assert common.calculate_kl_divergence(df, mapping) == pytest.approx(0.1732868, abs=1e-6)
+
+
+def test_m6_kl_divergence_is_zero_when_distributions_match():
+    """분포가 같으면 0 이다 — **예측이 전부 틀려도** 그렇다(M14 와 같은 성질).
+
+    KL 을 정확도처럼 구현한 코드는 이 단정에서 걸린다.
+    """
+    df = pd.DataFrame({"y_true": ["A", "B"], "y_pred": ["B", "A"]})
+    mapping = {"y_true": "y_true", "y_pred": "y_pred", "_task_type": "multiclass"}
+
+    assert common.calculate_kl_divergence(df, mapping) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_m6_kl_divergence_is_asymmetric():
+    """KL 은 거리가 아니다 — p‖q 와 q‖p 가 다르다. 대칭 지표로 구현하면 걸린다."""
+    forward = pd.DataFrame({"y_true": ["A", "A", "A", "B"], "y_pred": ["A", "A", "B", "B"]})
+    backward = pd.DataFrame({"y_true": ["A", "A", "B", "B"], "y_pred": ["A", "A", "A", "B"]})
+    mapping = {"y_true": "y_true", "y_pred": "y_pred", "_task_type": "multiclass"}
+
+    assert common.calculate_kl_divergence(forward, mapping) != pytest.approx(
+        common.calculate_kl_divergence(backward, mapping)
+    )
