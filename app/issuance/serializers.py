@@ -59,6 +59,60 @@ def _organization_at_issue(report: Report) -> OrganizationOut:
     return organization_out(report.organization)
 
 
+def diff_report_sections(before: dict | None, after: dict | None) -> list[str] | None:
+    """두 성적서 스냅샷 사이에서 값이 달라진 **최상위 절**을 돌려준다 (ISSUES.md F-06).
+
+    재발급 이력에는 "무엇이 바뀌었는지"가 없었다 — 정정본을 받은 사람은 v1.1 이
+    나왔다는 사실만 알고 무엇이 달라졌는지 알 수 없었다.
+
+    **새 컬럼을 만들지 않는다.** 필요한 데이터는 이미 서버에 있고(차수별 스냅샷, F-01)
+    `create_all` 은 기존 테이블에 컬럼을 추가하지 못하므로(F-11) 읽는 시점에 만든다.
+
+    이전 차수 스냅샷이 없으면(이 라운드 이전 발급본은 소급 백필을 하지 않았다)
+    None 을 돌려준다 — 모르는 것을 '변경 없음'으로 말하지 않는다.
+    """
+    if before is None or after is None:
+        return None
+    keys = set(before) | set(after)
+    return sorted(k for k in keys if before.get(k) != after.get(k))
+
+
+def _parse_content(content_json: str | None) -> dict | None:
+    """스냅샷 본문(JSON 텍스트) → dict. 깨진 값은 '모름'으로 취급한다."""
+    if not content_json:
+        return None
+    try:
+        parsed = json.loads(content_json)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _history(report: Report) -> list[IssuanceHistoryItem]:
+    """발급 이력 — 각 차수에 **직전 차수 대비 바뀐 절**을 함께 싣는다(ISSUES.md F-06)."""
+    by_version = {s.version: _parse_content(s.content_json) for s in report.snapshots}
+    items: list[IssuanceHistoryItem] = []
+    previous_version: str | None = None
+
+    for issuance in report.issuances:
+        changed = (
+            None
+            if previous_version is None
+            else diff_report_sections(
+                by_version.get(previous_version), by_version.get(issuance.version)
+            )
+        )
+        items.append(IssuanceHistoryItem(
+            version=issuance.version,
+            issued_at=_iso_utc(issuance.issued_at),
+            note=issuance.note,
+            changed_sections=changed,
+        ))
+        previous_version = issuance.version
+
+    return items
+
+
 def issuance_out(report: Report) -> IssuanceOut:
     """Report ORM → IssuanceOut (meta.reportId + performer + signature)."""
     latest = report.issuances[-1]
@@ -68,14 +122,7 @@ def issuance_out(report: Report) -> IssuanceOut:
         issuer=latest.issuer,
         issued_at=_iso_utc(latest.issued_at),
         organization=_organization_at_issue(report),
-        history=[
-            IssuanceHistoryItem(
-                version=i.version,
-                issued_at=_iso_utc(i.issued_at),
-                note=i.note,
-            )
-            for i in report.issuances
-        ],
+        history=_history(report),
     )
 
 
