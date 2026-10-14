@@ -286,3 +286,71 @@ async def test_assembly_error_falls_back(make_fake_openai_client):
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "fallback"
     assert resp.meta.reason == "assembly_error"
+
+
+# ── 판정 불가(INCONCLUSIVE)와 고객 입력(client_inputs) ─────────────────────────────
+#
+# 서술 설계 D19: 핵심 지표가 산출되지 않았거나 판정 대상이 없으면 "판정 불가"다. 확인하지 못한
+# 것을 "모두 충족"으로 쓰면 확인한 것처럼 읽힌다.
+# 서술 설계 D25: 고객 입력은 모두 AI 에 넘긴다. 고객이 적은 숫자를 서술이 옮겨 적는 것은 환각이
+# 아니므로 숫자 허용 목록에 들어가야 한다.
+
+def test_inconclusive_rejects_all_passed_claim():
+    from app.narrative.grounding import find_verdict_contradictions
+
+    texts = ["모든 시험항목이 합격 기준을 충족하였다."]
+    assert find_verdict_contradictions(texts, "INCONCLUSIVE") == texts
+    # 판정 불가에서 일부 지표의 미달을 적는 것은 사실일 수 있어 막지 않는다.
+    assert find_verdict_contradictions(["Recall 이 목표에 미달하였다."], "INCONCLUSIVE") == []
+
+
+def test_fallback_labels_inconclusive():
+    fs = _sample_fact_sheet().model_copy(update={"verdict": "INCONCLUSIVE"})
+    benchmark_refs = build_benchmark_refs("binary", fs.metrics)
+    resp = build_fallback_narrative(fs, benchmark_refs, compute_derived(fs), reason="no_key")
+    assert resp.conclusion.verdict == "INCONCLUSIVE"
+    assert "판정 불가" in resp.conclusion.narrative
+
+
+def test_client_input_numbers_are_allowed():
+    fs = _sample_fact_sheet()
+    benchmark_refs = build_benchmark_refs("binary", fs.metrics)
+    derived = compute_derived(fs)
+    client_inputs = {
+        "training_data": {"학습 샘플 수": "12,000개", "수집 기간": "2023-01 ~ 2024-12"},
+        "ground_truth": {"라벨러 수": "3명", "라벨 일치도": "Cohen의 카파 0.71"},
+    }
+    text = ["학습 데이터 12,000개, 라벨러 3명, 카파 0.71 로 보고되었다."]
+
+    without = verify_grounding(text, build_number_whitelist(fs, benchmark_refs, derived))
+    assert not without.passed
+
+    with_inputs = build_number_whitelist(fs, benchmark_refs, derived, client_inputs)
+    assert verify_grounding(text, with_inputs).passed
+
+
+def test_client_inputs_size_limited():
+    from app.narrative.schemas import MAX_CLIENT_INPUTS_CHARS
+
+    fs = _sample_fact_sheet()
+    ok = NarrativeRequest(task_type=TaskType.binary, fact_sheet=fs, client_inputs={"a": "b"})
+    assert ok.client_inputs == {"a": "b"}
+    with pytest.raises(ValidationError):
+        NarrativeRequest(
+            task_type=TaskType.binary,
+            fact_sheet=fs,
+            client_inputs={"note": "x" * (MAX_CLIENT_INPUTS_CHARS + 1)},
+        )
+
+
+def test_client_inputs_reach_the_prompt():
+    from app.narrative.prompt import build_user_prompt
+
+    prompt = build_user_prompt({"verdict": "PASS"}, [], {}, {"declarations": {"사용 방식": "배치"}})
+    assert '"client_inputs"' in prompt and "배치" in prompt
+    # 없으면 싣지 않는다 — 종전 요청과 같은 프롬프트다.
+    assert "client_inputs" not in build_user_prompt({"verdict": "PASS"}, [], {})
+
+
+def test_metric_fact_core_flag_defaults_false():
+    assert MetricFact(metric_id="M1", display_name="Accuracy", value=0.9, status="pass").is_core is False

@@ -48,8 +48,37 @@ def _add(wl: set, v: Any) -> None:
             wl.add(f"{round(f * 100, k):g}")
 
 
-def build_number_whitelist(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> set:
-    """출력 검증용 허용 숫자 집합 (fact_sheet + 파생값의 다중 표기)."""
+def _add_client_numbers(wl: set, obj: Any) -> None:
+    """고객 입력 안의 숫자(학습 표본 수, 라벨러 수, 일치도, 수집 기간 등)를 허용 목록에 넣는다.
+
+    고객 입력은 계산값이 아니라 의뢰자가 적은 사실이다. 서술이 그 숫자를 옮겨 적는 것은 환각이
+    아니므로 허용한다. 글 속의 숫자는 검증 쪽과 같은 정규식으로 뽑는다.
+    """
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, (int, float)):
+        _add(wl, obj)
+    elif isinstance(obj, str):
+        for tok in _NUMBER_RE.findall(_CTX_TOKEN_RE.sub(" ", obj)):
+            c = _canon(tok)
+            if c is not None:
+                _add(wl, c)
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            _add_client_numbers(wl, k)
+            _add_client_numbers(wl, v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _add_client_numbers(wl, item)
+
+
+def build_number_whitelist(
+    fs: FactSheet,
+    benchmark_refs: list[dict],
+    derived: dict,
+    client_inputs: dict | None = None,
+) -> set:
+    """출력 검증용 허용 숫자 집합 (fact_sheet + 파생값 + 고객 입력의 다중 표기)."""
     wl: set = set()
 
     _add(wl, fs.n_samples)
@@ -103,6 +132,9 @@ def build_number_whitelist(fs: FactSheet, benchmark_refs: list[dict], derived: d
         _add(wl, pct)
     for val in derived.get("counts", {}).values():
         _add(wl, val)
+
+    if client_inputs:
+        _add_client_numbers(wl, client_inputs)
 
     return wl
 
@@ -187,14 +219,15 @@ _CLAIMS_SOME_FAILED = re.compile(
 def find_verdict_contradictions(texts: list[str], verdict: str) -> list[str]:
     """강제된 판정과 직접 모순되는 문장을 돌려준다(없으면 빈 목록).
 
-    - FAIL / CONDITIONAL_PASS 인데 "모두 충족했다" → 모순
+    - FAIL / CONDITIONAL_PASS / INCONCLUSIVE 인데 "모두 충족했다" → 모순
+      (판정 불가는 확인하지 못했다는 뜻이다. 다 충족했다고 쓰면 확인한 것처럼 읽힌다.)
     - PASS 인데 "미달했다" → 모순
     """
     contradictions: list[str] = []
     for text in texts:
         if not isinstance(text, str) or not text.strip():
             continue
-        if verdict in ("FAIL", "CONDITIONAL_PASS") and _CLAIMS_ALL_PASSED.search(text):
+        if verdict in ("FAIL", "CONDITIONAL_PASS", "INCONCLUSIVE") and _CLAIMS_ALL_PASSED.search(text):
             contradictions.append(text)
         elif verdict == "PASS" and _CLAIMS_SOME_FAILED.search(text):
             contradictions.append(text)

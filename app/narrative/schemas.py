@@ -1,5 +1,8 @@
 """app/narrative/schemas.py — 서술 도메인 스키마(FactSheet·서술 요청/응답·출력 모델)."""
 
+import json
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 from app.core.schemas import ReportPurpose, TaskType
 
@@ -9,6 +12,9 @@ from app.core.schemas import ReportPurpose, TaskType
 # 정상 사용 시 지표는 M1~M23 (23개), 클래스는 많아야 수십 개다.
 MAX_METRIC_FACTS = 64
 MAX_CLASS_ENTRIES = 256
+# 고객 입력(client_inputs)의 직렬화 길이 상한. 정상 입력은 수천 자다(카드 다섯 장의 짧은 답과
+# 자유서술 몇 칸). 무인증 과금 경로라 배열 상한과 같은 이유로 막는다(G-03).
+MAX_CLIENT_INPUTS_CHARS = 20_000
 
 
 class MetricFact(BaseModel):
@@ -18,6 +24,7 @@ class MetricFact(BaseModel):
     value:        float        = Field(description="산출값")
     threshold:    float | None = Field(default=None, description="합격 임계값(없으면 정보 제공)")
     status:       str          = Field(description="pass | fail | warning | info")
+    is_core:      bool         = Field(default=False, description="핵심 지표 — 미달하면 불합격(서술 설계 D19)")
 
 
 class PerClassFact(BaseModel):
@@ -78,7 +85,7 @@ class FactSheet(BaseModel):
     per_class:    list[PerClassFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES, description="클래스별 지표")
     confusion:    ConfusionFact | None     = None
     distribution: DistributionFact | None  = None
-    verdict:      str   = Field(description="PASS | CONDITIONAL_PASS | FAIL (프론트 규칙 산출)")
+    verdict:      str   = Field(description="PASS | CONDITIONAL_PASS | FAIL | INCONCLUSIVE (프론트 규칙 산출, D19)")
     score:        float = Field(description="통과율 점수 (프론트 규칙 산출)")
     latency:      LatencyFact = Field(default_factory=LatencyFact)
 
@@ -88,6 +95,22 @@ class NarrativeRequest(BaseModel):
     task_type:      TaskType      = Field(description="분류 모델 유형")
     report_purpose: ReportPurpose = Field(default=ReportPurpose.external, description="internal | external | project")
     fact_sheet:     FactSheet     = Field(description="평가 결과 사실 시트")
+    client_inputs:  dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "고객이 제공한 입력(서술 설계 D25). 선언, 학습·평가 데이터, 정답 라벨, 실행 환경 등. "
+            "회사·과제 정보는 담지 않는다(D34). 계산값이 아니라 의뢰자 제공 정보다."
+        ),
+    )
+
+    @field_validator("client_inputs")
+    @classmethod
+    def _client_inputs_within_limit(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is None:
+            return v
+        if len(json.dumps(v, ensure_ascii=False)) > MAX_CLIENT_INPUTS_CHARS:
+            raise ValueError(f"고객 입력이 상한({MAX_CLIENT_INPUTS_CHARS}자)을 넘습니다.")
+        return v
 
 
 class InterpretationOut(BaseModel):
@@ -96,7 +119,7 @@ class InterpretationOut(BaseModel):
 
 
 class ConclusionOut(BaseModel):
-    verdict:   str = Field(description="PASS | CONDITIONAL_PASS | FAIL (서버가 fact_sheet 값으로 강제)")
+    verdict:   str = Field(description="PASS | CONDITIONAL_PASS | FAIL | INCONCLUSIVE (서버가 fact_sheet 값으로 강제)")
     benchmark: str = ""
     narrative: str = ""
     risks:     str = ""

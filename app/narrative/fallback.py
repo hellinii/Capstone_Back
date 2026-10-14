@@ -11,6 +11,7 @@ _VERDICT_LABEL = {
     "PASS": "적합(합격)",
     "CONDITIONAL_PASS": "조건부 적합",
     "FAIL": "부적합(불합격)",
+    "INCONCLUSIVE": "판정 불가",
 }
 _POSITION_LABEL = {"above": "상위", "within": "범위 내", "below": "하위"}
 # 방향 반영 품질 라벨(D7[3]) — 낮을수록 좋은 지표의 'below'는 미흡이 아니라 우수.

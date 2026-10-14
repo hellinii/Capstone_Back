@@ -18,21 +18,35 @@ def build_system_prompt(report_purpose: str) -> str:
         "[필수 규칙]\n"
         "1. JSON 안에 명시된 숫자만 사용한다. 새로운 숫자를 계산·반올림·백분율 환산·추정하지 마라.\n"
         "2. JSON 에 없는 지표·수치(특히 지연시간/latency 가 available=false 인 경우 어떤 지연 수치도) 언급 금지.\n"
-        "3. conclusion.verdict 는 fact_sheet.verdict 값을 그대로 사용한다.\n"
+        "3. conclusion.verdict 는 fact_sheet.verdict 값을 그대로 사용한다. 값은 PASS(합격), "
+        "CONDITIONAL_PASS(조건부 합격), FAIL(불합격), INCONCLUSIVE(판정 불가: 핵심 지표가 산출되지 "
+        "않았거나 판정 대상 지표가 없음) 중 하나다. 판정 불가면 합격이나 불합격으로 단정하지 마라. "
+        "metrics 의 is_core=true 는 의뢰자가 지정한 핵심 지표다.\n"
         "4. benchmark 서술에는 benchmark_refs 의 source_note(기준의 출처·성격)를 반드시 포함하고, "
         "'공개 벤치마크 평균'처럼 단정하지 마라. benchmark_refs 가 비어 있으면 비교를 주장하지 마라.\n"
         "5. 과장 없이 사실 기반으로, 평가기관 성적서 문체(객관적·간결)로 작성한다.\n"
         f"6. 이 성적서의 용도는 '{report_purpose}' 이다.\n"
-        "7. 반드시 지정된 JSON 스키마로만 응답한다. 설명 문장을 덧붙이지 마라."
+        "7. 반드시 지정된 JSON 스키마로만 응답한다. 설명 문장을 덧붙이지 마라.\n"
+        "8. client_inputs 는 의뢰자가 제공한 정보다(선언, 학습·평가 데이터, 정답 라벨, 실행 환경 등). "
+        "서술에 자유롭게 반영하되, 값이 '제공되지 않음'인 항목은 그 사실만 적고 내용을 지어내지 마라. "
+        "client_inputs 의 숫자는 적힌 그대로만 쓴다."
     )
 
 
-def build_user_prompt(fact_sheet: dict, benchmark_refs: list, derived: dict) -> str:
+def build_user_prompt(
+    fact_sheet: dict,
+    benchmark_refs: list,
+    derived: dict,
+    client_inputs: dict | None = None,
+) -> str:
     payload = {
         "fact_sheet": fact_sheet,
         "derived": derived,
         "benchmark_refs": benchmark_refs,
     }
+    # 고객 입력은 계산값과 섞이지 않게 따로 싣는다(서술 설계 D25).
+    if client_inputs:
+        payload["client_inputs"] = client_inputs
     return (
         "다음 사실 시트를 근거로 성적서 7·8·9절 서술을 작성하라.\n"
         "각 필드 의미: interpretation(7절 정밀분석: confusion_analysis=혼동행렬 기반 오분류 해석, "

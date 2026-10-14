@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 _MODEL = "gpt-4.1-nano"
 
 
-def _prepare_facts(fs, task_type_value: str):
+def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
     """파생값·기준치·숫자 화이트리스트 준비 — 순수 CPU 구간(스레드풀로 오프로드된다).
 
     build_number_whitelist 는 혼동행렬을 행x열 이중 루프로 돌며 셀마다 문자열을
@@ -40,7 +40,7 @@ def _prepare_facts(fs, task_type_value: str):
     """
     derived = compute_derived(fs)
     benchmark_refs = build_benchmark_refs(task_type_value, fs.metrics)
-    whitelist = build_number_whitelist(fs, benchmark_refs, derived)
+    whitelist = build_number_whitelist(fs, benchmark_refs, derived, client_inputs)
     return derived, benchmark_refs, whitelist
 
 
@@ -57,7 +57,7 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
     """
     fs = req.fact_sheet
     derived, benchmark_refs, whitelist = await run_cpu_bound(
-        _prepare_facts, fs, req.task_type.value
+        _prepare_facts, fs, req.task_type.value, req.client_inputs
     )
 
     # 1. 무키 → 폴백
@@ -81,7 +81,12 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
                 model=_MODEL,
                 messages=[
                     {"role": "system", "content": build_system_prompt(req.report_purpose.value)},
-                    {"role": "user", "content": build_user_prompt(fs.model_dump(), benchmark_refs, derived)},
+                    {
+                        "role": "user",
+                        "content": build_user_prompt(
+                            fs.model_dump(), benchmark_refs, derived, req.client_inputs
+                        ),
+                    },
                 ],
                 response_format=build_response_schema(),
                 temperature=0,
