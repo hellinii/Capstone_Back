@@ -83,6 +83,14 @@ class FactSheet(BaseModel):
     dropped_rows: int  = Field(default=0, description="제외된 행 수")
     metrics:      list[MetricFact]   = Field(default=[], max_length=MAX_METRIC_FACTS, description="지표 결과")
     per_class:    list[PerClassFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES, description="클래스별 지표")
+    class_averages: list[PerClassFact] = Field(
+        default=[],
+        max_length=4,
+        description=(
+            "클래스별 표(M22)의 평균 줄 — 매크로·가중·마이크로(멀티레이블은 샘플 평균도). "
+            "평균 방식 차이를 8.2 에 쓰는 재료(서술 설계 D17·D39). M22 미선택이면 빈 배열."
+        ),
+    )
     confusion:    ConfusionFact | None     = None
     distribution: DistributionFact | None  = None
     verdict:      str   = Field(description="PASS | CONDITIONAL_PASS | FAIL | INCONCLUSIVE (프론트 규칙 산출, D19)")

@@ -354,3 +354,31 @@ def test_client_inputs_reach_the_prompt():
 
 def test_metric_fact_core_flag_defaults_false():
     assert MetricFact(metric_id="M1", display_name="Accuracy", value=0.9, status="pass").is_core is False
+
+
+def test_class_average_rows_reach_the_fact_sheet_and_whitelist():
+    """클래스별 표(M22)의 평균 줄을 버리지 않는다(서술 설계 D17·D39). 서술이 그 숫자를 쓰면 허용된다."""
+    from app.narrative.schemas import PerClassFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "class_averages": [
+                PerClassFact(label="매크로 평균", precision=0.731, recall=0.682, f1=0.705, support=200),
+                PerClassFact(label="가중 평균", precision=0.794, recall=0.781, f1=0.786, support=200),
+            ]
+        }
+    )
+    derived = compute_derived(fs)
+    wl = build_number_whitelist(fs, [], derived)
+
+    g = verify_grounding(["매크로 평균 F1 은 0.705, 가중 평균 F1 은 0.786 이다."], wl)
+    assert g.passed, g.violations
+
+
+def test_class_averages_are_bounded():
+    """평균 줄은 많아야 넷이다(매크로·가중·마이크로·샘플). 그보다 많으면 거절한다."""
+    from app.narrative.schemas import PerClassFact
+
+    rows = [PerClassFact(label=f"avg{i}", f1=0.5) for i in range(5)]
+    with pytest.raises(ValidationError):
+        FactSheet(verdict="PASS", score=100.0, class_averages=rows)
