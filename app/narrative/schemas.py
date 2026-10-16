@@ -50,6 +50,15 @@ class ConfusionFact(BaseModel):
         return v
 
 
+class ConfusionCountFact(BaseModel):
+    """TP·TN·FP·FN 건수 한 줄. 이진은 양성 클래스 한 줄, 다중·멀티는 클래스(레이블)마다(일대다)."""
+    label: str
+    tp: int
+    fp: int
+    fn: int
+    tn: int
+
+
 class DistributionFact(BaseModel):
     class_distribution: dict[str, int] = Field(
         default={},
@@ -77,17 +86,50 @@ class LatencyFact(BaseModel):
     unit: str = "ms"
 
 
+class DerivedPredictionFact(BaseModel):
+    """예측을 확률·점수에서 파생했다는 사실(재료 목록 9절 "파생 예측 사실", 고정 문구 9)."""
+    method:         str = Field(description="threshold | argmax | threshold_per_label")
+    threshold:      float | dict[str, float] | None = Field(
+        default=None, description="결정 임계값. 멀티레이블은 레이블(컬럼)별, argmax 는 없음"
+    )
+    source_columns: list[str] = Field(default=[], max_length=MAX_CLASS_ENTRIES, description="파생에 쓴 점수 컬럼")
+
+    @field_validator("threshold")
+    @classmethod
+    def _per_label_within_limit(cls, v):
+        if isinstance(v, dict) and len(v) > MAX_CLASS_ENTRIES:
+            raise ValueError(f"레이블별 임계값 수가 상한({MAX_CLASS_ENTRIES})을 넘습니다.")
+        return v
+
+
 class FactSheet(BaseModel):
     """프론트가 평가 결과로 조립해 보내는 '사실 시트'. LLM은 이 안의 숫자만 사용한다."""
     n_samples:    int  = Field(default=0, description="평가 샘플 수")
     dropped_rows: int  = Field(default=0, description="제외된 행 수")
     metrics:      list[MetricFact]   = Field(default=[], max_length=MAX_METRIC_FACTS, description="지표 결과")
     per_class:    list[PerClassFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES, description="클래스별 지표")
+    class_averages: list[PerClassFact] = Field(
+        default=[],
+        max_length=4,
+        description=(
+            "클래스별 표(M22)의 평균 줄 — 매크로·가중·마이크로(멀티레이블은 샘플 평균도). "
+            "평균 방식 차이를 8.2 에 쓰는 재료(서술 설계 D17·D39). M22 미선택이면 빈 배열."
+        ),
+    )
     confusion:    ConfusionFact | None     = None
+    confusion_counts: list[ConfusionCountFact] = Field(
+        default=[],
+        max_length=MAX_CLASS_ENTRIES,
+        description="TP·TN·FP·FN 건수 — 혼동행렬(M21) 선택과 무관하게 늘 실린다(재료 목록 9절)",
+    )
     distribution: DistributionFact | None  = None
     verdict:      str   = Field(description="PASS | CONDITIONAL_PASS | FAIL | INCONCLUSIVE (프론트 규칙 산출, D19)")
     score:        float = Field(description="통과율 점수 (프론트 규칙 산출)")
     latency:      LatencyFact = Field(default_factory=LatencyFact)
+    derived_prediction: DerivedPredictionFact | None = Field(
+        default=None,
+        description="예측을 확률에서 파생했을 때만. 서술은 수치가 그 임계값의 함수임을 알아야 한다",
+    )
 
 
 class NarrativeRequest(BaseModel):
@@ -125,6 +167,18 @@ class ConclusionOut(BaseModel):
     risks:     str = ""
 
 
+class BenchmarkRefOut(BaseModel):
+    """8.1 에 숫자로 찍을 벤치마크 비교 한 줄 — 서버가 계산한 값 그대로(서술 설계 §4.8)."""
+    metric:      str
+    model_value: float
+    ref_low:     float
+    ref_high:    float
+    position:    str = Field(description="above | within | below (단순 수치 위치)")
+    direction:   str = Field(description="higher | lower (높을수록/낮을수록 좋음)")
+    quality:     str = Field(description="better | within | worse (방향을 반영한 우열)")
+    source_note: str = Field(description="기준의 출처·성격 — '내부 참조 기준치'")
+
+
 class RecommendationNarrativeOut(BaseModel):
     data_quality: str = ""
     model_ops:    str = ""
@@ -157,3 +211,10 @@ class NarrativeResponse(BaseModel):
     recommendation_narrative: RecommendationNarrativeOut
     recommendations:         list[RecommendationOut] = []
     meta:                    NarrativeMeta
+    benchmark_refs:          list[BenchmarkRefOut] = Field(
+        default=[],
+        description=(
+            "벤치마크 비교값. 8.1 에 참조 범위를 숫자로 찍는다(재료 목록 9절). 종전에는 AI 가 쓴 "
+            "문장 안에만 나왔다. 서술 경로(llm·fallback)와 무관하게 늘 같은 값이다"
+        ),
+    )

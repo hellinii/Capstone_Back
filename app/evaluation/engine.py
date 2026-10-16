@@ -1,7 +1,8 @@
 """app/evaluation/engine.py — 평가 지표 계산 오케스트레이션(디스패치)
 
 전처리(preprocess_data) 후 METRIC_REQUIREMENTS 로부터 계산 가능 지표 를 정하고, METRIC_REGISTRY
-로 각 지표 를 실제 계산 함수(metrics/*)에 디스패치한다. binary ROC/PR 곡선·latency 통계도 부착.
+로 각 지표 를 실제 계산 함수(metrics/*)에 디스패치한다. TP·TN·FP·FN 건수, binary ROC/PR 곡선,
+latency 통계도 부착.
 
 상호작용
 - 의존(import): pandas, app.core.schemas(METRIC_REQUIREMENTS), .preprocessor, .metrics(common/binary/multiclass/multilabel)
@@ -11,7 +12,7 @@
 import pandas as pd
 from typing import Dict, Any, List
 
-from .metrics import common, binary, multiclass, multilabel
+from .metrics import common, binary, counts, multiclass, multilabel
 from .preprocessor import preprocess_data
 from .errors import metric_error
 from app.core.schemas import METRIC_REQUIREMENTS
@@ -124,17 +125,21 @@ def evaluate(
         else:
             results[metric_id] = metric_error("구현되지 않은 지표입니다.")
 
-    # ── 차트용 곡선 좌표 (binary, 스칼라 AUROC/AUPRC 산출 성공 시 함께 제공) ──
-    # 별도 지표가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다.
-    if task_type == "binary":
-        if "M9" in selected_metric_ids and isinstance(results.get("M9"), (int, float)):
+    # ── TP·TN·FP·FN 건수 — 지표 선택과 무관하게 늘 계산한다(재료 목록 9절, 7.1 인쇄·AI 전달) ──
+    # 별도 지표가 아니라 success_metrics 의 confusion_counts 키로 내려보낸다. 예측이 없어
+    # 계산할 수 없으면(불균형 비율만 고른 경우 등) 키를 두지 않는다.
+    try:
+        results["confusion_counts"] = counts.calculate_confusion_counts(df, mapping_dict)
+    except Exception:
+        pass
+
+    # ── 차트용 곡선 좌표 (binary, score 컬럼이 있을 때) ──
+    # 별도 지표가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다. 종전에는
+    # AUROC(M9)·AUPRC(M10)를 골랐을 때만 만들었다 — 재료 목록 9절은 "이진이고 score가 있을 때"다.
+    if task_type == "binary" and mapping_dict.get("score_positive"):
+        for key, func in (("roc_curve", binary.calculate_roc_curve), ("pr_curve", binary.calculate_pr_curve)):
             try:
-                results["roc_curve"] = binary.calculate_roc_curve(df, mapping_dict)
-            except Exception:
-                pass
-        if "M10" in selected_metric_ids and isinstance(results.get("M10"), (int, float)):
-            try:
-                results["pr_curve"] = binary.calculate_pr_curve(df, mapping_dict)
+                results[key] = func(df, mapping_dict)
             except Exception:
                 pass
 

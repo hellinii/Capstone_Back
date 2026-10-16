@@ -12,7 +12,7 @@ fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비�
 import json
 import logging
 
-from app.narrative.schemas import ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
+from app.narrative.schemas import BenchmarkRefOut, ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.fallback import build_fallback_narrative
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema
@@ -54,11 +54,20 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
     LLM 서술 생성 진입점.
     - client is None(무키) / LLM 호출 실패 / grounding 위반 → 규칙 폴백.
     - verdict 는 항상 fact_sheet 값으로 강제(LLM echo 무시).
+    - 벤치마크 비교값(benchmark_refs)은 서술 경로와 무관하게 응답에 함께 싣는다 — 8.1 에 참조
+      범위를 숫자로 찍는다(재료 목록 9절).
     """
     fs = req.fact_sheet
     derived, benchmark_refs, whitelist = await run_cpu_bound(
         _prepare_facts, fs, req.task_type.value, req.client_inputs
     )
+    resp = await _narrate(client, req, fs, derived, benchmark_refs, whitelist)
+    resp.benchmark_refs = [BenchmarkRefOut(**ref) for ref in benchmark_refs]
+    return resp
+
+
+async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, whitelist) -> NarrativeResponse:
+    """서술 본문 — LLM 또는 규칙 폴백. 반환 경로가 여럿이라 공통 부착은 호출자가 한다."""
 
     # 1. 무키 → 폴백
     if client is None:
@@ -80,7 +89,7 @@ async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse
             response = await client.chat.completions.create(
                 model=_MODEL,
                 messages=[
-                    {"role": "system", "content": build_system_prompt(req.report_purpose.value)},
+                    {"role": "system", "content": build_system_prompt(req.report_purpose.value, req.task_type.value)},
                     {
                         "role": "user",
                         "content": build_user_prompt(

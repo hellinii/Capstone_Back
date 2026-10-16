@@ -354,3 +354,96 @@ def test_client_inputs_reach_the_prompt():
 
 def test_metric_fact_core_flag_defaults_false():
     assert MetricFact(metric_id="M1", display_name="Accuracy", value=0.9, status="pass").is_core is False
+
+
+def test_class_average_rows_reach_the_fact_sheet_and_whitelist():
+    """클래스별 표(M22)의 평균 줄을 버리지 않는다(서술 설계 D17·D39). 서술이 그 숫자를 쓰면 허용된다."""
+    from app.narrative.schemas import PerClassFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "class_averages": [
+                PerClassFact(label="매크로 평균", precision=0.731, recall=0.682, f1=0.705, support=200),
+                PerClassFact(label="가중 평균", precision=0.794, recall=0.781, f1=0.786, support=200),
+            ]
+        }
+    )
+    derived = compute_derived(fs)
+    wl = build_number_whitelist(fs, [], derived)
+
+    g = verify_grounding(["매크로 평균 F1 은 0.705, 가중 평균 F1 은 0.786 이다."], wl)
+    assert g.passed, g.violations
+
+
+def test_class_averages_are_bounded():
+    """평균 줄은 많아야 넷이다(매크로·가중·마이크로·샘플). 그보다 많으면 거절한다."""
+    from app.narrative.schemas import PerClassFact
+
+    rows = [PerClassFact(label=f"avg{i}", f1=0.5) for i in range(5)]
+    with pytest.raises(ValidationError):
+        FactSheet(verdict="PASS", score=100.0, class_averages=rows)
+
+
+def test_system_prompt_names_the_task_type():
+    """분류 유형 이름이 AI 에 직접 간다(재료 목록 2절 "작업 유형 — AI 예")."""
+    from app.narrative.prompt import build_system_prompt
+
+    assert "다중 클래스 분류" in build_system_prompt("internal", "multiclass")
+    assert "멀티레이블 분류" in build_system_prompt("internal", "multilabel")
+
+
+def test_derived_prediction_threshold_is_allowed_in_narrative():
+    """파생 예측 사실이 사실 시트에 실려 가고(재료 목록 9절), 그 임계값을 서술에 써도 된다."""
+    from app.narrative.schemas import DerivedPredictionFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "derived_prediction": DerivedPredictionFact(
+                method="threshold", threshold=0.35, source_columns=["score"]
+            )
+        }
+    )
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+
+    assert verify_grounding(["예측값은 확률에 임계값 0.35 를 적용해 만들었다."], wl).passed
+
+
+def test_per_label_thresholds_are_allowed_in_narrative():
+    from app.narrative.schemas import DerivedPredictionFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "derived_prediction": DerivedPredictionFact(
+                method="threshold_per_label", threshold={"score_a": 0.4, "score_b": 0.65}
+            )
+        }
+    )
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+
+    assert verify_grounding(["레이블 a 는 0.4, b 는 0.65 로 판정했다."], wl).passed
+
+
+async def test_benchmark_refs_come_back_with_the_narrative():
+    """8.1 에 참조 범위를 숫자로 찍도록 비교값을 응답에 싣는다(재료 목록 9절). 폴백이어도 같다."""
+    req = NarrativeRequest(task_type=TaskType.binary, fact_sheet=_sample_fact_sheet())
+    resp = await generate_narrative(None, req)
+
+    expected = build_benchmark_refs("binary", req.fact_sheet.metrics)
+    assert resp.meta.source == "fallback"
+    assert [r.model_dump() for r in resp.benchmark_refs] == expected
+    assert len(expected) > 0
+
+
+def test_confusion_counts_reach_the_fact_sheet_and_whitelist():
+    """TP·TN·FP·FN 건수는 M21 없이도 AI 에 간다(재료 목록 9절). 서술이 그 건수를 쓰면 허용된다."""
+    from app.narrative.schemas import ConfusionCountFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "confusion": None,
+            "confusion_counts": [ConfusionCountFact(label="1", tp=52, fp=56, fn=43, tn=49)],
+        }
+    )
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+
+    assert verify_grounding(["양성 기준 TP 52건, FN 43건이다."], wl).passed

@@ -96,6 +96,14 @@ def build_number_whitelist(
         if pc.label and pc.label.replace(".", "").isdigit():
             _add(wl, pc.label)
 
+    for row in fs.confusion_counts:
+        for val in (row.tp, row.fp, row.fn, row.tn):
+            _add(wl, val)
+
+    for avg in fs.class_averages:
+        for val in (avg.precision, avg.recall, avg.f1, avg.support):
+            _add(wl, val)
+
     if fs.confusion:
         for row in fs.confusion.matrix:
             for cell in row:
@@ -111,6 +119,11 @@ def build_number_whitelist(
                 _add(wl, k)
         if fs.distribution.imbalance_ratio is not None:
             _add(wl, fs.distribution.imbalance_ratio)
+
+    if fs.derived_prediction:
+        threshold = fs.derived_prediction.threshold
+        for val in threshold.values() if isinstance(threshold, dict) else (threshold,):
+            _add(wl, val)
 
     if fs.latency and fs.latency.available:
         for val in (fs.latency.mean, fs.latency.p50, fs.latency.p95, fs.latency.p99):
