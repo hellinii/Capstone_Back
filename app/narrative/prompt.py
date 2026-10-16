@@ -10,7 +10,12 @@ analyzer.py 의 프롬프트/스키마 패턴을 따른다. 핵심 제약:
 import json
 
 
-def build_system_prompt(report_purpose: str) -> str:
+# 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예").
+TASK_TYPE_LABELS = {"binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "멀티레이블 분류"}
+
+
+def build_system_prompt(report_purpose: str, task_type: str = "") -> str:
+    task_label = TASK_TYPE_LABELS.get(task_type, task_type)
     return (
         "너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술 작성 전문가다.\n"
         "주어진 JSON 사실 시트(fact_sheet)와 파생값(derived)·벤치마크(benchmark_refs)만을 근거로 "
@@ -29,7 +34,10 @@ def build_system_prompt(report_purpose: str) -> str:
         "7. 반드시 지정된 JSON 스키마로만 응답한다. 설명 문장을 덧붙이지 마라.\n"
         "8. client_inputs 는 의뢰자가 제공한 정보다(선언, 학습·평가 데이터, 정답 라벨, 실행 환경 등). "
         "서술에 자유롭게 반영하되, 값이 '제공되지 않음'인 항목은 그 사실만 적고 내용을 지어내지 마라. "
-        "client_inputs 의 숫자는 적힌 그대로만 쓴다."
+        "client_inputs 의 숫자는 적힌 그대로만 쓴다.\n"
+        + (f"9. 평가한 모델의 분류 유형은 '{task_label}' 이다.\n" if task_label else "")
+        + "10. fact_sheet.derived_prediction 이 있으면 예측값은 모델이 직접 낸 것이 아니라 확률에 "
+        "결정 임계값을 적용해 만든 것이다. 수치가 그 임계값에 따라 달라진다는 점을 해석에 반영하라."
     )
 
 

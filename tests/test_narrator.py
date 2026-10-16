@@ -382,3 +382,53 @@ def test_class_averages_are_bounded():
     rows = [PerClassFact(label=f"avg{i}", f1=0.5) for i in range(5)]
     with pytest.raises(ValidationError):
         FactSheet(verdict="PASS", score=100.0, class_averages=rows)
+
+
+def test_system_prompt_names_the_task_type():
+    """분류 유형 이름이 AI 에 직접 간다(재료 목록 2절 "작업 유형 — AI 예")."""
+    from app.narrative.prompt import build_system_prompt
+
+    assert "다중 클래스 분류" in build_system_prompt("internal", "multiclass")
+    assert "멀티레이블 분류" in build_system_prompt("internal", "multilabel")
+
+
+def test_derived_prediction_threshold_is_allowed_in_narrative():
+    """파생 예측 사실이 사실 시트에 실려 가고(재료 목록 9절), 그 임계값을 서술에 써도 된다."""
+    from app.narrative.schemas import DerivedPredictionFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "derived_prediction": DerivedPredictionFact(
+                method="threshold", threshold=0.35, source_columns=["score"]
+            )
+        }
+    )
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+
+    assert verify_grounding(["예측값은 확률에 임계값 0.35 를 적용해 만들었다."], wl).passed
+
+
+def test_per_label_thresholds_are_allowed_in_narrative():
+    from app.narrative.schemas import DerivedPredictionFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "derived_prediction": DerivedPredictionFact(
+                method="threshold_per_label", threshold={"score_a": 0.4, "score_b": 0.65}
+            )
+        }
+    )
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+
+    assert verify_grounding(["레이블 a 는 0.4, b 는 0.65 로 판정했다."], wl).passed
+
+
+async def test_benchmark_refs_come_back_with_the_narrative():
+    """8.1 에 참조 범위를 숫자로 찍도록 비교값을 응답에 싣는다(재료 목록 9절). 폴백이어도 같다."""
+    req = NarrativeRequest(task_type=TaskType.binary, fact_sheet=_sample_fact_sheet())
+    resp = await generate_narrative(None, req)
+
+    expected = build_benchmark_refs("binary", req.fact_sheet.metrics)
+    assert resp.meta.source == "fallback"
+    assert [r.model_dump() for r in resp.benchmark_refs] == expected
+    assert len(expected) > 0

@@ -116,6 +116,11 @@ def build_number_whitelist(
         if fs.distribution.imbalance_ratio is not None:
             _add(wl, fs.distribution.imbalance_ratio)
 
+    if fs.derived_prediction:
+        threshold = fs.derived_prediction.threshold
+        for val in threshold.values() if isinstance(threshold, dict) else (threshold,):
+            _add(wl, val)
+
     if fs.latency and fs.latency.available:
         for val in (fs.latency.mean, fs.latency.p50, fs.latency.p95, fs.latency.p99):
             _add(wl, val)

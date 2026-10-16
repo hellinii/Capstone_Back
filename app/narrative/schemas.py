@@ -77,6 +77,22 @@ class LatencyFact(BaseModel):
     unit: str = "ms"
 
 
+class DerivedPredictionFact(BaseModel):
+    """예측을 확률·점수에서 파생했다는 사실(재료 목록 9절 "파생 예측 사실", 고정 문구 9)."""
+    method:         str = Field(description="threshold | argmax | threshold_per_label")
+    threshold:      float | dict[str, float] | None = Field(
+        default=None, description="결정 임계값. 멀티레이블은 레이블(컬럼)별, argmax 는 없음"
+    )
+    source_columns: list[str] = Field(default=[], max_length=MAX_CLASS_ENTRIES, description="파생에 쓴 점수 컬럼")
+
+    @field_validator("threshold")
+    @classmethod
+    def _per_label_within_limit(cls, v):
+        if isinstance(v, dict) and len(v) > MAX_CLASS_ENTRIES:
+            raise ValueError(f"레이블별 임계값 수가 상한({MAX_CLASS_ENTRIES})을 넘습니다.")
+        return v
+
+
 class FactSheet(BaseModel):
     """프론트가 평가 결과로 조립해 보내는 '사실 시트'. LLM은 이 안의 숫자만 사용한다."""
     n_samples:    int  = Field(default=0, description="평가 샘플 수")
@@ -96,6 +112,10 @@ class FactSheet(BaseModel):
     verdict:      str   = Field(description="PASS | CONDITIONAL_PASS | FAIL | INCONCLUSIVE (프론트 규칙 산출, D19)")
     score:        float = Field(description="통과율 점수 (프론트 규칙 산출)")
     latency:      LatencyFact = Field(default_factory=LatencyFact)
+    derived_prediction: DerivedPredictionFact | None = Field(
+        default=None,
+        description="예측을 확률에서 파생했을 때만. 서술은 수치가 그 임계값의 함수임을 알아야 한다",
+    )
 
 
 class NarrativeRequest(BaseModel):
@@ -133,6 +153,18 @@ class ConclusionOut(BaseModel):
     risks:     str = ""
 
 
+class BenchmarkRefOut(BaseModel):
+    """8.1 에 숫자로 찍을 벤치마크 비교 한 줄 — 서버가 계산한 값 그대로(서술 설계 §4.8)."""
+    metric:      str
+    model_value: float
+    ref_low:     float
+    ref_high:    float
+    position:    str = Field(description="above | within | below (단순 수치 위치)")
+    direction:   str = Field(description="higher | lower (높을수록/낮을수록 좋음)")
+    quality:     str = Field(description="better | within | worse (방향을 반영한 우열)")
+    source_note: str = Field(description="기준의 출처·성격 — '내부 참조 기준치'")
+
+
 class RecommendationNarrativeOut(BaseModel):
     data_quality: str = ""
     model_ops:    str = ""
@@ -165,3 +197,10 @@ class NarrativeResponse(BaseModel):
     recommendation_narrative: RecommendationNarrativeOut
     recommendations:         list[RecommendationOut] = []
     meta:                    NarrativeMeta
+    benchmark_refs:          list[BenchmarkRefOut] = Field(
+        default=[],
+        description=(
+            "벤치마크 비교값. 8.1 에 참조 범위를 숫자로 찍는다(재료 목록 9절). 종전에는 AI 가 쓴 "
+            "문장 안에만 나왔다. 서술 경로(llm·fallback)와 무관하게 늘 같은 값이다"
+        ),
+    )

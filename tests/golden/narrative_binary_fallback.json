@@ -1,4 +1,36 @@
 {
+  "benchmark_refs": [
+    {
+      "direction": "higher",
+      "metric": "Accuracy",
+      "model_value": 0.94,
+      "position": "above",
+      "quality": "better",
+      "ref_high": 0.92,
+      "ref_low": 0.85,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)"
+    },
+    {
+      "direction": "higher",
+      "metric": "Recall",
+      "model_value": 0.7,
+      "position": "below",
+      "quality": "worse",
+      "ref_high": 0.92,
+      "ref_low": 0.8,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)"
+    },
+    {
+      "direction": "higher",
+      "metric": "AUROC",
+      "model_value": 0.88,
+      "position": "within",
+      "quality": "within",
+      "ref_high": 0.95,
+      "ref_low": 0.85,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)"
+    }
+  ],
   "conclusion": {
     "benchmark": "Accuracy 0.94는 내부 참조 기준 0.85~0.92 대비 우수; Recall 0.7는 내부 참조 기준 0.8~0.92 대비 미흡; AUROC 0.88는 내부 참조 기준 0.85~0.95 대비 기준 범위 내. (내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음))",
     "narrative": "임계값이 설정된 시험항목 3개 중 2개가 기준을 충족하여(통과율 66.7%), 종합 판정은 '조건부 적합'이다. 기준 미달 항목은 Recall이다.",
