@@ -432,3 +432,18 @@ async def test_benchmark_refs_come_back_with_the_narrative():
     assert resp.meta.source == "fallback"
     assert [r.model_dump() for r in resp.benchmark_refs] == expected
     assert len(expected) > 0
+
+
+def test_confusion_counts_reach_the_fact_sheet_and_whitelist():
+    """TP·TN·FP·FN 건수는 M21 없이도 AI 에 간다(재료 목록 9절). 서술이 그 건수를 쓰면 허용된다."""
+    from app.narrative.schemas import ConfusionCountFact
+
+    fs = _sample_fact_sheet().model_copy(
+        update={
+            "confusion": None,
+            "confusion_counts": [ConfusionCountFact(label="1", tp=52, fp=56, fn=43, tn=49)],
+        }
+    )
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+
+    assert verify_grounding(["양성 기준 TP 52건, FN 43건이다."], wl).passed

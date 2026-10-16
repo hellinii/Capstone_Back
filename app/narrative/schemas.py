@@ -50,6 +50,15 @@ class ConfusionFact(BaseModel):
         return v
 
 
+class ConfusionCountFact(BaseModel):
+    """TP·TN·FP·FN 건수 한 줄. 이진은 양성 클래스 한 줄, 다중·멀티는 클래스(레이블)마다(일대다)."""
+    label: str
+    tp: int
+    fp: int
+    fn: int
+    tn: int
+
+
 class DistributionFact(BaseModel):
     class_distribution: dict[str, int] = Field(
         default={},
@@ -108,6 +117,11 @@ class FactSheet(BaseModel):
         ),
     )
     confusion:    ConfusionFact | None     = None
+    confusion_counts: list[ConfusionCountFact] = Field(
+        default=[],
+        max_length=MAX_CLASS_ENTRIES,
+        description="TP·TN·FP·FN 건수 — 혼동행렬(M21) 선택과 무관하게 늘 실린다(재료 목록 9절)",
+    )
     distribution: DistributionFact | None  = None
     verdict:      str   = Field(description="PASS | CONDITIONAL_PASS | FAIL | INCONCLUSIVE (프론트 규칙 산출, D19)")
     score:        float = Field(description="통과율 점수 (프론트 규칙 산출)")

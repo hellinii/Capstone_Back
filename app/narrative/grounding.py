@@ -96,6 +96,10 @@ def build_number_whitelist(
         if pc.label and pc.label.replace(".", "").isdigit():
             _add(wl, pc.label)
 
+    for row in fs.confusion_counts:
+        for val in (row.tp, row.fp, row.fn, row.tn):
+            _add(wl, val)
+
     for avg in fs.class_averages:
         for val in (avg.precision, avg.recall, avg.f1, avg.support):
             _add(wl, val)
