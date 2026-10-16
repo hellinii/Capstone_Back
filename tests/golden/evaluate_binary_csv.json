@@ -69,6 +69,14 @@
       "M7": 0.4666666666666667,
       "M8": 0.5333333333333333,
       "M9": 0.5111779448621554,
+      "confusion_counts": {
+        "fn": 43,
+        "fp": 56,
+        "positive_class": "1",
+        "tn": 49,
+        "tp": 52,
+        "type": "binary"
+      },
       "pr_curve": {
         "precision": [
           1.0,
