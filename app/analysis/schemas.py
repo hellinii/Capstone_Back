@@ -71,3 +71,11 @@ class ValidateDataResponse(BaseModel):
     validation_details: list[ValidationCheckItem]  = Field(description="개별 검증 항목 결과 목록")
     error_count:        int                       = Field(description="에러 수")
     warning_count:      int                       = Field(description="경고 수")
+    class_distribution: dict[str, int] | None     = Field(
+        default=None,
+        description=(
+            "평가 프레임 기준 클래스(레이블)별 등장 횟수. 평가 응답의 class_distribution 과 같은 "
+            "함수·같은 프레임으로 세므로 재료 선택 점검이 성적서 3절과 같은 불균형 비율을 쓴다. "
+            "필수 컬럼 누락·0행처럼 프레임을 만들지 못한 응답에는 없다(null)."
+        ),
+    )

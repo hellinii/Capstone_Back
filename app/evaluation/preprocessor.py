@@ -336,22 +336,30 @@ def _warn_ghost_classes(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, An
         )
 
 
-def _extract_class_distribution(df: pd.DataFrame, mapping_dict: dict, task_type: str, logs: Dict[str, Any]) -> None:
-    """6. 클래스 분포 추출."""
+def class_distribution_of(df: pd.DataFrame, mapping_dict: dict, task_type: str) -> Dict[str, int]:
+    """평가 프레임의 정답 컬럼에서 클래스(레이블)별 등장 횟수를 센다 — 분포의 단일 출처.
+
+    평가(`preprocess_data`)와 데이터 검증(`validation_service`)이 **같은 프레임**에 이 함수를
+    불러, 검증 화면이 미리 보는 불균형 비율(IR)과 성적서 3절의 IR 이 같은 값이 된다.
+    멀티레이블 셀은 파싱 전 원문이어도 되고 이미 리스트여도 된다(`parse_label_cell` 은 둘 다 받는다).
+    """
     class_dist: Dict[str, int] = {}
-    y_true_col_for_dist = mapping_dict.get('y_true') or mapping_dict.get('true_class') or mapping_dict.get('true_labels')
-    if y_true_col_for_dist and y_true_col_for_dist in df.columns:
+    col = mapping_dict.get('y_true') or mapping_dict.get('true_class') or mapping_dict.get('true_labels')
+    if col and col in df.columns:
         if task_type == 'multilabel':
-            # df[y_true_col_for_dist]는 이미 파서를 거쳐 리스트 형태임
-            for labels in df[y_true_col_for_dist].dropna():
-                if isinstance(labels, list):
-                    for label in labels:
-                        class_dist[label] = class_dist.get(label, 0) + 1
+            for cell in df[col]:
+                for label in parse_label_cell(cell):
+                    class_dist[label] = class_dist.get(label, 0) + 1
         else:
-            class_dist = df[y_true_col_for_dist].value_counts().to_dict()
+            class_dist = df[col].value_counts().to_dict()
     # 키 표현형과 순서를 표준화한다 — 종전 `{str(k): v}` 는 int 1 과 str '1' 을 뭉개며
     # 카운트를 **덮어썼고**, 사전순 정렬이 ['1','10','2'] 로 클래스 순서를 뒤집었다(D-04).
-    logs["class_distribution"] = normalize_distribution(class_dist)
+    return normalize_distribution(class_dist)
+
+
+def _extract_class_distribution(df: pd.DataFrame, mapping_dict: dict, task_type: str, logs: Dict[str, Any]) -> None:
+    """6. 클래스 분포 추출."""
+    logs["class_distribution"] = class_distribution_of(df, mapping_dict, task_type)
 
 
 def collect_role_columns(mappings: List[Dict[str, str]]) -> Dict[str, List[str]]:

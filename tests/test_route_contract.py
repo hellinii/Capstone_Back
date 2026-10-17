@@ -125,10 +125,10 @@ def test_analysis_response_fields():
 
 
 def test_validate_data_response_fields():
-    """6절 검증표와 프론트 진행 게이트(E-04)가 읽는 필드."""
+    """6절 검증표와 프론트 진행 게이트(E-04), 재료 선택 점검의 IR(class_distribution)이 읽는 필드."""
     assert {
         "task_type", "selected_metric_ids", "execution_summary",
-        "validation_details", "error_count", "warning_count",
+        "validation_details", "error_count", "warning_count", "class_distribution",
     } <= _fields("ValidateDataResponse")
 
 
