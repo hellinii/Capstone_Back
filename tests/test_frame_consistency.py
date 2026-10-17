@@ -171,6 +171,63 @@ def test_multilabel_empty_labels_are_not_counted_as_missing():
     )
 
 
+# ── 재료 선택 점검: 검증이 미리 보는 분포 == 성적서 3절이 쓰는 평가 분포 ────────────
+
+@pytest.mark.parametrize("task", ["binary", "multiclass", "multilabel"])
+def test_validate_class_distribution_equals_evaluate(task):
+    """검증 응답의 class_distribution 은 평가 응답과 같아야 한다.
+
+    재료 선택 점검(4번 줄: IR > 9 이면 AUPRC 필요)은 검증 화면에서 이 분포로 IR 을 셈한다.
+    성적서 3절은 평가 응답의 분포로 IR 을 찍는다. 둘이 어긋나면 화면은 "불균형 큼"이라
+    경고하는데 성적서는 IR 8.9 를 찍는 식의 모순이 생긴다.
+    """
+    v = _validate(task, "csv").json()
+    e = _evaluate(task, "csv").json()
+    assert e["class_distribution"], "평가 분포가 비어 있으면 비교가 무의미하다"
+    assert v["class_distribution"] == e["class_distribution"]
+    assert list(v["class_distribution"]) == list(e["class_distribution"]), "클래스 순서도 같아야 한다"
+
+
+def test_validate_class_distribution_parses_multilabel_cells_like_evaluate():
+    """멀티레이블 원문 셀("a|b", "a,b", 빈 셀)을 평가와 같은 파서로 센다."""
+    csv = "id,true_labels,pred_labels\n1,a|b,a\n2,,a\n3,\"a,c\",c\n4,10,10\n5,2,2\n"
+    data = _payload(
+        "multilabel",
+        [
+            {"column": "id", "role": "sample_id"},
+            {"column": "true_labels", "role": "true_labels"},
+            {"column": "pred_labels", "role": "pred_labels"},
+        ],
+        ["M16"],
+    )
+    files = {"file": ("ml.csv", csv.encode(), "text/csv")}
+    v = client.post("/api/validate-data", files=files, data={"data": data}).json()
+    e = client.post("/api/evaluate", files=files, data={"data": data}).json()
+    assert v["class_distribution"] == {"10": 1, "2": 1, "a": 2, "b": 1, "c": 1}
+    assert v["class_distribution"] == e["class_distribution"]
+
+
+def test_validate_without_frame_has_no_class_distribution():
+    """필수 컬럼이 없어 프레임을 만들지 못하면 분포를 지어내지 않는다(null)."""
+    csv = "id,t\n1,0\n2,1\n"
+    data = _payload(
+        "binary",
+        [
+            {"column": "id", "role": "sample_id"},
+            {"column": "t", "role": "y_true"},
+            {"column": "p", "role": "y_pred"},
+        ],
+        ["M1"],
+    )
+    body = client.post(
+        "/api/validate-data",
+        files={"file": ("x.csv", csv.encode(), "text/csv")},
+        data={"data": data},
+    ).json()
+    assert body["error_count"] >= 1
+    assert body["class_distribution"] is None
+
+
 # ── D-02: 후속 검사가 과다 축소된 프레임 위에서 허위 경고를 만들지 않는다 ────────
 
 def test_latency_missing_does_not_shrink_class_checks():

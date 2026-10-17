@@ -124,6 +124,78 @@
       "M3": 0.4708668899682428,
       "M4": 0.48007025235639533,
       "M5": 0.48007025235639533,
+      "confidence_intervals": {
+        "M15": {
+          "high": 0.5563,
+          "level": 0.95,
+          "low": 0.485,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M16": {
+          "high": 0.108,
+          "level": 0.95,
+          "low": 0.0384,
+          "method": "wilson"
+        },
+        "M17": {
+          "high": 0.3733,
+          "level": 0.95,
+          "low": 0.2979,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M18": {
+          "high": 0.0208,
+          "level": 0.95,
+          "low": 0.0005,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M2": {
+          "high": 0.5345,
+          "level": 0.95,
+          "low": 0.4448,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M23": {
+          "high": 1.5116,
+          "level": 0.95,
+          "low": 1.0606,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M3": {
+          "high": 0.5147,
+          "level": 0.95,
+          "low": 0.4276,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M4": {
+          "high": 0.5168,
+          "level": 0.95,
+          "low": 0.4369,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M5": {
+          "high": 0.5168,
+          "level": 0.95,
+          "low": 0.4369,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        }
+      },
       "confusion_counts": {
         "rows": [
           {
@@ -156,6 +228,27 @@
           }
         ],
         "type": "per_class"
+      },
+      "error_ratios": {
+        "boundary": null,
+        "boundary_margin": 0.1,
+        "boundary_note": "threshold_unknown",
+        "confident": {
+          "count": 46,
+          "ratio": 0.1106
+        },
+        "confident_level": 0.9,
+        "misclassified": 416,
+        "threshold": null,
+        "unit": "label_cell"
+      },
+      "imbalance_effect": {
+        "accuracy_minus_macro_f1": null,
+        "imbalance_ratio": 1.1031,
+        "level": "mild",
+        "majority_class": "finance",
+        "majority_minus_minority_f1": 0.0134,
+        "minority_class": "sports"
       }
     }
   },

@@ -1,4 +1,10 @@
 {
+  "class_distribution": {
+    "finance": 107,
+    "news": 102,
+    "sports": 97,
+    "tech": 102
+  },
   "error_count": 0,
   "execution_summary": [
     {

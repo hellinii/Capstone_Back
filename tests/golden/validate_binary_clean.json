@@ -1,4 +1,8 @@
 {
+  "class_distribution": {
+    "0": 105,
+    "1": 95
+  },
   "error_count": 0,
   "execution_summary": [
     {

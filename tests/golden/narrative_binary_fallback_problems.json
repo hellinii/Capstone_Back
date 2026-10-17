@@ -1,0 +1,87 @@
+{
+  "benchmark_refs": [
+    {
+      "direction": "higher",
+      "metric": "Accuracy",
+      "model_value": 0.94,
+      "position": "above",
+      "quality": "better",
+      "ref_high": 0.92,
+      "ref_low": 0.85,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "within",
+      "target_value": 0.85
+    },
+    {
+      "direction": "higher",
+      "metric": "Recall",
+      "model_value": 0.7,
+      "position": "below",
+      "quality": "worse",
+      "ref_high": 0.92,
+      "ref_low": 0.8,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "within",
+      "target_value": 0.8
+    },
+    {
+      "direction": "higher",
+      "metric": "AUROC",
+      "model_value": 0.88,
+      "position": "within",
+      "quality": "within",
+      "ref_high": 0.95,
+      "ref_low": 0.85,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "below",
+      "target_value": 0.8
+    }
+  ],
+  "conclusion": {
+    "benchmark": "Accuracy 0.94는 내부 참조 기준 0.85~0.92 대비 우수; Recall 0.7는 내부 참조 기준 0.8~0.92 대비 미흡; AUROC 0.88는 내부 참조 기준 0.85~0.95 대비 기준 범위 내. (내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)) 목표값 수준은 Accuracy 0.85(참조 범위 안), Recall 0.8(참조 범위 안), AUROC 0.8(참조 범위보다 낮음)이다.",
+    "narrative": "임계값이 설정된 시험항목 3개 중 2개가 기준을 충족하여(통과율 66.7%), 종합 판정은 '부적합(불합격)'이다. 기준 미달 항목은 Recall이다.",
+    "risks": "기준 미달 지표는 Recall(0.7, 기준 0.8)로, 해당 영역의 성능 저하 위험이 존재한다. 결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있어 현재 임계값이 최적이 아닐 수 있다. 다만 이 0.1409는 같은 평가 데이터로 고른 임계값에서 나온 '이 데이터에서 오를 수 있는 최대폭'이므로 별도 데이터에서 확인해야 한다.",
+    "verdict": "FAIL"
+  },
+  "interpretation": {
+    "confusion_analysis": "혼동 행렬 기준 전체 200건 중 25건이 오분류되었다(정분류 175건). 거짓 음성(FN)은 15건, 거짓 양성(FP)은 10건이다.",
+    "distribution_analysis": "평가 데이터셋은 총 200건이며, 클래스 분포는 0 130건(65.0%), 1 70건(35.0%)이다. 불균형 비율은 1.857로 불균형이 있고, 정확도와 매크로 F1 의 차이는 0.12, 다수 클래스(0)와 소수 클래스(1)의 F1 차이는 0.18로 0.1 이상 벌어져 불균형이 성능 수치에 영향을 준 것으로 보인다. 소수 클래스의 성능 지표 해석에 유의가 필요하다."
+  },
+  "meta": {
+    "grounding": {
+      "checked": 0,
+      "passed": true,
+      "violations": []
+    },
+    "model": null,
+    "reason": "no_key",
+    "source": "fallback"
+  },
+  "recommendation_narrative": {
+    "data_quality": "데이터 측면에서 지목된 문제는 P3(불균형 영향 있음 (다수 0 · 소수 1))이며, 9절 권고표의 해당 항목에 따른 보완 후 재평가를 권고한다. 전처리에서 3건이 평가에서 제외되었다.",
+    "model_ops": "모델 측면에서 지목된 문제는 P1(핵심 지표 미달 (Recall)), P2(임계값 부적합)이며, 9절 권고표의 해당 항목에 따른 개선 후 재평가를 권고한다."
+  },
+  "recommendations": [
+    {
+      "action": "미달한 핵심 지표의 오분류 사례를 분석하고 재학습·데이터 보강·결정 임계값 재조정을 검토한 뒤 재평가한다",
+      "category": "핵심 지표 개선",
+      "expected_impact": "핵심 지표 충족 여부 재확인 및 종합 판정 개선 근거 확보",
+      "priority": "HIGH",
+      "problem_id": "P1"
+    },
+    {
+      "action": "평가 데이터와 분리된 검증 데이터로 결정 임계값을 다시 고르고, 같은 조건으로 재평가한다",
+      "category": "결정 임계값 조정",
+      "expected_impact": "현재 임계값이 최적이 아니어서 생기는 성능 손실 축소",
+      "priority": "MEDIUM",
+      "problem_id": "P2"
+    },
+    {
+      "action": "의뢰자가 편향 감소 노력을 수행하지 않았다고 밝혔으므로, 소수 클래스 데이터를 보강하거나 클래스 가중치·재표집으로 불균형을 완화한 뒤 재평가한다",
+      "category": "데이터 균형",
+      "expected_impact": "소수 클래스 성능 개선 및 불균형에 의한 성능 왜곡 축소",
+      "priority": "MEDIUM",
+      "problem_id": "P3"
+    }
+  ]
+}

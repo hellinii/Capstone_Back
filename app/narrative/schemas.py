@@ -1,7 +1,7 @@
 """app/narrative/schemas.py — 서술 도메인 스키마(FactSheet·서술 요청/응답·출력 모델)."""
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 from app.core.schemas import ReportPurpose, TaskType
@@ -15,6 +15,27 @@ MAX_CLASS_ENTRIES = 256
 # 고객 입력(client_inputs)의 직렬화 길이 상한. 정상 입력은 수천 자다(카드 다섯 장의 짧은 답과
 # 자유서술 몇 칸). 무인증 과금 경로라 배열 상한과 같은 이유로 막는다(G-03).
 MAX_CLIENT_INPUTS_CHARS = 20_000
+# 6.0 신뢰구간 방식 한 줄(ci_method_note)의 길이 상한. 방식 종류를 나열한 한 문장이라 수백 자를 넘지 않는다.
+MAX_CI_METHOD_NOTE_CHARS = 500
+# 9절 문제 목록(problems)의 상한(서술 설계 D22). 문제는 종류(9종)마다 많아야 하나라 9개를 넘지 않는다 —
+# 여유를 두되 무인증 과금 경로라 막는다(G-03). 근거 수치(evidence)는 자유 dict 라 직렬화 길이로 잰다:
+# 가장 큰 것은 클래스마다 학습·평가 비율을 싣는 분포 차이로, 클래스 256개에서도 수만 자를 넘지 않는다.
+MAX_PROBLEMS = 16
+MAX_PROBLEM_EVIDENCE_CHARS = 20_000
+MAX_PROBLEM_TEXT_CHARS = 1_000
+
+# 문제 종류 9종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
+ProblemKind = Literal[
+    "core_fail",
+    "inconclusive",
+    "noncore_fail",
+    "core_near_target",
+    "threshold_tuning",
+    "imbalance_effect",
+    "weakest_class",
+    "distribution_shift",
+    "label_caution",
+]
 
 
 class MetricFact(BaseModel):
@@ -25,6 +46,16 @@ class MetricFact(BaseModel):
     threshold:    float | None = Field(default=None, description="합격 임계값(없으면 정보 제공)")
     status:       str          = Field(description="pass | fail | warning | info")
     is_core:      bool         = Field(default=False, description="핵심 지표 — 미달하면 불합격(서술 설계 D19)")
+    # 95% 신뢰구간(서술 설계 D29). 프론트가 평가 응답 confidence_intervals 에서 판정 대상 지표에만 싣는다.
+    # 구간을 내지 못한 지표(skipped)와 옛 요청은 둘 다 None.
+    ci_low:       float | None = Field(default=None, description="95% 신뢰구간 하한")
+    ci_high:      float | None = Field(default=None, description="95% 신뢰구간 상한")
+    # 목표값과의 차이(서술 설계 D12). 프론트가 판정 대상 지표에만 싣는다. 높을수록 좋은 지표는
+    # value − threshold, 낮을수록 좋은 지표는 threshold − value — 그래서 0 이상이면 충족 쪽이다.
+    margin:       float | None = Field(default=None, description="목표값과의 차이(부호 그대로, 0 이상이면 충족 쪽)")
+    # 아슬아슬 — |margin| < |threshold| × 3%(엄격 미만). 판정은 프론트 computeVerdict 한 곳에서 하고
+    # 서버는 받은 값을 읽기만 한다. 판정 대상이 아니거나 옛 요청이면 False.
+    near_target:  bool         = Field(default=False, description="목표값과의 차이가 목표값의 3% 미만")
 
 
 class PerClassFact(BaseModel):
@@ -102,6 +133,90 @@ class DerivedPredictionFact(BaseModel):
         return v
 
 
+class ErrorCountFact(BaseModel):
+    """경계 오류·확신 오류 한 종류의 건수와 비율(ratio = count / misclassified, 4자리)."""
+    count: int          = Field(ge=0)
+    ratio: float | None = Field(default=None, ge=0.0, le=1.0, description="오분류가 0건이면 None")
+
+
+class ErrorRatiosFact(BaseModel):
+    """오분류의 성격 — 결정 경계 근처(경계 오류)와 높은 확신으로 틀림(확신 오류)(서술 설계 D30).
+
+    평가 응답 success_metrics.error_ratios 를 프론트가 그대로 옮겨 싣는다. 확률이 없으면 키 자체가 없다.
+    """
+    unit:          Literal["sample", "label_cell"] = Field(
+        description="sample(이진·다중: 표본 단위) | label_cell(멀티레이블: 틀린 레이블 칸 단위)"
+    )
+    misclassified: int = Field(ge=0, description="분모 — 확률이 있는 오분류 수(멀티레이블은 틀린 칸 수)")
+    boundary:      ErrorCountFact | None = Field(default=None, description="경계 오류. 임계값을 모르면 None")
+    boundary_note: Literal["threshold_unknown"] | None = Field(
+        default=None, description="boundary 가 None 인 이유 — 예측을 직접 올려 임계값을 모름"
+    )
+    confident:       ErrorCountFact
+    boundary_margin: float = Field(default=0.1, description="경계 거리 기준(엄격 미만)")
+    confident_level: float = Field(default=0.9, description="확신 기준(틀린 쪽 확률 이상)")
+    threshold:       float | dict[str, float] | None = Field(
+        default=None, description="경계 판정에 쓴 임계값. 멀티레이블은 컬럼별일 수 있고, 다중은 None"
+    )
+
+    @field_validator("threshold")
+    @classmethod
+    def _per_label_within_limit(cls, v):
+        if isinstance(v, dict) and len(v) > MAX_CLASS_ENTRIES:
+            raise ValueError(f"레이블별 임계값 수가 상한({MAX_CLASS_ENTRIES})을 넘습니다.")
+        return v
+
+
+class F1ThresholdGainFact(BaseModel):
+    """임계값 조정 여지(서술 설계 D40) — 원본 PR 곡선의 최대 F1 과 지금 예측의 F1(4자리).
+
+    평가 응답 success_metrics.f1_threshold_gain 을 프론트가 그대로 옮겨 싣는다. 이진이고 점수가 있을 때만.
+    gain 은 같은 평가 데이터로 고른 임계값의 이득이라 '이 데이터에서 오를 수 있는 최대폭'이다.
+    """
+    max_f1:         float = Field(ge=0.0, le=1.0)
+    current_f1:     float = Field(ge=0.0, le=1.0)
+    gain:           float = Field(ge=0.0, le=1.0, description="max(0, max_f1 − current_f1)")
+    best_threshold: float = Field(description="최대 F1 을 내는 결정 임계값")
+
+
+class ImbalanceEffectFact(BaseModel):
+    """불균형 영향(서술 설계 D20) — 평가 응답 success_metrics.imbalance_effect 를 그대로 옮겨 싣는다.
+
+    level 판정(IR 1.5 미만 경미, 차이 0.10 이상 영향 있음)은 평가 엔진이 이미 했다. 서술은 level 을 읽기만 한다.
+    """
+    level: Literal["affected", "no_distortion", "mild"] = Field(
+        description="affected(영향 있음) | no_distortion(불균형 있으나 왜곡 미관찰) | mild(경미)"
+    )
+    imbalance_ratio:            float        = Field(ge=1.0, description="다수/소수(M23 과 같은 정의)")
+    accuracy_minus_macro_f1:    float | None = Field(default=None, description="정확도 − 매크로 F1. 멀티레이블은 None")
+    majority_minus_minority_f1: float        = Field(description="다수 F1 − 소수 F1 (음수일 수 있다)")
+    majority_class:             str
+    minority_class:             str
+
+
+class ProblemFact(BaseModel):
+    """9절 권고가 대응할 문제 하나(서술 설계 D22). 프론트 problemList.ts 가 정해진 조건으로 만든다.
+
+    서버는 문제를 판정하지 않는다 — 받은 목록에 권고를 묶기만 한다(번호·우선순위도 받은 그대로).
+    """
+    id:                str = Field(pattern=r"^P[0-9]{1,3}$", description="P1… 번호(우선순위 순)")
+    kind:              ProblemKind
+    priority:          Literal["HIGH", "MEDIUM", "LOW"]
+    title:             str = Field(max_length=MAX_PROBLEM_TEXT_CHARS, description="문제 이름(지표·클래스 이름 포함)")
+    source_section:    str = Field(default="", max_length=32, description="문제가 드러난 절(예: 8.2)")
+    recommend_section: str = Field(default="", max_length=32, description="권고를 쓰는 절(9.1 데이터 | 9.2 모델)")
+    evidence:          dict[str, Any] = Field(default={}, description="근거 수치 — 숫자는 grounding 허용 목록에 들어간다")
+    note:              str | None = Field(default=None, max_length=MAX_PROBLEM_TEXT_CHARS, description="덧붙임")
+
+    @field_validator("evidence")
+    @classmethod
+    def _evidence_within_limit(cls, v: dict[str, Any]) -> dict[str, Any]:
+        # 자유 dict 라 배열 상한으로는 못 막는다 — 고객 입력과 같이 직렬화 길이로 잰다(G-03).
+        if len(json.dumps(v, ensure_ascii=False)) > MAX_PROBLEM_EVIDENCE_CHARS:
+            raise ValueError(f"문제 근거 수치가 상한({MAX_PROBLEM_EVIDENCE_CHARS}자)을 넘습니다.")
+        return v
+
+
 class FactSheet(BaseModel):
     """프론트가 평가 결과로 조립해 보내는 '사실 시트'. LLM은 이 안의 숫자만 사용한다."""
     n_samples:    int  = Field(default=0, description="평가 샘플 수")
@@ -130,6 +245,37 @@ class FactSheet(BaseModel):
         default=None,
         description="예측을 확률에서 파생했을 때만. 서술은 수치가 그 임계값의 함수임을 알아야 한다",
     )
+    error_ratios: ErrorRatiosFact | None = Field(
+        default=None,
+        description="경계·확신 오류 비율(D30) — 확률이 있을 때만. 7.1 에서 오류의 성격을 쓰는 재료",
+    )
+    f1_threshold_gain: F1ThresholdGainFact | None = Field(
+        default=None,
+        description="임계값 조정 여지(D40) — 이진이고 점수가 있을 때만. 8.2·8.3 에서 쓰는 재료",
+    )
+    imbalance_effect: ImbalanceEffectFact | None = Field(
+        default=None,
+        description="불균형 영향(D20) — 예측이 있을 때만. 7.2 분포 해석의 결론(level)",
+    )
+    ci_method_note: str | None = Field(
+        default=None,
+        max_length=MAX_CI_METHOD_NOTE_CHARS,
+        description="6.0 에 찍는 신뢰구간 방식 한 줄(D29) — 서술 참고용. 신뢰구간이 없으면 None",
+    )
+    problems: list[ProblemFact] = Field(
+        default=[],
+        max_length=MAX_PROBLEMS,
+        description="9절 권고가 대응할 문제 목록(D22). 비어 있으면 권고도 없다",
+    )
+
+    @field_validator("problems")
+    @classmethod
+    def _problem_ids_unique(cls, v: list[ProblemFact]) -> list[ProblemFact]:
+        # 권고는 번호로 문제에 묶인다 — 번호가 겹치면 어느 문제의 권고인지 정할 수 없다.
+        ids = [p.id for p in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError("문제 번호(id)가 겹칩니다.")
+        return v
 
 
 class NarrativeRequest(BaseModel):
@@ -176,6 +322,11 @@ class BenchmarkRefOut(BaseModel):
     position:    str = Field(description="above | within | below (단순 수치 위치)")
     direction:   str = Field(description="higher | lower (높을수록/낮을수록 좋음)")
     quality:     str = Field(description="better | within | worse (방향을 반영한 우열)")
+    # 목표값 수준(서술 설계 D31). 목표값이 없는 지표는 둘 다 None.
+    target_value:    float | None = Field(default=None, description="그 지표의 목표값(threshold)")
+    target_position: str | None   = Field(
+        default=None, description="below | within | above — 목표값의 참조 범위 대비 단순 수치 위치"
+    )
     source_note: str = Field(description="기준의 출처·성격 — '내부 참조 기준치'")
 
 
@@ -185,7 +336,9 @@ class RecommendationNarrativeOut(BaseModel):
 
 
 class RecommendationOut(BaseModel):
-    priority:        str = Field(description="HIGH | MEDIUM | LOW")
+    # 권고는 모두 문제 목록의 번호 하나에 묶인다(서술 설계 D22). 우선순위는 그 문제의 것을 따른다.
+    problem_id:      str = Field(description="대응하는 문제 번호(fact_sheet.problems[].id)")
+    priority:        str = Field(description="HIGH | MEDIUM | LOW (서버가 문제의 우선순위로 강제)")
     category:        str
     action:          str
     expected_impact: str
@@ -200,7 +353,7 @@ class GroundingInfo(BaseModel):
 class NarrativeMeta(BaseModel):
     source:    str             = Field(description="llm | fallback")
     model:     str | None      = None
-    reason:    str | None      = Field(default=None, description="폴백 사유: no_key | api_error | grounding_failed")
+    reason:    str | None      = Field(default=None, description="폴백 사유: no_key | api_error | grounding_failed | impact_number 등")
     grounding: GroundingInfo   = Field(default_factory=GroundingInfo)
 
 

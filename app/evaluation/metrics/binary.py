@@ -1,10 +1,10 @@
 """app/evaluation/metrics/binary.py — 이진 분류 전용 지표(sklearn 기반)
 
-특이도/FPR/AUROC/AUPRC/LogLoss/MCC 및 ROC·PR 곡선 좌표 계산.
+특이도/FPR/AUROC/AUPRC/LogLoss/MCC 및 ROC·PR 곡선 좌표, 임계값 조정 여지(f1_threshold_gain) 계산.
 
 상호작용
 - 의존(import): pandas, sklearn
-- 사용처: app.evaluation.engine(METRIC_REGISTRY, 곡선 부착)
+- 사용처: app.evaluation.engine(METRIC_REGISTRY, 곡선·임계값 조정 여지 부착)
 """
 
 import pandas as pd
@@ -150,3 +150,43 @@ def calculate_pr_curve(df: pd.DataFrame, mapping_dict: dict) -> dict:
     recall, precision = _downsample_pair(recall, precision)
     return {"recall": recall, "precision": precision}
 
+
+
+def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
+    """임계값 조정 여지(서술 설계 D40) — 원본 PR 곡선의 최대 F1 과 지금 예측의 F1 차이.
+
+    지표가 아니라 success_metrics 의 f1_threshold_gain 키로 내려보낸다(이진·score 가 있을 때).
+    곡선은 **다운샘플 전** `precision_recall_curve` 를 쓴다 — 차트용 `pr_curve` 는 60점으로
+    줄여 최댓값을 놓칠 수 있다.
+
+    - max_f1·best_threshold: 곡선의 점마다 F1 = 2PR/(P+R)(P+R=0 이면 0). 동률은 낮은 임계값.
+    - current_f1: 평가에 실제로 쓴 예측(직접 올린 y_pred 또는 파생 예측)의 양성 F1.
+      양성 기준은 TP·FP 건수(counts)·M7·M8 과 같다(`_binary_confusion_counts`).
+    - gain = max(0, max_f1 − current_f1). y_pred 를 직접 올리면 그 예측이 곡선 위의 점이
+      아닐 수 있어 차이가 음수가 될 수 있다 — 그때는 "올릴 여지 없음"이므로 0.
+    값은 4자리로 반올림해 싣는다. "≥ 0.10 이면 임계값 부적합" 판정은 프론트가 실린 gain 으로 한다.
+    """
+    y_true, y_score = _get_true_score(df, mapping_dict)
+    positive = _resolve_positive_value(y_true, mapping_dict.get('_positive_class'))
+    y_true_bin = (y_true == positive).astype(int)
+    if y_true_bin.sum() == 0:
+        raise ValueError("정답에 양성이 없어 PR 곡선의 F1 을 정의할 수 없습니다.")
+
+    precision, recall, thresholds = precision_recall_curve(y_true_bin, y_score)
+    # 마지막 점(P=1, R=0)은 임계값이 없는 곡선 끝이라 뺀다(F1 도 0).
+    precision, recall = precision[:-1], recall[:-1]
+    denom = precision + recall
+    f1 = np.divide(2 * precision * recall, denom, out=np.zeros_like(denom, dtype=float), where=denom > 0)
+    # 동률이면 첫 점 = 가장 낮은 임계값. 분수로는 같은 F1(예: 6/9 와 4/6 = 2/3)이 부동소수 계산에서
+    # 마지막 자리만 달라(0.66…65 vs 0.66…66) 높은 임계값이 이기지 않게, 9자리로 반올림한 뒤 고른다.
+    best = int(np.argmax(np.round(f1, 9)))
+
+    _tn, fp, fn, tp = _binary_confusion_counts(df, mapping_dict)
+    current = float(2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) > 0 else 0.0
+    max_f1 = float(f1[best])
+    return {
+        "max_f1": round(max_f1, 4),
+        "current_f1": round(current, 4),
+        "gain": round(max(0.0, max_f1 - current), 4),
+        "best_threshold": round(float(thresholds[best]), 4),
+    }

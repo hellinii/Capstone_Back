@@ -73,7 +73,12 @@ def build_benchmark_refs(task_type: str, metrics: list) -> list[dict]:
     LLM 은 이 position 을 산문화만 하고 숫자 비교를 직접 하지 않는다.
     기준표에 없는 지표는 제외(→ LLM 에 '비교 데이터 없음'으로 전달).
 
-    metrics: MetricFact 리스트 (또는 .display_name/.value 속성을 가진 객체)
+    목표값 수준(서술 설계 D31): 목표값(threshold)이 있으면 그 값과 참조 범위의 위치도 함께 싣는다.
+    target_position 은 position 과 같은 단순 수치 위치(below/within/above)라 방향을 반영하지 않는다
+    — "목표를 범위보다 낮게/안에/높게 잡았다"는 설정 수준만 말한다. 목표값 0·음수도 실제 목표다
+    (None 일 때만 '목표 없음'). 목표가 없으면 두 키 모두 None.
+
+    metrics: MetricFact 리스트 (또는 .display_name/.value/.threshold 속성을 가진 객체)
     """
     refs = []
     for m in metrics:
@@ -87,6 +92,11 @@ def build_benchmark_refs(task_type: str, metrics: list) -> list[dict]:
         low, high = rng
         lower_is_better = name in LOWER_IS_BETTER
         position = benchmark_position(float(value), low, high)
+        target = getattr(m, "threshold", None)
+        target_value = float(target) if target is not None else None
+        target_position = (
+            benchmark_position(target_value, low, high) if target_value is not None else None
+        )
         refs.append({
             "metric": name,
             "model_value": round(float(value), 4),
@@ -96,6 +106,8 @@ def build_benchmark_refs(task_type: str, metrics: list) -> list[dict]:
             # 방향 반영 필드(D7[3]). 낮을수록 좋은 지표의 'below'는 worse 가 아니라 better.
             "direction": "lower" if lower_is_better else "higher",
             "quality": _quality(position, lower_is_better),
+            "target_value": target_value,
+            "target_position": target_position,
             "source_note": SOURCE_NOTE,
         })
     return refs

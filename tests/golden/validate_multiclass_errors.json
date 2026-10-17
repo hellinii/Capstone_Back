@@ -1,4 +1,9 @@
 {
+  "class_distribution": {
+    "bird": 69,
+    "cat": 57,
+    "dog": 73
+  },
   "error_count": 1,
   "execution_summary": [
     {

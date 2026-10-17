@@ -14,7 +14,7 @@ from app.analysis.schemas import ExecutionSummaryItem, ValidateDataResponse, Val
 from app.evaluation.schemas import EvaluateRequest
 from app.analysis import validation_checks as checks
 from app.evaluation.frame import build_evaluation_frame, required_columns
-from app.evaluation.preprocessor import collect_role_columns
+from app.evaluation.preprocessor import class_distribution_of, collect_role_columns
 
 
 def _counts(details: list[ValidationCheckItem]) -> tuple[int, int]:
@@ -45,6 +45,7 @@ def _build_missing_required_response(
 def _build_full_response(
     task_type: str, selected_metric_ids: list[str], details: list[ValidationCheckItem],
     total_rows: int, valid_rows: int, excluded_rows: int,
+    class_distribution: dict[str, int] | None = None,
 ) -> ValidateDataResponse:
     """전체 검증 완료 응답."""
     error_count, warning_count = _counts(details)
@@ -82,6 +83,7 @@ def _build_full_response(
         validation_details=details,
         error_count=error_count,
         warning_count=warning_count,
+        class_distribution=class_distribution,
     )
 
 
@@ -145,4 +147,10 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     # 3-7. latency
     details += checks.check_latency(df_clean, mapping_dict)
 
-    return _build_full_response(task_type, selected_metric_ids, details, total_rows, valid_rows, excluded_rows)
+    # 평가와 같은 프레임·같은 함수로 센 분포 — 재료 선택 점검의 IR 이 3절과 같아진다.
+    class_distribution = class_distribution_of(df_clean, mapping_dict, task_type)
+
+    return _build_full_response(
+        task_type, selected_metric_ids, details, total_rows, valid_rows, excluded_rows,
+        class_distribution,
+    )
