@@ -169,6 +169,26 @@ def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> st
     )
 
 
+def _problems_text(problems: list) -> str:
+    """9절 권고의 근거(서술 설계 D22). 권고는 문제 목록에만 묶는다 — 문제가 없으면 권고도 없다."""
+    if not problems:
+        return (
+            "fact_sheet.problems 가 비어 있다 — 이 평가에서 지목된 데이터·모델상의 문제가 없다. "
+            "recommendations 는 빈 배열로 두고 권고를 지어내지 마라. recommendation_narrative 에도 "
+            "문제나 권고를 새로 만들지 말고, 지목된 문제가 없다는 사실만 적어라.\n"
+        )
+    return (
+        "fact_sheet.problems 는 9절 권고가 대응할 문제 목록이다(id 순서가 우선순위 순서). "
+        "recommendations 의 각 항목은 반드시 problems 의 id 하나를 problem_id 로 가지며 그 문제에 대응해야 "
+        "한다. 모든 문제에 권고를 하나 이상 달고, 목록에 없는 문제에 대한 권고는 쓰지 마라. "
+        "priority 는 그 문제의 priority 를 쓴다. expected_impact(기대 효과)에는 숫자나 예상 수치(개선 폭·"
+        "목표 달성값 등)를 쓰지 말고 무엇이 나아지는지만 말로 적어라. "
+        "recommendation_narrative.data_quality(9.1)는 recommend_section 이 9.1 인 데이터 쪽 문제를, "
+        "model_ops(9.2)는 9.2 인 모델 쪽 문제를 다룬다. 어느 쪽에 문제가 없으면 지목된 문제가 없다고만 "
+        "적고, problems 에 없는 문제를 지어내지 마라. note 가 있으면 그 사실을 권고에 반영하라.\n"
+    )
+
+
 def build_user_prompt(
     fact_sheet: dict,
     benchmark_refs: list,
@@ -195,13 +215,39 @@ def build_user_prompt(
         "position(단순 수치 위치)이 아니라 quality 로 서술하라(낮을수록 좋은 지표는 범위 아래가 오히려 우수).\n"
         "target_value 는 그 지표의 목표값(없으면 null)이고, target_position 은 목표값이 참조 범위보다 "
         "낮음(below)/범위 안(within)/높음(above)인지를 나타내는 단순 수치 위치다. 목표 설정 수준을 "
-        "8.1(conclusion.benchmark)에서 해석하되, 높을수록/낮을수록 좋은지 방향 해석은 하지 말고 위치만 말하라.\n\n"
+        "8.1(conclusion.benchmark)에서 해석하되, 높을수록/낮을수록 좋은지 방향 해석은 하지 말고 위치만 말하라.\n"
+        + _problems_text(fact_sheet.get("problems") or [])
+        + "\n"
         + json.dumps(payload, ensure_ascii=False)
     )
 
 
-def build_response_schema() -> dict:
-    """OpenAI structured output (strict json_schema). meta 는 서버가 채우므로 제외."""
+def build_response_schema(problems: list | None = None) -> dict:
+    """OpenAI structured output (strict json_schema). meta 는 서버가 채우므로 제외.
+
+    권고는 문제 목록(list[ProblemFact])에 묶는다(서술 설계 D22): problem_id 는 그 요청의 문제 번호들만 고를 수 있는 enum 이다.
+    문제가 없으면 권고 배열을 maxItems 0 으로 막는다(빈 enum 은 스키마가 아니므로 그때는 문자열로 둔다).
+    서버 후처리(service._align_recommendations)가 같은 규칙을 다시 지킨다 — 스키마는 첫 방어선이다.
+    """
+    ids = [p.id for p in (problems or [])]
+    problem_id_schema: dict = {"type": "string", "enum": ids} if ids else {"type": "string"}
+    recommendations_schema: dict = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "problem_id": problem_id_schema,
+                "priority": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+                "category": {"type": "string"},
+                "action": {"type": "string"},
+                "expected_impact": {"type": "string"},
+            },
+            "required": ["problem_id", "priority", "category", "action", "expected_impact"],
+        },
+    }
+    if not ids:
+        recommendations_schema["maxItems"] = 0
     return {
         "type": "json_schema",
         "json_schema": {
@@ -240,20 +286,7 @@ def build_response_schema() -> dict:
                         },
                         "required": ["data_quality", "model_ops"],
                     },
-                    "recommendations": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "priority": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-                                "category": {"type": "string"},
-                                "action": {"type": "string"},
-                                "expected_impact": {"type": "string"},
-                            },
-                            "required": ["priority", "category", "action", "expected_impact"],
-                        },
-                    },
+                    "recommendations": recommendations_schema,
                 },
                 "required": [
                     "interpretation",

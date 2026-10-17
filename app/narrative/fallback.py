@@ -5,7 +5,7 @@ narrative_fallback.py — 규칙 기반 폴백 서술 생성.
 fact_sheet 의 실제 계산값(+ compute_derived 파생값)만 템플릿에 삽입한다(환각 0 보장).
 출력의 모든 숫자는 build_number_whitelist 가 포함하는 값이므로 grounding 검증을 통과한다.
 """
-from app.narrative.schemas import ConclusionOut, FactSheet, GroundingInfo, InterpretationOut, NarrativeMeta, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
+from app.narrative.schemas import ConclusionOut, FactSheet, GroundingInfo, InterpretationOut, NarrativeMeta, NarrativeResponse, ProblemFact, RecommendationNarrativeOut, RecommendationOut
 
 _VERDICT_LABEL = {
     "PASS": "적합(합격)",
@@ -206,67 +206,118 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     )
 
 
+# 문제 종류별 권고 템플릿(서술 설계 D22) — (분류, 권고, 기대 효과). 9절 권고표의 한 줄이 된다.
+# 기대 효과에는 숫자를 쓰지 않는다: 개선 폭은 이 평가로 알 수 없는 예측값이라, 숫자로 쓰면 근거 없는
+# 약속이 된다(LLM 권고도 같은 규칙으로 막는다 — service._impact_has_number).
+# 권고 문장에도 숫자를 넣지 않는다. 무엇이 문제인지(지표·클래스 이름과 수치)는 9절 표의 "대응 문제 번호"
+# 칸(P1 · 문제 이름)과 원천 절이 이미 말한다.
+_PROBLEM_TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "core_fail": (
+        "핵심 지표 개선",
+        "미달한 핵심 지표의 오분류 사례를 분석하고 재학습·데이터 보강·결정 임계값 재조정을 검토한 뒤 재평가한다",
+        "핵심 지표 충족 여부 재확인 및 종합 판정 개선 근거 확보",
+    ),
+    "inconclusive": (
+        "판정 조건 보완",
+        "핵심 지표가 산출되도록 입력 데이터와 지표 선택을 점검하고, 판정 대상 지표의 목표값을 정한 뒤 재평가한다",
+        "합격 여부를 판정할 수 있는 시험 결과 확보",
+    ),
+    "noncore_fail": (
+        "보조 지표 개선",
+        "미달한 비핵심 지표가 운영 목적에 주는 영향을 검토하고, 필요하면 재학습·결정 임계값 조정으로 보완한다",
+        "보조 지표 미달에 따른 운영 위험 감소",
+    ),
+    "core_near_target": (
+        "판정 안정성 확인",
+        "목표값에 근접해 합격한 핵심 지표를 별도 평가 데이터나 더 큰 표본으로 다시 측정해 합격이 유지되는지 확인한다",
+        "표본 변동에 따른 판정 뒤집힘 위험 확인",
+    ),
+    "threshold_tuning": (
+        "결정 임계값 조정",
+        "평가 데이터와 분리된 검증 데이터로 결정 임계값을 다시 고르고, 같은 조건으로 재평가한다",
+        "현재 임계값이 최적이 아니어서 생기는 성능 손실 축소",
+    ),
+    "imbalance_effect": (
+        "데이터 균형",
+        "소수 클래스 데이터를 보강하거나 클래스 가중치·재표집으로 불균형을 완화한 뒤 재평가한다",
+        "소수 클래스 성능 개선 및 불균형에 의한 성능 왜곡 축소",
+    ),
+    "weakest_class": (
+        "취약 클래스 보강",
+        "성능이 가장 낮은 클래스의 데이터를 추가 수집하고 오분류 사례를 분석해 보강한다",
+        "취약 클래스 성능 개선 및 클래스 간 성능 편차 축소",
+    ),
+    "distribution_shift": (
+        "분포 일치 확인",
+        "학습 데이터와 평가 데이터의 클래스 비율이 다른 원인을 확인하고, 운영 환경 분포를 반영한 데이터로 재평가한다",
+        "운영 환경 성능 추정의 정확도 향상",
+    ),
+    "label_caution": (
+        "정답 라벨 검증",
+        "정답 라벨 일부를 표본 추출해 사람이 검토하고 라벨 오류 비율을 확인한다",
+        "정답 오류가 성능 수치에 주는 영향 파악",
+    ),
+}
+
+# 편향 감소 노력을 "수행 안 함"으로 밝힌 불균형 영향(note 가 있음) — 권고 앞에 그 사실을 붙인다.
+_IMBALANCE_NOTE_PREFIX = "의뢰자가 편향 감소 노력을 수행하지 않았다고 밝혔으므로, "
+
+
+def problem_recommendation(problem: ProblemFact) -> RecommendationOut:
+    """문제 하나의 폴백 권고(종류별 템플릿). 우선순위·번호는 문제의 것을 그대로 쓴다.
+
+    LLM 이 권고를 하나도 달지 않은 문제를 채울 때도(service) 이 함수를 쓴다 — 문제마다 권고가 하나 이상
+    있어야 9절 표가 문제 목록과 맞는다.
+    """
+    category, action, impact = _PROBLEM_TEMPLATES[problem.kind]
+    if problem.kind == "imbalance_effect" and problem.note:
+        action = _IMBALANCE_NOTE_PREFIX + action
+    return RecommendationOut(
+        problem_id=problem.id,
+        priority=problem.priority,
+        category=category,
+        action=action,
+        expected_impact=impact,
+    )
+
+
+def _problem_names(problems: list[ProblemFact]) -> str:
+    return ", ".join(f"{p.id}({p.title})" for p in problems)
+
+
 def _recommendations(fs: FactSheet):
-    ir = fs.distribution.imbalance_ratio if fs.distribution else None
-    failed = [m for m in fs.metrics if m.status == "fail"]
-    failed_names = [m.display_name for m in failed]
+    """9절 — 권고는 문제 목록(problems)에만 묶는다(서술 설계 D22).
 
-    # 9.1 / 9.2 서술
-    dq_segs = []
-    if ir is not None and ir > 1.5:
-        dq_segs.append(
-            f"클래스 불균형 비율 {ir}가 허용 기준을 초과하므로, 오버샘플링(SMOTE 등) 또는 "
-            "클래스 가중치 조정을 통한 균형화 후 재평가를 권고한다."
-        )
-    if fs.dropped_rows > 0:
-        dq_segs.append(
-            f"전처리에서 {fs.dropped_rows}건이 제외되었으므로, 결측·오류 데이터 정제를 통한 "
-            "유효 표본 확보를 권고한다."
-        )
-    if not dq_segs:
-        dq_segs.append("데이터 품질·균형은 허용 범위로 판단되며, 현 데이터셋 기준 추가 보완은 필수적이지 않다.")
-    data_quality = " ".join(dq_segs)
+    종전에는 문제와 무관하게 권고를 지어냈다: 아무 문제가 없어도 '운영 모니터링'을 넣고, 제외 행·
+    불균형 비율 1.5 초과·미달 지표마다 따로 권고를 만들었다. 문제 목록의 조건(불균형은 '영향 있음'만,
+    미달은 판정 사유)과 어긋나 9절이 문제 목록에 없는 문제를 권고했다. 이제 문제가 없으면 권고도 없다.
 
-    if failed_names:
-        model_ops = (
-            f"기준 미달 지표({', '.join(failed_names)})의 개선을 위해 임계값 재조정·재학습을 검토하고, "
-            "운영 단계에서 해당 지표의 주기적 모니터링을 권고한다."
+    9.1(data_quality)은 데이터 쪽 문제(recommend_section 9.1), 9.2(model_ops)는 모델 쪽 문제만 말한다.
+    제외 행 수는 사실로만 적는다 — 문제 목록에 없으니 권고하지 않는다.
+    """
+    data_side = [p for p in fs.problems if p.recommend_section == "9.1"]
+    model_side = [p for p in fs.problems if p.recommend_section != "9.1"]
+
+    if data_side:
+        data_quality = (
+            f"데이터 측면에서 지목된 문제는 {_problem_names(data_side)}이며, "
+            "9절 권고표의 해당 항목에 따른 보완 후 재평가를 권고한다."
         )
     else:
-        model_ops = "현 성능 수준 유지를 위해 운영 단계의 주기적 성능 모니터링과 데이터 드리프트 감시를 권고한다."
-
-    # 권고 표 (정적 규칙 매핑)
-    recs: list[RecommendationOut] = []
-    for m in failed:
-        recs.append(RecommendationOut(
-            priority="HIGH",
-            category=f"{m.display_name} 개선",
-            action=f"{m.display_name} 기준 미달({m.value}) — 임계값 재조정/재학습/데이터 보강 검토",
-            expected_impact=f"{m.display_name} 향상 및 종합 판정 개선",
-        ))
-    if ir is not None and ir > 1.5:
-        recs.append(RecommendationOut(
-            priority="MEDIUM",
-            category="데이터 균형",
-            action=f"클래스 비율 균형화(불균형 비율 {ir}) 후 추가 평가",
-            expected_impact="불균형에 의한 성능 왜곡 사전 검증",
-        ))
+        data_quality = "데이터 측면에서 권고 대상으로 지목된 문제는 없다."
     if fs.dropped_rows > 0:
-        recs.append(RecommendationOut(
-            priority="LOW",
-            category="데이터 품질",
-            action=f"결측·오류 데이터 정제(제외 {fs.dropped_rows}건)",
-            expected_impact="유효 표본 확대 및 평가 신뢰도 향상",
-        ))
-    if not recs:
-        recs.append(RecommendationOut(
-            priority="LOW",
-            category="운영 모니터링",
-            action="운영 단계 성능·데이터 드리프트 주기적 모니터링 체계 수립",
-            expected_impact="성능 저하 조기 감지",
-        ))
+        data_quality += f" 전처리에서 {fs.dropped_rows}건이 평가에서 제외되었다."
 
-    return RecommendationNarrativeOut(data_quality=data_quality, model_ops=model_ops), recs[:5]
+    if model_side:
+        model_ops = (
+            f"모델 측면에서 지목된 문제는 {_problem_names(model_side)}이며, "
+            "9절 권고표의 해당 항목에 따른 개선 후 재평가를 권고한다."
+        )
+    else:
+        model_ops = "모델 측면에서 권고 대상으로 지목된 문제는 없다."
+
+    recs = [problem_recommendation(p) for p in fs.problems]
+    return RecommendationNarrativeOut(data_quality=data_quality, model_ops=model_ops), recs
 
 
 def build_fallback_narrative(

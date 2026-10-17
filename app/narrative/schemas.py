@@ -17,6 +17,25 @@ MAX_CLASS_ENTRIES = 256
 MAX_CLIENT_INPUTS_CHARS = 20_000
 # 6.0 신뢰구간 방식 한 줄(ci_method_note)의 길이 상한. 방식 종류를 나열한 한 문장이라 수백 자를 넘지 않는다.
 MAX_CI_METHOD_NOTE_CHARS = 500
+# 9절 문제 목록(problems)의 상한(서술 설계 D22). 문제는 종류(9종)마다 많아야 하나라 9개를 넘지 않는다 —
+# 여유를 두되 무인증 과금 경로라 막는다(G-03). 근거 수치(evidence)는 자유 dict 라 직렬화 길이로 잰다:
+# 가장 큰 것은 클래스마다 학습·평가 비율을 싣는 분포 차이로, 클래스 256개에서도 수만 자를 넘지 않는다.
+MAX_PROBLEMS = 16
+MAX_PROBLEM_EVIDENCE_CHARS = 20_000
+MAX_PROBLEM_TEXT_CHARS = 1_000
+
+# 문제 종류 9종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
+ProblemKind = Literal[
+    "core_fail",
+    "inconclusive",
+    "noncore_fail",
+    "core_near_target",
+    "threshold_tuning",
+    "imbalance_effect",
+    "weakest_class",
+    "distribution_shift",
+    "label_caution",
+]
 
 
 class MetricFact(BaseModel):
@@ -175,6 +194,29 @@ class ImbalanceEffectFact(BaseModel):
     minority_class:             str
 
 
+class ProblemFact(BaseModel):
+    """9절 권고가 대응할 문제 하나(서술 설계 D22). 프론트 problemList.ts 가 정해진 조건으로 만든다.
+
+    서버는 문제를 판정하지 않는다 — 받은 목록에 권고를 묶기만 한다(번호·우선순위도 받은 그대로).
+    """
+    id:                str = Field(pattern=r"^P[0-9]{1,3}$", description="P1… 번호(우선순위 순)")
+    kind:              ProblemKind
+    priority:          Literal["HIGH", "MEDIUM", "LOW"]
+    title:             str = Field(max_length=MAX_PROBLEM_TEXT_CHARS, description="문제 이름(지표·클래스 이름 포함)")
+    source_section:    str = Field(default="", max_length=32, description="문제가 드러난 절(예: 8.2)")
+    recommend_section: str = Field(default="", max_length=32, description="권고를 쓰는 절(9.1 데이터 | 9.2 모델)")
+    evidence:          dict[str, Any] = Field(default={}, description="근거 수치 — 숫자는 grounding 허용 목록에 들어간다")
+    note:              str | None = Field(default=None, max_length=MAX_PROBLEM_TEXT_CHARS, description="덧붙임")
+
+    @field_validator("evidence")
+    @classmethod
+    def _evidence_within_limit(cls, v: dict[str, Any]) -> dict[str, Any]:
+        # 자유 dict 라 배열 상한으로는 못 막는다 — 고객 입력과 같이 직렬화 길이로 잰다(G-03).
+        if len(json.dumps(v, ensure_ascii=False)) > MAX_PROBLEM_EVIDENCE_CHARS:
+            raise ValueError(f"문제 근거 수치가 상한({MAX_PROBLEM_EVIDENCE_CHARS}자)을 넘습니다.")
+        return v
+
+
 class FactSheet(BaseModel):
     """프론트가 평가 결과로 조립해 보내는 '사실 시트'. LLM은 이 안의 숫자만 사용한다."""
     n_samples:    int  = Field(default=0, description="평가 샘플 수")
@@ -220,6 +262,20 @@ class FactSheet(BaseModel):
         max_length=MAX_CI_METHOD_NOTE_CHARS,
         description="6.0 에 찍는 신뢰구간 방식 한 줄(D29) — 서술 참고용. 신뢰구간이 없으면 None",
     )
+    problems: list[ProblemFact] = Field(
+        default=[],
+        max_length=MAX_PROBLEMS,
+        description="9절 권고가 대응할 문제 목록(D22). 비어 있으면 권고도 없다",
+    )
+
+    @field_validator("problems")
+    @classmethod
+    def _problem_ids_unique(cls, v: list[ProblemFact]) -> list[ProblemFact]:
+        # 권고는 번호로 문제에 묶인다 — 번호가 겹치면 어느 문제의 권고인지 정할 수 없다.
+        ids = [p.id for p in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError("문제 번호(id)가 겹칩니다.")
+        return v
 
 
 class NarrativeRequest(BaseModel):
@@ -280,7 +336,9 @@ class RecommendationNarrativeOut(BaseModel):
 
 
 class RecommendationOut(BaseModel):
-    priority:        str = Field(description="HIGH | MEDIUM | LOW")
+    # 권고는 모두 문제 목록의 번호 하나에 묶인다(서술 설계 D22). 우선순위는 그 문제의 것을 따른다.
+    problem_id:      str = Field(description="대응하는 문제 번호(fact_sheet.problems[].id)")
+    priority:        str = Field(description="HIGH | MEDIUM | LOW (서버가 문제의 우선순위로 강제)")
     category:        str
     action:          str
     expected_impact: str
@@ -295,7 +353,7 @@ class GroundingInfo(BaseModel):
 class NarrativeMeta(BaseModel):
     source:    str             = Field(description="llm | fallback")
     model:     str | None      = None
-    reason:    str | None      = Field(default=None, description="폴백 사유: no_key | api_error | grounding_failed")
+    reason:    str | None      = Field(default=None, description="폴백 사유: no_key | api_error | grounding_failed | impact_number 등")
     grounding: GroundingInfo   = Field(default_factory=GroundingInfo)
 
 

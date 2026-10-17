@@ -176,6 +176,13 @@ def build_number_whitelist(
         _add(wl, IMBALANCE_MILD_BELOW)
         _add(wl, IMBALANCE_F1_GAP)
 
+    # 문제 목록(D22) — 근거 수치(evidence)와 이름·덧붙임 속 숫자(숫자 꼴 클래스 이름 등).
+    # evidence 는 자유 dict 라 고객 입력과 같이 재귀로 뽑는다.
+    for problem in fs.problems:
+        _add_client_numbers(wl, problem.evidence)
+        _add_client_numbers(wl, problem.title)
+        _add_client_numbers(wl, problem.note)
+
     if fs.latency and fs.latency.available:
         for val in (fs.latency.mean, fs.latency.p50, fs.latency.p95, fs.latency.p99):
             _add(wl, val)
@@ -222,6 +229,17 @@ def verify_grounding(texts: list[str], whitelist: set) -> GroundingInfo:
                 violations.append(tok)
     uniq = sorted(set(violations))
     return GroundingInfo(checked=checked, violations=uniq, passed=len(uniq) == 0)
+
+
+def has_number_token(text: str) -> bool:
+    """글에 숫자 토큰이 있는지 — verify_grounding 과 같은 기준(문맥 토큰 제거 후 같은 정규식).
+
+    권고의 기대 효과(expected_impact)에 쓴다(서술 설계 D22). 기대 효과의 숫자는 허용 목록 안이어도
+    "F1 0.8 달성"처럼 이 평가가 보장하지 않는 예측값이 되므로 아예 받지 않는다.
+    """
+    if not isinstance(text, str):
+        return False
+    return any(_canon(tok) is not None for tok in _NUMBER_RE.findall(_CTX_TOKEN_RE.sub(" ", text)))
 
 
 def _collect_strings(obj: Any, out: list) -> None:

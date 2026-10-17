@@ -14,12 +14,13 @@ import logging
 
 from app.narrative.schemas import BenchmarkRefOut, ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
 from app.narrative.baselines import build_benchmark_refs
-from app.narrative.fallback import build_fallback_narrative
+from app.narrative.fallback import build_fallback_narrative, problem_recommendation
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import (
     build_number_whitelist,
     find_verdict_contradictions,
+    has_number_token,
     verify_grounding,
     _collect_grounding_texts,
 )
@@ -47,6 +48,40 @@ def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
 def _verify_llm_output(data: dict, whitelist):
     """LLM 출력 전수 수집 + grounding 검증 — 순수 CPU 구간."""
     return verify_grounding(_collect_grounding_texts(data), whitelist)
+
+
+class _ImpactNumber(Exception):
+    """권고의 기대 효과에 숫자가 있다 — 전체 폴백(impact_number)으로 강등하라는 신호."""
+
+
+def _align_recommendations(recs: list, problems: list) -> list[RecommendationOut]:
+    """LLM 권고를 문제 목록에 맞춘다(서술 설계 D22). 규칙은 계약서 §3 그대로다.
+
+    - problem_id 가 비었거나 목록에 없는 권고는 버린다(어느 문제에도 대응하지 않는 권고).
+    - 남은 권고의 기대 효과에 숫자가 있으면 _ImpactNumber — 근거 없는 예측값이라 전체를 폴백한다.
+    - priority 는 문제의 것으로 강제한다(LLM 값 무시). 정렬은 문제 번호 순서, 같은 문제 안은 LLM 순서.
+    - 권고가 하나도 없는 문제는 그 종류의 폴백 템플릿으로 채운다 — 9절 표가 문제 목록과 맞아야 한다.
+    - 개수로 자르지 않는다(종전 [:5] 는 문제가 많을 때 뒤쪽 문제의 권고를 말없이 지웠다).
+    문제가 없으면 권고도 없다. 권고 항목이 dict 가 아니면 예외가 나서 호출부가 assembly_error 로 강등한다.
+    """
+    by_id: dict[str, list[dict]] = {p.id: [] for p in problems}
+    for r in recs:
+        pid = str(r.get("problem_id") or "").strip()
+        if pid not in by_id:
+            continue
+        if has_number_token(r.get("expected_impact", "")):
+            raise _ImpactNumber(pid)
+        by_id[pid].append(r)
+
+    aligned: list[RecommendationOut] = []
+    for p in problems:
+        matched = by_id[p.id]
+        if not matched:
+            aligned.append(problem_recommendation(p))
+            continue
+        for r in matched:
+            aligned.append(RecommendationOut(**{**r, "problem_id": p.id, "priority": p.priority}))
+    return aligned
 
 
 async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse:
@@ -97,7 +132,7 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
                         ),
                     },
                 ],
-                response_format=build_response_schema(),
+                response_format=build_response_schema(fs.problems),
                 temperature=0,
                 seed=4213,
             )
@@ -143,6 +178,14 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
                 fs, benchmark_refs, derived, reason="verdict_contradiction"
             )
 
+        # 권고를 문제 목록에 묶는다(D22). 기대 효과에 숫자가 있으면 전체 폴백 — 권고 하나만 바꿔 끼우면
+        # 같은 LLM 이 쓴 9절 서술(recommendation_narrative)과 어긋날 수 있다.
+        try:
+            aligned = _align_recommendations(recs, fs.problems)
+        except _ImpactNumber as exc:
+            logger.warning("권고 기대 효과에 숫자 → 규칙 폴백(impact_number): 문제 %s", exc)
+            return build_fallback_narrative(fs, benchmark_refs, derived, reason="impact_number")
+
         # 정상 — verdict 는 서버값으로 강제
         return NarrativeResponse(
             interpretation=InterpretationOut(**interp),
@@ -153,7 +196,7 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
                 risks=concl.get("risks", ""),
             ),
             recommendation_narrative=RecommendationNarrativeOut(**rec_narr),
-            recommendations=[RecommendationOut(**r) for r in recs][:5],
+            recommendations=aligned,
             meta=NarrativeMeta(source="llm", model=_MODEL, grounding=grounding),
         )
     except Exception:

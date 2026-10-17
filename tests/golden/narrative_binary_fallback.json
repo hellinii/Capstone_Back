@@ -58,27 +58,8 @@
     "source": "fallback"
   },
   "recommendation_narrative": {
-    "data_quality": "클래스 불균형 비율 1.857가 허용 기준을 초과하므로, 오버샘플링(SMOTE 등) 또는 클래스 가중치 조정을 통한 균형화 후 재평가를 권고한다. 전처리에서 3건이 제외되었으므로, 결측·오류 데이터 정제를 통한 유효 표본 확보를 권고한다.",
-    "model_ops": "기준 미달 지표(Recall)의 개선을 위해 임계값 재조정·재학습을 검토하고, 운영 단계에서 해당 지표의 주기적 모니터링을 권고한다."
+    "data_quality": "데이터 측면에서 권고 대상으로 지목된 문제는 없다. 전처리에서 3건이 평가에서 제외되었다.",
+    "model_ops": "모델 측면에서 권고 대상으로 지목된 문제는 없다."
   },
-  "recommendations": [
-    {
-      "action": "Recall 기준 미달(0.7) — 임계값 재조정/재학습/데이터 보강 검토",
-      "category": "Recall 개선",
-      "expected_impact": "Recall 향상 및 종합 판정 개선",
-      "priority": "HIGH"
-    },
-    {
-      "action": "클래스 비율 균형화(불균형 비율 1.857) 후 추가 평가",
-      "category": "데이터 균형",
-      "expected_impact": "불균형에 의한 성능 왜곡 사전 검증",
-      "priority": "MEDIUM"
-    },
-    {
-      "action": "결측·오류 데이터 정제(제외 3건)",
-      "category": "데이터 품질",
-      "expected_impact": "유효 표본 확대 및 평가 신뢰도 향상",
-      "priority": "LOW"
-    }
-  ]
+  "recommendations": []
 }
