@@ -77,6 +77,19 @@
         "tp": 52,
         "type": "binary"
       },
+      "error_ratios": {
+        "boundary": null,
+        "boundary_margin": 0.1,
+        "boundary_note": "threshold_unknown",
+        "confident": {
+          "count": 31,
+          "ratio": 0.3131
+        },
+        "confident_level": 0.9,
+        "misclassified": 99,
+        "threshold": null,
+        "unit": "sample"
+      },
       "pr_curve": {
         "precision": [
           1.0,

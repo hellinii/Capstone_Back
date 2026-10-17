@@ -1,21 +1,25 @@
 """app/evaluation/engine.py — 평가 지표 계산 오케스트레이션(디스패치)
 
 전처리(preprocess_data) 후 METRIC_REQUIREMENTS 로부터 계산 가능 지표 를 정하고, METRIC_REGISTRY
-로 각 지표 를 실제 계산 함수(metrics/*)에 디스패치한다. TP·TN·FP·FN 건수, binary ROC/PR 곡선,
+로 각 지표 를 실제 계산 함수(metrics/*)에 디스패치한다. TP·TN·FP·FN 건수, 경계·확신 오류 비율, binary ROC/PR 곡선,
 latency 통계도 부착.
 
 상호작용
-- 의존(import): pandas, app.core.schemas(METRIC_REQUIREMENTS), .preprocessor, .metrics(common/binary/multiclass/multilabel)
+- 의존(import): pandas, app.core.schemas(METRIC_REQUIREMENTS), .preprocessor, .metrics(common/binary/counts/misclassification/multiclass/multilabel)
 - 사용처: app.evaluation.service.run_evaluation_pipeline
 """
+
+import logging
 
 import pandas as pd
 from typing import Dict, Any, List
 
-from .metrics import common, binary, counts, multiclass, multilabel
-from .preprocessor import preprocess_data
+from .metrics import common, binary, counts, misclassification, multiclass, multilabel
+from .preprocessor import collect_role_columns, preprocess_data
 from .errors import metric_error
 from app.core.schemas import METRIC_REQUIREMENTS
+
+logger = logging.getLogger(__name__)
 
 # Task Type 별로 허용되는 지표 정의 (core.schemas 의 단일 출처에서 동적 생성)
 VALID_METRICS_BY_TASK = {
@@ -132,6 +136,19 @@ def evaluate(
         results["confusion_counts"] = counts.calculate_confusion_counts(df, mapping_dict)
     except Exception:
         pass
+
+    # ── 경계·확신 오류 비율 (서술 설계 D30, 확률과 예측이 모두 있을 때) ──
+    # 지표가 아니라 success_metrics 의 error_ratios 키로 내려보낸다. 확률 컬럼이 여럿인 역할은
+    # mapping_dict 가 마지막 하나만 남기므로 매핑 원본에서 목록을 다시 모은다. 임계값은 파생
+    # 예측(derived)에서만 안다. 계산할 수 없으면 키를 두지 않는다.
+    try:
+        ratios = misclassification.calculate_error_ratios(
+            df, mapping_dict, collect_role_columns(mappings), derived,
+        )
+        if ratios is not None:
+            results["error_ratios"] = ratios
+    except Exception as e:
+        logger.warning("error_ratios 계산 생략: %s", e)
 
     # ── 차트용 곡선 좌표 (binary, score 컬럼이 있을 때) ──
     # 별도 지표가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다. 종전에는

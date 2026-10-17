@@ -156,6 +156,19 @@
           }
         ],
         "type": "per_class"
+      },
+      "error_ratios": {
+        "boundary": null,
+        "boundary_margin": 0.1,
+        "boundary_note": "threshold_unknown",
+        "confident": {
+          "count": 46,
+          "ratio": 0.1106
+        },
+        "confident_level": 0.9,
+        "misclassified": 416,
+        "threshold": null,
+        "unit": "label_cell"
       }
     }
   },
