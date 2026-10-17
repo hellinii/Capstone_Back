@@ -94,6 +94,22 @@ def test_gain_uses_uploaded_prediction_for_current_f1():
     assert gain == {"max_f1": 0.8889, "current_f1": 0.0, "gain": 0.8889, "best_threshold": 0.35}
 
 
+def test_gain_tie_with_float_noise_picks_lowest_threshold():
+    """분수로는 같은 F1 이 부동소수로는 마지막 자리만 다른 동률 — 낮은 임계값을 고른다.
+
+    임계값 0.6: TP3 FP2 FN1 → 6/9, 0.9: TP2 FP0 FN2 → 4/6. 둘 다 2/3 이지만 2PR/(P+R) 계산은
+    0.66…65(0.6) vs 0.66…66(0.9) 이라 그대로 argmax 하면 0.9 가 이긴다.
+    """
+    rows = [
+        (0, 0.3), (0, 0.4), (0, 0.5), (0, 0.7), (0, 0.8),
+        (1, 0.2), (1, 0.6), (1, 0.9), (1, 0.9),
+    ]
+    gain = _binary_derived(rows)["f1_threshold_gain"]
+
+    assert gain["max_f1"] == 0.6667
+    assert gain["best_threshold"] == 0.6
+
+
 def test_gain_absent_without_score_or_for_other_tasks():
     assert "f1_threshold_gain" not in _with_pred([(0, 0), (1, 1), (1, 0)])
     assert "f1_threshold_gain" not in _with_pred([("a", "a"), ("b", "b"), ("c", "b")], task="multiclass")
@@ -174,6 +190,40 @@ def test_gaps_just_below_0_10_are_no_distortion():
     assert effect["imbalance_ratio"] == 3.0
     assert 0 < effect["majority_minus_minority_f1"] < 0.10
     assert 0 < effect["accuracy_minus_macro_f1"] < 0.10
+
+
+def test_minority_better_than_majority_is_no_distortion():
+    """IR ≥ 1.5, 정확도 − 매크로 F1 < 0.10, 다수 F1 − 소수 F1 ≤ −0.10 — 소수 클래스가 더 잘 맞는다.
+    차이는 부호 그대로 비교하므로 왜곡 미관찰이다(절댓값으로 비교하면 affected 로 뒤집힌다).
+
+    neg 2 (둘 다 → pos), pos 1 (맞음), IR 2. pos: TP1 FP2 → F1 2/4 = 0.5, neg F1 = 0.
+    다수 − 소수 = −0.5. 정확도 1/3 − 매크로 0.25 = 0.0833.
+    """
+    rows = _repeat(("neg", "pos", 2), ("pos", "pos", 1))
+    effect = _with_pred(rows, positive_class="pos")["imbalance_effect"]
+
+    assert effect == {
+        "level": "no_distortion",
+        "imbalance_ratio": 2.0,
+        "accuracy_minus_macro_f1": 0.0833,
+        "majority_minus_minority_f1": -0.5,
+        "majority_class": "neg",
+        "minority_class": "pos",
+    }
+
+
+def test_multilabel_minority_better_than_majority_is_no_distortion():
+    """멀티레이블도 같다. 빈도 x 3 · y 1 (IR 3). x: TP1 FN2 → F1 2/4 = 0.5, y: TP1 FP1 → F1 2/3.
+    다수 − 소수 = −0.1667 → 왜곡 미관찰."""
+    df = pd.DataFrame(
+        [("x|y", "x|y"), ("x", "y"), ("x", "")],
+        columns=["true_labels", "pred_labels"],
+    )
+    effect = evaluate(df, MULTILABEL_PRED, "multilabel", ["M15"])["imbalance_effect"]
+
+    assert effect["imbalance_ratio"] == 3.0
+    assert effect["majority_minus_minority_f1"] == -0.1667
+    assert effect["level"] == "no_distortion"
 
 
 def test_imbalance_effect_ignores_ghost_predicted_class():

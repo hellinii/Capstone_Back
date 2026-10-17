@@ -1065,3 +1065,62 @@ def test_rules_13_to_15_follow_facts():
                                   ("mild", "불균형이 경미하다")) if lv != level]
         for other in others:
             assert other not in prompt, (level, other)
+
+
+# ── 세션 3 검토 반영: 소수점 절 번호·신뢰구간 방식 문장·margin 크기 ─────────────────────
+
+@pytest.mark.parametrize("text", [
+    "8.3절에서 지적한 위험을 9절에서 다룬다.",
+    "구간이 목표값을 포함한다(8.2).",
+    "9.2절 권고를 따른다.",
+    "7.1 절의 오류 분석과 같다.",
+    "8절 8.3 의 내용과 같다.",
+])
+def test_dotted_section_references_are_not_numbers(text):
+    """"8.3절"·"(8.2)" 는 절 번호다 — 종전에는 "3절"만 지우고 "8." 을 환각 수치로 잡았다."""
+    from app.narrative.grounding import has_number_token
+
+    fs = _no_special_fact_sheet()
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+    g = verify_grounding([text], wl)
+    assert g.passed, g.violations
+    assert has_number_token(text) is False
+
+
+@pytest.mark.parametrize("text, fake", [
+    ("8.3절에서 지적한 대로 정확도는 0.82 이다.", "0.82"),
+    ("정확도는 (0.82) 이다.", "(0.82)"),
+    ("오류율이 8.2% 로 8.2절과 같다.", "8.2%"),
+    ("비용을 0.3 절감한다.", "0.3"),
+])
+def test_dotted_section_rule_does_not_whitelist_fake_values(text, fake):
+    """절 번호 꼴만 지운다 — 지표값 꼴(0.82)·백분율(8.2%)·'절감' 앞 숫자는 그대로 검증한다."""
+    from app.narrative.grounding import has_number_token
+
+    fs = _no_special_fact_sheet()
+    wl = build_number_whitelist(fs, [], compute_derived(fs))
+    g = verify_grounding([text], wl)
+    assert not g.passed
+    assert any(fake.strip("()") in v for v in g.violations), g.violations
+    assert has_number_token(text) is True
+
+
+def test_whitelist_includes_numbers_in_ci_method_note():
+    """6.0 신뢰구간 방식 한 줄의 숫자("2,000회")를 서술이 옮겨 적어도 환각이 아니다."""
+    text = ["신뢰구간은 재표집 2,000회로 구했다."]
+    bare = build_number_whitelist(_bare_fact_sheet(), [], {})
+    assert not verify_grounding(text, bare).passed
+
+    fs = _bare_fact_sheet(ci_method_note="정확도는 Wilson 구간, 그 밖의 지표는 재표집(2,000회)으로 구했다.")
+    assert verify_grounding(text, build_number_whitelist(fs, [], {})).passed
+    # 없으면(None) 건너뛴다.
+    build_number_whitelist(_bare_fact_sheet(ci_method_note=None), [], {})
+
+
+def test_whitelist_includes_absolute_margin():
+    """margin 이 음수여도 "목표값보다 0.0288 낮다"처럼 크기만 적는 서술을 허용한다."""
+    fs = _bare_fact_sheet(metrics=[_near_metric(value=0.7712, threshold=0.8, margin=-0.0288,
+                                                 near=False, status="fail")])
+    wl = build_number_whitelist(fs, [], {})
+    assert "-0.0288" in wl and "0.0288" in wl
+    assert verify_grounding(["Recall 은 목표값보다 0.0288 낮다."], wl).passed

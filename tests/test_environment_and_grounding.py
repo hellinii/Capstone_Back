@@ -97,6 +97,14 @@ def test_consistent_sentences_pass(verdict, text):
     "운영 환경에서는 기준에 미달할 우려가 있다.",
     "표본이 바뀌면 기준에 미달할 수 있다.",
     "임계값이 설정된 모든 시험항목이 기준을 충족하여 식별된 기준 미달 위험은 없다.",
+    # 세션 3 검토 — 가정·권고 꼴도 미달 주장이 아니다.
+    "표본이 바뀌면 Recall 이 기준을 충족하지 못할 수도 있다.",
+    "운영 데이터에서는 기준에 이르지 못할 가능성이 있다.",
+    "재평가에서는 불합격으로 판정될 수 있다.",
+    "표본 변동으로 판정이 미달로 바뀔 수 있다.",
+    "결정 임계값을 점검해 기준 미달을 예방한다.",
+    "Recall 미달 방지를 위해 소수 클래스를 보강한다.",
+    "Recall 은 미달 리스크가 남아 있다.",
 ])
 def test_pass_allows_hypothetical_shortfall_wording(text):
     """[B7, D12] 아슬아슬 합격을 8.3 에 쓰면 합격 성적서에도 '미달 위험·가능성'이 나온다.
@@ -115,6 +123,10 @@ def test_pass_allows_hypothetical_shortfall_wording(text):
     "Recall 은 목표를 미충족하였다.",
     # 같은 글 안에 경고와 진짜 미달 주장이 함께 있으면 진짜 쪽에서 걸린다.
     "Accuracy 는 미달할 위험이 있고, Recall 은 기준에 미달하였다.",
+    "Recall 은 기준을 충족하지 못하였다.",
+    "Recall 은 기준에 이르지 못했다.",
+    "Recall 은 미달로 판정되었다.",
+    "Recall 은 불합격으로 판정되어 개선 가능성이 있다.",
 ])
 def test_pass_still_rejects_real_shortfall_claims(text):
     assert find_verdict_contradictions([text], "PASS") == [text]

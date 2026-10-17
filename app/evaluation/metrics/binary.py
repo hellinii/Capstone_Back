@@ -177,7 +177,9 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
     precision, recall = precision[:-1], recall[:-1]
     denom = precision + recall
     f1 = np.divide(2 * precision * recall, denom, out=np.zeros_like(denom, dtype=float), where=denom > 0)
-    best = int(np.argmax(f1))  # 동률이면 첫 점 = 가장 낮은 임계값
+    # 동률이면 첫 점 = 가장 낮은 임계값. 분수로는 같은 F1(예: 6/9 와 4/6 = 2/3)이 부동소수 계산에서
+    # 마지막 자리만 달라(0.66…65 vs 0.66…66) 높은 임계값이 이기지 않게, 9자리로 반올림한 뒤 고른다.
+    best = int(np.argmax(np.round(f1, 9)))
 
     _tn, fp, fn, tp = _binary_confusion_counts(df, mapping_dict)
     current = float(2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) > 0 else 0.0

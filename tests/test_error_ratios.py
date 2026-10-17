@@ -92,6 +92,22 @@ def test_binary_with_uploaded_prediction_has_no_boundary():
     assert ratios["confident"] == {"count": 2, "ratio": 0.6667}  # 0.95(FP), 0.05(FN, 1−p=0.95)
 
 
+def test_binary_uploaded_prediction_confident_uses_predicted_side_probability():
+    """확신은 '틀린 쪽(예측한 쪽)' 확률로 잰다 — y_pred 를 직접 올리면 예측이 점수 쪽과 어긋날 수 있다.
+
+    (0, 1, 0.05): 양성으로 예측했는데 양성 확률 0.05 → 틀린 쪽 확률 0.05, 확신 아님.
+    (1, 0, 0.97): 음성으로 예측했는데 음성 확률 0.03 → 확신 아님.
+    (0, 1, 0.95): 양성 예측, 양성 확률 0.95 → 확신.
+    max(p, 1 − p) 로 재면 셋 다 확신(0.95·0.97·0.95)이 된다.
+    """
+    df = pd.DataFrame([(0, 1, 0.05), (1, 0, 0.97), (0, 1, 0.95)], columns=["y_true", "y_pred", "score"])
+    mappings = BINARY_SCORE_ONLY + [{"role": "y_pred", "column": "y_pred"}]
+    ratios = evaluate(df, mappings, "binary", ["M1"], positive_class="1")["error_ratios"]
+
+    assert ratios["misclassified"] == 3
+    assert ratios["confident"] == {"count": 1, "ratio": 0.3333}
+
+
 def test_no_misclassification_gives_null_ratios():
     ratios = _binary_derived([(1, 0.8), (0, 0.2)])["error_ratios"]
 
