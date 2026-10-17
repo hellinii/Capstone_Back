@@ -467,3 +467,46 @@ def test_zero_or_negative_target_is_a_target(target):
     assert "MCC" in resp.conclusion.risks
     assert "모든 시험항목이 기준을 충족" not in resp.conclusion.risks
     assert "1개 중 0개" in resp.conclusion.narrative
+
+
+def _with_derivation(method, threshold=None):
+    from app.narrative.schemas import DerivedPredictionFact
+
+    return _sample_fact_sheet().model_copy(
+        update={"derived_prediction": DerivedPredictionFact(method=method, threshold=threshold)}
+    )
+
+
+def test_rule_10_follows_the_derivation_method():
+    """규칙 10 은 파생 방법마다 다르다 — 다중 클래스(argmax)에는 임계값이 없다(DESIGN_GAPS R3)."""
+    from app.narrative.prompt import build_system_prompt
+
+    threshold = build_system_prompt("internal", "binary", _with_derivation("threshold", 0.35))
+    per_label = build_system_prompt("internal", "multilabel", _with_derivation("threshold_per_label", {"a": 0.4}))
+    argmax = build_system_prompt("internal", "multiclass", _with_derivation("argmax"))
+    direct = build_system_prompt("internal", "binary", _sample_fact_sheet())
+
+    assert "10. " in threshold and "결정 임계값을 적용" in threshold
+    assert "10. " in per_label and "레이블마다" in per_label
+    assert "10. " in argmax and "가장 큰 클래스" in argmax
+    assert "임계값을 적용" not in argmax
+    # 예측을 직접 올렸으면 파생 사실이 없으니 규칙 10 도 없다.
+    assert "10. " not in direct and "derived_prediction" not in direct
+
+
+async def test_service_sends_the_method_specific_rule(make_fake_openai_client):
+    llm_json = {
+        "interpretation": {"confusion_analysis": "", "distribution_analysis": ""},
+        "conclusion": {"verdict": "", "benchmark": "", "narrative": "", "risks": ""},
+        "recommendation_narrative": {"data_quality": "", "model_ops": ""},
+        "recommendations": [],
+    }
+    client = make_fake_openai_client(llm_json)
+    req = NarrativeRequest(
+        task_type=TaskType.multiclass, report_purpose="internal", fact_sheet=_with_derivation("argmax")
+    )
+    await generate_narrative(client, req)
+
+    system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "가장 큰 클래스" in system
+    assert "임계값을 적용" not in system

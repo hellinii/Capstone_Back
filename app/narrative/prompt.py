@@ -14,8 +14,38 @@ import json
 TASK_TYPE_LABELS = {"binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "멀티레이블 분류"}
 
 
-def build_system_prompt(report_purpose: str, task_type: str = "") -> str:
+# 규칙 10 — 예측을 확률에서 파생했을 때 방법마다 다른 한 문장(고정 문구 9 와 같은 구분).
+# 다중 클래스는 임계값이 아니라 가장 큰 확률의 클래스를 고른다(argmax).
+_DERIVATION_RULES = {
+    "threshold": (
+        "fact_sheet.derived_prediction 이 있으므로 예측값은 모델이 직접 낸 것이 아니라 확률에 "
+        "결정 임계값을 적용해 만든 것이다. 수치가 그 임계값에 따라 달라진다는 점을 해석에 반영하라."
+    ),
+    "threshold_per_label": (
+        "fact_sheet.derived_prediction 이 있으므로 예측값은 모델이 직접 낸 것이 아니라 레이블마다 "
+        "점수에 결정 임계값을 적용해 만든 것이다. 수치가 그 임계값들에 따라 달라진다는 점을 해석에 반영하라."
+    ),
+    "argmax": (
+        "fact_sheet.derived_prediction 이 있으므로 예측값은 모델이 직접 낸 것이 아니라 클래스별 확률 중 "
+        "가장 큰 클래스를 고른 것이다. 결정 임계값은 쓰지 않았으니 임계값을 언급하지 마라."
+    ),
+}
+_DERIVATION_RULE_OTHER = (
+    "fact_sheet.derived_prediction 이 있으므로 예측값은 모델이 직접 낸 것이 아니라 확률에서 파생한 것이다."
+)
+
+
+def _derivation_rule(fs) -> str | None:
+    derived = getattr(fs, "derived_prediction", None) if fs is not None else None
+    if derived is None:
+        return None
+    return _DERIVATION_RULES.get(derived.method, _DERIVATION_RULE_OTHER)
+
+
+def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> str:
+    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10 등)을 고르는 데만 쓴다."""
     task_label = TASK_TYPE_LABELS.get(task_type, task_type)
+    derivation_rule = _derivation_rule(fs)
     return (
         "너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술 작성 전문가다.\n"
         "주어진 JSON 사실 시트(fact_sheet)와 파생값(derived)·벤치마크(benchmark_refs)만을 근거로 "
@@ -36,8 +66,7 @@ def build_system_prompt(report_purpose: str, task_type: str = "") -> str:
         "서술에 자유롭게 반영하되, 값이 '제공되지 않음'인 항목은 그 사실만 적고 내용을 지어내지 마라. "
         "client_inputs 의 숫자는 적힌 그대로만 쓴다.\n"
         + (f"9. 평가한 모델의 분류 유형은 '{task_label}' 이다.\n" if task_label else "")
-        + "10. fact_sheet.derived_prediction 이 있으면 예측값은 모델이 직접 낸 것이 아니라 확률에 "
-        "결정 임계값을 적용해 만든 것이다. 수치가 그 임계값에 따라 달라진다는 점을 해석에 반영하라."
+        + (f"10. {derivation_rule}\n" if derivation_rule else "")
     )
 
 
