@@ -9,6 +9,8 @@ analyzer.py 의 프롬프트/스키마 패턴을 따른다. 핵심 제약:
 """
 import json
 
+from app.narrative.derived import threshold_tuning_needed
+
 
 # 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예").
 TASK_TYPE_LABELS = {"binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "멀티레이블 분류"}
@@ -77,12 +79,67 @@ def _confidence_interval_rule(fs) -> str | None:
     )
 
 
+def _near_target_rule(fs) -> str | None:
+    """규칙 13 — 아슬아슬 합격(서술 설계 D12). near_target 이고 합격한 지표가 있을 때만 붙인다."""
+    metrics = getattr(fs, "metrics", None) if fs is not None else None
+    if not metrics or not any(m.near_target and m.status == "pass" for m in metrics):
+        return None
+    return (
+        "fact_sheet.metrics 에서 near_target=true 이고 status=pass 인 지표는 목표값과의 차이(margin)가 "
+        "목표값의 3% 미만인 아슬아슬 합격이다. conclusion.risks(8.3)에 그 지표와 margin 을 적힌 그대로 적고, "
+        "표본이 달라지면 기준에 미달할 위험이 있다고 써라. 합격한 지표이므로 미달했다고 쓰지 마라."
+    )
+
+
+def _threshold_gain_rule(fs) -> str | None:
+    """규칙 14 — 임계값 조정 여지(서술 설계 D40). gain 이 기준(0.10) 이상일 때만 붙인다."""
+    if fs is None or getattr(fs, "f1_threshold_gain", None) is None or not threshold_tuning_needed(fs):
+        return None
+    return (
+        "fact_sheet.f1_threshold_gain 의 gain 이 0.1 이상이다. conclusion.narrative(8.2)와 "
+        "conclusion.risks(8.3)에서 결정 임계값을 best_threshold 로 바꾸면 F1 이 current_f1 에서 max_f1 까지 "
+        "오를 수 있다고 적되, gain 은 '이 데이터에서 오를 수 있는 최대폭'이고 같은 평가 데이터로 고른 "
+        "임계값이라 별도 데이터에서 확인해야 한다고 반드시 덧붙여라. 성능 향상을 보장한다고 쓰지 마라."
+    )
+
+
+# 규칙 15 — 불균형 영향(서술 설계 D20). level 판정은 평가 엔진이 했고, 서술은 level 에 맞는 결론만 쓴다.
+_IMBALANCE_RULES = {
+    "affected": (
+        "불균형 영향 있음이다 — 불균형 비율(imbalance_ratio)이 1.5 이상이고 정확도와 매크로 F1 의 차이"
+        "(accuracy_minus_macro_f1) 또는 다수·소수 클래스 F1 의 차이(majority_minus_minority_f1)가 0.1 이상이다. "
+        "불균형이 성능 수치에 영향을 주었다고 쓰고, 소수 클래스의 성능 해석에 유의하라고 적어라."
+    ),
+    "no_distortion": (
+        "불균형은 있으나 성능 왜곡은 관찰되지 않았다 — 불균형 비율(imbalance_ratio)이 1.5 이상이지만 두 F1 "
+        "차이가 모두 0.1 미만이다. 불균형이 성능을 왜곡했다고 쓰지 마라."
+    ),
+    "mild": (
+        "불균형이 경미하다 — 불균형 비율(imbalance_ratio)이 1.5 미만이다. 불균형 때문에 성능이 왜곡되었다고 "
+        "쓰지 마라."
+    ),
+}
+
+
+def _imbalance_rule(fs) -> str | None:
+    ie = getattr(fs, "imbalance_effect", None) if fs is not None else None
+    if ie is None:
+        return None
+    return (
+        f"fact_sheet.imbalance_effect 의 level 이 {ie.level} 이므로 interpretation.distribution_analysis(7.2)의 "
+        f"결론은 {_IMBALANCE_RULES[ie.level]} 수치는 imbalance_effect 에 적힌 그대로 써라."
+    )
+
+
 def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> str:
-    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10·11·12 등)을 고르는 데만 쓴다."""
+    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10~15)을 고르는 데만 쓴다."""
     task_label = TASK_TYPE_LABELS.get(task_type, task_type)
     derivation_rule = _derivation_rule(fs)
     error_ratio_rule = _error_ratio_rule(fs)
     ci_rule = _confidence_interval_rule(fs)
+    near_rule = _near_target_rule(fs)
+    gain_rule = _threshold_gain_rule(fs)
+    imbalance_rule = _imbalance_rule(fs)
     return (
         "너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술 작성 전문가다.\n"
         "주어진 JSON 사실 시트(fact_sheet)와 파생값(derived)·벤치마크(benchmark_refs)만을 근거로 "
@@ -106,6 +163,9 @@ def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> st
         + (f"10. {derivation_rule}\n" if derivation_rule else "")
         + (f"11. {error_ratio_rule}\n" if error_ratio_rule else "")
         + (f"12. {ci_rule}\n" if ci_rule else "")
+        + (f"13. {near_rule}\n" if near_rule else "")
+        + (f"14. {gain_rule}\n" if gain_rule else "")
+        + (f"15. {imbalance_rule}\n" if imbalance_rule else "")
     )
 
 

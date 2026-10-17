@@ -855,3 +855,213 @@ def test_ci_fields_schema():
     assert old.metrics[0].ci_low is None and old.ci_method_note is None
     with pytest.raises(ValidationError):
         FactSheet(verdict="PASS", score=100.0, ci_method_note="가" * 501)
+
+
+# ── 아슬아슬 합격·임계값 조정 여지·불균형 영향(서술 설계 D12·D40·D20, B7) ─────────────────
+
+def _near_metric(name="Recall", value=0.81, threshold=0.8, margin=0.01, near=True, status="pass"):
+    return MetricFact(
+        metric_id="M3", display_name=name, value=value, threshold=threshold,
+        status=status, margin=margin, near_target=near,
+    )
+
+
+def _gain(**over):
+    from app.narrative.schemas import F1ThresholdGainFact
+
+    base = {"max_f1": 0.8421, "current_f1": 0.7012, "gain": 0.1409, "best_threshold": 0.37}
+    base.update(over)
+    return F1ThresholdGainFact(**base)
+
+
+def _imbalance(**over):
+    from app.narrative.schemas import ImbalanceEffectFact
+
+    base = {
+        "level": "affected", "imbalance_ratio": 3.2,
+        "accuracy_minus_macro_f1": 0.12, "majority_minus_minority_f1": 0.18,
+        "majority_class": "neg", "minority_class": "pos",
+    }
+    base.update(over)
+    return ImbalanceEffectFact(**base)
+
+
+def test_new_fact_fields_schema_accepts_contract_shape():
+    req = NarrativeRequest(
+        task_type=TaskType.binary,
+        fact_sheet={
+            "verdict": "PASS", "score": 100.0,
+            "metrics": [{"metric_id": "M3", "display_name": "Recall", "value": 0.81, "threshold": 0.8,
+                         "status": "pass", "margin": 0.01, "near_target": True}],
+            "f1_threshold_gain": {"max_f1": 0.8421, "current_f1": 0.7012, "gain": 0.1409, "best_threshold": 0.37},
+            "imbalance_effect": {"level": "affected", "imbalance_ratio": 3.2, "accuracy_minus_macro_f1": None,
+                                 "majority_minus_minority_f1": -0.05, "majority_class": "2", "minority_class": "0"},
+        },
+    )
+    fs = req.fact_sheet
+    assert fs.metrics[0].near_target is True and fs.metrics[0].margin == 0.01
+    assert fs.f1_threshold_gain.gain == 0.1409
+    assert fs.imbalance_effect.accuracy_minus_macro_f1 is None
+    # 옛 요청(키 없음)도 받는다.
+    old = FactSheet(verdict="PASS", score=100.0, metrics=[MetricFact(
+        metric_id="M1", display_name="Accuracy", value=0.9, status="info")])
+    assert old.metrics[0].margin is None and old.metrics[0].near_target is False
+    assert old.f1_threshold_gain is None and old.imbalance_effect is None
+    with pytest.raises(ValidationError):
+        _imbalance(level="severe")
+    with pytest.raises(ValidationError):
+        _gain(gain=-0.01)
+
+
+@pytest.mark.parametrize("gain, notable", [(0.1, True), (0.0999, False), (0.1409, True), (0.0, False)])
+def test_threshold_tuning_boundary(gain, notable):
+    """gain ≥ 0.10 (경계 포함) — 프론트 문제 목록 threshold_tuning 과 같은 기준."""
+    fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=gain))
+    assert compute_derived(fs)["threshold_tuning"] is notable
+
+
+def test_threshold_tuning_absent_without_gain():
+    assert "threshold_tuning" not in compute_derived(_sample_fact_sheet())
+
+
+def test_whitelist_new_numbers_only_with_facts():
+    """margin·3%·gain 네 값·0.1·불균형 값·1.5 는 해당 사실이 실렸을 때만 허용한다."""
+    without = build_number_whitelist(_bare_fact_sheet(), [], {})
+    for tok in ("0.1", "1.5", "3", "0.03", "0.37", "3.2"):
+        assert tok not in without, tok
+
+    near = build_number_whitelist(_bare_fact_sheet(metrics=[_near_metric(margin=0.012)]), [], {})
+    for tok in ("0.012", "0.03", "3"):
+        assert tok in near, tok
+    # near_target 이 아니면 3% 는 허용하지 않는다(margin 은 사실이라 허용).
+    not_near = build_number_whitelist(_bare_fact_sheet(metrics=[_near_metric(margin=0.2, near=False)]), [], {})
+    assert "0.2" in not_near and "0.03" not in not_near
+
+    gain = build_number_whitelist(_bare_fact_sheet(f1_threshold_gain=_gain()), [], {})
+    for tok in ("0.8421", "0.7012", "0.1409", "0.37", "0.1"):
+        assert tok in gain, tok
+    assert "1.5" not in gain
+
+    ie = build_number_whitelist(_bare_fact_sheet(imbalance_effect=_imbalance(
+        majority_minus_minority_f1=-0.05, majority_class="2", minority_class="7")), [], {})
+    for tok in ("3.2", "0.12", "-0.05", "1.5", "0.1", "2", "7"):
+        assert tok in ie, tok
+
+
+def test_fallback_risks_mention_near_target_pass_metrics():
+    fs = FactSheet(verdict="PASS", score=100.0, metrics=[
+        MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass",
+                   margin=0.09, near_target=False),
+        _near_metric(),
+    ])
+    derived = compute_derived(fs)
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+
+    risks = resp.conclusion.risks
+    assert (
+        "목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Recall(0.81, 기준 0.8, 차이 0.01)로, "
+        "표본이 달라지면 기준에 미달할 위험이 있다." in risks
+    )
+    assert "Accuracy(" not in risks
+    assert "식별된 기준 미달 위험은 없다" not in risks
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+    # 합격 성적서의 이 서술이 판정 모순으로 걸리지 않는다.
+    from app.narrative.grounding import find_verdict_contradictions
+    assert find_verdict_contradictions(_all_texts(resp), "PASS") == []
+
+
+def test_fallback_risks_skip_near_target_fail_and_absent_flags():
+    """근소 미달(near_target 이지만 fail)은 아슬아슬 '합격'이 아니다. 키가 없으면 종전 문장 그대로."""
+    fs = _sample_fact_sheet()
+    assert build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.risks == (
+        "기준 미달 지표는 Recall(0.7, 기준 0.8)로, 해당 영역의 성능 저하 위험이 존재한다."
+    )
+    near_fail = _bare_fact_sheet(metrics=[_near_metric(value=0.79, margin=-0.01, status="fail")])
+    assert "아슬아슬" not in build_fallback_narrative(
+        near_fail, [], compute_derived(near_fail), "no_key").conclusion.risks
+
+
+def test_fallback_risks_state_threshold_gain_only_when_notable():
+    fs = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain()})
+    derived = compute_derived(fs)
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    risks = resp.conclusion.risks
+    assert "결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있어" in risks
+    assert "'이 데이터에서 오를 수 있는 최대폭'이므로 별도 데이터에서 확인해야 한다." in risks
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+
+    small = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain(gain=0.0999)})
+    assert "최대폭" not in build_fallback_narrative(small, [], compute_derived(small), "no_key").conclusion.risks
+
+
+@pytest.mark.parametrize("level, expected, absent", [
+    ("affected",
+     "불균형 비율은 3.2로 불균형이 있고, 정확도와 매크로 F1 의 차이는 0.12, 다수 클래스(neg)와 소수 클래스(pos)의 "
+     "F1 차이는 0.18로 0.1 이상 벌어져 불균형이 성능 수치에 영향을 준 것으로 보인다.",
+     "왜곡은 관찰되지 않았다"),
+    ("no_distortion",
+     "불균형 비율은 3.2로 불균형이 있으나, 정확도와 매크로 F1 의 차이는 0.12, 다수 클래스(neg)와 소수 클래스(pos)의 "
+     "F1 차이는 0.18로 0.1 미만이어서 불균형에 의한 성능 왜곡은 관찰되지 않았다.",
+     "영향을 준"),
+    ("mild", "불균형 비율은 3.2로 1.5 미만이어서 불균형은 경미하다.", "불균형이 있"),
+])
+def test_fallback_distribution_follows_imbalance_level(level, expected, absent):
+    """7.2 의 결론은 엔진이 낸 level 로만 쓴다 — distribution.imbalance_ratio(1.857)로 다시 판정하지 않는다."""
+    fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": _imbalance(level=level)})
+    derived = compute_derived(fs)
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    text = resp.interpretation.distribution_analysis
+    assert expected in text
+    assert absent not in text
+    assert "1.857" not in text
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+
+
+def test_fallback_distribution_multilabel_uses_label_gap_only():
+    ie = _imbalance(accuracy_minus_macro_f1=None, majority_minus_minority_f1=-0.04, level="no_distortion")
+    fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": ie})
+    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.distribution_analysis
+    assert "다수 레이블(neg)와 소수 레이블(pos)의 F1 차이는 -0.04로 0.1 미만" in text
+    assert "매크로 F1" not in text
+
+
+def test_fallback_distribution_without_imbalance_effect_is_neutral():
+    """키가 없으면(옛 프론트) 비율만 적고 1.5 판정을 하지 않는다 — 종전의 'IR ≤ 1.5 = 균형' 규칙은 없앴다."""
+    for ir in (1.4, 1.5, 1.857):
+        fs = _sample_fact_sheet().model_copy(update={"distribution": DistributionFact(
+            class_distribution={"0": 130, "1": 70}, imbalance_ratio=ir)})
+        text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.distribution_analysis
+        assert text.endswith(f" 불균형 비율은 {ir}이다."), text
+        assert "균형 상태" not in text and "경미" not in text
+
+
+def test_rules_13_to_15_follow_facts():
+    from app.narrative.prompt import build_system_prompt
+
+    plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
+    for n in ("13. ", "14. ", "15. "):
+        assert n not in plain
+    assert "near_target" not in plain and "f1_threshold_gain" not in plain and "imbalance_effect" not in plain
+
+    near = build_system_prompt("internal", "binary", _bare_fact_sheet(metrics=[_near_metric()]))
+    assert "13. " in near and "conclusion.risks(8.3)" in near and "아슬아슬 합격" in near
+    near_fail = build_system_prompt(
+        "internal", "binary", _bare_fact_sheet(metrics=[_near_metric(status="fail", margin=-0.01)]))
+    assert "13. " not in near_fail
+
+    gain = build_system_prompt("internal", "binary", _bare_fact_sheet(f1_threshold_gain=_gain()))
+    assert "14. " in gain and "이 데이터에서 오를 수 있는 최대폭" in gain and "별도 데이터에서 확인" in gain
+    assert "conclusion.narrative(8.2)" in gain and "conclusion.risks(8.3)" in gain
+    small = build_system_prompt("internal", "binary", _bare_fact_sheet(f1_threshold_gain=_gain(gain=0.0999)))
+    assert "14. " not in small
+
+    for level, phrase in (("affected", "성능 수치에 영향을 주었다고"),
+                          ("no_distortion", "성능 왜곡은 관찰되지 않았다"),
+                          ("mild", "불균형이 경미하다")):
+        prompt = build_system_prompt("internal", "binary", _bare_fact_sheet(imbalance_effect=_imbalance(level=level)))
+        assert "15. " in prompt and "distribution_analysis(7.2)" in prompt and phrase in prompt, level
+        others = [p for lv, p in (("affected", "성능 수치에 영향을 주었다고"),
+                                  ("no_distortion", "성능 왜곡은 관찰되지 않았다"),
+                                  ("mild", "불균형이 경미하다")) if lv != level]
+        for other in others:
+            assert other not in prompt, (level, other)

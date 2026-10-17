@@ -31,6 +31,12 @@ class MetricFact(BaseModel):
     # 구간을 내지 못한 지표(skipped)와 옛 요청은 둘 다 None.
     ci_low:       float | None = Field(default=None, description="95% 신뢰구간 하한")
     ci_high:      float | None = Field(default=None, description="95% 신뢰구간 상한")
+    # 목표값과의 차이(서술 설계 D12). 프론트가 판정 대상 지표에만 싣는다. 높을수록 좋은 지표는
+    # value − threshold, 낮을수록 좋은 지표는 threshold − value — 그래서 0 이상이면 충족 쪽이다.
+    margin:       float | None = Field(default=None, description="목표값과의 차이(부호 그대로, 0 이상이면 충족 쪽)")
+    # 아슬아슬 — |margin| < |threshold| × 3%(엄격 미만). 판정은 프론트 computeVerdict 한 곳에서 하고
+    # 서버는 받은 값을 읽기만 한다. 판정 대상이 아니거나 옛 요청이면 False.
+    near_target:  bool         = Field(default=False, description="목표값과의 차이가 목표값의 3% 미만")
 
 
 class PerClassFact(BaseModel):
@@ -142,6 +148,33 @@ class ErrorRatiosFact(BaseModel):
         return v
 
 
+class F1ThresholdGainFact(BaseModel):
+    """임계값 조정 여지(서술 설계 D40) — 원본 PR 곡선의 최대 F1 과 지금 예측의 F1(4자리).
+
+    평가 응답 success_metrics.f1_threshold_gain 을 프론트가 그대로 옮겨 싣는다. 이진이고 점수가 있을 때만.
+    gain 은 같은 평가 데이터로 고른 임계값의 이득이라 '이 데이터에서 오를 수 있는 최대폭'이다.
+    """
+    max_f1:         float = Field(ge=0.0, le=1.0)
+    current_f1:     float = Field(ge=0.0, le=1.0)
+    gain:           float = Field(ge=0.0, le=1.0, description="max(0, max_f1 − current_f1)")
+    best_threshold: float = Field(description="최대 F1 을 내는 결정 임계값")
+
+
+class ImbalanceEffectFact(BaseModel):
+    """불균형 영향(서술 설계 D20) — 평가 응답 success_metrics.imbalance_effect 를 그대로 옮겨 싣는다.
+
+    level 판정(IR 1.5 미만 경미, 차이 0.10 이상 영향 있음)은 평가 엔진이 이미 했다. 서술은 level 을 읽기만 한다.
+    """
+    level: Literal["affected", "no_distortion", "mild"] = Field(
+        description="affected(영향 있음) | no_distortion(불균형 있으나 왜곡 미관찰) | mild(경미)"
+    )
+    imbalance_ratio:            float        = Field(ge=1.0, description="다수/소수(M23 과 같은 정의)")
+    accuracy_minus_macro_f1:    float | None = Field(default=None, description="정확도 − 매크로 F1. 멀티레이블은 None")
+    majority_minus_minority_f1: float        = Field(description="다수 F1 − 소수 F1 (음수일 수 있다)")
+    majority_class:             str
+    minority_class:             str
+
+
 class FactSheet(BaseModel):
     """프론트가 평가 결과로 조립해 보내는 '사실 시트'. LLM은 이 안의 숫자만 사용한다."""
     n_samples:    int  = Field(default=0, description="평가 샘플 수")
@@ -173,6 +206,14 @@ class FactSheet(BaseModel):
     error_ratios: ErrorRatiosFact | None = Field(
         default=None,
         description="경계·확신 오류 비율(D30) — 확률이 있을 때만. 7.1 에서 오류의 성격을 쓰는 재료",
+    )
+    f1_threshold_gain: F1ThresholdGainFact | None = Field(
+        default=None,
+        description="임계값 조정 여지(D40) — 이진이고 점수가 있을 때만. 8.2·8.3 에서 쓰는 재료",
+    )
+    imbalance_effect: ImbalanceEffectFact | None = Field(
+        default=None,
+        description="불균형 영향(D20) — 예측이 있을 때만. 7.2 분포 해석의 결론(level)",
     )
     ci_method_note: str | None = Field(
         default=None,

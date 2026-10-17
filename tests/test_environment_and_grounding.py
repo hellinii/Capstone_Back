@@ -89,6 +89,37 @@ def test_consistent_sentences_pass(verdict, text):
     assert find_verdict_contradictions([text], verdict) == []
 
 
+@pytest.mark.parametrize("text", [
+    "Recall 은 목표값과의 차이가 작아 표본이 달라지면 기준에 미달할 위험이 있다.",
+    "F1 Score 는 아슬아슬하게 합격해 미달 가능성이 남아 있다.",
+    "표본 변동에 따라 미달 위험이 존재한다.",
+    "다른 데이터에서는 기준에 미달할 가능성이 있다.",
+    "운영 환경에서는 기준에 미달할 우려가 있다.",
+    "표본이 바뀌면 기준에 미달할 수 있다.",
+    "임계값이 설정된 모든 시험항목이 기준을 충족하여 식별된 기준 미달 위험은 없다.",
+])
+def test_pass_allows_hypothetical_shortfall_wording(text):
+    """[B7, D12] 아슬아슬 합격을 8.3 에 쓰면 합격 성적서에도 '미달 위험·가능성'이 나온다.
+
+    미달했다는 주장이 아니라 미달할 수 있다는 경고라 판정과 모순되지 않는다. 종전 정규식은 '미달'
+    한 글자만 보고 이 문장들까지 잡아 맞는 서술을 폴백으로 강등했다.
+    """
+    assert find_verdict_contradictions([text], "PASS") == []
+
+
+@pytest.mark.parametrize("text", [
+    "Recall 이 기준에 미달하였다.",
+    "기준 미달 항목은 Recall 이다.",
+    "Recall 은 목표에 미달했다.",
+    "본 모델은 불합격이다.",
+    "Recall 은 목표를 미충족하였다.",
+    # 같은 글 안에 경고와 진짜 미달 주장이 함께 있으면 진짜 쪽에서 걸린다.
+    "Accuracy 는 미달할 위험이 있고, Recall 은 기준에 미달하였다.",
+])
+def test_pass_still_rejects_real_shortfall_claims(text):
+    assert find_verdict_contradictions([text], "PASS") == [text]
+
+
 def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_openai_client):
     """모순이 발견되면 그 서술을 쓰지 않고 규칙 폴백으로 강등한다."""
     from app.core import llm_budget

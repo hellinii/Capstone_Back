@@ -4,12 +4,16 @@ LLM 출력의 모든 숫자가 fact_sheet/파생값 화이트리스트 안에 �
 호출부(narrator)가 규칙 폴백으로 대체한다. 숫자 화이트리스트 구성·검증·문자열 수집을 담당.
 
 상호작용
-- 의존(import): re, typing.Any, app.core.schemas(FactSheet, GroundingInfo)
+- 의존(import): re, typing.Any, app.narrative.schemas(FactSheet, GroundingInfo),
+  app.narrative.derived(THRESHOLD_GAIN_NOTABLE), app.evaluation.metrics.counts(불균형 기준값)
 - 사용처: app.narrative.service(generate_narrative 의 화이트리스트/검증), tests
 """
 import re
 from typing import Any
 
+# 불균형 영향 기준(D20)은 평가 엔진이 판정에 쓴 값을 그대로 가져온다(값마다 한 곳).
+from app.evaluation.metrics.counts import IMBALANCE_F1_GAP, IMBALANCE_MILD_BELOW
+from app.narrative.derived import THRESHOLD_GAIN_NOTABLE
 from app.narrative.schemas import FactSheet, GroundingInfo
 
 
@@ -21,6 +25,10 @@ _CTX_TOKEN_RE = re.compile(
 
 # 신뢰구간의 신뢰수준(서술 설계 D29). 평가 응답 confidence_intervals 의 level 과 같다.
 CI_LEVEL = 0.95
+
+# 아슬아슬 기준(서술 설계 D12) — 목표값과의 차이가 목표값의 3% 미만. 판정은 프론트가 하고(near_target),
+# 서술이 "3%"라고 쓸 수 있게 near_target 지표가 있을 때만 허용한다.
+NEAR_TARGET_SHARE = 0.03
 
 # 숫자 토큰: 앞 글자가 영숫자면(F1·P99 등 식별자) 숫자로 보지 않는다(선행 lookbehind).
 # 부호(음수 정답값 -0.1 등)·천단위 콤마·백분율(%)을 함께 포착한다(D7[2]).
@@ -95,9 +103,12 @@ def build_number_whitelist(
         # 95% 신뢰구간(D29) — None 이면 _add 가 건너뛴다.
         _add(wl, m.ci_low)
         _add(wl, m.ci_high)
+        _add(wl, m.margin)  # 목표값과의 차이(D12) — None 이면 _add 가 건너뛴다
     # 구간이 실렸을 때만 신뢰수준(95%)을 허용한다 — 평가 응답의 level 과 같은 값이다.
     if any(m.ci_low is not None and m.ci_high is not None for m in fs.metrics):
         _add(wl, CI_LEVEL)
+    if any(m.near_target for m in fs.metrics):
+        _add(wl, NEAR_TARGET_SHARE)
 
     for pc in fs.per_class:
         for val in (pc.precision, pc.recall, pc.f1, pc.support):
@@ -147,6 +158,23 @@ def build_number_whitelist(
         _add(wl, er.confident_level)
         for val in er.threshold.values() if isinstance(er.threshold, dict) else (er.threshold,):
             _add(wl, val)
+
+    # 임계값 조정 여지(D40) — 네 값과 판정 기준 0.10. 키가 없으면 0.1 은 다른 사실에서만 나온다.
+    gain = fs.f1_threshold_gain
+    if gain:
+        for val in (gain.max_f1, gain.current_f1, gain.gain, gain.best_threshold):
+            _add(wl, val)
+        _add(wl, THRESHOLD_GAIN_NOTABLE)
+
+    # 불균형 영향(D20) — 비율·두 차이(음수일 수 있다)와 기준 1.5·0.10. 숫자 꼴 클래스 이름("2")도 허용한다.
+    ie = fs.imbalance_effect
+    if ie:
+        for val in (ie.imbalance_ratio, ie.accuracy_minus_macro_f1, ie.majority_minus_minority_f1):
+            _add(wl, val)
+        _add_client_numbers(wl, ie.majority_class)
+        _add_client_numbers(wl, ie.minority_class)
+        _add(wl, IMBALANCE_MILD_BELOW)
+        _add(wl, IMBALANCE_F1_GAP)
 
     if fs.latency and fs.latency.available:
         for val in (fs.latency.mean, fs.latency.p50, fs.latency.p95, fs.latency.p99):
@@ -246,8 +274,13 @@ _CLAIMS_ALL_PASSED = re.compile(
 )
 
 # "미달했다"는 주장. PASS 판정과 모순된다.
+# 단, "미달 가능성·미달 위험·미달할 우려"는 미달했다는 주장이 아니다. 아슬아슬 합격(near_target, D12)을
+# 8.3 에 쓰면 합격 성적서에도 자연히 나오는 말이라, 이것까지 잡으면 맞는 서술이 폴백으로 강등된다.
+# 미달·불합격·미충족 바로 뒤(사이에 '할·될'과 공백만)에 가능성·위험·우려가 오거나 "할 수 있다"가
+# 오면 건너뛴다. 같은 글에 진짜 미달 주장이 따로 있으면 그쪽에서 여전히 걸린다.
+_HYPOTHETICAL = r"(?!\s*(?:할|될)?\s*(?:가능성|위험|우려)|\s*(?:할|될)\s*수\s*(?:도\s*)?있)"
 _CLAIMS_SOME_FAILED = re.compile(
-    r"(미달|불합격|미충족)"
+    rf"(미달|불합격|미충족){_HYPOTHETICAL}"
     r"|충족하지\s*못"
     r"|기준에\s*이르지\s*못"
 )

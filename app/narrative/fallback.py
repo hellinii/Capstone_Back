@@ -50,6 +50,35 @@ def _error_ratio_sentence(er) -> str:
     return f"{unit} {er.misclassified}건 중 {reason}{confident}"
 
 
+def _imbalance_sentence(ie) -> str:
+    """7.2 불균형 결론 한 문장(서술 설계 D20). level 판정은 평가 엔진이 했고 여기서는 읽기만 한다.
+
+    숫자는 imbalance_effect 의 값과 두 기준(1.5·0.1)뿐이라 허용 목록 안이다. 정확도 − 매크로 F1 이
+    없으면(멀티레이블) 다수·소수 '레이블'의 F1 차이만 쓴다.
+    """
+    ir = ie.imbalance_ratio
+    if ie.level == "mild":
+        return f"불균형 비율은 {ir}로 1.5 미만이어서 불균형은 경미하다."
+    unit = "레이블" if ie.accuracy_minus_macro_f1 is None else "클래스"
+    gaps = []
+    if ie.accuracy_minus_macro_f1 is not None:
+        gaps.append(f"정확도와 매크로 F1 의 차이는 {ie.accuracy_minus_macro_f1}")
+    gaps.append(
+        f"다수 {unit}({ie.majority_class})와 소수 {unit}({ie.minority_class})의 F1 차이는 "
+        f"{ie.majority_minus_minority_f1}"
+    )
+    gap_text = ", ".join(gaps)
+    if ie.level == "affected":
+        return (
+            f"불균형 비율은 {ir}로 불균형이 있고, {gap_text}로 0.1 이상 벌어져 불균형이 성능 수치에 "
+            f"영향을 준 것으로 보인다. 소수 {unit}의 성능 지표 해석에 유의가 필요하다."
+        )
+    return (
+        f"불균형 비율은 {ir}로 불균형이 있으나, {gap_text}로 0.1 미만이어서 불균형에 의한 성능 왜곡은 "
+        "관찰되지 않았다."
+    )
+
+
 def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
     conf = derived.get("confusion")
     if conf:
@@ -72,13 +101,13 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         items = ", ".join(f"{k} {v}건({pct.get(k, 0)}%)" for k, v in cd.items())
         s = f"평가 데이터셋은 총 {dist['total']}건이며, 클래스 분포는 {items}이다."
         ir = fs.distribution.imbalance_ratio
-        if ir is not None:
-            bal = (
-                "균형 상태이다"
-                if ir <= 1.5
-                else "불균형 상태로, 소수 클래스의 성능 지표 해석에 유의가 필요하다"
-            )
-            s += f" 불균형 비율은 {ir}로 {bal}."
+        # 불균형의 결론은 평가 엔진이 낸 imbalance_effect.level 로만 쓴다(D20). 종전에는 여기서
+        # IR ≤ 1.5 를 '균형'으로 따로 판정해, 엔진의 '1.5 미만 = 경미'와 경계가 어긋났다.
+        # 키가 없는 요청(옛 프론트)에는 판정 없이 비율만 적는다 — 근거 없는 결론을 만들지 않는다.
+        if fs.imbalance_effect is not None:
+            s += " " + _imbalance_sentence(fs.imbalance_effect)
+        elif ir is not None:
+            s += f" 불균형 비율은 {ir}이다."
         distribution_analysis = s
     else:
         distribution_analysis = "클래스 분포 데이터가 제공되지 않아 분포 분석을 생략한다."
@@ -139,13 +168,38 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
             "표본 변동에 따라 해당 지표의 판정이 달라질 수 있다."
         )
 
+    # 아슬아슬 합격(D12) — near_target 판정은 프론트가 했고 여기서는 합격한 지표만 골라 읽는다.
+    near = [m for m in fs.metrics if m.near_target and m.status == "pass"]
     if failed_metrics:
         items = ", ".join(
             f"{m.display_name}({m.value}, 기준 {m.threshold})" for m in failed_metrics
         )
         risks = f"기준 미달 지표는 {items}로, 해당 영역의 성능 저하 위험이 존재한다."
+    elif near:
+        # "식별된 기준 미달 위험은 없다"와 아슬아슬 문장이 함께 실리면 서로 어긋나므로 앞 문장을 바꾼다.
+        risks = "임계값이 설정된 모든 시험항목이 기준을 충족하였다."
     else:
         risks = "임계값이 설정된 모든 시험항목이 기준을 충족하여 식별된 기준 미달 위험은 없다."
+    if near:
+        # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
+        items = ", ".join(
+            f"{m.display_name}({m.value}, 기준 {m.threshold}, 차이 {m.margin})"
+            if m.margin is not None
+            else f"{m.display_name}({m.value}, 기준 {m.threshold})"
+            for m in near
+        )
+        risks += (
+            f" 목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 {items}로, "
+            "표본이 달라지면 기준에 미달할 위험이 있다."
+        )
+    # 임계값 조정 여지(D40) — 기준(0.10) 판정은 compute_derived 가 한 곳에서 한다.
+    if derived.get("threshold_tuning"):
+        g = fs.f1_threshold_gain
+        risks += (
+            f" 결정 임계값을 {g.best_threshold}로 바꾸면 F1 이 {g.current_f1}에서 {g.max_f1}까지 오를 수 있어 "
+            f"현재 임계값이 최적이 아닐 수 있다. 다만 이 {g.gain}는 같은 평가 데이터로 고른 임계값에서 나온 "
+            "'이 데이터에서 오를 수 있는 최대폭'이므로 별도 데이터에서 확인해야 한다."
+        )
 
     return ConclusionOut(
         verdict=fs.verdict, benchmark=benchmark, narrative=narrative, risks=risks

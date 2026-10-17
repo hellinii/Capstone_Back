@@ -1,7 +1,7 @@
 """app/narrative/derived.py — 서버 파생 사실 계산(순수)
 
 혼동행렬 파생(정오분류·TP/TN/FP/FN), 클래스 분포 백분율, 임계값 지표 판정 카운트,
-신뢰구간이 목표값을 포함하는 지표 목록을 fact_sheet 로부터 미리 계산한다.
+신뢰구간이 목표값을 포함하는 지표 목록, 임계값 조정 여지가 큰지를 fact_sheet 로부터 미리 계산한다.
 LLM 은 계산하지 않으며 이 값들만 인용한다.
 
 상호작용
@@ -9,6 +9,16 @@ LLM 은 계산하지 않으며 이 값들만 인용한다.
 - 사용처: app.narrative.service(generate_narrative 가 서술 전 파생값 준비)
 """
 from app.narrative.schemas import FactSheet
+
+# 임계값 조정 여지가 '부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40). 프론트 문제 목록의
+# threshold_tuning 과 같은 기준이며, 둘 다 실린 4자리 gain 으로 판정한다(계약 §1.3).
+THRESHOLD_GAIN_NOTABLE = 0.10
+
+
+def threshold_tuning_needed(fs: FactSheet) -> bool:
+    """f1_threshold_gain.gain ≥ 0.10 인지 — 서버 쪽 판정은 여기 한 곳(프롬프트·폴백이 읽는다)."""
+    gain = fs.f1_threshold_gain
+    return gain is not None and gain.gain >= THRESHOLD_GAIN_NOTABLE
 
 
 def _find_pos_idx(labels: list, positive_class) -> int:
@@ -113,5 +123,9 @@ def compute_derived(fs: FactSheet) -> dict:
             and m.ci_high is not None
             and m.ci_low <= m.threshold <= m.ci_high
         ]
+
+    # 임계값 조정 여지(D40) — 키가 실린 사실 시트에만 둔다(옛 요청은 derived 가 그대로).
+    if fs.f1_threshold_gain is not None:
+        derived["threshold_tuning"] = threshold_tuning_needed(fs)
 
     return derived
