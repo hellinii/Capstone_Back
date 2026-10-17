@@ -133,6 +133,7 @@ def build_number_whitelist(
         _add(wl, ref.get("model_value"))
         _add(wl, ref.get("ref_low"))
         _add(wl, ref.get("ref_high"))
+        _add(wl, ref.get("target_value"))  # 목표값 수준(D31) — None 이면 _add 가 건너뛴다
 
     # 파생값
     conf = derived.get("confusion", {})

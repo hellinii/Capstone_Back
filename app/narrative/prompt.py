@@ -93,7 +93,10 @@ def build_user_prompt(
         "recommendations(9절 권고표 항목들).\n"
         "benchmark_refs 의 각 항목은 direction(higher/lower=높을수록/낮을수록 좋음)과 "
         "quality(better/within/worse=우수/기준 범위 내/미흡)를 포함한다. 벤치마크 우열은 "
-        "position(단순 수치 위치)이 아니라 quality 로 서술하라(낮을수록 좋은 지표는 범위 아래가 오히려 우수).\n\n"
+        "position(단순 수치 위치)이 아니라 quality 로 서술하라(낮을수록 좋은 지표는 범위 아래가 오히려 우수).\n"
+        "target_value 는 그 지표의 목표값(없으면 null)이고, target_position 은 목표값이 참조 범위보다 "
+        "낮음(below)/범위 안(within)/높음(above)인지를 나타내는 단순 수치 위치다. 목표 설정 수준을 "
+        "8.1(conclusion.benchmark)에서 해석하되, 높을수록/낮을수록 좋은지 방향 해석은 하지 말고 위치만 말하라.\n\n"
         + json.dumps(payload, ensure_ascii=False)
     )
 

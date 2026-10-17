@@ -16,6 +16,8 @@ _VERDICT_LABEL = {
 _POSITION_LABEL = {"above": "상위", "within": "범위 내", "below": "하위"}
 # 방향 반영 품질 라벨(D7[3]) — 낮을수록 좋은 지표의 'below'는 미흡이 아니라 우수.
 _QUALITY_LABEL = {"better": "우수", "within": "기준 범위 내", "worse": "미흡"}
+# 목표값 수준(D31) — 단순 수치 위치라 방향(우수/미흡)으로 바꾸지 않는다.
+_TARGET_POSITION_LABEL = {"below": "참조 범위보다 낮음", "within": "참조 범위 안", "above": "참조 범위보다 높음"}
 
 
 def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
@@ -63,6 +65,15 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
             for r in benchmark_refs
         ]
         benchmark = "; ".join(segs) + f". ({benchmark_refs[0]['source_note']})"
+        # 목표값 수준(D31): 목표값이 있는 지표만. 숫자는 목표값(threshold)뿐이라 허용 목록 안이다.
+        targets = [
+            f"{r['metric']} {r['target_value']}"
+            f"({_TARGET_POSITION_LABEL.get(r['target_position'], r['target_position'])})"
+            for r in benchmark_refs
+            if r.get("target_value") is not None
+        ]
+        if targets:
+            benchmark += f" 목표값 수준은 {', '.join(targets)}이다."
     else:
         benchmark = "비교 가능한 내부 참조 기준치가 없어 벤치마크 비교를 생략한다."
 

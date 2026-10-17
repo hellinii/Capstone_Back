@@ -510,3 +510,94 @@ async def test_service_sends_the_method_specific_rule(make_fake_openai_client):
     system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
     assert "가장 큰 클래스" in system
     assert "임계값을 적용" not in system
+
+
+# ── 목표값 수준(서술 설계 D31) ─────────────────────────────────────────────────
+#
+# 참조 범위와 목표값이 만나는 곳: 목표를 범위보다 낮게/안에/높게 잡았는지를 단순 수치 위치로
+# 싣는다(방향 반영 없음). 목표값 0·음수도 실제 목표다 — None 일 때만 '목표 없음'.
+
+def _target_ref(threshold, value=0.88, name="Accuracy", task="binary"):
+    m = MetricFact(metric_id="M1", display_name=name, value=value, threshold=threshold, status="info")
+    return build_benchmark_refs(task, [m])[0]
+
+
+@pytest.mark.parametrize("threshold, expected", [
+    (0.84, "below"),
+    (0.85, "within"),   # ref_low 와 같으면 범위 안
+    (0.9, "within"),
+    (0.92, "within"),   # ref_high 와 같으면 범위 안
+    (0.93, "above"),
+])
+def test_target_position_boundaries(threshold, expected):
+    ref = _target_ref(threshold)  # binary Accuracy 참조 범위 0.85~0.92
+    assert ref["target_value"] == threshold
+    assert ref["target_position"] == expected
+
+
+@pytest.mark.parametrize("threshold", [0.0, -0.1])
+def test_target_zero_or_negative_is_a_real_target(threshold):
+    ref = _target_ref(threshold)
+    assert ref["target_value"] == threshold
+    assert ref["target_position"] == "below"
+
+
+def test_no_target_gives_null_target_fields():
+    ref = _target_ref(None)
+    assert ref["target_value"] is None and ref["target_position"] is None
+
+
+def test_target_position_ignores_direction():
+    """낮을수록 좋은 지표(Hamming Loss)도 목표값 위치는 단순 수치 위치다(우수/미흡 아님)."""
+    ref = _target_ref(0.02, value=0.1, name="Hamming Loss", task="multilabel")  # 범위 0.05~0.20
+    assert ref["target_position"] == "below"
+
+
+def test_fallback_states_target_level_and_passes_grounding():
+    fs = _sample_fact_sheet().model_copy(update={"metrics": [
+        MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, threshold=0.0, status="pass"),
+        MetricFact(metric_id="M3", display_name="Recall", value=0.70, threshold=-0.1, status="pass"),
+        MetricFact(metric_id="M9", display_name="AUROC", value=0.88, status="info"),
+    ]})
+    derived = compute_derived(fs)
+    refs = build_benchmark_refs("binary", fs.metrics)
+    resp = build_fallback_narrative(fs, refs, derived, reason="no_key")
+
+    benchmark = resp.conclusion.benchmark
+    assert "목표값 수준은 Accuracy 0.0(참조 범위보다 낮음), Recall -0.1(참조 범위보다 낮음)이다." in benchmark
+    assert "AUROC 0.88(" not in benchmark  # 목표 없는 지표는 목표값 수준에 넣지 않는다
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, refs, derived)).passed
+
+
+def test_fallback_without_targets_has_no_target_sentence():
+    fs = _sample_fact_sheet().model_copy(update={"metrics": [
+        MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, status="info"),
+    ]})
+    refs = build_benchmark_refs("binary", fs.metrics)
+    resp = build_fallback_narrative(fs, refs, compute_derived(fs), reason="no_key")
+    assert "목표값 수준" not in resp.conclusion.benchmark
+
+
+def test_whitelist_contains_target_values_from_refs():
+    fs = _sample_fact_sheet()
+    refs = [dict(_target_ref(0.77), target_value=0.77)]
+    wl = build_number_whitelist(fs.model_copy(update={"metrics": []}), refs, {})
+    assert "0.77" in wl
+
+
+def test_prompt_explains_target_position():
+    from app.narrative.prompt import build_user_prompt
+
+    prompt = build_user_prompt({"verdict": "PASS"}, [], {})
+    assert "target_position" in prompt and "target_value" in prompt
+    assert "방향 해석은 하지 말고" in prompt
+
+
+def test_benchmark_ref_out_carries_target_fields():
+    from app.narrative.schemas import BenchmarkRefOut
+
+    out = BenchmarkRefOut(**_target_ref(0.0))
+    assert out.target_value == 0.0 and out.target_position == "below"
+    # 옛 형태(목표 키 없음)도 받는다.
+    legacy = {k: v for k, v in _target_ref(0.9).items() if not k.startswith("target_")}
+    assert BenchmarkRefOut(**legacy).target_position is None

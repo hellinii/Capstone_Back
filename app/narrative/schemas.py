@@ -176,6 +176,11 @@ class BenchmarkRefOut(BaseModel):
     position:    str = Field(description="above | within | below (단순 수치 위치)")
     direction:   str = Field(description="higher | lower (높을수록/낮을수록 좋음)")
     quality:     str = Field(description="better | within | worse (방향을 반영한 우열)")
+    # 목표값 수준(서술 설계 D31). 목표값이 없는 지표는 둘 다 None.
+    target_value:    float | None = Field(default=None, description="그 지표의 목표값(threshold)")
+    target_position: str | None   = Field(
+        default=None, description="below | within | above — 목표값의 참조 범위 대비 단순 수치 위치"
+    )
     source_note: str = Field(description="기준의 출처·성격 — '내부 참조 기준치'")
 
 

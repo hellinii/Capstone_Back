@@ -8,7 +8,9 @@
       "quality": "better",
       "ref_high": 0.92,
       "ref_low": 0.85,
-      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)"
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "within",
+      "target_value": 0.85
     },
     {
       "direction": "higher",
@@ -18,7 +20,9 @@
       "quality": "worse",
       "ref_high": 0.92,
       "ref_low": 0.8,
-      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)"
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "within",
+      "target_value": 0.8
     },
     {
       "direction": "higher",
@@ -28,11 +32,13 @@
       "quality": "within",
       "ref_high": 0.95,
       "ref_low": 0.85,
-      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)"
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "below",
+      "target_value": 0.8
     }
   ],
   "conclusion": {
-    "benchmark": "Accuracy 0.94는 내부 참조 기준 0.85~0.92 대비 우수; Recall 0.7는 내부 참조 기준 0.8~0.92 대비 미흡; AUROC 0.88는 내부 참조 기준 0.85~0.95 대비 기준 범위 내. (내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음))",
+    "benchmark": "Accuracy 0.94는 내부 참조 기준 0.85~0.92 대비 우수; Recall 0.7는 내부 참조 기준 0.8~0.92 대비 미흡; AUROC 0.88는 내부 참조 기준 0.85~0.95 대비 기준 범위 내. (내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)) 목표값 수준은 Accuracy 0.85(참조 범위 안), Recall 0.8(참조 범위 안), AUROC 0.8(참조 범위보다 낮음)이다.",
     "narrative": "임계값이 설정된 시험항목 3개 중 2개가 기준을 충족하여(통과율 66.7%), 종합 판정은 '조건부 적합'이다. 기준 미달 항목은 Recall이다.",
     "risks": "기준 미달 지표는 Recall(0.7, 기준 0.8)로, 해당 영역의 성능 저하 위험이 존재한다.",
     "verdict": "CONDITIONAL_PASS"
