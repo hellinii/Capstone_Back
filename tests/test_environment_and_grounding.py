@@ -138,6 +138,11 @@ def test_pass_allows_hypothetical_shortfall_wording(text):
     "Recall 은 불합격으로 이어져 리스크가 있다.",
     "Recall 은 미충족으로 분류돼 위험하다.",
     "Recall 은 미달로 나타나 위험하다.",
+    # 세션 3 검토 3 — 받침이 ㄹ 이어도 능동 판단 동사(볼·판단할·평가할·간주할)는 지금 결과를 미달로 보는 주장이다.
+    "재현율이 기준 미달로 볼 수 있다.",
+    "재현율은 미달로 판단할 수 있다.",
+    "정밀도는 불합격으로 평가할 수 있다.",
+    "재현율은 미달로 간주할 수 있다.",
 ])
 def test_pass_still_rejects_real_shortfall_claims(text):
     assert find_verdict_contradictions([text], "PASS") == [text]

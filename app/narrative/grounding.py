@@ -335,11 +335,15 @@ def _has_rieul_final(ch: str) -> bool:
 
 # 받침이 ㄹ 인 음절 전부(될·할·바뀔·떨어질의 '질'·내려갈의 '갈' …)를 문자 집합으로 만든다.
 _RIEUL_FINAL = "[" + "".join(chr(c) for c in range(0xAC00, 0xD7A4) if _has_rieul_final(chr(c))) + "]"
+_RIEUL_FINAL_WORD = rf"[가-힣]{{0,4}}{_RIEUL_FINAL}"
+# 받침이 ㄹ 이어도 "미달로 볼·판단할·평가할 수 있다"는 앞일이 아니라 지금 결과를 미달로 본다는 주장이다.
+# 능동 판단 동사는 가정에서 뺀다("판정될 수 있다"처럼 피동은 앞일이라 그대로 건너뛴다).
+_JUDGING_VERB = r"(?:볼|판단할|평가할|간주할|해석할|판정할|분류할|확인할|보아야\s*할)"
 _HYPOTHETICAL = (
     r"(?!\s*(?:할|될)?\s*(?:가능성|위험|우려|리스크)"
     r"|\s*(?:할|될)\s*수\s*(?:도\s*)?있"
     r"|\s*(?:을|를)?\s*(?:예방|방지)"
-    rf"|\s*(?:으로|로)\s*[가-힣]{{0,4}}{_RIEUL_FINAL}\s*{_MAYBE})"
+    rf"|\s*(?:으로|로)\s*(?!{_JUDGING_VERB}\s*수){_RIEUL_FINAL_WORD}\s*{_MAYBE})"
 )
 _CLAIMS_SOME_FAILED = re.compile(
     rf"(미달|불합격|미충족){_HYPOTHETICAL}"
