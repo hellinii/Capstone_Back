@@ -221,6 +221,14 @@
         "misclassified": 133,
         "threshold": null,
         "unit": "sample"
+      },
+      "imbalance_effect": {
+        "accuracy_minus_macro_f1": 0.0036,
+        "imbalance_ratio": 1.2982,
+        "level": "mild",
+        "majority_class": "dog",
+        "majority_minus_minority_f1": 0.1177,
+        "minority_class": "cat"
       }
     }
   },

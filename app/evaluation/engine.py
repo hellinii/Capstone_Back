@@ -2,7 +2,7 @@
 
 전처리(preprocess_data) 후 METRIC_REQUIREMENTS 로부터 계산 가능 지표 를 정하고, METRIC_REGISTRY
 로 각 지표 를 실제 계산 함수(metrics/*)에 디스패치한다. TP·TN·FP·FN 건수, 경계·확신 오류 비율, 지표 신뢰구간,
-binary ROC/PR 곡선, latency 통계도 부착.
+임계값 조정 여지, 불균형 영향, binary ROC/PR 곡선, latency 통계도 부착.
 
 상호작용
 - 의존(import): pandas, app.core.schemas(METRIC_REQUIREMENTS), .preprocessor, .metrics(common/binary/counts/intervals/misclassification/multiclass/multilabel)
@@ -160,6 +160,22 @@ def evaluate(
             results["confidence_intervals"] = cis
     except Exception as e:
         logger.warning("confidence_intervals 계산 생략: %s", e)
+
+    # ── 임계값 조정 여지 (서술 설계 D40, binary 이고 score 와 예측이 있을 때) ──
+    # 원본 PR 곡선의 최대 F1 과 지금 예측의 F1 차이. "임계값 부적합"(≥ 0.10) 판정은 프론트가 한다.
+    if task_type == "binary" and mapping_dict.get("score_positive"):
+        try:
+            results["f1_threshold_gain"] = binary.calculate_f1_threshold_gain(df, mapping_dict)
+        except Exception as e:
+            logger.warning("f1_threshold_gain 계산 생략: %s", e)
+
+    # ── 불균형 영향 (서술 설계 D20, 정답과 예측이 있을 때) ──
+    # M23 선택과 무관하게 IR 을 다시 내고, 정확도 − 매크로 F1·다수 F1 − 소수 F1 로 왜곡을 본다.
+    # 예측이 없거나 정답 클래스가 하나뿐이면 키를 두지 않는다.
+    try:
+        results["imbalance_effect"] = counts.calculate_imbalance_effect(df, mapping_dict)
+    except Exception as e:
+        logger.warning("imbalance_effect 계산 생략: %s", e)
 
     # ── 차트용 곡선 좌표 (binary, score 컬럼이 있을 때) ──
     # 별도 지표가 아니라 success_metrics 의 roc_curve/pr_curve 키로 내려보낸다. 종전에는
