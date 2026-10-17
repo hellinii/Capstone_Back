@@ -749,3 +749,109 @@ def test_error_ratios_schema_accepts_contract_shape_and_rejects_bad_values():
         ErrorRatiosFact(unit="sample", misclassified=1)  # confident 필수
     with pytest.raises(ValidationError):
         _error_ratios(threshold={f"c{i}": 0.5 for i in range(257)})
+
+
+# ── 신뢰구간이 목표값을 포함하는 지표(서술 설계 D29, B5) ────────────────────────
+
+def _ci_metric(name="F1 Score", value=0.78, threshold=0.8, low=0.71, high=0.83, status="fail"):
+    return MetricFact(
+        metric_id="M4", display_name=name, value=value, threshold=threshold,
+        status=status, ci_low=low, ci_high=high,
+    )
+
+
+@pytest.mark.parametrize(
+    "threshold, contained",
+    [
+        (0.71, True),    # 하한과 같으면 포함(양 끝 포함)
+        (0.83, True),    # 상한과 같으면 포함
+        (0.8, True),
+        (0.7099, False),
+        (0.8301, False),
+    ],
+)
+def test_ci_contains_target_boundaries(threshold, contained):
+    fs = _bare_fact_sheet(metrics=[_ci_metric(threshold=threshold)])
+    assert compute_derived(fs)["ci_contains_target"] == (["F1 Score"] if contained else [])
+
+
+def test_ci_contains_target_skips_metrics_without_target_or_interval():
+    fs = _bare_fact_sheet(metrics=[
+        _ci_metric(name="Accuracy", threshold=None, status="info"),   # 목표 없음 → 판정 대상 아님
+        _ci_metric(name="Recall", low=None, high=None),               # 구간 없음(skipped)
+        _ci_metric(name="MCC", value=0.02, threshold=0.0, low=-0.05, high=0.09),  # 목표 0 도 목표다
+    ])
+    assert compute_derived(fs)["ci_contains_target"] == ["MCC"]
+
+
+def test_ci_contains_target_absent_without_intervals():
+    """구간이 하나도 없는 옛 사실 시트에는 키가 없다(프롬프트·폴백 그대로)."""
+    assert "ci_contains_target" not in compute_derived(_sample_fact_sheet())
+
+
+def test_whitelist_has_interval_bounds_and_level_only_with_intervals():
+    without = build_number_whitelist(_bare_fact_sheet(metrics=[_ci_metric(low=None, high=None)]), [], {})
+    assert "95" not in without and "0.71" not in without
+
+    wl = build_number_whitelist(_bare_fact_sheet(metrics=[_ci_metric(low=-0.0512, high=0.8333)]), [], {})
+    for tok in ("-0.0512", "0.8333", "0.95", "95"):
+        assert tok in wl, tok
+
+
+def test_fallback_states_metrics_whose_interval_contains_target():
+    fs = _sample_fact_sheet().model_copy(update={"metrics": [
+        MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, threshold=0.85, status="pass",
+                   ci_low=0.9, ci_high=0.97),
+        _ci_metric(name="Recall", value=0.7, threshold=0.8, low=0.63, high=0.81),
+    ]})
+    derived = compute_derived(fs)
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+
+    text = resp.conclusion.narrative
+    assert (
+        "95% 신뢰구간이 목표값을 포함하는 지표는 Recall(구간 0.63~0.81, 목표 0.8)로, "
+        "표본 변동에 따라 해당 지표의 판정이 달라질 수 있다." in text
+    )
+    assert "Accuracy(구간" not in text
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+
+
+def test_fallback_without_contained_targets_has_no_interval_sentence():
+    fs = _sample_fact_sheet()
+    assert "신뢰구간" not in build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.narrative
+    outside = fs.model_copy(update={"metrics": [_ci_metric(threshold=0.9)]})
+    assert "신뢰구간" not in build_fallback_narrative(
+        outside, [], compute_derived(outside), "no_key"
+    ).conclusion.narrative
+
+
+def test_rule_12_follows_intervals():
+    from app.narrative.prompt import build_system_prompt
+
+    plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
+    with_ci = build_system_prompt(
+        "internal", "binary", _sample_fact_sheet().model_copy(update={"metrics": [_ci_metric()]})
+    )
+    assert "12. " not in plain and "ci_contains_target" not in plain
+    assert "12. " in with_ci and "derived.ci_contains_target" in with_ci
+    assert "conclusion.narrative(8.2)" in with_ci and "95% 신뢰구간" in with_ci
+    assert "통계적 유의성 검정은 하지 않았다" in with_ci
+
+
+def test_ci_fields_schema():
+    req = NarrativeRequest(
+        task_type=TaskType.binary,
+        fact_sheet={
+            "verdict": "PASS", "score": 100.0,
+            "metrics": [{"metric_id": "M1", "display_name": "Accuracy", "value": 0.9, "threshold": 0.8,
+                         "status": "pass", "ci_low": 0.85, "ci_high": 0.94}],
+            "ci_method_note": "정확도는 Wilson 구간, 그 밖의 지표는 재표집(2,000회)으로 구했다.",
+        },
+    )
+    assert req.fact_sheet.metrics[0].ci_low == 0.85
+    # 옛 요청(키 없음)도 받는다.
+    old = FactSheet(verdict="PASS", score=100.0, metrics=[MetricFact(
+        metric_id="M1", display_name="Accuracy", value=0.9, status="info")])
+    assert old.metrics[0].ci_low is None and old.ci_method_note is None
+    with pytest.raises(ValidationError):
+        FactSheet(verdict="PASS", score=100.0, ci_method_note="가" * 501)

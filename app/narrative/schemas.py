@@ -15,6 +15,8 @@ MAX_CLASS_ENTRIES = 256
 # 고객 입력(client_inputs)의 직렬화 길이 상한. 정상 입력은 수천 자다(카드 다섯 장의 짧은 답과
 # 자유서술 몇 칸). 무인증 과금 경로라 배열 상한과 같은 이유로 막는다(G-03).
 MAX_CLIENT_INPUTS_CHARS = 20_000
+# 6.0 신뢰구간 방식 한 줄(ci_method_note)의 길이 상한. 방식 종류를 나열한 한 문장이라 수백 자를 넘지 않는다.
+MAX_CI_METHOD_NOTE_CHARS = 500
 
 
 class MetricFact(BaseModel):
@@ -25,6 +27,10 @@ class MetricFact(BaseModel):
     threshold:    float | None = Field(default=None, description="합격 임계값(없으면 정보 제공)")
     status:       str          = Field(description="pass | fail | warning | info")
     is_core:      bool         = Field(default=False, description="핵심 지표 — 미달하면 불합격(서술 설계 D19)")
+    # 95% 신뢰구간(서술 설계 D29). 프론트가 평가 응답 confidence_intervals 에서 판정 대상 지표에만 싣는다.
+    # 구간을 내지 못한 지표(skipped)와 옛 요청은 둘 다 None.
+    ci_low:       float | None = Field(default=None, description="95% 신뢰구간 하한")
+    ci_high:      float | None = Field(default=None, description="95% 신뢰구간 상한")
 
 
 class PerClassFact(BaseModel):
@@ -167,6 +173,11 @@ class FactSheet(BaseModel):
     error_ratios: ErrorRatiosFact | None = Field(
         default=None,
         description="경계·확신 오류 비율(D30) — 확률이 있을 때만. 7.1 에서 오류의 성격을 쓰는 재료",
+    )
+    ci_method_note: str | None = Field(
+        default=None,
+        max_length=MAX_CI_METHOD_NOTE_CHARS,
+        description="6.0 에 찍는 신뢰구간 방식 한 줄(D29) — 서술 참고용. 신뢰구간이 없으면 None",
     )
 
 

@@ -1,7 +1,8 @@
 """app/narrative/derived.py — 서버 파생 사실 계산(순수)
 
-혼동행렬 파생(정오분류·TP/TN/FP/FN), 클래스 분포 백분율, 임계값 지표 판정 카운트를
-fact_sheet 로부터 미리 계산한다. LLM 은 계산하지 않으며 이 값들만 인용한다.
+혼동행렬 파생(정오분류·TP/TN/FP/FN), 클래스 분포 백분율, 임계값 지표 판정 카운트,
+신뢰구간이 목표값을 포함하는 지표 목록을 fact_sheet 로부터 미리 계산한다.
+LLM 은 계산하지 않으며 이 값들만 인용한다.
 
 상호작용
 - 의존(import): app.core.schemas(FactSheet)
@@ -99,5 +100,18 @@ def compute_derived(fs: FactSheet) -> dict:
         "passed": passed,
         "n_metrics": len(fs.metrics),
     }
+
+    # 구간이 목표값을 포함하는 지표(서술 설계 D29) — 판정은 여기 한 곳에서만 한다.
+    # 목표값이 구간 안(양 끝 포함)이면 표본이 달라졌을 때 그 지표의 판정이 바뀔 수 있다.
+    # 신뢰구간이 하나도 실리지 않은 사실 시트(옛 요청)에는 키를 두지 않는다 — 프롬프트·폴백이 그대로다.
+    if any(m.ci_low is not None and m.ci_high is not None for m in fs.metrics):
+        derived["ci_contains_target"] = [
+            m.display_name
+            for m in fs.metrics
+            if m.threshold is not None
+            and m.ci_low is not None
+            and m.ci_high is not None
+            and m.ci_low <= m.threshold <= m.ci_high
+        ]
 
     return derived

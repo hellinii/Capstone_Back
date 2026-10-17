@@ -63,11 +63,26 @@ def _error_ratio_rule(fs) -> str | None:
     return rule
 
 
+def _confidence_interval_rule(fs) -> str | None:
+    """규칙 12 — 신뢰구간 해석(서술 설계 D29). 지표에 ci_low·ci_high 가 실렸을 때만 붙인다."""
+    metrics = getattr(fs, "metrics", None) if fs is not None else None
+    if not metrics or not any(m.ci_low is not None and m.ci_high is not None for m in metrics):
+        return None
+    return (
+        "fact_sheet.metrics 의 ci_low·ci_high 는 지표마다의 95% 신뢰구간이다. "
+        "conclusion.narrative(8.2)에서 derived.ci_contains_target 에 이름이 있는 지표는 구간이 목표값을 "
+        "포함하므로 표본 변동에 따라 그 지표의 판정이 달라질 수 있다고 적어라. 목록에 없는 지표에 이 말을 "
+        "붙이지 말고, 구간 폭·차이 같은 새 숫자를 계산하지 마라. 단일 모델 평가라 통계적 유의성 검정은 "
+        "하지 않았다 — 유의하다·유의미한 차이 같은 검정 결과를 주장하지 마라."
+    )
+
+
 def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> str:
-    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10·11 등)을 고르는 데만 쓴다."""
+    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10·11·12 등)을 고르는 데만 쓴다."""
     task_label = TASK_TYPE_LABELS.get(task_type, task_type)
     derivation_rule = _derivation_rule(fs)
     error_ratio_rule = _error_ratio_rule(fs)
+    ci_rule = _confidence_interval_rule(fs)
     return (
         "너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술 작성 전문가다.\n"
         "주어진 JSON 사실 시트(fact_sheet)와 파생값(derived)·벤치마크(benchmark_refs)만을 근거로 "
@@ -90,6 +105,7 @@ def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> st
         + (f"9. 평가한 모델의 분류 유형은 '{task_label}' 이다.\n" if task_label else "")
         + (f"10. {derivation_rule}\n" if derivation_rule else "")
         + (f"11. {error_ratio_rule}\n" if error_ratio_rule else "")
+        + (f"12. {ci_rule}\n" if ci_rule else "")
     )
 
 

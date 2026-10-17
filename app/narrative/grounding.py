@@ -19,6 +19,9 @@ _CTX_TOKEN_RE = re.compile(
     r"ISO/?IEC\s+TS\s*4213(?:\s*:\s*2022)?|4213\s*:\s*2022|\d+\s*절|제\s*\d+\s*종"
 )
 
+# 신뢰구간의 신뢰수준(서술 설계 D29). 평가 응답 confidence_intervals 의 level 과 같다.
+CI_LEVEL = 0.95
+
 # 숫자 토큰: 앞 글자가 영숫자면(F1·P99 등 식별자) 숫자로 보지 않는다(선행 lookbehind).
 # 부호(음수 정답값 -0.1 등)·천단위 콤마·백분율(%)을 함께 포착한다(D7[2]).
 _NUMBER_RE = re.compile(r"(?<![A-Za-z0-9])[+-]?\d+(?:[.,]\d+)?%?")
@@ -89,6 +92,12 @@ def build_number_whitelist(
         _add(wl, m.value)
         if m.threshold is not None:
             _add(wl, m.threshold)
+        # 95% 신뢰구간(D29) — None 이면 _add 가 건너뛴다.
+        _add(wl, m.ci_low)
+        _add(wl, m.ci_high)
+    # 구간이 실렸을 때만 신뢰수준(95%)을 허용한다 — 평가 응답의 level 과 같은 값이다.
+    if any(m.ci_low is not None and m.ci_high is not None for m in fs.metrics):
+        _add(wl, CI_LEVEL)
 
     for pc in fs.per_class:
         for val in (pc.precision, pc.recall, pc.f1, pc.support):

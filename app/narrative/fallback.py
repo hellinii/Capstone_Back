@@ -124,6 +124,20 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     failed = [m.display_name for m in failed_metrics]
     if failed:
         narrative += f" 기준 미달 항목은 {', '.join(failed)}이다."
+    # 신뢰구간이 목표값을 포함하는 지표(D29) — 판정은 compute_derived 가 한 곳에서 한다.
+    # 8.2(종합 총평)에 둔다: 판정을 얼마나 믿을 수 있는지는 판정을 설명하는 자리의 말이다.
+    # 숫자는 구간 양 끝·목표값·신뢰수준(95)뿐이라 허용 목록 안이다.
+    ci_names = set(derived.get("ci_contains_target") or [])
+    if ci_names:
+        items = ", ".join(
+            f"{m.display_name}(구간 {m.ci_low}~{m.ci_high}, 목표 {m.threshold})"
+            for m in fs.metrics
+            if m.display_name in ci_names
+        )
+        narrative += (
+            f" 95% 신뢰구간이 목표값을 포함하는 지표는 {items}로, "
+            "표본 변동에 따라 해당 지표의 판정이 달라질 수 있다."
+        )
 
     if failed_metrics:
         items = ", ".join(
