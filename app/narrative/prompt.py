@@ -42,10 +42,32 @@ def _derivation_rule(fs) -> str | None:
     return _DERIVATION_RULES.get(derived.method, _DERIVATION_RULE_OTHER)
 
 
+def _error_ratio_rule(fs) -> str | None:
+    """규칙 11 — 오분류의 성격(서술 설계 D30). error_ratios 가 있을 때만, 사실에 맞는 문장만 붙인다."""
+    er = getattr(fs, "error_ratios", None) if fs is not None else None
+    if er is None:
+        return None
+    rule = (
+        "fact_sheet.error_ratios 가 있으므로 interpretation.confusion_analysis(7.1)에서 오류의 성격을 "
+        "서술하라. 오분류(misclassified) 중 결정 경계 근처에서 틀린 경계 오류(boundary: 경계와의 거리가 "
+        "boundary_margin 미만)와 높은 확신으로 틀린 확신 오류(confident: 틀린 쪽 확률이 confident_level "
+        "이상)의 count 와 ratio 를 적힌 그대로 써라."
+    )
+    if er.boundary is None and er.boundary_note == "threshold_unknown":
+        rule += (
+            " boundary 가 null 이고 boundary_note 가 threshold_unknown 이다 — 예측값을 직접 제출해 결정 "
+            "임계값을 알 수 없으므로 경계 오류는 계산하지 않았다고 적고, 경계 오류 수치를 지어내지 마라."
+        )
+    if er.unit == "label_cell":
+        rule += " unit 이 label_cell 이므로 단위는 표본이 아니라 '틀린 레이블 칸'이다. 건수를 표본 수로 쓰지 마라."
+    return rule
+
+
 def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> str:
-    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10 등)을 고르는 데만 쓴다."""
+    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10·11 등)을 고르는 데만 쓴다."""
     task_label = TASK_TYPE_LABELS.get(task_type, task_type)
     derivation_rule = _derivation_rule(fs)
+    error_ratio_rule = _error_ratio_rule(fs)
     return (
         "너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술 작성 전문가다.\n"
         "주어진 JSON 사실 시트(fact_sheet)와 파생값(derived)·벤치마크(benchmark_refs)만을 근거로 "
@@ -67,6 +89,7 @@ def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> st
         "client_inputs 의 숫자는 적힌 그대로만 쓴다.\n"
         + (f"9. 평가한 모델의 분류 유형은 '{task_label}' 이다.\n" if task_label else "")
         + (f"10. {derivation_rule}\n" if derivation_rule else "")
+        + (f"11. {error_ratio_rule}\n" if error_ratio_rule else "")
     )
 
 

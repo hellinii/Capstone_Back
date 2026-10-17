@@ -1,7 +1,7 @@
 """app/narrative/schemas.py — 서술 도메인 스키마(FactSheet·서술 요청/응답·출력 모델)."""
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 from app.core.schemas import ReportPurpose, TaskType
@@ -102,6 +102,40 @@ class DerivedPredictionFact(BaseModel):
         return v
 
 
+class ErrorCountFact(BaseModel):
+    """경계 오류·확신 오류 한 종류의 건수와 비율(ratio = count / misclassified, 4자리)."""
+    count: int          = Field(ge=0)
+    ratio: float | None = Field(default=None, ge=0.0, le=1.0, description="오분류가 0건이면 None")
+
+
+class ErrorRatiosFact(BaseModel):
+    """오분류의 성격 — 결정 경계 근처(경계 오류)와 높은 확신으로 틀림(확신 오류)(서술 설계 D30).
+
+    평가 응답 success_metrics.error_ratios 를 프론트가 그대로 옮겨 싣는다. 확률이 없으면 키 자체가 없다.
+    """
+    unit:          Literal["sample", "label_cell"] = Field(
+        description="sample(이진·다중: 표본 단위) | label_cell(멀티레이블: 틀린 레이블 칸 단위)"
+    )
+    misclassified: int = Field(ge=0, description="분모 — 확률이 있는 오분류 수(멀티레이블은 틀린 칸 수)")
+    boundary:      ErrorCountFact | None = Field(default=None, description="경계 오류. 임계값을 모르면 None")
+    boundary_note: Literal["threshold_unknown"] | None = Field(
+        default=None, description="boundary 가 None 인 이유 — 예측을 직접 올려 임계값을 모름"
+    )
+    confident:       ErrorCountFact
+    boundary_margin: float = Field(default=0.1, description="경계 거리 기준(엄격 미만)")
+    confident_level: float = Field(default=0.9, description="확신 기준(틀린 쪽 확률 이상)")
+    threshold:       float | dict[str, float] | None = Field(
+        default=None, description="경계 판정에 쓴 임계값. 멀티레이블은 컬럼별일 수 있고, 다중은 None"
+    )
+
+    @field_validator("threshold")
+    @classmethod
+    def _per_label_within_limit(cls, v):
+        if isinstance(v, dict) and len(v) > MAX_CLASS_ENTRIES:
+            raise ValueError(f"레이블별 임계값 수가 상한({MAX_CLASS_ENTRIES})을 넘습니다.")
+        return v
+
+
 class FactSheet(BaseModel):
     """프론트가 평가 결과로 조립해 보내는 '사실 시트'. LLM은 이 안의 숫자만 사용한다."""
     n_samples:    int  = Field(default=0, description="평가 샘플 수")
@@ -129,6 +163,10 @@ class FactSheet(BaseModel):
     derived_prediction: DerivedPredictionFact | None = Field(
         default=None,
         description="예측을 확률에서 파생했을 때만. 서술은 수치가 그 임계값의 함수임을 알아야 한다",
+    )
+    error_ratios: ErrorRatiosFact | None = Field(
+        default=None,
+        description="경계·확신 오류 비율(D30) — 확률이 있을 때만. 7.1 에서 오류의 성격을 쓰는 재료",
     )
 
 

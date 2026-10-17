@@ -125,6 +125,20 @@ def build_number_whitelist(
         for val in threshold.values() if isinstance(threshold, dict) else (threshold,):
             _add(wl, val)
 
+    # 경계·확신 오류 비율(D30) — 건수·비율(백분율 표기 포함)과 두 기준(0.1·0.9), 경계 판정 임계값.
+    # 키가 없으면 0.1·0.9 는 허용하지 않는다(다른 사실에서 나오지 않는 한).
+    er = fs.error_ratios
+    if er:
+        _add(wl, er.misclassified)
+        for part in (er.boundary, er.confident):
+            if part is not None:
+                _add(wl, part.count)
+                _add(wl, part.ratio)
+        _add(wl, er.boundary_margin)
+        _add(wl, er.confident_level)
+        for val in er.threshold.values() if isinstance(er.threshold, dict) else (er.threshold,):
+            _add(wl, val)
+
     if fs.latency and fs.latency.available:
         for val in (fs.latency.mean, fs.latency.p50, fs.latency.p95, fs.latency.p99):
             _add(wl, val)

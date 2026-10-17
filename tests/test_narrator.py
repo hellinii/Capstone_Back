@@ -601,3 +601,151 @@ def test_benchmark_ref_out_carries_target_fields():
     # 옛 형태(목표 키 없음)도 받는다.
     legacy = {k: v for k, v in _target_ref(0.9).items() if not k.startswith("target_")}
     assert BenchmarkRefOut(**legacy).target_position is None
+
+
+# ── 경계·확신 오류 비율(서술 설계 D30, B3) ─────────────────────────────────────
+
+def _error_ratios(**over):
+    from app.narrative.schemas import ErrorRatiosFact
+
+    base = {
+        "unit": "sample",
+        "misclassified": 12,
+        "boundary": {"count": 5, "ratio": 0.4167},
+        "boundary_note": None,
+        "confident": {"count": 2, "ratio": 0.1667},
+        "boundary_margin": 0.1,
+        "confident_level": 0.9,
+        "threshold": 0.35,
+    }
+    base.update(over)
+    return ErrorRatiosFact(**base)
+
+
+_UNKNOWN = {"boundary": None, "boundary_note": "threshold_unknown", "threshold": None}
+
+
+def _bare_fact_sheet(**over) -> FactSheet:
+    """다른 사실에서 0.1·0.9 가 새어 들어오지 않는 최소 사실 시트(점수 0, 지표 없음)."""
+    return FactSheet(verdict="INCONCLUSIVE", score=0.0, **over)
+
+
+def test_whitelist_has_margin_and_level_only_with_error_ratios():
+    """0.1·0.9 는 error_ratios 가 실렸을 때만 서술에 쓸 수 있다."""
+    without = build_number_whitelist(_bare_fact_sheet(), [], {})
+    assert "0.1" not in without and "0.9" not in without
+
+    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=_error_ratios()), [], {})
+    for tok in ("0.1", "0.9", "12", "5", "2", "0.4167", "41.7", "41.67", "0.1667", "16.7", "0.35"):
+        assert tok in wl, tok
+
+
+def test_whitelist_takes_per_label_error_thresholds():
+    er = _error_ratios(unit="label_cell", threshold={"score_a": 0.42, "score_b": 0.61})
+    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=er), [], {})
+    assert "0.42" in wl and "0.61" in wl
+
+
+def test_whitelist_skips_null_boundary():
+    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=_error_ratios(**_UNKNOWN)), [], {})
+    assert "0.4167" not in wl and "5" not in wl
+    assert "0.1667" in wl
+
+
+def test_fallback_states_boundary_and_confident_errors():
+    fs = _sample_fact_sheet().model_copy(update={"error_ratios": _error_ratios()})
+    derived = compute_derived(fs)
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+
+    text = resp.interpretation.confusion_analysis
+    assert (
+        "오분류 12건 중 결정 경계와의 거리가 0.1 미만인 경계 오류는 5건(41.7%), "
+        "틀린 쪽 확률이 0.9 이상인 확신 오류는 2건(16.7%)이다." in text
+    )
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+
+
+def test_fallback_says_boundary_not_computed_when_threshold_unknown():
+    fs = _sample_fact_sheet().model_copy(update={"error_ratios": _error_ratios(**_UNKNOWN)})
+    derived = compute_derived(fs)
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+
+    text = resp.interpretation.confusion_analysis
+    assert "결정 임계값을 알 수 없으므로 경계 오류는 계산하지 않았고" in text
+    assert "확신 오류는 2건(16.7%)이다." in text
+    assert "경계 오류는 5건" not in text
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+
+
+def test_fallback_error_sentence_for_label_cells_and_zero_errors():
+    cells = _error_ratios(unit="label_cell", threshold={"score_a": 0.5})
+    fs = _sample_fact_sheet().model_copy(update={"error_ratios": cells})
+    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.confusion_analysis
+    assert "틀린 레이블 칸 12건 중" in text
+
+    zero = _error_ratios(misclassified=0, boundary={"count": 0, "ratio": None}, confident={"count": 0, "ratio": None})
+    fs0 = _sample_fact_sheet().model_copy(update={"error_ratios": zero})
+    text0 = build_fallback_narrative(fs0, [], compute_derived(fs0), "no_key").interpretation.confusion_analysis
+    assert "확률이 있는 오분류가 없어 경계 오류·확신 오류 비율은 산출하지 않았다." in text0
+
+
+def test_fallback_without_error_ratios_is_unchanged():
+    fs = _sample_fact_sheet()
+    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.confusion_analysis
+    assert "경계 오류" not in text and "확신 오류" not in text
+
+
+def test_rule_11_follows_error_ratios():
+    from app.narrative.prompt import build_system_prompt
+
+    plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
+    known = build_system_prompt(
+        "internal", "binary", _sample_fact_sheet().model_copy(update={"error_ratios": _error_ratios()})
+    )
+    unknown = build_system_prompt(
+        "internal", "binary", _sample_fact_sheet().model_copy(update={"error_ratios": _error_ratios(**_UNKNOWN)})
+    )
+    cells = build_system_prompt(
+        "internal", "multilabel",
+        _sample_fact_sheet().model_copy(update={"error_ratios": _error_ratios(unit="label_cell")}),
+    )
+
+    assert "11. " not in plain and "error_ratios" not in plain
+    assert "11. " in known and "confusion_analysis(7.1)" in known
+    assert "threshold_unknown" not in known and "label_cell" not in known
+    assert "경계 오류는 계산하지 않았다고" in unknown
+    assert "틀린 레이블 칸" in cells
+
+
+def test_error_ratios_schema_accepts_contract_shape_and_rejects_bad_values():
+    from app.narrative.schemas import ErrorRatiosFact
+
+    # 계약 §1.1 모양 그대로(평가 응답을 프론트가 옮겨 싣는다).
+    req = NarrativeRequest(
+        task_type=TaskType.binary,
+        fact_sheet={
+            "verdict": "PASS", "score": 100.0,
+            "error_ratios": {
+                "unit": "sample", "misclassified": 12,
+                "boundary": None, "boundary_note": "threshold_unknown",
+                "confident": {"count": 2, "ratio": 0.1667},
+                "boundary_margin": 0.1, "confident_level": 0.9, "threshold": None,
+            },
+        },
+    )
+    assert req.fact_sheet.error_ratios.boundary is None
+    # 옛 요청(키 없음)도 받는다.
+    assert FactSheet(verdict="PASS", score=100.0).error_ratios is None
+
+    with pytest.raises(ValidationError):
+        _error_ratios(unit="row")
+    with pytest.raises(ValidationError):
+        _error_ratios(boundary_note="other")
+    with pytest.raises(ValidationError):
+        _error_ratios(confident={"count": -1, "ratio": 0.1})
+    with pytest.raises(ValidationError):
+        _error_ratios(confident={"count": 2, "ratio": 1.5})
+    with pytest.raises(ValidationError):
+        ErrorRatiosFact(unit="sample", misclassified=1)  # confident 필수
+    with pytest.raises(ValidationError):
+        _error_ratios(threshold={f"c{i}": 0.5 for i in range(257)})

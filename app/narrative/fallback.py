@@ -20,6 +20,36 @@ _QUALITY_LABEL = {"better": "우수", "within": "기준 범위 내", "worse": "�
 _TARGET_POSITION_LABEL = {"below": "참조 범위보다 낮음", "within": "참조 범위 안", "above": "참조 범위보다 높음"}
 
 
+def _pct(ratio: float) -> str:
+    """비율을 백분율 소수 1자리로 — 허용 목록(_add)의 백분율 표기와 같은 반올림."""
+    return f"{round(ratio * 100, 1):g}%"
+
+
+def _error_ratio_sentence(er) -> str:
+    """7.1 오류의 성격 한 문장(서술 설계 D30). 숫자는 error_ratios 의 값과 두 기준뿐이다."""
+    unit = "틀린 레이블 칸" if er.unit == "label_cell" else "오분류"
+    if er.misclassified == 0:
+        subject = "틀린 레이블 칸이" if er.unit == "label_cell" else "오분류가"
+        return f"확률이 있는 {subject} 없어 경계 오류·확신 오류 비율은 산출하지 않았다."
+
+    def seg(part) -> str:
+        return f"{part.count}건({_pct(part.ratio)})" if part.ratio is not None else f"{part.count}건"
+
+    confident = (
+        f"틀린 쪽 확률이 {er.confident_level:g} 이상인 확신 오류는 {seg(er.confident)}이다."
+    )
+    if er.boundary is not None:
+        return (
+            f"{unit} {er.misclassified}건 중 결정 경계와의 거리가 {er.boundary_margin:g} 미만인 "
+            f"경계 오류는 {seg(er.boundary)}, {confident}"
+        )
+    if er.boundary_note == "threshold_unknown":
+        reason = "예측값을 직접 제출해 결정 임계값을 알 수 없으므로 경계 오류는 계산하지 않았고, "
+    else:
+        reason = "경계 오류는 계산하지 않았고, "
+    return f"{unit} {er.misclassified}건 중 {reason}{confident}"
+
+
 def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
     conf = derived.get("confusion")
     if conf:
@@ -32,6 +62,8 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         confusion_analysis = " ".join(parts)
     else:
         confusion_analysis = "혼동 행렬 데이터가 제공되지 않아 클래스 간 오분류 분석을 생략한다."
+    if fs.error_ratios is not None:
+        confusion_analysis += " " + _error_ratio_sentence(fs.error_ratios)
 
     dist = derived.get("distribution")
     if dist and fs.distribution:
