@@ -447,3 +447,23 @@ def test_confusion_counts_reach_the_fact_sheet_and_whitelist():
     wl = build_number_whitelist(fs, [], compute_derived(fs))
 
     assert verify_grounding(["양성 기준 TP 52건, FN 43건이다."], wl).passed
+
+
+@pytest.mark.parametrize("target", [0.0, -0.1])
+def test_zero_or_negative_target_is_a_target(target):
+    """목표값 0·음수(MCC)도 목표다 — 미달이면 폴백이 '모두 충족'이라 쓰면 판정과 모순된다."""
+    fs = FactSheet(
+        verdict="FAIL",
+        score=0.0,
+        metrics=[
+            MetricFact(metric_id="M20", display_name="MCC", value=-0.2, threshold=target,
+                       status="fail", is_core=True),
+        ],
+    )
+    d = compute_derived(fs)
+    assert d["counts"]["target"] == 1
+    assert d["counts"]["passed"] == 0
+    resp = build_fallback_narrative(fs, [], d, "no_key")
+    assert "MCC" in resp.conclusion.risks
+    assert "모든 시험항목이 기준을 충족" not in resp.conclusion.risks
+    assert "1개 중 0개" in resp.conclusion.narrative

@@ -91,8 +91,9 @@ def compute_derived(fs: FactSheet) -> dict:
         }
 
     # 판정 카운트(통과율 근거) — 폴백/LLM 이 "N개 중 M개 통과"를 인용할 때 사용
-    target = sum(1 for m in fs.metrics if m.threshold)
-    passed = sum(1 for m in fs.metrics if m.status == "pass" and m.threshold)
+    # 목표값 0·음수(MCC 등)도 목표다 — "없음"은 None 뿐이다(프론트 PR #55 의 null 규칙과 같다).
+    target = sum(1 for m in fs.metrics if m.threshold is not None)
+    passed = sum(1 for m in fs.metrics if m.status == "pass" and m.threshold is not None)
     derived["counts"] = {
         "target": target,
         "passed": passed,

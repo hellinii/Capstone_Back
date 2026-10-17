@@ -76,7 +76,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     )
     failed_metrics = [
         m for m in fs.metrics
-        if m.status == "fail" and m.threshold is not None and m.threshold > 0
+        if m.status == "fail" and m.threshold is not None  # 목표값 0·음수 미달도 미달이다
     ]
     failed = [m.display_name for m in failed_metrics]
     if failed:
