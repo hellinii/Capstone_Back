@@ -146,6 +146,8 @@
 
 ### 4.5 입력 — FactSheet (LLM에 주입할 "사실 시트")
 
+> **고객 입력(client_inputs) 길이(2026-10-19).** 사실 시트와 함께 오는 고객 입력은 직렬화 길이 20,000자까지 받는다(`MAX_CLIENT_INPUTS_CHARS`). 길이는 **공백 없는 JSON**(`json.dumps(…, ensure_ascii=False, separators=(",", ":"))`)으로 잰다 — 프론트 `JSON.stringify` 와 같은 기준이라 한글 1자는 1자로 센다. 프론트는 상한의 90%(18,000자)를 목표로 가장 긴 자유 글부터 잘라 보내(`fitClientInputs`), 넘어서 서술 전체가 422 로 빠지는 일을 막는다. 지시문에 가는 작업 유형 이름은 이진 분류 / 다중 클래스 분류 / 다중 레이블 분류다(`TASK_TYPE_LABELS`).
+
 원시 CSV/DataFrame/확률은 **절대 미주입**. 오직 계산된 fact만:
 
 - `task_type`, `n_samples`, `dropped_rows`, `warnings`
@@ -273,6 +275,7 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 - **프론트**: 컬럼 매핑 UI(`src/components/column-mapping/`)에 "응답시간" 역할 추가, `latency` MOCK 제거
 - **컬럼 미매핑 시**: 섹션을 "측정 안 됨(N/A)"으로 렌더 + LLM에 미주입(`fact_sheet.latency = {available:false}`)
 - LLM은 latency 컬럼이 있을 때만 실제 지연 수치를 인용 (화이트리스트에 포함됨). 없으면 지연 수치 생성 원천 봉쇄
+- **이름과 단위(2026-10-19)**: 규칙 폴백 매퍼가 `latency`·`latency_ms`·`inference_time(_ms)`·`response_time(_ms)`·`elapsed_ms` 를 지연시간 역할로 잡는다. 단위는 이름으로도 데이터로도 확정할 수 없어 ms 가정을 유지하고, 값이 모두 1 미만이면 검증 단계가 "초 단위로 보임" 경고(`Latency unit`)를 낸다(막지는 않음). 자세한 규칙은 [ARCHITECTURE.md §9](ARCHITECTURE.md)
 
 ---
 

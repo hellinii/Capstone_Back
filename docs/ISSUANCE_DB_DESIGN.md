@@ -149,7 +149,13 @@ COMMIT
 |---|---|---|---|
 | `GET /api/organization` | 수행기관 조회(performer) | — | `OrganizationOut` |
 | `POST /api/reports/issue` | 발급(채번) | `IssueRequest{run_id, model_name, model_version, note?, issuer?}` | `IssuanceOut` |
-| `POST /api/reports/{report_no}/reissue` | 재발급(정정) | `ReissueRequest{note}` | `IssuanceOut` |
+| `POST /api/reports/{report_no}/reissue` | 재발급(정정) | `ReissueRequest{run_id, note}` | `IssuanceOut` |
+
+**글자 수 상한(2026-10-19).** 발급 비고(`note`)·발급자(`issuer`)·정정 사유(`note`)는 앞뒤 공백을 뗀 뒤 **200자까지**
+받는다(`app/issuance/schemas.py` `MAX_ISSUANCE_TEXT_CHARS`). 셋 다 발급 이력으로 성적서 서명란에 그대로 인쇄되는
+한 줄이고, 무인증 API 라 상한 없이 받으면 긴 글이 DB 와 인쇄본에 영구히 남는다. 넘으면 422 이고 `detail[].msg` 가
+한국어 문구다("정정 사유는 200자 이하로 적어 주세요(지금 201자).", 빈 사유는 "정정 사유를 적어 주세요."). 공백뿐인
+비고는 '최초 발급'으로, 공백뿐인 발급자는 기관 기본값으로 둔다. 프론트 발급·정정 발급 대화상자의 입력 칸 상한이 같은 값이다.
 | `GET /api/reports/{report_no}` | 발급정보 조회(재오픈) | — | `IssuanceOut` |
 | ~~`PUT /api/organization`~~ *(설계에만 존재)* | **구현되지 않았고 앞으로도 만들지 않습니다** — 무인증 상태에서 이 엔드포인트 하나로 이미 발급된 모든 성적서의 기관 표기가 소급 변경됩니다(ISSUES.md G-01) | — | — |
 
@@ -252,7 +258,7 @@ Capstone_Back/
 ## 11. 미결 / 리스크
 
 1. **마이그레이션 도구**: 초기엔 `create_all`. 스키마 변경 잦아지면 Alembic 도입(현재는 과함).
-2. **인증 부재**: 발급 API 에 인증 없음(현 시스템 전체가 무인증). 발급자(issuer)는 당분간 기관 기본값. 추후 인증 도입 시 실제 사용자명.
+2. **인증 부재**: 발급 API 에 인증 없음(현 시스템 전체가 무인증). 발급자(issuer)는 당분간 기관 기본값. 추후 인증 도입 시 실제 사용자명. 프론트 화면에는 발급자 칸을 두지 않는다(2026-10-18 결정) — 인증이 없어 확인할 수 없는 이름이 서명란과 발급 이력에 찍히게 되기 때문이다. API 는 관리용으로 `issuer` 를 그대로 받되 200자 상한을 둔다.
 3. **버전 표기 규칙**: `v1.x` minor 증가로 시작. 대규모 정정 시 major(v2.0) 정책은 추후.
 4. **run_id 신뢰**: run_id 는 프론트 생성(localStorage). 서버는 이를 키로 재발급 판별 — 멱등성은 run_id 유일성에 의존. 동일 run 의 중복 발급은 막지만, 서로 다른 run 이 같은 모델을 평가하면 별도 번호(정상).
 5. **PDF 발급 연계**: 향후 PDF 생성 시 발급본(번호·서명 확정)만 PDF 허용하는 정책 검토.
