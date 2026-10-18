@@ -21,8 +21,9 @@ def client_inputs_length(v: dict[str, Any]) -> int:
     """고객 입력의 직렬화 길이 — 공백 없는 JSON(구분자 ","·":", 한글은 그대로)으로 잰다(B7).
 
     프론트 `fitClientInputs`(Capstone_Front/src/lib/report/reportMaterials.ts)가 `JSON.stringify` 로
-    재는 것과 같은 기준이다. JS 는 UTF-16 단위로 세므로(이모지 등은 2) 프론트 값이 늘 크거나 같다 —
-    프론트가 맞춘 입력은 여기서 넘지 않는다.
+    재는 것과 같은 기준이다. 문자열·정수·보통 소수는 두 쪽 길이가 같고, JS 는 UTF-16 단위로 세므로
+    (이모지 등은 2) 대개 프론트 값이 크거나 같다. 예외는 지수 표기 실수뿐이다(파이썬 '1e-07' 이 JS '1e-7'
+    보다 한 자 길다) — 고객 입력은 글이라 사실상 없고, 프론트 목표(상한의 90%)의 여유가 덮는다(S9 검토).
     """
     return len(json.dumps(v, ensure_ascii=False, separators=(",", ":")))
 
