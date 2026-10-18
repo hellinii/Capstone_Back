@@ -1032,6 +1032,27 @@ def test_fallback_risks_skip_near_target_fail_and_absent_flags():
         near_fail, [], compute_derived(near_fail), "no_key").conclusion.risks
 
 
+def test_fallback_metric_numbers_use_report_digits():
+    """S10: 규칙 폴백 8절이 "Recall(0.5473684210526316, 기준 0.8)"처럼 반올림 안 한 수를 찍었다.
+    성적서처럼 셋째 자리까지만 쓴다(끝의 0 은 뺀다). 자리마다 따로 고정한다 — 미달·아슬아슬·신뢰구간."""
+    raw = 0.5473684210526316
+    failed = _bare_fact_sheet(metrics=[MetricFact(
+        metric_id="M3", display_name="Recall", value=raw, threshold=0.8, status="fail")])
+    resp = build_fallback_narrative(failed, [], compute_derived(failed), "no_key")
+    assert "Recall(0.547, 기준 0.8)" in resp.conclusion.risks
+    assert "0.5473" not in " ".join(_all_texts(resp))
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed))).passed
+
+    near = _bare_fact_sheet(metrics=[_near_metric(value=0.80789, threshold=0.8, margin=0.00789)])
+    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
+    assert "Recall(0.808, 기준 0.8, 차이 0.008)" in near_risks
+
+    ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.78123, threshold=0.8, low=0.712345, high=0.83456)])
+    ci_resp = build_fallback_narrative(ci, [], compute_derived(ci), "no_key")
+    assert "F1 Score(구간 0.712~0.835, 목표 0.8)" in " ".join(_all_texts(ci_resp))
+    assert "F1 Score(0.781, 기준 0.8)" in ci_resp.conclusion.risks
+
+
 def test_fallback_risks_state_threshold_gain_only_when_notable():
     fs = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain()})
     derived = compute_derived(fs)
