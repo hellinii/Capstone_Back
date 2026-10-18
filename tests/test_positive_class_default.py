@@ -10,6 +10,7 @@ import pytest
 from app.analysis.metadata import _detect_binary_classes
 from app.evaluation.labels import default_positive_class
 from app.evaluation.metrics.binary import _resolve_positive_value
+from app.evaluation.metrics.common import _get_binary_kwargs
 from app.evaluation.preprocessor import preprocess_data
 
 
@@ -58,7 +59,10 @@ def _derived_positive(truth: list) -> str:
     [["cat", "dog", "cat", "dog"], [0, 1, 0, 1], ["normal", "fraud", "normal", "fraud"], ["b", "a", "b", "a"]],
 )
 def test_three_sites_agree(truth):
-    """자동 판단(metadata)·지표 계산(binary)·예측 파생(preprocessor)이 같은 입력에 같은 양성을 고른다."""
+    """자동 판단(metadata)·지표 계산(binary·common)·예측 파생(preprocessor)이 같은 입력에 같은 양성을 고른다.
+
+    S10: common._get_binary_kwargs(precision·recall·F1)도 양성 미지정이면 정렬 뒤쪽(classes[-1])이
+    아니라 같은 기본값을 쓴다 — fraud/normal 이면 종전엔 normal 이 양성이었다."""
     expected, _, _ = default_positive_class(truth)
     series = pd.Series(truth)
 
@@ -69,8 +73,18 @@ def test_three_sites_agree(truth):
     assert detected == str(expected)
     assert str(resolved) == str(expected)
     assert derived == str(expected)
+    assert str(_get_binary_kwargs(series, {})["pos_label"]) == str(expected)
 
 
 def test_cat_dog_is_dog_and_ambiguous_on_screen():
     pos, neg, ambiguous = _detect_binary_classes(pd.Series(["cat", "dog", "cat"]))
     assert (pos, neg, ambiguous) == ("dog", "cat", True)
+
+
+def test_recall_without_positive_uses_default_positive():
+    """양성 미지정(metadata 없이 API 직접 호출)의 recall 이 fraud 를 양성으로 계산한다."""
+    from app.evaluation.metrics.common import calculate_recall
+
+    df = pd.DataFrame({"t": ["fraud", "fraud", "normal", "normal"], "p": ["fraud", "normal", "normal", "normal"]})
+    mapping = {"y_true": "t", "y_pred": "p", "_task_type": "binary"}
+    assert calculate_recall(df, mapping) == pytest.approx(0.5)  # normal 이 양성이면 1.0
