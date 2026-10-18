@@ -380,6 +380,12 @@ def test_class_mismatch_unit_numeric_spelling_and_whitespace():
     )[0]
     assert space.status == "warning"
     assert space.result == "Pred has unknown classes: cat"
+    # 공백이 예측 쪽에 있어도 알린다(양쪽 다 공백을 보존해야 한다)
+    pred_space = check_class_mismatch(
+        _pd.DataFrame({"t": ["cat", "dog"], "p": [" cat", "dog"]}), mapping
+    )[0]
+    assert pred_space.status == "warning"
+    assert pred_space.result == "Pred has unknown classes:  cat"
 
     # 소수 라벨(0.5)은 정수로 뭉개지 않는다
     frac = check_class_mismatch(_pd.DataFrame({"t": [0.0, 1.0], "p": [0.5, 1.0]}), mapping)[0]
