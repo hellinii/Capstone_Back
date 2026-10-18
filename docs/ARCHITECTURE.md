@@ -205,13 +205,15 @@ pytest -q                          # 테스트 (tests/)
 1. 정답 이름(`y_true`·`label`·`target`·`ground_truth`·`actual`·`true_label(s)` …) → `y_true`(멀티레이블은 `true_labels`)
 2. 예측 이름(`y_pred`·`pred`·`prediction`·`predicted`·`pred_label(s)` …) → `y_pred`(멀티레이블은 `pred_labels`)
 3. 지연시간 이름(`latency`·`latency_ms`·`inference_time(_ms)`·`response_time(_ms)`·`elapsed_ms`, 또는 낱말 `latency`) → `latency`
-4. 낱말 `id`·`idx`·`index`·`uid`·`uuid` → `sample_id`. `valid_flag`·`width` 처럼 'id' 가 **들어 있기만** 한 이름은 잡지 않는다
-5. 낱말 `prob`·`proba`·`probability`·`score`, 또는 `p_` 로 시작 → 유형의 확률 역할(`score_positive`·`prob_per_class`·`score_per_label`). 이진은 낱말 `positive` 도. `position` 같은 이름은 잡지 않는다
+4. 낱말 `id`·`idx`·`index`·`uid`·`uuid`, 또는 붙여 쓴 식별자 이름(`sampleid`·`rowid`·`userid`·`fileid` 등 목록) → `sample_id`. `valid_flag`·`width` 처럼 'id' 가 **들어 있기만** 한 이름은 잡지 않는다
+5. 낱말 `prob`·`proba`·`probability`·`score`(복수형·숫자 꼬리 `probs`·`scores`·`prob1` 포함), 또는 `p_` 로 시작 → 유형의 확률 역할(`score_positive`·`prob_per_class`·`score_per_label`). 이진은 낱말 `positive` 도. `position` 같은 이름은 잡지 않는다
 6. 그 밖은 `ignore` + "규칙으로 판단하지 못했다" 안내
 
 한 컬럼만 받는 역할(샘플 ID·정답·예측·이진 확률·지연시간)을 두 번째 컬럼이 또 잡으면, 첫 컬럼만 그 역할로 두고
 나머지는 `ignore` 로 내린 뒤 `column_notes` 에 `status="duplicate_role"` 안내를 싣는다 — 역할이 겹치면 매핑 확정이
-막히기 때문이다. 확률 역할은 클래스·레이블마다 한 컬럼이라 여러 컬럼을 그대로 받는다.
+막히기 때문이다. 단 이진에서 양성 확률 후보가 여럿(`prob_0`·`prob_1`)이면 기본 양성 클래스(§9.2)
+이름이 붙은 컬럼을 남긴다 — 첫 컬럼을 남기면 음성 확률이 양성 확률로 들어가 AUROC 가 조용히 뒤집힌다. 이름이 맞는
+후보가 없으면 첫 컬럼. 확률 역할은 클래스·레이블마다 한 컬럼이라 여러 컬럼을 그대로 받는다.
 
 자동 매핑 AI 지시문(`app/analysis/prompt_builder.py`)도 다중·멀티 확률 컬럼을 확률 역할로 안내한다(종전에는
 "확률 컬럼도 ignore"라고 적어 y_pred 없는 파일의 예측이 사라졌다). 지시문의 역할 집합은 `VALID_ROLES_BY_TASK` 와 같다.

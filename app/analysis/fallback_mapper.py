@@ -3,7 +3,8 @@
 OpenAI 키가 없거나 LLM 호출이 실패했을 때 컬럼명 패턴으로 역할을 추정하는 폴백 매핑.
 
 상호작용
-- 의존(import): pandas, app.core.schemas, app.analysis.metadata(extract_metadata)
+- 의존(import): pandas, app.core.schemas, app.analysis.metadata(extract_metadata),
+  app.evaluation.labels(default_positive_class), app.evaluation.preprocessor(PROB_COLUMN_PREFIXES)
 - 사용처: app.analysis.analysis_service (무키/LLM 실패 시 강등 경로)
 """
 import re
@@ -13,6 +14,8 @@ import pandas as pd
 from app.core.schemas import ColumnMapping, ColumnRole, MULTI_COLUMN_ROLES, TaskType
 from app.analysis.schemas import AnalysisResponse, ColumnMatchNote
 from app.analysis.metadata import extract_metadata
+from app.evaluation.labels import default_positive_class, normalize_label
+from app.evaluation.preprocessor import PROB_COLUMN_PREFIXES
 
 
 # ── 이름 규칙(M8·M4) ──────────────────────────────────────────────────────────
@@ -22,6 +25,12 @@ from app.analysis.metadata import extract_metadata
 
 # 낱말 하나라도 이것이면 샘플 ID — id·image_id·imageId·row_index·uid.
 SAMPLE_ID_WORDS = frozenset({"id", "idx", "index", "uid", "uuid"})
+# 구분자 없이 붙여 쓴 식별자 이름(낱말 하나) — 종전 부분 문자열 규칙이 잡던 흔한 꼴을 놓치지 않게 따로 둔다.
+# 'id' 로 끝나는 낱말을 모두 잡으면 valid·grid·void 를 다시 오인하므로 목록으로만 받는다(S9 검토).
+SAMPLE_ID_COMPOUNDS = frozenset({
+    "sampleid", "rowid", "rowidx", "rowindex", "imageid", "imgid", "fileid", "userid",
+    "itemid", "recordid", "docid", "caseid", "objectid", "instanceid",
+})
 
 # 이름 전체(낱말을 _ 로 이은 꼴)가 이것이면 정답·예측. 멀티레이블은 true_labels·pred_labels 역할로 간다.
 TRUTH_NAMES = frozenset({
@@ -42,6 +51,12 @@ LATENCY_NAMES = frozenset({
 
 # 확률·점수 낱말. 'pos'·'p' 처럼 짧은 낱말은 다른 뜻(position 의 줄임 등)과 겹쳐 넣지 않는다.
 PROBABILITY_WORDS = frozenset({"prob", "proba", "probability", "score"})
+# 복수형·숫자 꼬리(probs·scores·prob1)도 같은 낱말로 본다 — 종전 부분 문자열 규칙이 잡던 꼴(S9 검토).
+_PROBABILITY_WORD_RE = re.compile(r"^(probs?|probas?|probabilit(y|ies)|scores?)\d*$")
+
+
+def _is_probability_word(word: str) -> bool:
+    return word in PROBABILITY_WORDS or bool(_PROBABILITY_WORD_RE.match(word))
 
 
 def name_words(column: str) -> list[str]:
@@ -62,10 +77,10 @@ def fallback_role(task_type: TaskType, column: str) -> ColumnRole:
         return ColumnRole.pred_labels if multilabel else ColumnRole.y_pred
     if joined in LATENCY_NAMES or "latency" in words:
         return ColumnRole.latency
-    if SAMPLE_ID_WORDS.intersection(words):
+    if SAMPLE_ID_WORDS.intersection(words) or joined in SAMPLE_ID_COMPOUNDS:
         return ColumnRole.sample_id
     # 'p_cat' 처럼 p 하나로 시작하는 꼴은 평가가 받는 확률 접두어(p_)다.
-    if PROBABILITY_WORDS.intersection(words) or (len(words) > 1 and words[0] == "p"):
+    if any(_is_probability_word(w) for w in words) or (len(words) > 1 and words[0] == "p"):
         return {
             TaskType.binary: ColumnRole.score_positive,
             TaskType.multiclass: ColumnRole.prob_per_class,
@@ -74,6 +89,33 @@ def fallback_role(task_type: TaskType, column: str) -> ColumnRole:
     if task_type == TaskType.binary and "positive" in words:
         return ColumnRole.score_positive
     return ColumnRole.ignore
+
+
+def _preferred_score_column(
+    task_type: TaskType, roles: dict[str, ColumnRole], df: pd.DataFrame,
+) -> str | None:
+    """이진에서 양성 확률 후보가 여럿(prob_0·prob_1)이면 기본 양성 클래스 이름이 붙은 컬럼을 고른다.
+
+    '첫 컬럼만 남김' 규칙을 그대로 쓰면 prob_0·prob_1 에서 음성 확률(prob_0)이 양성 확률로 들어가
+    AUROC 등이 조용히 뒤집힌다(S9 검토). 양성은 자동 판단·지표 계산과 같은 함수(default_positive_class)로
+    정하고, 이름이 맞는 후보가 없으면 None(종전대로 첫 컬럼).
+    """
+    if task_type != TaskType.binary:
+        return None
+    candidates = [c for c, r in roles.items() if r == ColumnRole.score_positive]
+    truth = next((c for c, r in roles.items() if r == ColumnRole.y_true), None)
+    if len(candidates) < 2 or truth is None or truth not in df.columns:
+        return None
+    positive, negative, _ = default_positive_class(df[truth].dropna().unique())
+    if positive is None or negative is None:
+        return None
+    target = normalize_label(positive).lower()
+    for col in candidates:
+        lowered = col.lower()
+        for prefix in PROB_COLUMN_PREFIXES:
+            if lowered.startswith(prefix) and lowered[len(prefix):] == target:
+                return col
+    return None
 
 
 def analyze_columns_fallback(
@@ -86,12 +128,18 @@ def analyze_columns_fallback(
     # 한 컬럼만 받는 역할을 두 번째 컬럼이 또 잡으면 매핑 확정이 막힌다(역할 중복). 첫 컬럼만 그 역할로
     # 두고 나머지는 ignore 로 내린 뒤 알린다(M8) — 사용자는 매핑 화면에서 바꿀 수 있다.
     duplicate_notes: list[ColumnMatchNote] = []
+    roles = {col: fallback_role(task_type, col) for col in columns}
     taken: dict[ColumnRole, str] = {}
+    preferred_score = _preferred_score_column(task_type, roles, df)
+    if preferred_score is not None:
+        taken[ColumnRole.score_positive] = preferred_score
 
     for col in columns:
-        role = fallback_role(task_type, col)
+        role = roles[col]
         if role not in MULTI_COLUMN_ROLES:
-            if role in taken:
+            if taken.get(role) == col:
+                pass  # 미리 고른 컬럼(이진 양성 확률) — 그대로 둔다
+            elif role in taken:
                 duplicate_notes.append(
                     ColumnMatchNote(
                         llm_column=col,

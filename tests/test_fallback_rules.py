@@ -169,3 +169,57 @@ def test_no_key_multilabel_upload_maps_true_and_pred_labels():
         "score_news": "score_per_label",
         "inference_time_ms": "latency",
     }
+
+
+# ── S9 검토: 종전 규칙이 잡던 흔한 이름을 놓치지 않는다 ─────────────────────────────
+
+@pytest.mark.parametrize("column", ["sampleid", "rowid", "userid", "fileid", "imageid", "SampleID", "RowId"])
+def test_compound_identifier_names_stay_sample_id(column):
+    """구분자 없이 붙여 쓴 식별자 — 종전 부분 문자열 규칙이 sample_id 로 잡던 꼴."""
+    assert fallback_role(B, column) == ColumnRole.sample_id
+
+
+@pytest.mark.parametrize("column", ["valid", "grid", "void", "solid", "paid"])
+def test_words_ending_in_id_are_not_identifiers(column):
+    assert fallback_role(B, column) == ColumnRole.ignore
+
+
+@pytest.mark.parametrize(
+    "task_type,column,expected",
+    [
+        (B, "probs", ColumnRole.score_positive),
+        (B, "scores", ColumnRole.score_positive),
+        (B, "prob1", ColumnRole.score_positive),
+        (B, "y_probas", ColumnRole.score_positive),
+        (ML, "scores_sports", ColumnRole.score_per_label),
+        (MC, "probabilities_cat", ColumnRole.prob_per_class),
+        (B, "probe", ColumnRole.ignore),
+    ],
+)
+def test_plural_and_numbered_probability_words(task_type, column, expected):
+    assert fallback_role(task_type, column) == expected
+
+
+@pytest.mark.parametrize(
+    "truth,columns,expected",
+    [
+        ([0, 1, 0, 1], ["prob_0", "prob_1"], "prob_1"),
+        ([0, 1, 0, 1], ["prob_1", "prob_0"], "prob_1"),
+        (["cat", "dog", "cat", "dog"], ["p_cat", "p_dog"], "p_dog"),  # M5: 모르는 두 문자열이면 뒤쪽(dog)이 양성
+        (["normal", "fraud", "normal", "fraud"], ["score_fraud", "score_normal"], "score_fraud"),
+        (["no", "yes", "no", "yes"], ["Prob_No", "Prob_Yes"], "Prob_Yes"),
+        ([0, 1, 0, 1], ["score_a", "score_b"], "score_a"),  # 이름이 안 맞으면 종전대로 첫 컬럼
+    ],
+)
+def test_binary_two_score_columns_keep_the_positive_one(truth, columns, expected):
+    """이진에서 양성 확률 후보가 둘이면 기본 양성 클래스 이름이 붙은 컬럼을 남긴다 — 첫 컬럼(prob_0)을 남기면
+    음성 확률이 양성 확률로 들어가 AUROC 가 조용히 뒤집힌다(S9 검토)."""
+    df = pd.DataFrame({"y_true": truth, **{c: [0.5] * len(truth) for c in columns}})
+    resp = analyze_columns_fallback(task_type=B, columns=["y_true", *columns], df=df)
+    roles = {m.column: m.role for m in resp.column_mappings}
+    assert [c for c in columns if roles[c] == ColumnRole.score_positive] == [expected]
+    other = next(c for c in columns if c != expected)
+    assert roles[other] == ColumnRole.ignore
+    notes = [n for n in resp.column_notes if n.llm_column == other]
+    assert len(notes) == 1 and notes[0].status == "duplicate_role" and f"'{expected}'" in notes[0].message
+    assert resp.metadata.positive_class is not None
