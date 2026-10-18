@@ -1053,6 +1053,25 @@ def test_fallback_metric_numbers_use_report_digits():
     assert "F1 Score(0.781, 기준 0.8)" in ci_resp.conclusion.risks
 
 
+def test_fallback_long_threshold_is_rounded_at_every_site():
+    """S10 검토: 목표값이 0.8 처럼 짧으면 반올림을 빼도 테스트가 통과했다. 긴 목표값(2/3)으로
+    미달·아슬아슬·신뢰구간 세 자리의 목표값을 따로 고정한다."""
+    t = 2 / 3
+    failed = _bare_fact_sheet(metrics=[MetricFact(
+        metric_id="M3", display_name="Recall", value=0.5, threshold=t, status="fail")])
+    risks = build_fallback_narrative(failed, [], compute_derived(failed), "no_key").conclusion.risks
+    assert "Recall(0.5, 기준 0.667)" in risks
+
+    near = _bare_fact_sheet(metrics=[_near_metric(value=0.68, threshold=t, margin=0.68 - t)])
+    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
+    assert "Recall(0.68, 기준 0.667, 차이 0.013)" in near_risks
+
+    ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.6, threshold=t, low=0.55, high=0.7)])
+    ci_texts = " ".join(_all_texts(build_fallback_narrative(ci, [], compute_derived(ci), "no_key")))
+    assert "F1 Score(구간 0.55~0.7, 목표 0.667)" in ci_texts
+    assert "0.6666" not in ci_texts
+
+
 def test_fallback_risks_state_threshold_gain_only_when_notable():
     fs = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain()})
     derived = compute_derived(fs)
