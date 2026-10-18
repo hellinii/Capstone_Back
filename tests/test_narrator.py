@@ -423,6 +423,17 @@ def test_system_prompt_names_the_task_type():
     assert "멀티레이블 분류" not in multilabel
 
 
+def test_system_prompt_core_metric_line_is_neutral():
+    """W8: 핵심 지표는 의뢰자가 바꾸지 않으면 분류 유형의 기본값이다. AI 지시문이 '의뢰자가 지정'이라고
+    단정하면 성적서 6.1(기본값 사용)과 서술이 갈린다. 세 유형 모두 중립 문장만 간다."""
+    from app.narrative.prompt import build_system_prompt
+
+    for task_type in ("binary", "multiclass", "multilabel"):
+        prompt = build_system_prompt("internal", task_type, _sample_fact_sheet())
+        assert "is_core=true 는 판정에 쓰는 핵심 지표다(의뢰자가 정했거나 분류 유형의 기본값)" in prompt
+        assert "의뢰자가 지정" not in prompt
+
+
 def test_task_type_labels_are_korean_names():
     """W9: 프론트 성적서 TASK_TYPE_LABELS 와 같은 세 이름(프론트 대조 테스트가 이 표를 읽는다)."""
     from app.narrative.prompt import TASK_TYPE_LABELS
