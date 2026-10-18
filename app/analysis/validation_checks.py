@@ -19,6 +19,7 @@ import pandas as pd
 
 from app.analysis.schemas import ValidationCheckItem
 from app.analysis.validator import find_column_conflicts, find_invalid_roles
+from app.evaluation.labels import label_text
 from app.evaluation.preprocessor import probability_names_problem
 
 
@@ -154,8 +155,10 @@ def check_class_mismatch(df_clean: pd.DataFrame, mapping_dict: dict) -> list[Val
     y_pred_col = mapping_dict.get("y_pred") or mapping_dict.get("predicted_class")
 
     if y_true_col and y_pred_col and y_true_col in df_clean.columns and y_pred_col in df_clean.columns:
-        true_classes = set(df_clean[y_true_col].astype(str).unique())
-        pred_classes = set(df_clean[y_pred_col].astype(str).unique())
+        # 숫자 표기만 맞춘다(빈 칸 때문에 float 이 된 정답 1.0 ↔ 정수 예측 1). 앞뒤 공백은 남겨
+        # ' cat' ↔ 'cat' 불일치는 계속 알린다 — 평가는 둘을 다른 클래스로 센다.
+        true_classes = {label_text(v) for v in df_clean[y_true_col].unique()}
+        pred_classes = {label_text(v) for v in df_clean[y_pred_col].unique()}
         extra_in_pred = pred_classes - true_classes
         if extra_in_pred:
             return [ValidationCheckItem(

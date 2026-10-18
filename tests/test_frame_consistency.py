@@ -333,3 +333,54 @@ def test_build_frame_raises_on_missing_required_column():
 
     with _pytest.raises(ValueError, match="없는컬럼"):
         build_evaluation_frame(df, mappings, "binary")
+
+
+# ── S10: Class mismatch 는 float↔int 표기만 맞추고 앞뒤 공백 차이는 계속 알린다 ────────
+
+def test_blank_true_cell_does_not_raise_false_class_mismatch():
+    """[S10] 정답 칸 하나가 비어 y_true 가 float(0.0·1.0), y_pred 가 int(0·1)로 읽히면
+    종전엔 "Pred has unknown classes: 0, 1" 이라는 틀린 경고가 났다(평가는 정상 계산)."""
+    csv = "id,t,p\n1,0,0\n2,0,1\n3,1,1\n4,1,0\n5,,1\n6,0,0\n"
+    data = _payload(
+        "binary",
+        [
+            {"column": "id", "role": "sample_id"},
+            {"column": "t", "role": "y_true"},
+            {"column": "p", "role": "y_pred"},
+        ],
+        ["M1"],
+    )
+    body = client.post(
+        "/api/validate-data",
+        files={"file": ("blank.csv", csv.encode(), "text/csv")},
+        data={"data": data},
+    ).json()
+    item = next(d for d in body["validation_details"] if d["name"] == "Class mismatch")
+    assert item["status"] == "pass", item
+    assert item["result"] == "None"
+
+
+def test_class_mismatch_unit_numeric_spelling_and_whitespace():
+    """표기 비교 규칙을 함수 단위로 고정한다: 1.0↔1 은 같고, ' cat'↔'cat' 은 다르다."""
+    import pandas as _pd
+    from app.analysis.validation_checks import check_class_mismatch
+
+    mapping = {"y_true": "t", "y_pred": "p"}
+    same = check_class_mismatch(_pd.DataFrame({"t": [0.0, 1.0, 1.0], "p": [0, 1, 0]}), mapping)[0]
+    assert same.status == "pass" and same.result == "None"
+
+    # 정수 예측이 float 정답에 없는 진짜 미지 클래스(2)는 계속 알린다 — 표기는 '2'
+    extra = check_class_mismatch(_pd.DataFrame({"t": [0.0, 1.0], "p": [0, 2]}), mapping)[0]
+    assert extra.status == "warning"
+    assert extra.result == "Pred has unknown classes: 2"
+
+    # 앞뒤 공백 불일치는 평가에서 다른 클래스로 세므로 숨기지 않는다
+    space = check_class_mismatch(
+        _pd.DataFrame({"t": [" cat", "dog"], "p": ["cat", "dog"]}), mapping
+    )[0]
+    assert space.status == "warning"
+    assert space.result == "Pred has unknown classes: cat"
+
+    # 소수 라벨(0.5)은 정수로 뭉개지 않는다
+    frac = check_class_mismatch(_pd.DataFrame({"t": [0.0, 1.0], "p": [0.5, 1.0]}), mapping)[0]
+    assert frac.status == "warning" and frac.result == "Pred has unknown classes: 0.5"

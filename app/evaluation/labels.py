@@ -36,15 +36,26 @@ import ast
 import math
 
 
+def label_text(value: Any) -> str:
+    """라벨 하나의 숫자 표기만 맞춘 문자열 — 앞뒤 공백은 **그대로** 둔다.
+
+    정수 값 float(1.0)은 `'1'` 로 쓴다. 빈 칸 하나 때문에 pandas 가 정수 컬럼을 float 로
+    읽어도 정수 컬럼('1')과 같은 표기가 된다. 공백까지 지우는 표준 표기는 normalize_label 이다.
+    공백 차이를 알려야 하는 곳(검증의 Class mismatch — 평가는 ' cat' 과 'cat' 을 다른 클래스로
+    센다)은 이 함수를 쓴다.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def normalize_label(value: Any) -> str:
-    """라벨 하나를 표준 표현형(문자열)으로.
+    """라벨 하나를 표준 표현형(문자열)으로 — label_text 표기에서 앞뒤 공백까지 지운다.
 
     숫자는 소수점 없는 정수로 만든다 — pandas 가 정수 컬럼을 float 로 읽으면 라벨이
     `'1.0'` 이 되어 `'1'` 과 다른 라벨이 된다.
     """
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value).strip()
+    return label_text(value).strip()
 
 
 def find_label(values: Iterable[Any], name: Any) -> Any | None:
