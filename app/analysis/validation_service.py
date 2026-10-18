@@ -144,8 +144,14 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     if task_check:
         details += task_check(df_clean, mapping_dict, role_columns)
 
-    # 3-7. latency
+    # 3-6b. 확률 컬럼 이름으로 클래스를 확정할 수 있는가(M3) — 평가의 400 을 여기서 미리 막는다.
+    details += checks.check_probability_column_names(
+        df_clean, role_columns, task_type, request.metadata.model_dump(), selected_metric_ids,
+    )
+
+    # 3-7. latency (+ 단위 경고, M4)
     details += checks.check_latency(df_clean, mapping_dict)
+    details += checks.check_latency_unit(df_clean, mapping_dict)
 
     # 평가와 같은 프레임·같은 함수로 센 분포 — 재료 선택 점검의 IR 이 3절과 같아진다.
     class_distribution = class_distribution_of(df_clean, mapping_dict, task_type)

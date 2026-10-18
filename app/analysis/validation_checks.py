@@ -19,6 +19,7 @@ import pandas as pd
 
 from app.analysis.schemas import ValidationCheckItem
 from app.analysis.validator import find_column_conflicts, find_invalid_roles
+from app.evaluation.preprocessor import probability_names_problem
 
 
 def check_column_conflicts(column_mappings, task_type) -> list[ValidationCheckItem]:
@@ -536,6 +537,57 @@ def check_latency(df_clean: pd.DataFrame, mapping_dict: dict) -> list[Validation
                 group="latency",
             ))
     return items
+
+
+# 새 검증 항목 이름(M3·M4). 프론트 검증 화면의 한국어 이름 표(CHECK_NAME_KO)가 이 이름들을 대조한다.
+PROBABILITY_COLUMN_NAMES_CHECK = "Probability column names"
+LATENCY_UNIT_CHECK = "Latency unit"
+
+# 지연시간 값이 모두 이 값 미만이면 초 단위로 적은 것으로 보인다(M4). 지연시간 역할은 ms 로 읽는다.
+# 1 ms 미만으로 도는 모델도 있어 막지 않고 경고만 한다 — 단위는 데이터만으로 확정할 수 없다.
+LATENCY_SECONDS_SUSPECT_BELOW = 1.0
+
+
+def check_probability_column_names(
+    df_clean: pd.DataFrame,
+    role_columns: dict[str, list[str]],
+    task_type: str,
+    metadata: dict | None,
+    selected_metric_ids: list[str] | None,
+) -> list[ValidationCheckItem]:
+    """3-6b. 확률에서 예측을 파생할 때 컬럼 이름으로 클래스·레이블을 확정할 수 있는가(M3).
+
+    평가와 같은 함수(preprocessor.probability_names_problem)로 판정한다 — 평가 단계의 400 이 검증
+    화면의 차단으로 앞당겨진다. 파생하지 않거나(y_pred 가 있음 등) 이름이 맞으면 항목을 내지 않는다.
+    """
+    problem = probability_names_problem(df_clean, role_columns, task_type, metadata, selected_metric_ids)
+    if problem is None:
+        return []
+    return [ValidationCheckItem(
+        name=PROBABILITY_COLUMN_NAMES_CHECK,
+        result=problem,
+        handling="Stop evaluation — rename columns to prob_<class> (e.g. prob_cat) or map a prediction column",
+        status="error",
+        group=task_type,
+    )]
+
+
+def check_latency_unit(df_clean: pd.DataFrame, mapping_dict: dict) -> list[ValidationCheckItem]:
+    """3-7b. 지연시간 값이 모두 1 미만이면 초 단위로 보인다는 경고(M4). 진행은 막지 않는다."""
+    latency_col = mapping_dict.get("latency")
+    if not latency_col or latency_col not in df_clean.columns:
+        return []
+    values = pd.to_numeric(df_clean[latency_col], errors="coerce").dropna()
+    values = values[values >= 0]
+    if len(values) == 0 or not (values < LATENCY_SECONDS_SUSPECT_BELOW).all():
+        return []
+    return [ValidationCheckItem(
+        name=LATENCY_UNIT_CHECK,
+        result=f"All {len(values)} values < {LATENCY_SECONDS_SUSPECT_BELOW:g} (max={values.max():.4g})",
+        handling="Values look like seconds — latency is read as milliseconds (kept as-is)",
+        status="warning",
+        group="latency",
+    )]
 
 
 # task_type → task별 추가 검사 함수 (elif 사다리 대체)

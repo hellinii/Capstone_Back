@@ -11,7 +11,7 @@ from app.core.schemas import ColumnRole, TaskType, VALID_ROLES_BY_TASK
 # (테스트가 고정한다). 확률 역할은 세 유형 모두 정식 입력이다(2026-09-07 결정 1) — y_pred 가 없으면
 # 확률에서 예측을 파생하므로, 확률 컬럼을 ignore 로 보내면 평가할 예측이 사라진다(M1).
 # 확률 컬럼 이름은 평가가 '접두어 + 클래스·레이블 이름'으로 클래스를 확정한다
-# (app/evaluation/preprocessor.py 의 _PROB_COLUMN_PREFIXES) — 그래서 이름 꼴을 함께 알려 준다.
+# (app/evaluation/preprocessor.py 의 PROB_COLUMN_PREFIXES) — 그래서 이름 꼴을 함께 알려 준다.
 _ROLE_HINTS: dict[TaskType, dict[ColumnRole, str]] = {
     TaskType.binary: {
         ColumnRole.sample_id: "샘플 식별자 (id, sample_id, image_id 등)",
