@@ -343,6 +343,33 @@ def test_client_inputs_size_limited():
         )
 
 
+def test_client_inputs_length_is_compact_json_like_the_frontend():
+    """B7: 공백 없는 JSON 으로 잰다 — 프론트 JSON.stringify 와 같은 수. 한글은 1자로 센다."""
+    from app.narrative.schemas import client_inputs_length
+
+    v = {"declarations": {"사용 방식": "배치", "목록": [1, 2]}, "note": "가나다"}
+    expected = '{"declarations":{"사용 방식":"배치","목록":[1,2]},"note":"가나다"}'
+    assert client_inputs_length(v) == len(expected)
+
+
+def test_client_inputs_limit_boundary_is_exact():
+    """B7: 직렬화 길이가 정확히 상한이면 통과, 한 자 더 많으면 422(ValidationError)."""
+    from app.narrative.schemas import MAX_CLIENT_INPUTS_CHARS, client_inputs_length
+
+    fs = _sample_fact_sheet()
+    # {"a":{"b":"…","c":"…"}} — 기본 구분자였다면 공백 3자가 더해져 상한을 넘는 꼴로 만든다.
+    base = {"a": {"b": "", "c": "가"}}
+    filler = MAX_CLIENT_INPUTS_CHARS - client_inputs_length(base)
+    at_limit = {"a": {"b": "나" * filler, "c": "가"}}
+    assert client_inputs_length(at_limit) == MAX_CLIENT_INPUTS_CHARS
+    ok = NarrativeRequest(task_type=TaskType.binary, fact_sheet=fs, client_inputs=at_limit)
+    assert ok.client_inputs == at_limit
+
+    over = {"a": {"b": "나" * (filler + 1), "c": "가"}}
+    with pytest.raises(ValidationError):
+        NarrativeRequest(task_type=TaskType.binary, fact_sheet=fs, client_inputs=over)
+
+
 def test_client_inputs_reach_the_prompt():
     from app.narrative.prompt import build_user_prompt
 

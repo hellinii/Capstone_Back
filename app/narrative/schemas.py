@@ -15,6 +15,17 @@ MAX_CLASS_ENTRIES = 256
 # 고객 입력(client_inputs)의 직렬화 길이 상한. 정상 입력은 수천 자다(카드 다섯 장의 짧은 답과
 # 자유서술 몇 칸). 무인증 과금 경로라 배열 상한과 같은 이유로 막는다(G-03).
 MAX_CLIENT_INPUTS_CHARS = 20_000
+
+
+def client_inputs_length(v: dict[str, Any]) -> int:
+    """고객 입력의 직렬화 길이 — 공백 없는 JSON(구분자 ","·":", 한글은 그대로)으로 잰다(B7).
+
+    프론트 `fitClientInputs`(Capstone_Front/src/lib/report/reportMaterials.ts)가 `JSON.stringify` 로
+    재는 것과 같은 기준이다. JS 는 UTF-16 단위로 세므로(이모지 등은 2) 프론트 값이 늘 크거나 같다 —
+    프론트가 맞춘 입력은 여기서 넘지 않는다.
+    """
+    return len(json.dumps(v, ensure_ascii=False, separators=(",", ":")))
+
 # 6.0 신뢰구간 방식 한 줄(ci_method_note)의 길이 상한. 방식 종류를 나열한 한 문장이라 수백 자를 넘지 않는다.
 MAX_CI_METHOD_NOTE_CHARS = 500
 # 9절 문제 목록(problems)의 상한(서술 설계 D22). 문제는 종류(9종)마다 많아야 하나라 9개를 넘지 않는다 —
@@ -296,7 +307,7 @@ class NarrativeRequest(BaseModel):
     def _client_inputs_within_limit(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
         if v is None:
             return v
-        if len(json.dumps(v, ensure_ascii=False)) > MAX_CLIENT_INPUTS_CHARS:
+        if client_inputs_length(v) > MAX_CLIENT_INPUTS_CHARS:
             raise ValueError(f"고객 입력이 상한({MAX_CLIENT_INPUTS_CHARS}자)을 넘습니다.")
         return v
 
