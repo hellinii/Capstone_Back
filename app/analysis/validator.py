@@ -65,29 +65,29 @@ _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
         (
             ColumnRole.score_positive,
             "MISSING_SCORE_POSITIVE",
-            "score_positive가 없어 M9, M10, M19 (확률 기반 지표)를 계산할 수 없습니다.",
+            "양성 클래스 점수 컬럼이 없어 점수를 쓰는 지표(AUROC·AUPRC·Log Loss)를 계산할 수 없습니다.",
         ),
         (
             ColumnRole.y_pred,
             "MISSING_Y_PRED",
-            "y_pred가 없어 score_positive와 결정 임계값으로 예측을 파생합니다. "
-            "파생값은 모델의 실제 출력이 아니며 성적서에 그 사실이 기재됩니다.",
+            "예측 컬럼이 없어 양성 클래스 점수가 결정 임계값 이상이면 양성으로 예측합니다. "
+            "이렇게 만든 예측은 모델이 직접 낸 값이 아니며, 성적서에 그 사실을 적습니다.",
         ),
     ],
     TaskType.multiclass: [
         (
             ColumnRole.y_pred,
             "MISSING_Y_PRED",
-            "y_pred가 없어 prob_per_class의 argmax로 예측을 파생합니다. "
-            "파생값은 모델의 실제 출력이 아니며 성적서에 그 사실이 기재됩니다.",
+            "예측 컬럼이 없어 클래스별 확률이 가장 큰 클래스를 예측으로 씁니다. "
+            "이렇게 만든 예측은 모델이 직접 낸 값이 아니며, 성적서에 그 사실을 적습니다.",
         ),
     ],
     TaskType.multilabel: [
         (
             ColumnRole.pred_labels,
             "MISSING_PRED_LABELS",
-            "pred_labels가 없어 score_per_label과 레이블별 결정 임계값으로 예측을 파생합니다. "
-            "파생값은 모델의 실제 출력이 아니며 성적서에 그 사실이 기재됩니다.",
+            "예측 컬럼이 없어 레이블별 점수가 그 레이블의 결정 임계값 이상이면 그 레이블을 예측으로 씁니다. "
+            "이렇게 만든 예측은 모델이 직접 낸 값이 아니며, 성적서에 그 사실을 적습니다.",
         ),
     ],
 }
@@ -244,7 +244,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
         if task_type == TaskType.binary:
             errors.append(MappingValidationError(
                 code="MISSING_PRED_OR_SCORE",
-                message="Binary 평가는 y_pred 또는 score_positive 중 최소 하나가 필요합니다.",
+                message="이진 분류 평가는 예측 컬럼이나 양성 클래스 점수 컬럼 중 하나 이상이 필요합니다.",
             ))
         else:
             errors.append(MappingValidationError(
