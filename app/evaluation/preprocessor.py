@@ -312,8 +312,7 @@ def _derive_predictions(
     elif task_type == 'multiclass':
         if decision_threshold is not None:
             logs["warnings"].append(
-                "multiclass 는 확률의 argmax 로 예측을 파생하므로 decision_threshold 는 "
-                "사용되지 않았습니다."
+                "다중 클래스는 확률이 가장 큰 클래스를 예측으로 쓰므로 결정 임계값은 쓰지 않았습니다."
             )
         labels = _resolve_probability_labels(source, _known_targets(task_type, df, truth_col, metadata), "클래스")
         classes = list(pd.Series(df[truth_col]).dropna().unique())
@@ -344,10 +343,19 @@ def _derive_predictions(
 
     logs["derived_prediction"]["column"] = out
     logs["warnings"].append(
-        "하드 예측 컬럼이 없어 확률·점수에서 예측을 파생했습니다"
-        f"({logs['derived_prediction']['method']}). 파생값은 모델의 실제 출력이 아닙니다."
+        f"예측 컬럼이 없어 {_DERIVATION_TEXT[logs['derived_prediction']['method']]}. "
+        "이렇게 만든 예측은 모델이 직접 낸 값이 아닙니다."
     )
     return df
+
+
+# 평가 경고(화면 [평가] 안내·성적서)에 찍는 파생 방식 — 내부 이름(argmax 등) 대신 쉬운 말.
+# 매핑 확인 단계의 안내(analysis/validator.py _WARNING_CONDITIONS)와 같은 설명이다.
+_DERIVATION_TEXT = {
+    "threshold": "양성 클래스 점수가 결정 임계값 이상이면 양성으로 예측했습니다",
+    "argmax": "클래스별 확률이 가장 큰 클래스를 예측으로 썼습니다",
+    "threshold_per_label": "레이블별 점수가 그 레이블의 결정 임계값 이상이면 그 레이블을 예측으로 썼습니다",
+}
 
 
 def _coerce_latency(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, Any]) -> None:
