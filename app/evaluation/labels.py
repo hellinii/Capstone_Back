@@ -47,6 +47,22 @@ def normalize_label(value: Any) -> str:
     return str(value).strip()
 
 
+def find_label(values: Iterable[Any], name: Any) -> Any | None:
+    """표준 표기 `name` 에 해당하는 **원래 값**(dtype·앞뒤 공백 그대로)을 찾는다 — 없으면 None.
+
+    화면·metadata 는 클래스를 normalize_label 표기('1'·'cat')로 주고받지만 데이터의 값은 1.0·' cat'
+    일 수 있다. `y_true == 양성` 처럼 원래 값과 비교해야 하는 곳은 str() 로 맞춰 보지 말고 이 함수로
+    되찾는다(빈 칸 섞인 정수 정답이 float 이 되어 '1' ≠ '1.0' 이 되던 문제).
+    """
+    if name is None:
+        return None
+    target = normalize_label(name)
+    for v in values:
+        if normalize_label(v) == target:
+            return v
+    return None
+
+
 def parse_label_cell(item: Any) -> List[str]:
     """멀티레이블 셀 하나 → 라벨 목록(항상 문자열).
 

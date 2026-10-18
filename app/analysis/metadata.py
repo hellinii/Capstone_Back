@@ -32,7 +32,9 @@ def _detect_binary_classes(series: pd.Series) -> tuple[str | None, str | None, b
     pos, neg, ambiguous = default_positive_class(series.dropna().unique())
     if neg is None:
         return None, None, True  # 2개 값이 아니면 판단 불가
-    return str(pos), str(neg), ambiguous
+    # 표기는 column_unique_values 와 같은 normalize_label — str(1.0) = '1.0' 이면 프론트가 목록에 없는 양성으로
+    # 보고 비운다(빈 칸 섞인 정수 정답). 평가 쪽은 labels.find_label 로 원래 값을 되찾는다.
+    return normalize_label(pos), normalize_label(neg), ambiguous
 
 
 def extract_metadata(

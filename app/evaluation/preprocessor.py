@@ -19,7 +19,7 @@ import pandas as pd
 
 from app.core.schemas import METRIC_REQUIREMENTS, PREDICTION_ROLES_BY_TASK, TaskType
 from app.evaluation.labels import (
-    default_positive_class, normalize_distribution, normalize_label, parse_label_cell, sort_labels,
+    default_positive_class, find_label, normalize_distribution, normalize_label, parse_label_cell, sort_labels,
 )
 
 from .frame import build_evaluation_frame
@@ -147,7 +147,7 @@ def _resolve_probability_labels(cols: List[str], known: List[str], kind: str) ->
     (validation_checks 의 argmax 검사가 D-07 에서 택한 것과 같은 원칙.)
     """
     labels = [_label_from_column(c) for c in cols]
-    known_set = {str(k) for k in known}
+    known_set = {normalize_label(k) for k in known}
     if len(set(labels)) != len(labels):
         raise ValueError(
             f"확률 컬럼명에서 뽑은 {kind} 이름이 중복됩니다({labels}). "
@@ -226,7 +226,8 @@ def _known_targets(task_type: str, df: pd.DataFrame, truth_col: str, metadata: D
         )
     else:
         known = metadata.get('detected_classes') or list(pd.Series(df[truth_col]).dropna().unique())
-    return [str(k) for k in known]
+    # 표기는 normalize_label — 빈 칸 섞인 정수 정답(1.0)·앞뒤 공백(' cat')도 prob_1·prob_cat 과 맞는다.
+    return [normalize_label(k) for k in known]
 
 
 def probability_names_problem(
@@ -286,27 +287,26 @@ def _derive_predictions(
         col = source[0]
         threshold = _threshold_for(decision_threshold, col)
         classes = list(pd.Series(df[truth_col]).dropna().unique())
-        positive = metadata.get('positive_class')
-        negative = metadata.get('negative_class')
-        if positive is None or str(positive) not in {str(c) for c in classes}:
+        # metadata 의 양성·음성은 표기('1'·'cat')다. 정답 라벨의 실제 값(dtype·공백 포함)으로 되찾아 쓴다 —
+        # 0/1 로 만들면 문자열 정답과 섞여 sklearn 이 'mix of binary and unknown targets' 로 죽고, str() 로
+        # 맞춰 보면 빈 칸 섞인 정수 정답(1.0)에서 사용자가 고른 양성을 못 찾아 기본값으로 바꿔 버린다.
+        positive = find_label(classes, metadata.get('positive_class'))
+        if positive is None:
             # 기본 양성은 자동 판단·지표 계산과 같은 함수로 정한다(M5).
             positive = default_positive_class(classes)[0] if classes else 1
-        if negative is None or str(negative) not in {str(c) for c in classes}:
-            remaining = [c for c in classes if str(c) != str(positive)]
+        negative = find_label(classes, metadata.get('negative_class'))
+        if negative is None:
+            remaining = [c for c in classes if normalize_label(c) != normalize_label(positive)]
             if not remaining:
                 raise ValueError(
                     "정답 컬럼에 클래스가 하나뿐이라 확률에서 예측을 파생할 수 없습니다."
                 )
             negative = remaining[0]
-        # 정답 라벨의 실제 값(dtype 포함)으로 만든다. 0/1 로 만들면 문자열 정답과 섞여
-        # sklearn 이 'mix of binary and unknown targets' 로 죽는다.
-        positive = next(c for c in classes if str(c) == str(positive))
-        negative = next(c for c in classes if str(c) == str(negative))
         df[out] = [positive if v >= threshold else negative for v in df[col]]
         logs["derived_prediction"] = {
             "method": "threshold", "threshold": threshold,
             "source_columns": [col], "target_role": "y_pred",
-            "positive_class": str(positive), "negative_class": str(negative),
+            "positive_class": normalize_label(positive), "negative_class": normalize_label(negative),
         }
 
     elif task_type == 'multiclass':
@@ -317,7 +317,7 @@ def _derive_predictions(
             )
         labels = _resolve_probability_labels(source, _known_targets(task_type, df, truth_col, metadata), "클래스")
         classes = list(pd.Series(df[truth_col]).dropna().unique())
-        by_name = {str(c): c for c in classes}
+        by_name = {normalize_label(c): c for c in classes}  # 표기 → 원래 값(1.0·' cat')
         picks = df[source].astype(float).values.argmax(axis=1)
         df[out] = [by_name.get(labels[i], labels[i]) for i in picks]
         logs["derived_prediction"] = {

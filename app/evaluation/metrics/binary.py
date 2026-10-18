@@ -10,7 +10,7 @@
 import pandas as pd
 import numpy as np
 
-from app.evaluation.labels import default_positive_class
+from app.evaluation.labels import default_positive_class, find_label
 from typing import Dict, Any
 from sklearn.metrics import (
     confusion_matrix,
@@ -39,11 +39,15 @@ def _get_true_score(df: pd.DataFrame, mapping_dict: dict):
 def _resolve_positive_value(y_true, positive_class=None):
     """양성으로 간주할 실제 값을 결정한다.
 
-    positive_class 가 주어지면 원래 데이터 타입에 맞춰 변환해 쓰고,
+    positive_class 가 주어지면 그 표기에 해당하는 데이터의 원래 값을 쓰고(없으면 데이터 타입에 맞춰 변환),
     없으면 labels.default_positive_class 의 기본값을 쓴다(M5 — 자동 판단·예측 파생과 같은 규칙).
     """
     if positive_class is not None:
-        # positive_class가 문자열 형태일 수 있으므로 원래 데이터 타입과 맞춤 비교
+        # 표기('1'·'cat')로 원래 값(1.0·' cat')을 먼저 찾는다 — 표기 규칙은 labels.normalize_label 하나.
+        found = find_label(np.unique(y_true), positive_class)
+        if found is not None:
+            return found
+        # 데이터에 없는 값이면 종전처럼 원래 데이터 타입에 맞춰 변환만 한다
         try:
             if np.issubdtype(y_true.dtype, np.number):
                 return type(y_true.iloc[0])(positive_class)

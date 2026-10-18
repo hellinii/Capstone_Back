@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any
 
-from app.evaluation.labels import normalize_label, parse_label_cell, sort_labels
+from app.evaluation.labels import find_label, normalize_label, parse_label_cell, sort_labels
 from sklearn.metrics import (
     accuracy_score, 
     precision_score, 
@@ -109,6 +109,9 @@ def _get_binary_kwargs(y_true, mapping_dict):
     pos_label = mapping_dict.get('_positive_class')
     if pos_label is None:
         pos_label = classes[-1] if len(classes) > 0 else 1
+    found = find_label(classes, pos_label)  # 표기 '1'·'cat' → 원래 값 1.0·' cat'
+    if found is not None:
+        return {"pos_label": found, "average": "binary", "zero_division": 0}
     try:
         if np.issubdtype(y_true.dtype, np.number):
             pos_label = type(y_true.iloc[0])(pos_label)
