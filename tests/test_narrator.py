@@ -415,8 +415,21 @@ def test_system_prompt_names_the_task_type():
     """분류 유형 이름이 AI 에 직접 간다(재료 목록 2절 "작업 유형 — AI 예")."""
     from app.narrative.prompt import build_system_prompt
 
+    assert "이진 분류" in build_system_prompt("internal", "binary")
     assert "다중 클래스 분류" in build_system_prompt("internal", "multiclass")
-    assert "멀티레이블 분류" in build_system_prompt("internal", "multilabel")
+    # W9: 한국어 이름은 '다중 레이블 분류'로 통일한다(옛 '멀티레이블 분류'는 AI 에 가지 않는다).
+    multilabel = build_system_prompt("internal", "multilabel")
+    assert "다중 레이블 분류" in multilabel
+    assert "멀티레이블 분류" not in multilabel
+
+
+def test_task_type_labels_are_korean_names():
+    """W9: 프론트 성적서 TASK_TYPE_LABELS 와 같은 세 이름(프론트 대조 테스트가 이 표를 읽는다)."""
+    from app.narrative.prompt import TASK_TYPE_LABELS
+
+    assert TASK_TYPE_LABELS == {
+        "binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "다중 레이블 분류",
+    }
 
 
 def test_derived_prediction_threshold_is_allowed_in_narrative():

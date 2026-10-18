@@ -12,8 +12,10 @@ import json
 from app.narrative.derived import threshold_tuning_needed
 
 
-# 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예").
-TASK_TYPE_LABELS = {"binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "멀티레이블 분류"}
+# 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예"). 한국어 이름은 이 셋으로 통일한다(W9,
+# 2026-10-18 사용자 결정) — 프론트 성적서의 TASK_TYPE_LABELS 와 같은 글자다. 이미 발급된 성적서는 저장된
+# 이름 그대로 두고, 새 서술 요청부터 이 이름이 AI 에 간다.
+TASK_TYPE_LABELS = {"binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "다중 레이블 분류"}
 
 
 # 규칙 10 — 예측을 확률에서 파생했을 때 방법마다 다른 한 문장(고정 문구 9 와 같은 구분).
