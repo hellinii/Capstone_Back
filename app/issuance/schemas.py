@@ -3,12 +3,43 @@
 import json
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticCustomError
 
 # 발급 요청에 실리는 성적서 원본(FinalReportData)의 크기 상한.
 # 통상 수십 KB 다 — ROC/PR 곡선은 60점으로 다운샘플되고 datasetSamples 는 비어 있다.
 # 이 API 는 무인증이므로 상한 없이 받으면 임의 크기 JSON 이 DB 에 영구 저장된다
 # (ISSUES.md G-03·G-04 와 같은 뿌리). 통상값의 약 20배로 여유 있게 잡는다.
 MAX_CONTENT_BYTES = 1_048_576  # 1 MiB
+
+# 발급 비고·정정 사유·발급자의 길이 상한(B16). 이 셋은 발급 이력으로 성적서 서명란에 그대로 인쇄된다 —
+# 한 줄 사유라 200자면 넉넉하다. 무인증 API 라 상한 없이 받으면 긴 글이 DB 와 인쇄본에 영구히 남는다.
+# 프론트 발급·정정 발급 대화상자의 입력 칸 상한이 이 값과 같다(프론트 테스트가 이 줄을 읽어 대조한다).
+MAX_ISSUANCE_TEXT_CHARS = 200
+
+# 422 응답의 detail[].msg 로 그대로 나가는 한국어 문구. PydanticCustomError 를 쓰는 것은
+# ValueError 처럼 "Value error, " 가 앞에 붙지 않게 하려는 것이다(프론트가 이 문구를 그대로 보인다).
+_FIELD_NAME_KO = {"note": "발급 비고", "reissue_note": "정정 사유", "issuer": "발급자"}
+
+
+def _check_text_length(v: str, field: str) -> str:
+    """앞뒤 공백을 뗀 길이가 상한을 넘으면 한국어 문구로 거절한다."""
+    if len(v) > MAX_ISSUANCE_TEXT_CHARS:
+        raise PydanticCustomError(
+            "issuance_text_too_long",
+            "{field}는 {limit}자 이하로 적어 주세요(지금 {length}자).",
+            {"field": _FIELD_NAME_KO[field], "limit": MAX_ISSUANCE_TEXT_CHARS, "length": len(v)},
+        )
+    return v
+
+
+def _optional_text(v: str | None, field: str) -> str | None:
+    """선택 칸 — 공백뿐이면 비운 것(None)으로 본다. 그러면 서비스가 기본값('최초 발급'·기관 이름)을 쓴다."""
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    return _check_text_length(v, field)
 
 
 def _validate_content_size(v: dict | None) -> dict | None:
@@ -37,7 +68,7 @@ class IssueRequest(BaseModel):
     run_id:        str        = Field(min_length=1, description="프론트 워크스페이스 run 식별자(멱등 키)")
     model_name:    str | None = Field(default=None, description="대상 모델명")
     model_version: str | None = Field(default=None, description="대상 모델 버전")
-    note:          str | None = Field(default=None, description="발급 비고(미지정 시 '최초 발급')")
+    note:          str | None = Field(default=None, description="발급 비고(미지정·공백 시 '최초 발급', 200자 이하)")
     issuer:        str | None = Field(default=None, description="발급자(미지정 시 기관 기본값)")
     content:       dict | None = Field(
         default=None,
@@ -58,6 +89,16 @@ class IssueRequest(BaseModel):
     def _content_size(cls, v: dict | None) -> dict | None:
         return _validate_content_size(v)
 
+    @field_validator("note")
+    @classmethod
+    def _note_limit(cls, v: str | None) -> str | None:
+        return _optional_text(v, "note")
+
+    @field_validator("issuer")
+    @classmethod
+    def _issuer_limit(cls, v: str | None) -> str | None:
+        return _optional_text(v, "issuer")
+
 
 class ReissueRequest(BaseModel):
     """[재발급] 정정 발급 요청. 같은 번호 유지 + 버전 차수 증가(v1.0→v1.1)."""
@@ -66,7 +107,7 @@ class ReissueRequest(BaseModel):
         description="발급 시 사용한 run 식별자 — 소지 증명. report_no 는 순차 채번이라 "
                     "전수 열거가 가능하지만 run_id 는 randomUUID 라 추측할 수 없다.",
     )
-    note:   str        = Field(min_length=1, description="정정 사유(필수)")
+    note:   str        = Field(description="정정 사유(필수, 앞뒤 공백을 뗀 1~200자)")
     issuer: str | None = Field(default=None, description="발급자(미지정 시 기관 기본값)")
     content: dict | None = Field(
         default=None,
@@ -92,9 +133,15 @@ class ReissueRequest(BaseModel):
         # SignatureSection 을 통해 성적서에 그대로 인쇄된다. 사유가 공란이면 제3자가
         # 무엇이 왜 정정됐는지 판별할 근거가 사라진다(ISSUES.md F-06).
         # UI 는 ReportLayout.tsx 에서 이미 막고 있었으나 API 는 통과했다.
-        if not v.strip():
-            raise ValueError("정정 사유(note)는 비어 있을 수 없습니다.")
-        return v.strip()
+        v = v.strip()
+        if not v:
+            raise PydanticCustomError("reissue_note_blank", "정정 사유를 적어 주세요.")
+        return _check_text_length(v, "reissue_note")
+
+    @field_validator("issuer")
+    @classmethod
+    def _issuer_limit(cls, v: str | None) -> str | None:
+        return _optional_text(v, "issuer")
 
 
 class IssuanceHistoryItem(BaseModel):
