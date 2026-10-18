@@ -221,14 +221,19 @@ pytest -q                          # 테스트 (tests/)
 ### 9.2 양성 클래스 기본값
 
 사용자가 양성 클래스를 고르지 않았을 때의 기본값은 `app/evaluation/labels.py` `default_positive_class` 하나에서 정한다.
-자동 판단(`analysis/metadata.py`)·지표 계산(`metrics/binary.py`)·확률에서 예측 파생(`preprocessor.py`)이 모두 이 함수를 쓴다.
+자동 판단(`analysis/metadata.py`)·지표 계산·확률에서 예측 파생(`preprocessor.py`)이 모두 이 함수를 쓴다. 지표 계산은
+`metrics/binary.py` 의 `_resolve_positive_value` 한 곳에서 양성을 정하고, Precision·Recall·F1(`metrics/common.py`
+`_get_binary_kwargs`)·신뢰구간·혼동 수 집계도 그 함수를 부른다. 양성이 지정되면 그 표기의 원래 값(§9.4)을, 지정되지
+않으면(metadata 없이 API 를 직접 부른 경우) 이 기본값을 쓴다.
 
 1. 숫자면 큰 값(1 > 0)
 2. 알려진 짝(yes/no·true/false·positive/negative·spam/ham·malignant/benign·fraud/normal …)이면 정해진 값
 3. 그 밖은 정렬 순서(숫자면 수치 순, 아니면 사전 순)의 **뒤쪽** 값 — 임시로 고른 것이라 `positive_class_ambiguous=true` 로 알린다
 
 종전에는 3번에서 자동 판단만 **앞쪽**을 골라 화면에 보인 양성과 성적서 수치의 양성이 달랐다('cat'·'dog' 이면 화면은
-cat, 지표는 dog). 이제 셋 다 dog 다. 지난 평가는 저장된 양성 값을 쓰므로 영향이 없다.
+cat, 지표는 dog). 이제 셋 다 dog 다. 지난 평가는 저장된 양성 값을 쓰므로 영향이 없다. 양성 미지정일 때
+Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/normal 이면 종전엔 그 셋만 normal 을 양성으로 봤다).
+프론트는 양성을 늘 보내므로 화면 결과는 바뀌지 않는다.
 
 ### 9.3 검증 단계에서 미리 보는 것 (`/api/validate-data`)
 
@@ -240,3 +245,20 @@ cat, 지표는 dog). 이제 셋 다 dog 다. 지난 평가는 저장된 양성 �
 - **지연시간 단위**(`Latency unit`, warning): 지연시간 역할은 ms 로 읽는다. 값이 모두 1 미만이면 초로 적은 것으로 보여
   경고한다. 1 ms 미만으로 도는 모델도 있어 막지 않는다 — 단위는 데이터만으로 확정할 수 없다.
 
+### 9.4 클래스 표기
+
+데이터의 클래스 값과 화면·API 가 주고받는 클래스 이름은 다를 수 있다. 빈 칸이 하나라도 있으면 pandas 가 정수 정답
+컬럼을 float 로 읽어 1 이 1.0 이 되고, 문자열 클래스에는 앞뒤 공백(`' cat'`)이 붙어 있을 수 있다.
+
+- **주고받는 이름은 표기 하나**: `app/evaluation/labels.py` `normalize_label` — 정수 값 float 는 소수점 없이(1.0 → `'1'`),
+  앞뒤 공백은 뗀다(`' cat'` → `'cat'`). metadata 의 클래스 목록·`positive_class`, 응답의 `derived_prediction.positive_class`·
+  `negative_class`, `confusion_counts.positive_class` 가 모두 이 표기다. 그래서 정답이 float 이면 양성은 `'1.0'` 이 아니라
+  `'1'` 로 나간다(정수·문자열 정답은 종전과 같다). 이미 저장된 옛 run 의 metadata 에는 `'1.0'` 이 남아 있을 수 있다.
+- **원래 값은 `find_label` 로 되찾는다**: `y_true == 양성` 처럼 데이터 값과 비교하는 곳은 `str()` 로 맞춰 보지 않고
+  `labels.find_label(값들, 표기)` 로 원래 값(1.0·`' cat'`)을 찾아 쓴다. 쓰는 곳: 이진 예측 파생(`preprocessor.py`),
+  `binary._resolve_positive_value`(§9.2). 다중 예측 파생은 같은 규칙으로 만든 표기 → 원래 값 표를 쓴다. 표기를 만들어
+  내보내는 쪽(metadata 의 이진 클래스 판단·알려진 정답 목록·확률 컬럼 클래스 확정)은 `normalize_label` 을 쓴다.
+- **검증의 클래스 불일치 검사는 숫자 표기만 맞춘다**: `validation_checks.check_class_mismatch` 는 `labels.label_text`
+  (정수 값 float → 정수 표기, 공백은 그대로)로 비교한다. 정답 1.0 과 예측 1 은 같은 클래스로 보고, 정답 `' cat'` 과
+  예측 `'cat'` 처럼 공백이 다른 것은 계속 경고한다 — 평가는 둘을 다른 클래스로 세기 때문이다. `normalize_label` 은
+  `label_text` 에 공백 제거를 더한 것이라 숫자 표기 규칙은 한 곳에 있다.
