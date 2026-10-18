@@ -33,6 +33,7 @@
 """
 from typing import Any, Iterable, List
 import ast
+import math
 
 
 def normalize_label(value: Any) -> str:
@@ -99,3 +100,50 @@ def normalize_distribution(distribution: dict) -> dict:
     for key, count in distribution.items():
         merged[normalize_label(key)] = merged.get(normalize_label(key), 0) + int(count)
     return {label: merged[label] for label in sort_labels(merged.keys())}
+
+
+# ── 양성 클래스 기본값(M5) ────────────────────────────────────────────────────
+# 사용자가 양성 클래스를 고르지 않았을 때 무엇을 양성으로 볼지 정하는 규칙은 이 함수 하나다. 종전에는
+# 세 곳이 따로 정했다 — 자동 판단(analysis.metadata)은 모르는 두 문자열이면 **앞쪽**을, 지표 계산
+# (metrics.binary)과 예측 파생(preprocessor)은 **뒤쪽**을 골라, 화면에 보인 양성과 성적서 수치의 양성이
+# 달랐다. SPEC §0("문자면 알파벳 후순위")에 맞춰 뒤쪽으로 모았다.
+#
+# 순서: ① 숫자면 큰 값(1 > 0) ② 알려진 짝(yes/no·spam/ham·fraud/normal …)이면 정해진 값
+#       ③ 그 밖은 표준 순서(sort_labels)의 뒤쪽 값 — 임시로 고른 것이라 ambiguous 로 알린다.
+KNOWN_POSITIVE = frozenset({"1", "yes", "true", "positive", "pos", "spam", "malignant", "fraud", "1.0"})
+KNOWN_NEGATIVE = frozenset({"0", "no", "false", "negative", "neg", "ham", "benign", "normal", "0.0"})
+
+
+def _is_missing(value: Any) -> bool:
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
+def default_positive_class(values: Iterable[Any]) -> tuple[Any | None, Any | None, bool]:
+    """정답 값들에서 기본 양성·음성 클래스를 고른다 → (양성, 음성, 사용자 확인 필요 여부).
+
+    돌려주는 값은 **입력에 있던 원래 값**(dtype 그대로)이라 `y_true == 양성` 비교에 바로 쓴다.
+    값 종류가 둘이 아니면 이진 판단이 안 되므로 음성은 None, ambiguous 는 True 이고, 양성은 표준
+    순서의 뒤쪽 값을 임시로 준다(값이 하나도 없으면 None).
+    """
+    raw: dict[str, Any] = {}
+    for v in values:
+        if not _is_missing(v):
+            raw.setdefault(normalize_label(v), v)
+    if not raw:
+        return None, None, True
+    order = sort_labels(raw)
+    if len(order) != 2:
+        return raw[order[-1]], None, True
+
+    first, last = order
+    try:
+        float(first), float(last)
+        return raw[last], raw[first], False  # 숫자 — sort_labels 가 수치 순서라 뒤쪽이 큰 값
+    except ValueError:
+        pass
+    lf, ll = first.lower(), last.lower()
+    if lf in KNOWN_POSITIVE and ll in KNOWN_NEGATIVE:
+        return raw[first], raw[last], False
+    if ll in KNOWN_POSITIVE and lf in KNOWN_NEGATIVE:
+        return raw[last], raw[first], False
+    return raw[last], raw[first], True

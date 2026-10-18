@@ -18,7 +18,9 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 
 from app.core.schemas import METRIC_REQUIREMENTS, PREDICTION_ROLES_BY_TASK, TaskType
-from app.evaluation.labels import normalize_distribution, normalize_label, parse_label_cell, sort_labels
+from app.evaluation.labels import (
+    default_positive_class, normalize_distribution, normalize_label, parse_label_cell, sort_labels,
+)
 
 from .frame import build_evaluation_frame
 
@@ -231,7 +233,8 @@ def _derive_predictions(
         positive = metadata.get('positive_class')
         negative = metadata.get('negative_class')
         if positive is None or str(positive) not in {str(c) for c in classes}:
-            positive = sorted(classes, key=str)[-1] if classes else 1
+            # 기본 양성은 자동 판단·지표 계산과 같은 함수로 정한다(M5).
+            positive = default_positive_class(classes)[0] if classes else 1
         if negative is None or str(negative) not in {str(c) for c in classes}:
             remaining = [c for c in classes if str(c) != str(positive)]
             if not remaining:

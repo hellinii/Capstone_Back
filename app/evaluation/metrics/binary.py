@@ -9,6 +9,8 @@
 
 import pandas as pd
 import numpy as np
+
+from app.evaluation.labels import default_positive_class
 from typing import Dict, Any
 from sklearn.metrics import (
     confusion_matrix,
@@ -38,7 +40,7 @@ def _resolve_positive_value(y_true, positive_class=None):
     """양성으로 간주할 실제 값을 결정한다.
 
     positive_class 가 주어지면 원래 데이터 타입에 맞춰 변환해 쓰고,
-    없으면 정렬상 마지막 값을 양성으로 본다(e.g. 'Yes', 1).
+    없으면 labels.default_positive_class 의 기본값을 쓴다(M5 — 자동 판단·예측 파생과 같은 규칙).
     """
     if positive_class is not None:
         # positive_class가 문자열 형태일 수 있으므로 원래 데이터 타입과 맞춤 비교
@@ -49,8 +51,8 @@ def _resolve_positive_value(y_true, positive_class=None):
         except Exception:
             return positive_class
 
-    classes = np.sort(np.unique(y_true))
-    return classes[-1] if len(classes) > 0 else 1
+    positive, _, _ = default_positive_class(np.unique(y_true))
+    return positive if positive is not None else 1
 
 def _binarize_true_labels(y_true, positive_class=None):
     """문자열 등 비숫자형 라벨을 0, 1로 안전하게 변환"""
