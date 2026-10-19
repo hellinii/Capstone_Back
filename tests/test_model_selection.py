@@ -1,6 +1,6 @@
 """test_model_selection.py — 서술·매핑 모델 이름을 환경변수로 고르는지(2026-10-23 gpt-4.1-nano 종료 대응).
 
-서술은 Claude(app.narrative.llm, 기본 claude-sonnet-5-5), 컬럼 매핑은 OpenAI(기본 gpt-4.1-mini).
+서술은 Claude(app.narrative.llm, 기본 claude-sonnet-5-5), 컬럼 매핑은 OpenAI(기본 gpt-6-luna).
 코드 기본값은 운영값이다. 기본값이 종료된 모델로 돌아가거나, 환경변수를 읽지 않거나,
 호출에 넘긴 모델과 응답 meta.model 이 어긋나면 이 파일이 실패해야 한다.
 """
@@ -37,9 +37,9 @@ def _clear_model_env(monkeypatch):
 
 def test_default_models_are_not_retired():
     assert llm.DEFAULT_NARRATIVE_MODEL == "claude-sonnet-5-5"
-    assert llm_mapper.DEFAULT_MAPPING_MODEL == "gpt-4.1-mini"
+    assert llm_mapper.DEFAULT_MAPPING_MODEL == "gpt-6-luna"
     assert llm.narrative_model() == "claude-sonnet-5-5"
-    assert llm_mapper.mapping_model() == "gpt-4.1-mini"
+    assert llm_mapper.mapping_model() == "gpt-6-luna"
 
 
 def test_env_overrides_and_blank_falls_back(monkeypatch):
@@ -76,8 +76,9 @@ async def test_mapping_calls_use_selected_model_including_retry(monkeypatch, mak
     df = pd.DataFrame({"id": [1], "y_true": [0], "y_pred": [1]})
     with pytest.raises(openai.BadRequestError):
         await analyze_columns_with_llm(fake, TaskType.binary, list(df.columns), df)
-    models = [c.kwargs["model"] for c in fake.chat.completions.create.call_args_list]
-    assert models == ["gpt-x-map", "gpt-x-map"]
+    calls = fake.chat.completions.create.call_args_list
+    assert [c.kwargs["model"] for c in calls] == ["gpt-x-map", "gpt-x-map"]
+    assert ["temperature" in c.kwargs for c in calls] == [False, False]  # gpt-4 계열이 아니면 재시도에도 없다
 
 
 def test_retired_model_not_hardcoded_in_app():
@@ -86,3 +87,23 @@ def test_retired_model_not_hardcoded_in_app():
     assert files, "app/*.py 를 하나도 찾지 못했다"
     hits = [str(p) for p in files if RETIRED_MODEL in p.read_text(encoding="utf-8")]
     assert hits == [], f"종료되는 모델 이름이 코드에 남아 있다: {hits}"
+
+
+@pytest.mark.parametrize("model, sends_temperature", [
+    ("gpt-6-luna", False), ("gpt-5.5", False), ("gpt-4.1-mini", True), ("gpt-4.1", True),
+])
+async def test_mapping_sends_temperature_only_to_models_that_take_it(
+    monkeypatch, make_fake_openai_client, model, sends_temperature
+):
+    """추론형 모델에 temperature 를 보내면 400 이고, 그것이 스키마 거부 재시도를 엉뚱하게 쓴다."""
+    monkeypatch.setenv("MAPPING_MODEL", model)
+    fake = make_fake_openai_client({"column_mappings": [
+        {"column": "id", "role": "sample_id"}, {"column": "y_true", "role": "y_true"}, {"column": "y_pred", "role": "y_pred"},
+    ]})
+    df = pd.DataFrame({"id": [1, 2], "y_true": [0, 1], "y_pred": [1, 1]})
+    await analyze_columns_with_llm(fake, TaskType.binary, list(df.columns), df)
+    kw = fake.chat.completions.create.call_args.kwargs
+    assert kw["model"] == model
+    assert ("temperature" in kw) is sends_temperature
+    if sends_temperature:
+        assert kw["temperature"] == 0

@@ -25,7 +25,7 @@ services:
       - key: NARRATIVE_EFFORT
         sync: false            # 선택. 비우면 low. low | medium | high | xhigh | max
       - key: MAPPING_MODEL
-        sync: false            # 선택. 비우면 코드 기본값(gpt-4.1-mini). 컬럼 매핑 모델을 바꿀 때만 넣는다
+        sync: false            # 선택. 비우면 코드 기본값(gpt-6-luna). 안 되면 gpt-4.1-mini 를 넣는다
       # 아래 둘은 기본 꺼짐. 이 파일은 이 서비스에 적용되지 않으므로(위 ⚠️ 참조)
       # 실제로 켜려면 대시보드 Environment 에서 직접 넣어야 한다. 문서 정합용.
       - key: REQUIRE_PERSISTENT_DB

@@ -24,12 +24,22 @@ from app.analysis.metadata import extract_metadata
 
 
 # 컬럼 매핑 모델. 코드 기본값 = 운영값(종전 nano 모델은 2026-10-23 종료). 호출마다 읽는다.
-DEFAULT_MAPPING_MODEL = "gpt-4.1-mini"
+# gpt-6-luna 는 2026-10-19 실호출로 엄격 스키마·45초 안을 확인했다. 안 되면 MAPPING_MODEL=gpt-4.1-mini.
+DEFAULT_MAPPING_MODEL = "gpt-6-luna"
 
 
 def mapping_model() -> str:
     """컬럼 매핑에 쓸 모델 이름(`MAPPING_MODEL`, 비었으면 코드 기본값)."""
     return os.getenv("MAPPING_MODEL", "").strip() or DEFAULT_MAPPING_MODEL
+
+
+def _sampling_kwargs(model: str) -> dict:
+    """temperature 를 받는 모델에만 temperature=0 을 보낸다.
+
+    gpt-4 계열은 받고, 추론형 모델(gpt-5 이후 등)은 기본값이 아닌 temperature 를 400 으로 거절한다.
+    거절되면 스키마 거부 재시도(D5a)와 같은 BadRequestError 라 엉뚱하게 재시도를 한 번 더 쓰게 된다.
+    """
+    return {"temperature": 0} if model.startswith("gpt-4") else {}
 
 
 def _build_response_schema(task_type: TaskType, columns: list[str] | None = None) -> dict:
@@ -95,7 +105,7 @@ async def analyze_columns_with_llm(
                 model=model,
                 messages=messages,
                 response_format=_build_response_schema(task_type, schema_columns),
-                temperature=0,
+                **_sampling_kwargs(model),
             )
     except (openai.BadRequestError, openai.UnprocessableEntityError):
         # 동적 enum strict 스키마가 **거부된 경우에만** enum 없는 스키마로 1회 재시도(D5a).
@@ -108,7 +118,7 @@ async def analyze_columns_with_llm(
                 model=model,
                 messages=messages,
                 response_format=_build_response_schema(task_type, None),
-                temperature=0,
+                **_sampling_kwargs(model),
             )
 
     data = json.loads(response.choices[0].message.content)
