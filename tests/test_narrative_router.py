@@ -4,7 +4,7 @@ narrator.py 는 함수 단위 테스트(test_narrator.py)는 있으나 엔드포
 PR-F(grounding.py/derived.py 분리, generate_narrative 얇게)의 안전망으로, 라우터 배선 +
 규칙 기반 폴백 서술의 현재 출력을 골든으로 고정한다.
 
-lifespan 을 띄우지 않으므로 app.state.openai_client 가 없어(→ None) 결정론적 폴백 경로를 탄다.
+lifespan 을 띄우지 않으므로 app.state.anthropic_client 가 없어(→ None) 결정론적 폴백 경로를 탄다.
 """
 import json
 
@@ -16,19 +16,19 @@ from app.narrative.schemas import ConfusionFact, DistributionFact, FactSheet, Me
 from app.main import app
 from golden_utils import assert_golden
 
-client = TestClient(app)  # lifespan 미실행 → openai_client 없음 → 폴백
+client = TestClient(app)  # lifespan 미실행 → anthropic_client 없음 → 폴백
 
 
 @pytest.fixture(autouse=True)
 def _force_fallback():
-    """app 은 싱글턴이라 다른 테스트가 app.state.openai_client 에 mock 을 남길 수 있다.
+    """app 은 싱글턴이라 다른 테스트가 app.state.anthropic_client 에 가짜를 남길 수 있다.
     폴백 경로를 결정론적으로 태우기 위해 명시적으로 None 을 강제하고 원복한다."""
-    prev = getattr(app.state, "openai_client", None)
-    app.state.openai_client = None
+    prev = getattr(app.state, "anthropic_client", None)
+    app.state.anthropic_client = None
     try:
         yield
     finally:
-        app.state.openai_client = prev
+        app.state.anthropic_client = prev
 
 
 def _sample_request() -> NarrativeRequest:
@@ -160,7 +160,7 @@ def test_response_field_contract_fallback():
     _assert_response_contract(body, ["P1", "P2", "P3"])
 
 
-def test_response_field_contract_llm(make_fake_openai_client):
+def test_response_field_contract_llm(make_fake_anthropic_client):
     llm_json = {
         "interpretation": {"confusion_analysis": "오분류는 25건이다.", "distribution_analysis": ""},
         "conclusion": {"verdict": "FAIL", "benchmark": "", "narrative": "", "risks": ""},
@@ -170,7 +170,7 @@ def test_response_field_contract_llm(make_fake_openai_client):
              "expected_impact": "F1 개선"},
         ],
     }
-    app.state.openai_client = make_fake_openai_client(llm_json)  # autouse 픽스처가 원복한다
+    app.state.anthropic_client = make_fake_anthropic_client(llm_json)  # autouse 픽스처가 원복한다
     body = client.post(
         "/api/generate-narrative", json=json.loads(_problems_request().model_dump_json())
     ).json()

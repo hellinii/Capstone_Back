@@ -57,7 +57,7 @@ def test_remaining_reports_what_is_left():
 
 # ── 두 LLM 경로가 예산 초과 시 200 + 규칙 폴백으로 강등한다 ────────────────
 
-async def test_narrative_degrades_to_rule_fallback_when_budget_is_spent(make_fake_openai_client):
+async def test_narrative_degrades_to_rule_fallback_when_budget_is_spent(make_fake_anthropic_client):
     from app.narrative.schemas import NarrativeRequest
     from app.narrative.service import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
@@ -65,23 +65,23 @@ async def test_narrative_degrades_to_rule_fallback_when_budget_is_spent(make_fak
     for _ in range(llm_budget.MAX_LLM_CALLS_PER_HOUR):
         llm_budget.try_consume()
 
-    client = make_fake_openai_client({"interpretation": {}, "conclusion": {}})
+    client = make_fake_anthropic_client({"interpretation": {}, "conclusion": {}})
     result = await generate_narrative(client, minimal_narrative_request())
 
     assert result.meta.source == "fallback"
     assert result.meta.reason == "budget_exceeded"
     # 예산이 소진됐으면 실제 호출이 일어나면 안 된다 — 그것이 상한의 존재 이유다.
-    client.chat.completions.create.assert_not_called()
+    client.beta.messages.create.assert_not_called()
 
 
-async def test_narrative_still_calls_llm_within_budget(make_fake_openai_client):
+async def test_narrative_still_calls_llm_within_budget(make_fake_anthropic_client):
     from app.narrative.service import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
 
-    client = make_fake_openai_client({"interpretation": {}, "conclusion": {}})
+    client = make_fake_anthropic_client({"interpretation": {}, "conclusion": {}})
     await generate_narrative(client, minimal_narrative_request())
 
-    client.chat.completions.create.assert_called()
+    client.beta.messages.create.assert_called()
 
 
 def test_budget_is_shared_between_both_llm_endpoints():

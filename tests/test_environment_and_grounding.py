@@ -148,7 +148,7 @@ def test_pass_still_rejects_real_shortfall_claims(text):
     assert find_verdict_contradictions([text], "PASS") == [text]
 
 
-def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_openai_client):
+def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_anthropic_client):
     """모순이 발견되면 그 서술을 쓰지 않고 규칙 폴백으로 강등한다."""
     from app.core import llm_budget
     from app.narrative.service import generate_narrative
@@ -158,7 +158,7 @@ def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_openai_
     request = minimal_narrative_request()
     request.fact_sheet.verdict = "FAIL"
 
-    fake = make_fake_openai_client({
+    fake = make_fake_anthropic_client({
         "interpretation": {"confusionAnalysis": "모든 시험항목이 합격 기준을 충족하였다.",
                            "distributionAnalysis": ""},
         "conclusion": {"benchmark": "", "narrative": "", "risks": ""},

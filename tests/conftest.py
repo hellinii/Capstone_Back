@@ -1,9 +1,10 @@
 """공유 pytest 픽스처.
 
-핵심: async OpenAI 클라이언트 목(mock) 팩토리. narrator.generate_narrative /
-analyzer.analyze_columns_with_llm 등 LLM 호출부를 실제 API 키·네트워크 없이
+핵심: 가짜 LLM 클라이언트 팩토리 두 개 — 컬럼 매핑(analyze_columns_with_llm)용 OpenAI 가짜와
+서술(generate_narrative)용 Anthropic 가짜. LLM 호출부를 실제 API 키·네트워크 없이
 결정론적으로 테스트하기 위한 것이다. (grounding 폴백/타임아웃/조립 실패 경로 검증)
 """
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -43,3 +44,104 @@ def _make_fake_openai_client(content=None, *, raise_exc=None):
 def make_fake_openai_client():
     """원하는 응답 JSON 또는 예외로 목 OpenAI 클라이언트를 생성하는 팩토리."""
     return _make_fake_openai_client
+
+
+# ── Anthropic(서술) 가짜 클라이언트 ─────────────────────────────────────────────
+# 서술은 `await client.beta.messages.create(...)` 하나로 Claude 를 부른다(app.narrative.llm).
+# 가짜는 **설치된 SDK 의 실제 서명**에 인자를 묶어 본다 — 서명에 없는 인자(temperature·seed 등)나
+# 빠진 필수 인자는 실제 SDK 처럼 TypeError 가 난다. 응답은 SDK 의 BetaMessage 로 조립해
+# 필드 이름(stop_details·usage.iterations 등)이 실제와 어긋나면 테스트가 깨지게 한다.
+import inspect as _inspect
+
+from anthropic.resources.beta.messages import AsyncMessages as _AsyncBetaMessages
+from anthropic.types.beta import BetaMessage as _BetaMessage
+
+_BETA_CREATE_SIGNATURE = _inspect.signature(_AsyncBetaMessages.create)
+
+
+def fake_beta_message(
+    content=None,
+    *,
+    blocks=None,
+    model="claude-sonnet-5-5",
+    stop_reason="end_turn",
+    stop_details=None,
+    usage=(1000, 500),
+    iterations="auto",
+):
+    """BetaMessage 하나를 만든다.
+
+    - content: dict/list 면 json.dumps 한 text 블록, str 이면 그대로 text 블록, None 이면 블록 없음.
+    - blocks: 주면 content 대신 이 블록 목록을 그대로 쓴다(thinking·fallback 블록 섞기).
+    - iterations: "auto" 면 응답 model 의 message 한 줄, None·[] 면 비움, 목록이면 그대로.
+    """
+    if blocks is None:
+        if content is None:
+            blocks = []
+        else:
+            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+            blocks = [{"type": "text", "text": text}]
+    if iterations == "auto":
+        iterations = [{
+            "type": "message", "model": model, "input_tokens": usage[0], "output_tokens": usage[1],
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        }]
+    return _BetaMessage.model_validate({
+        "id": "msg_fake", "type": "message", "role": "assistant", "model": model,
+        "content": blocks, "stop_reason": stop_reason, "stop_details": stop_details, "stop_sequence": None,
+        "usage": {"input_tokens": usage[0], "output_tokens": usage[1], "iterations": iterations},
+    })
+
+
+def _make_fake_anthropic_client(content=None, *, raise_exc=None, responses=None, delay=0.0, **message_kwargs):
+    """AsyncAnthropic 유사 가짜. `client.beta.messages.create` 만 있다.
+
+    - content / message_kwargs: fake_beta_message 로 응답 하나를 만든다.
+    - responses: 호출마다 차례로 돌려줄 BetaMessage(또는 예외) 목록.
+    - raise_exc: 호출 시 이 예외를 던진다.
+    - delay: 응답 전에 기다릴 초(서버 마감 테스트).
+    """
+    client = MagicMock()
+    queue = list(responses) if responses is not None else None
+
+    async def _create(*args, **kwargs):
+        _BETA_CREATE_SIGNATURE.bind(None, *args, **kwargs)  # 실제 SDK 가 받지 않는 인자면 TypeError
+        if delay:
+            await asyncio.sleep(delay)
+        if raise_exc is not None:
+            raise raise_exc
+        if queue is not None:
+            item = queue.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+            return item
+        return fake_beta_message(content, **message_kwargs)
+
+    client.beta.messages.create = AsyncMock(side_effect=_create)
+    return client
+
+
+@pytest.fixture
+def make_fake_anthropic_client():
+    """원하는 응답·예외로 가짜 Anthropic 클라이언트를 만드는 팩토리."""
+    return _make_fake_anthropic_client
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm_clients(monkeypatch):
+    """모든 테스트에서 실제 LLM 을 부르지 않게 한다.
+
+    앱은 싱글턴이라 다른 테스트가 app.state 에 가짜를 남길 수 있고, 로컬 .env 에 키가 있으면
+    lifespan 이 실제 클라이언트를 만든다. 두 키를 지우고 두 클라이언트를 None 으로 시작한다
+    (키가 필요한 테스트는 monkeypatch.setenv 로 다시 넣는다).
+    """
+    from app.main import app  # 처음 import 할 때 load_dotenv() 가 키를 넣으므로 지우기보다 먼저
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    prev = (getattr(app.state, "openai_client", None), getattr(app.state, "anthropic_client", None))
+    app.state.openai_client = None
+    app.state.anthropic_client = None
+    yield
+    app.state.openai_client, app.state.anthropic_client = prev

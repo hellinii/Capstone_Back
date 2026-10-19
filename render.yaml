@@ -17,9 +17,13 @@ services:
       - key: DATABASE_URL
         sync: false            # Neon 연결 문자열 — 대시보드에서 입력(커밋 금지)
       - key: OPENAI_API_KEY
-        sync: false            # 대시보드에서 입력(커밋 금지)
+        sync: false            # 컬럼 매핑. 대시보드에서 입력(커밋 금지)
+      - key: ANTHROPIC_API_KEY
+        sync: false            # 서술 생성(Claude). 대시보드에서 입력(커밋 금지). 없으면 서술은 규칙 문장
       - key: NARRATIVE_MODEL
-        sync: false            # 선택. 비우면 코드 기본값(gpt-4.1-mini). 서술 생성 모델을 바꿀 때만 넣는다
+        sync: false            # 선택. 비우면 코드 기본값(claude-sonnet-5-5). Anthropic 모델 이름만 넣는다
+      - key: NARRATIVE_EFFORT
+        sync: false            # 선택. 비우면 low. low | medium | high | xhigh | max
       - key: MAPPING_MODEL
         sync: false            # 선택. 비우면 코드 기본값(gpt-4.1-mini). 컬럼 매핑 모델을 바꿀 때만 넣는다
       # 아래 둘은 기본 꺼짐. 이 파일은 이 서비스에 적용되지 않으므로(위 ⚠️ 참조)

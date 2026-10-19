@@ -2,7 +2,7 @@
 routers/narrative.py — LLM 서술 생성 API (성적서 7·8·9절).
 
 평가(/api/evaluate)와 분리된 엔드포인트. 프론트가 평가 결과로 조립한 fact_sheet 를 받아
-LLM(or 규칙 폴백)으로 서술을 생성한다. OpenAI 키가 없거나 호출 실패/grounding 위반 시
+LLM(Claude) 또는 규칙 폴백으로 서술을 생성한다. Anthropic 키가 없거나 호출 실패/grounding 위반 시
 규칙 기반 폴백으로 graceful degradation 하며, 평가 결과(KPI/차트)는 이 엔드포인트와 무관하게 유지된다.
 """
 from fastapi import APIRouter, Request
@@ -27,6 +27,6 @@ async def generate_narrative_endpoint(
     payload: NarrativeRequest,
     request: Request,
 ) -> NarrativeResponse:
-    # analyzer 라우터와 동일하게 app.state 의 OpenAI 클라이언트 재사용 (없으면 None → 폴백)
-    client = getattr(request.app.state, "openai_client", None)
+    # app.state 의 Anthropic 클라이언트 재사용(없으면 None → 규칙 폴백). 컬럼 매핑의 OpenAI 클라이언트와 별개다.
+    client = getattr(request.app.state, "anthropic_client", None)
     return await generate_narrative(client, payload)

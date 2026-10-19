@@ -1,5 +1,6 @@
 """test_model_selection.py — 서술·매핑 모델 이름을 환경변수로 고르는지(2026-10-23 gpt-4.1-nano 종료 대응).
 
+서술은 Claude(app.narrative.llm, 기본 claude-sonnet-5-5), 컬럼 매핑은 OpenAI(기본 gpt-4.1-mini).
 코드 기본값은 운영값이다. 기본값이 종료된 모델로 돌아가거나, 환경변수를 읽지 않거나,
 호출에 넘긴 모델과 응답 meta.model 이 어긋나면 이 파일이 실패해야 한다.
 """
@@ -13,7 +14,7 @@ import pytest
 from app.analysis import llm_mapper
 from app.analysis.llm_mapper import analyze_columns_with_llm
 from app.core.schemas import TaskType
-from app.narrative import service
+from app.narrative import llm
 from app.narrative.schemas import NarrativeRequest
 from app.narrative.service import generate_narrative
 from tests.test_narrator import _no_special_fact_sheet
@@ -35,34 +36,34 @@ def _clear_model_env(monkeypatch):
 
 
 def test_default_models_are_not_retired():
-    assert service.DEFAULT_NARRATIVE_MODEL == "gpt-4.1-mini"
+    assert llm.DEFAULT_NARRATIVE_MODEL == "claude-sonnet-5-5"
     assert llm_mapper.DEFAULT_MAPPING_MODEL == "gpt-4.1-mini"
-    assert service.narrative_model() == "gpt-4.1-mini"
+    assert llm.narrative_model() == "claude-sonnet-5-5"
     assert llm_mapper.mapping_model() == "gpt-4.1-mini"
 
 
 def test_env_overrides_and_blank_falls_back(monkeypatch):
-    monkeypatch.setenv("NARRATIVE_MODEL", " gpt-x-narr ")
+    monkeypatch.setenv("NARRATIVE_MODEL", " claude-x-narr ")
     monkeypatch.setenv("MAPPING_MODEL", "gpt-x-map")
-    assert service.narrative_model() == "gpt-x-narr"
+    assert llm.narrative_model() == "claude-x-narr"
     assert llm_mapper.mapping_model() == "gpt-x-map"
     monkeypatch.setenv("NARRATIVE_MODEL", "  ")
     monkeypatch.setenv("MAPPING_MODEL", "")
-    assert service.narrative_model() == service.DEFAULT_NARRATIVE_MODEL
+    assert llm.narrative_model() == llm.DEFAULT_NARRATIVE_MODEL
     assert llm_mapper.mapping_model() == llm_mapper.DEFAULT_MAPPING_MODEL
 
 
-@pytest.mark.parametrize("env_value, expected", [(None, "gpt-4.1-mini"), ("gpt-x-narr", "gpt-x-narr")])
-async def test_narrative_call_uses_selected_model(monkeypatch, make_fake_openai_client, env_value, expected):
+@pytest.mark.parametrize("env_value, expected", [(None, "claude-sonnet-5-5"), ("claude-x-narr", "claude-x-narr")])
+async def test_narrative_call_uses_selected_model(monkeypatch, make_fake_anthropic_client, env_value, expected):
     if env_value is not None:
         monkeypatch.setenv("NARRATIVE_MODEL", env_value)
-    client = make_fake_openai_client(_CLEAN_LLM_JSON)
+    client = make_fake_anthropic_client(_CLEAN_LLM_JSON, model=expected)
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="external", fact_sheet=_no_special_fact_sheet())
     resp = await generate_narrative(client, req)
-    assert client.chat.completions.create.call_count == 1
-    assert client.chat.completions.create.call_args.kwargs["model"] == expected
+    assert client.beta.messages.create.call_count == 1
+    assert client.beta.messages.create.call_args.kwargs["model"] == expected
     assert resp.meta.source == "llm"
-    assert resp.meta.model == expected  # 응답에 적는 모델 = 실제로 부른 모델
+    assert resp.meta.model == expected  # 응답에 적는 모델 = 실제로 답한 모델
 
 
 async def test_mapping_calls_use_selected_model_including_retry(monkeypatch, make_fake_openai_client):

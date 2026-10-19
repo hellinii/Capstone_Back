@@ -206,7 +206,7 @@ def test_grounding_covers_recommendation_category():
 
 # ── D3c/D7[1]: internal 폴백 + 조립 실패 폴백 (async, 목 클라이언트) ─────────────
 
-async def test_internal_grounding_violation_falls_back(make_fake_openai_client):
+async def test_internal_grounding_violation_falls_back(make_fake_anthropic_client):
     """report_purpose=internal 이어도 grounding 위반 시 규칙 폴백으로 강등(fail-open 제거, D3c)."""
     fs = _no_special_fact_sheet()
     llm_json = {
@@ -215,7 +215,7 @@ async def test_internal_grounding_violation_falls_back(make_fake_openai_client):
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": [],
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="internal", fact_sheet=fs)
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "fallback"
@@ -226,7 +226,7 @@ async def test_internal_grounding_violation_falls_back(make_fake_openai_client):
     assert verify_grounding(_all_texts(resp), wl).passed
 
 
-async def test_clean_llm_response_source_llm(make_fake_openai_client):
+async def test_clean_llm_response_source_llm(make_fake_anthropic_client):
     """근거 있는 정상 응답은 source=llm, verdict 는 서버값으로 강제."""
     fs = _no_special_fact_sheet()
     llm_json = {
@@ -235,7 +235,7 @@ async def test_clean_llm_response_source_llm(make_fake_openai_client):
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": [],
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="external", fact_sheet=fs)
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "llm"
@@ -272,7 +272,7 @@ def test_benchmark_direction_higher_is_better():
     assert ref["direction"] == "higher" and ref["quality"] == "better"
 
 
-async def test_assembly_error_falls_back(make_fake_openai_client):
+async def test_assembly_error_falls_back(make_fake_anthropic_client):
     """스키마 불일치(조립 불가) 응답은 500 대신 규칙 폴백(assembly_error, D7[1])."""
     fs = _no_special_fact_sheet()
     llm_json = {
@@ -281,7 +281,7 @@ async def test_assembly_error_falls_back(make_fake_openai_client):
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": ["not-a-dict"],  # RecommendationOut(**r) 조립 실패 유발
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="external", fact_sheet=fs)
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "fallback"
@@ -545,20 +545,20 @@ def test_rule_10_follows_the_derivation_method():
     assert "10. " not in direct and "derived_prediction" not in direct
 
 
-async def test_service_sends_the_method_specific_rule(make_fake_openai_client):
+async def test_service_sends_the_method_specific_rule(make_fake_anthropic_client):
     llm_json = {
         "interpretation": {"confusion_analysis": "", "distribution_analysis": ""},
         "conclusion": {"verdict": "", "benchmark": "", "narrative": "", "risks": ""},
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": [],
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(
         task_type=TaskType.multiclass, report_purpose="internal", fact_sheet=_with_derivation("argmax")
     )
     await generate_narrative(client, req)
 
-    system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    system = client.beta.messages.create.call_args.kwargs["system"]
     assert "가장 큰 클래스" in system
     assert "임계값을 적용" not in system
 
