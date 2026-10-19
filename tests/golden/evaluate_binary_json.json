@@ -69,6 +69,33 @@
       "M7": 0.4666666666666667,
       "M8": 0.5333333333333333,
       "M9": 0.5111779448621554,
+      "class_report": {
+        "0": {
+          "f1-score": 0.49746192893401014,
+          "precision": 0.532608695652174,
+          "recall": 0.4666666666666667,
+          "support": 105.0
+        },
+        "1": {
+          "f1-score": 0.5123152709359606,
+          "precision": 0.48148148148148145,
+          "recall": 0.5473684210526316,
+          "support": 95.0
+        },
+        "accuracy": 0.505,
+        "macro avg": {
+          "f1-score": 0.5048885999349854,
+          "precision": 0.5070450885668277,
+          "recall": 0.5070175438596491,
+          "support": 200.0
+        },
+        "weighted avg": {
+          "f1-score": 0.5045172663849367,
+          "precision": 0.508323268921095,
+          "recall": 0.505,
+          "support": 200.0
+        }
+      },
       "confidence_intervals": {
         "M1": {
           "high": 0.5735,
@@ -172,6 +199,24 @@
         "tn": 49,
         "tp": 52,
         "type": "binary"
+      },
+      "confusion_matrix": {
+        "labels": [
+          "0",
+          "1"
+        ],
+        "matrix": [
+          [
+            49,
+            56
+          ],
+          [
+            43,
+            52
+          ]
+        ],
+        "n_samples": 200,
+        "type": "multiclass_or_binary"
       },
       "error_ratios": {
         "boundary": null,

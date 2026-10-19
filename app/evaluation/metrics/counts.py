@@ -62,6 +62,40 @@ def calculate_confusion_counts(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     return {"type": "per_class", "rows": rows}
 
 
+# ── 늘 계산하는 혼동행렬·클래스별 표(S2) ──
+# 서술 7.1·8.3 과 9절 최약 클래스는 M21·M22 를 고르지 않아도 행렬·표를 쓴다(사용자 결정 2026-10-19). 성적서
+# 6절의 M21·M22 표 인쇄는 지금처럼 선택을 따른다 — 이 두 키는 서술·사실 시트·문제 목록의 재료다.
+
+def calculate_confusion_matrix_always(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
+    """success_metrics.confusion_matrix — M21 과 같은 모양 + n_samples.
+
+    멀티레이블은 레이블마다 2×2 라 각 2×2 의 합이 표본 수이고, 모든 칸의 합은 '레이블 칸' 수다. 그 단위를
+    unit = "label_cell"·cell_total 로 밝힌다(200행·레이블 4개면 800칸 — 800건으로 읽으면 표본 수와 어긋난다).
+    """
+    cm = common.calculate_confusion_matrix(df, mapping_dict)
+    out = {**cm, "n_samples": int(len(df))}
+    if cm["type"] == "multilabel":
+        out["unit"] = "label_cell"
+        out["cell_total"] = int(sum(sum(sum(row) for row in block) for block in cm["matrix"]))
+    return out
+
+
+def calculate_class_report_always(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
+    """success_metrics.class_report — M22 와 같은 모양(sklearn classification_report).
+
+    이진·다중은 'accuracy' 를 늘 싣고 'micro avg' 는 싣지 않는다. sklearn 은 예측에만 있는 클래스가 있으면
+    accuracy 대신 정답 클래스로 좁힌 'micro avg' 를 내는데, 다중 클래스의 마이크로 평균은 Accuracy 다
+    (프론트 classReportTable 이 이 값으로 마이크로 평균 줄을 만든다). 멀티레이블은 sklearn 그대로
+    (매크로·가중·마이크로·샘플 평균).
+    """
+    report = common.calculate_class_metrics(df, mapping_dict)
+    if mapping_dict.get("_task_type") in ("binary", "multiclass"):
+        y_true, y_pred = common._get_true_pred(df, mapping_dict)
+        report.pop("micro avg", None)
+        report["accuracy"] = float(accuracy_score(y_true, y_pred))
+    return report
+
+
 # ── 불균형 영향(서술 설계 D20) ──
 # IR 이 이 값 **미만**이면 경미. 1.5 정확히는 경미가 아니다(설계 D20 "1.5 미만 = 경미").
 IMBALANCE_MILD_BELOW = 1.5

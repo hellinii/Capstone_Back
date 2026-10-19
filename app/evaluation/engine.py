@@ -137,6 +137,18 @@ def evaluate(
     except Exception:
         pass
 
+    # ── 혼동행렬·클래스별 표 — 지표 선택과 무관하게 늘 계산한다(S2, 서술 7.1·8.3·9절 최약 클래스의 재료) ──
+    # M21·M22 와 같은 모양이고 success_metrics 의 confusion_matrix·class_report 키로 내려보낸다. 성적서 6절의
+    # M21·M22 표 인쇄는 선택을 따른다. 예측이 없어 만들 수 없으면 키를 두지 않는다.
+    for key, func in (
+        ("confusion_matrix", counts.calculate_confusion_matrix_always),
+        ("class_report", counts.calculate_class_report_always),
+    ):
+        try:
+            results[key] = func(df, mapping_dict)
+        except Exception as e:
+            logger.warning("%s 계산 생략: %s", key, e)
+
     # ── 경계·확신 오류 비율 (서술 설계 D30, 확률과 예측이 모두 있을 때) ──
     # 지표가 아니라 success_metrics 의 error_ratios 키로 내려보낸다. 확률 컬럼이 여럿인 역할은
     # mapping_dict 가 마지막 하나만 남기므로 매핑 원본에서 목록을 다시 모은다. 임계값은 파생
