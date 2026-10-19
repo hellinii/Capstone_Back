@@ -206,7 +206,7 @@ def test_grounding_covers_recommendation_category():
 
 # ── D3c/D7[1]: internal 폴백 + 조립 실패 폴백 (async, 목 클라이언트) ─────────────
 
-async def test_internal_grounding_violation_falls_back(make_fake_openai_client):
+async def test_internal_grounding_violation_falls_back(make_fake_anthropic_client):
     """report_purpose=internal 이어도 grounding 위반 시 규칙 폴백으로 강등(fail-open 제거, D3c)."""
     fs = _no_special_fact_sheet()
     llm_json = {
@@ -215,7 +215,7 @@ async def test_internal_grounding_violation_falls_back(make_fake_openai_client):
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": [],
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="internal", fact_sheet=fs)
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "fallback"
@@ -226,7 +226,7 @@ async def test_internal_grounding_violation_falls_back(make_fake_openai_client):
     assert verify_grounding(_all_texts(resp), wl).passed
 
 
-async def test_clean_llm_response_source_llm(make_fake_openai_client):
+async def test_clean_llm_response_source_llm(make_fake_anthropic_client):
     """근거 있는 정상 응답은 source=llm, verdict 는 서버값으로 강제."""
     fs = _no_special_fact_sheet()
     llm_json = {
@@ -235,7 +235,7 @@ async def test_clean_llm_response_source_llm(make_fake_openai_client):
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": [],
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="external", fact_sheet=fs)
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "llm"
@@ -272,7 +272,7 @@ def test_benchmark_direction_higher_is_better():
     assert ref["direction"] == "higher" and ref["quality"] == "better"
 
 
-async def test_assembly_error_falls_back(make_fake_openai_client):
+async def test_assembly_error_falls_back(make_fake_anthropic_client):
     """스키마 불일치(조립 불가) 응답은 500 대신 규칙 폴백(assembly_error, D7[1])."""
     fs = _no_special_fact_sheet()
     llm_json = {
@@ -281,7 +281,7 @@ async def test_assembly_error_falls_back(make_fake_openai_client):
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": ["not-a-dict"],  # RecommendationOut(**r) 조립 실패 유발
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="external", fact_sheet=fs)
     resp = await generate_narrative(client, req)
     assert resp.meta.source == "fallback"
@@ -545,20 +545,20 @@ def test_rule_10_follows_the_derivation_method():
     assert "10. " not in direct and "derived_prediction" not in direct
 
 
-async def test_service_sends_the_method_specific_rule(make_fake_openai_client):
+async def test_service_sends_the_method_specific_rule(make_fake_anthropic_client):
     llm_json = {
         "interpretation": {"confusion_analysis": "", "distribution_analysis": ""},
         "conclusion": {"verdict": "", "benchmark": "", "narrative": "", "risks": ""},
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": [],
     }
-    client = make_fake_openai_client(llm_json)
+    client = make_fake_anthropic_client(llm_json)
     req = NarrativeRequest(
         task_type=TaskType.multiclass, report_purpose="internal", fact_sheet=_with_derivation("argmax")
     )
     await generate_narrative(client, req)
 
-    system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    system = client.beta.messages.create.call_args.kwargs["system"]
     assert "가장 큰 클래스" in system
     assert "임계값을 적용" not in system
 
@@ -1010,11 +1010,11 @@ def test_fallback_risks_mention_near_target_pass_metrics():
 
     risks = resp.conclusion.risks
     assert (
-        "목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Recall(0.81, 기준 0.8, 차이 0.01)로, "
-        "표본이 달라지면 기준에 미달할 위험이 있다." in risks
+        "목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Recall(0.81, 목표 0.8, 차이 0.01)로, "
+        "표본이 달라지면 목표에 미달할 위험이 있다." in risks
     )
     assert "Accuracy(" not in risks
-    assert "식별된 기준 미달 위험은 없다" not in risks
+    assert "식별된 목표 미달 위험은 없다" not in risks
     assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
     # 합격 성적서의 이 서술이 판정 모순으로 걸리지 않는다.
     from app.narrative.grounding import find_verdict_contradictions
@@ -1025,7 +1025,7 @@ def test_fallback_risks_skip_near_target_fail_and_absent_flags():
     """근소 미달(near_target 이지만 fail)은 아슬아슬 '합격'이 아니다. 키가 없으면 종전 문장 그대로."""
     fs = _sample_fact_sheet()
     assert build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.risks == (
-        "기준 미달 지표는 Recall(0.7, 기준 0.8)로, 해당 영역의 성능 저하 위험이 존재한다."
+        "목표에 미달한 지표가 있어 해당 영역의 성능 저하 위험이 존재한다(목표 미달 지표: Recall(0.7, 목표 0.8))."
     )
     near_fail = _bare_fact_sheet(metrics=[_near_metric(value=0.79, margin=-0.01, status="fail")])
     assert "아슬아슬" not in build_fallback_narrative(
@@ -1039,18 +1039,18 @@ def test_fallback_metric_numbers_use_report_digits():
     failed = _bare_fact_sheet(metrics=[MetricFact(
         metric_id="M3", display_name="Recall", value=raw, threshold=0.8, status="fail")])
     resp = build_fallback_narrative(failed, [], compute_derived(failed), "no_key")
-    assert "Recall(0.547, 기준 0.8)" in resp.conclusion.risks
+    assert "Recall(0.547, 목표 0.8)" in resp.conclusion.risks
     assert "0.5473" not in " ".join(_all_texts(resp))
     assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed))).passed
 
     near = _bare_fact_sheet(metrics=[_near_metric(value=0.80789, threshold=0.8, margin=0.00789)])
     near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
-    assert "Recall(0.808, 기준 0.8, 차이 0.008)" in near_risks
+    assert "Recall(0.808, 목표 0.8, 차이 0.008)" in near_risks
 
     ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.78123, threshold=0.8, low=0.712345, high=0.83456)])
     ci_resp = build_fallback_narrative(ci, [], compute_derived(ci), "no_key")
     assert "F1 Score(구간 0.712~0.835, 목표 0.8)" in " ".join(_all_texts(ci_resp))
-    assert "F1 Score(0.781, 기준 0.8)" in ci_resp.conclusion.risks
+    assert "F1 Score(0.781, 목표 0.8)" in ci_resp.conclusion.risks
 
 
 def test_fallback_long_threshold_is_rounded_at_every_site():
@@ -1060,11 +1060,11 @@ def test_fallback_long_threshold_is_rounded_at_every_site():
     failed = _bare_fact_sheet(metrics=[MetricFact(
         metric_id="M3", display_name="Recall", value=0.5, threshold=t, status="fail")])
     risks = build_fallback_narrative(failed, [], compute_derived(failed), "no_key").conclusion.risks
-    assert "Recall(0.5, 기준 0.667)" in risks
+    assert "Recall(0.5, 목표 0.667)" in risks
 
     near = _bare_fact_sheet(metrics=[_near_metric(value=0.68, threshold=t, margin=0.68 - t)])
     near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
-    assert "Recall(0.68, 기준 0.667, 차이 0.013)" in near_risks
+    assert "Recall(0.68, 목표 0.667, 차이 0.013)" in near_risks
 
     ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.6, threshold=t, low=0.55, high=0.7)])
     ci_texts = " ".join(_all_texts(build_fallback_narrative(ci, [], compute_derived(ci), "no_key")))
@@ -1085,20 +1085,23 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
     assert "최대폭" not in build_fallback_narrative(small, [], compute_derived(small), "no_key").conclusion.risks
 
 
-@pytest.mark.parametrize("level, expected, absent", [
-    ("affected",
-     "불균형 비율은 3.2로 불균형이 있고, 정확도와 매크로 F1 의 차이는 0.12, 다수 클래스(neg)와 소수 클래스(pos)의 "
-     "F1 차이는 0.18로 0.1 이상 벌어져 불균형이 성능 수치에 영향을 준 것으로 보인다.",
+# 서술 라운드 S1: 문장을 기준 이상인 차이만 근거로 쓰게 고쳤다(점검 BE-02). 엔진이 낼 수 없는 조합
+# (no_distortion 인데 두 차이 0.12·0.18, mild 인데 비율 3.2)은 엔진이 실제로 낼 값으로 바꿨다.
+@pytest.mark.parametrize("level, values, expected, absent", [
+    ("affected", {},
+     "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있고, 정확도와 매크로 F1 의 차이(0.12)와 다수 클래스(neg)와 "
+     "소수 클래스(pos)의 F1 차이(0.18)가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다.",
      "왜곡은 관찰되지 않았다"),
-    ("no_distortion",
-     "불균형 비율은 3.2로 불균형이 있으나, 정확도와 매크로 F1 의 차이는 0.12, 다수 클래스(neg)와 소수 클래스(pos)의 "
-     "F1 차이는 0.18로 0.1 미만이어서 불균형에 의한 성능 왜곡은 관찰되지 않았다.",
+    ("no_distortion", {"accuracy_minus_macro_f1": 0.05, "majority_minus_minority_f1": 0.03},
+     "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있으나, 불균형에 의한 성능 왜곡은 관찰되지 않았다. "
+     "정확도와 매크로 F1 의 차이(0.05)는 기준(0.1) 미만이다. 다수 클래스(neg)와 소수 클래스(pos)의 F1 "
+     "차이(0.03)는 기준(0.1) 미만이다.",
      "영향을 준"),
-    ("mild", "불균형 비율은 3.2로 1.5 미만이어서 불균형은 경미하다.", "불균형이 있"),
+    ("mild", {"imbalance_ratio": 1.3}, "불균형 비율(1.3)이 1.5 미만이어서 불균형은 경미하다.", "불균형이 있"),
 ])
-def test_fallback_distribution_follows_imbalance_level(level, expected, absent):
+def test_fallback_distribution_follows_imbalance_level(level, values, expected, absent):
     """7.2 의 결론은 엔진이 낸 level 로만 쓴다 — distribution.imbalance_ratio(1.857)로 다시 판정하지 않는다."""
-    fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": _imbalance(level=level)})
+    fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": _imbalance(level=level, **values)})
     derived = compute_derived(fs)
     resp = build_fallback_narrative(fs, [], derived, reason="no_key")
     text = resp.interpretation.distribution_analysis
@@ -1112,7 +1115,7 @@ def test_fallback_distribution_multilabel_uses_label_gap_only():
     ie = _imbalance(accuracy_minus_macro_f1=None, majority_minus_minority_f1=-0.04, level="no_distortion")
     fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": ie})
     text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.distribution_analysis
-    assert "다수 레이블(neg)와 소수 레이블(pos)의 F1 차이는 -0.04로 0.1 미만" in text
+    assert "다수 레이블(neg)과 소수 레이블(pos)의 F1 차이(-0.04)는 음수로 소수 레이블의 F1 이 더 높다." in text
     assert "매크로 F1" not in text
 
 
@@ -1174,6 +1177,11 @@ def test_rules_13_to_15_follow_facts():
     "오류 분석과 같다(7.1·7.2).",
     "자세한 내용은 절 8.3.",
     "환경과 신뢰구간은 6.1·6.4절, 지표 정의는 (7.3, 9.1) 에 있다.",
+    # 2026-10-19 Claude 실호출 — 9절 칸 맨 앞에 소절 머리표를 붙여 썼다.
+    "9.1 데이터 측면에서는 클래스 불균형 영향(P1)이 지목되었다.",
+    "  9.2 모델 측면에서 지목된 문제는 없다.",
+    "9.1에서 지목된 문제는 P1(불균형 영향 있음)이다.",
+    "9.2에서 지목된 문제는 없다.",
 ])
 def test_dotted_section_references_are_not_numbers(text):
     """"8.3절"·"(8.2)" 는 절 번호다 — 종전에는 "3절"만 지우고 "8." 을 환각 수치로 잡았다."""
@@ -1199,6 +1207,12 @@ def test_dotted_section_references_are_not_numbers(text):
     ("값은 (8.2, 0.82) 이다.", "0.82"),
     ("절 8.3.5 를 본다.", "8.3"),
     ("기준 1.5·0.82절과 비교한다.", "1.5"),
+    # 소절 머리표 규칙은 글 맨 앞 + 실제 절 번호 + 띄어쓰기 + 한글일 때만이다.
+    ("정확도는 9.1 수준이다.", "9.1"),
+    ("0.82 수준의 정확도다.", "0.82"),
+    ("9.1% 의 오류율이다.", "9.1%"),
+    ("8.4 수준의 비율이다.", "8.4"),
+    ("9.1로 측정되었다.", "9.1"),
 ])
 def test_dotted_section_rule_does_not_whitelist_fake_values(text, fake):
     """절 번호 꼴만 지운다 — 지표값 꼴(0.82)·백분율(8.2%)·'절감' 앞 숫자는 그대로 검증한다."""

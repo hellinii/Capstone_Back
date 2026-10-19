@@ -43,9 +43,9 @@ async def test_no_key_fallback_is_logged(caplog):
     assert any(r.levelno >= logging.WARNING for r in caplog.records), "로그가 하나도 없다"
 
 
-async def test_narrative_api_error_fallback_is_logged(make_fake_openai_client, caplog):
+async def test_narrative_api_error_fallback_is_logged(make_fake_anthropic_client, caplog):
     """[G-06] LLM 서술 호출 실패 → 폴백이 로그에 남는다."""
-    fake = make_fake_openai_client(raise_exc=RuntimeError("upstream down"))
+    fake = make_fake_anthropic_client(raise_exc=RuntimeError("upstream down"))
     with caplog.at_level(logging.WARNING):
         resp = await generate_narrative(fake, _sample_request())
     assert resp.meta.reason == "api_error"
@@ -54,7 +54,7 @@ async def test_narrative_api_error_fallback_is_logged(make_fake_openai_client, c
     )
 
 
-async def test_grounding_violation_fallback_is_logged(make_fake_openai_client, caplog):
+async def test_grounding_violation_fallback_is_logged(make_fake_anthropic_client, caplog):
     """[G-06] grounding 위반으로 폴백할 때 **어떤 숫자가 걸렸는지** 남아야 한다.
 
     위반 토큰을 남기지 않으면 '환각이 있었다'는 사실만 알고 무엇이었는지 모른다.
@@ -65,7 +65,7 @@ async def test_grounding_violation_fallback_is_logged(make_fake_openai_client, c
         "recommendation_narrative": {"data_quality": "", "model_ops": ""},
         "recommendations": [],
     }
-    fake = make_fake_openai_client(llm_json)
+    fake = make_fake_anthropic_client(llm_json)
     with caplog.at_level(logging.WARNING):
         resp = await generate_narrative(fake, _sample_request())
     assert resp.meta.reason == "grounding_failed"

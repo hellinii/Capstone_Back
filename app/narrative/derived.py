@@ -47,9 +47,16 @@ def _find_pos_idx(labels: list, positive_class) -> int:
     return 1
 
 
-def compute_derived(fs: FactSheet) -> dict:
-    """LLM·폴백이 공통으로 인용할 파생 사실(서버 계산). 환각 방지를 위해 덧셈은 여기서만."""
+def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
+    """LLM·폴백이 공통으로 인용할 파생 사실(서버 계산). 환각 방지를 위해 덧셈은 여기서만.
+
+    task_type 이 "multilabel" 이면 혼동행렬 합계의 단위가 표본이 아니라 **레이블 칸**이다(프론트가 레이블별
+    2×2 를 더해 보낸다 — 표본 200개·레이블 4개면 800칸). 그 단위를 confusion.unit = "label_cell" 로 싣고,
+    분포에는 unit = "label" 을 싣는다(한 표본에 레이블이 여럿이라 비율 합이 100% 를 넘는다).
+    None(옛 호출)이면 종전과 같다.
+    """
     derived: dict = {}
+    multilabel = task_type == "multilabel"
 
     if fs.confusion and fs.confusion.matrix:
         m = fs.confusion.matrix
@@ -61,6 +68,8 @@ def compute_derived(fs: FactSheet) -> dict:
             "correct": correct,
             "misclassified": misclassified,
         }
+        if multilabel:
+            conf["unit"] = "label_cell"
         # 흔히 인용되는 파생 백분율도 서버가 미리 계산(정확값)해 화이트리스트에 포함시킨다.
         # → LLM 이 오분류율 등을 인용해도 grounding 통과(틀린 비율은 여전히 차단됨).
         if total > 0:
@@ -94,6 +103,7 @@ def compute_derived(fs: FactSheet) -> dict:
         # 멀티레이블에서는 백분율 합이 100% 를 넘을 수 있다(buildDatasetDiagnosis 와 같은 규약).
         total = fs.n_samples if fs.n_samples > 0 else sum(dist.values())
         derived["distribution"] = {
+            **({"unit": "label"} if multilabel else {}),
             "total": total,
             "percentages": {
                 k: round((v / total) * 100, 1) if total > 0 else 0.0

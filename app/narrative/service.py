@@ -5,11 +5,11 @@ fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비�
 대체한다. 파생 계산은 derived, 환각 방어는 grounding 모듈에 위임한다.
 
 상호작용
-- 의존(import): openai(런타임 client), app.core.schemas, app.narrative.baselines/fallback/
+- 의존(import): app.narrative.llm(Claude 호출 한 곳), app.core.schemas, app.narrative.baselines/fallback/
   prompt/derived(compute_derived)/grounding(build_number_whitelist·verify_grounding·_collect_grounding_texts)
 - 사용처: app.narrative.router(generate_narrative_endpoint), tests
 """
-import json
+import asyncio
 import logging
 
 from app.narrative.schemas import BenchmarkRefOut, ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
@@ -17,6 +17,7 @@ from app.narrative.baselines import build_benchmark_refs
 from app.narrative.fallback import build_fallback_narrative, problem_recommendation
 from app.narrative.prompt import build_system_prompt, build_user_prompt, build_response_schema
 from app.narrative.derived import compute_derived
+from app.narrative.llm import call_narrative_llm
 from app.narrative.grounding import (
     build_number_whitelist,
     find_verdict_contradictions,
@@ -29,7 +30,16 @@ from app.core.concurrency import llm_slot, run_cpu_bound
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4.1-nano"
+# 옛 동기 경로(/api/generate-narrative)의 서버 마감. 슬롯 대기와 호출을 합쳐 이 시간을 넘으면 200 + 규칙 문장
+# (사유: 슬롯을 얻지 못했으면 busy, 호출 중이었으면 timeout). 프론트는 160초에 요청을 끊으므로 그보다 짧아야
+# 빈 서술 대신 규칙 문장이 간다. llm.CALL_TIMEOUT_SECONDS × (llm.MAX_RETRIES + 1) 이 이 값 안에 든다(테스트 고정).
+NARRATIVE_DEADLINE_SECONDS = 120.0
+
+# 서술 AI 에 보내는 user 프롬프트의 글자 수 상한. 무인증 공개 경로라 칸별 상한만으로는 본문 2MB 안에서
+# 약 96만 자짜리 요청을 만들 수 있고, Sonnet 5.5 는 그것을 받아 한 건에 약 0.7달러를 받는다(독립 검토 OPS-1).
+# 정상 요청은 클래스가 많아도 수만 자 안이다. 넘으면 AI 를 부르지 않고 지갑도 쓰지 않은 채 규칙 문장
+# (사유 input_too_large). 사실 시트 칸별 상한·422 는 S4b 에서 따로 정한다.
+MAX_NARRATIVE_PROMPT_CHARS = 80_000
 
 
 def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
@@ -39,7 +49,7 @@ def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
     여러 개 만들므로 행렬 차원에 대해 제곱으로 커진다(G-04b 실측: 2500x2500 입력이
     이벤트 루프를 15.1 초 막았다).
     """
-    derived = compute_derived(fs)
+    derived = compute_derived(fs, task_type=task_type_value)
     benchmark_refs = build_benchmark_refs(task_type_value, fs.metrics)
     whitelist = build_number_whitelist(fs, benchmark_refs, derived, client_inputs)
     return derived, benchmark_refs, whitelist
@@ -108,40 +118,60 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
     if client is None:
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="no_key")
 
-    # 1-1. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
+    # 1-1. 요청 조립 + 크기 상한 — 지갑을 쓰기 전에 본다(너무 큰 요청이 예산을 먹지 않게).
+    try:
+        system = build_system_prompt(req.report_purpose.value, req.task_type.value, fs)
+        user = build_user_prompt(fs.model_dump(), benchmark_refs, derived, req.client_inputs)
+        schema = build_response_schema(fs.problems)
+    except Exception:
+        # 종전처럼 500 이 아니라 규칙 폴백 — 요청 조립 실패도 서술 실패의 하나다.
+        logger.exception("서술 요청 조립 실패 → 규칙 폴백(assembly_error)")
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")
+    if len(system) + len(user) > MAX_NARRATIVE_PROMPT_CHARS:
+        logger.warning(
+            "서술 요청이 너무 큼(%d자 > %d자) → 규칙 폴백(input_too_large)",
+            len(system) + len(user), MAX_NARRATIVE_PROMPT_CHARS,
+        )
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason="input_too_large")
+
+    # 1-2. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
     #      **429 가 아니라 200 + 폴백이다** — 프론트는 비 200 을 폴백이 아니라 오류로
     #      처리해 7·8·9절이 '생성 예정' 안내로 인쇄된다(사용자에게는 서비스 고장으로 보인다).
-    if not llm_budget.try_consume():
+    #      서술 지갑은 매핑 지갑과 따로다 — 옛 경로는 호출 1번이 보고서 1건이다.
+    if not llm_budget.narrative.try_consume():
         logger.warning(
-            "LLM 시간당 예산 소진(%d회) → 규칙 폴백으로 강등합니다.",
-            llm_budget.MAX_LLM_CALLS_PER_HOUR,
+            "서술 시간당 예산 소진(보고서 %d건) → 규칙 폴백으로 강등합니다.",
+            llm_budget.narrative.limit,
         )
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="budget_exceeded")
 
-    # 2. LLM 호출
-    try:
+    # 2. LLM 호출 — 슬롯 대기까지 서버 마감 안에서.
+    slot = {"acquired": False}
+
+    async def _call():
         async with llm_slot():
-            response = await client.chat.completions.create(
-                model=_MODEL,
-                messages=[
-                    {"role": "system", "content": build_system_prompt(req.report_purpose.value, req.task_type.value, fs)},
-                    {
-                        "role": "user",
-                        "content": build_user_prompt(
-                            fs.model_dump(), benchmark_refs, derived, req.client_inputs
-                        ),
-                    },
-                ],
-                response_format=build_response_schema(fs.problems),
-                temperature=0,
-                seed=4213,
-            )
-        data = json.loads(response.choices[0].message.content)
-    except Exception as exc:
-        # 조용한 품질 강등 지점(G-06). 종전에는 아무 흔적도 남지 않아, 남용으로 인한
-        # 키 소진과 일시적 장애를 사후에 구분할 수 없었다.
-        logger.warning("LLM 서술 호출 실패 → 규칙 폴백(api_error): %r", exc)
+            slot["acquired"] = True
+            return await call_narrative_llm(client, system=system, user=user, schema=schema)
+
+    try:
+        async with asyncio.timeout(NARRATIVE_DEADLINE_SECONDS):
+            result = await _call()
+    except TimeoutError:
+        reason = "timeout" if slot["acquired"] else "busy"
+        logger.warning("서술 서버 마감(%.0f초) 초과 → 규칙 폴백(%s)", NARRATIVE_DEADLINE_SECONDS, reason)
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason=reason)
+    except Exception:
+        # call_narrative_llm 은 SDK 오류를 failure 로 돌려준다. 그 밖의 예외(조용한 품질 강등 지점, G-06)도
+        # 500 이 아니라 규칙 폴백으로.
+        logger.exception("LLM 서술 호출 중 예기치 않은 오류 → 규칙 폴백(api_error)")
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="api_error")
+    if result.failure is not None:
+        # 거절(세 경우 모두)·잘림·모델 없음·시간 초과·API 오류·JSON 오류 — 사유는 그대로 싣고, 자세한 것은
+        # llm 의 호출 기록 로그에 있다(거절 종류·응답 모델·토큰).
+        logger.warning("LLM 서술 호출 실패 → 규칙 폴백(%s)", result.failure)
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason=result.failure)
+    data = result.data
+    model = result.record.response_model or result.record.requested_model
 
     # 3~5. grounding 검증 + 응답 조립. 스키마 불일치/누락으로 조립이 실패해도
     #      500 대신 규칙 폴백(assembly_error)으로 강등한다(D7[1]).
@@ -197,7 +227,7 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
             ),
             recommendation_narrative=RecommendationNarrativeOut(**rec_narr),
             recommendations=aligned,
-            meta=NarrativeMeta(source="llm", model=_MODEL, grounding=grounding),
+            meta=NarrativeMeta(source="llm", model=model, grounding=grounding),
         )
     except Exception:
         logger.exception("narrative 조립/검증 실패 → 규칙 폴백(assembly_error)")

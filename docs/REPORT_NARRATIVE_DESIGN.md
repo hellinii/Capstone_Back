@@ -8,6 +8,17 @@
 >
 > 이 문서를 남겨 두는 이유는 **왜 그렇게 만들었는가**를 잃지 않기 위해서입니다.
 > 앞으로 갱신하지 않습니다(ISSUES.md H-09, 2026-09-07 ★결정 11).
+>
+> **2026-10 서술 모델 전환(본문은 고치지 않고 여기에만 적음).** OpenAI 가 2026-10-23 에 `gpt-4.1-nano` 를
+> 종료해, 본문의 "gpt-4.1-nano + temperature=0 + seed=4213"은 더 이상 현행이 아닙니다.
+>
+> | 구분 | 본문 | **현행** |
+> |---|---|---|
+> | 서술 모델 | `gpt-4.1-nano`(OpenAI) | **Claude Sonnet 5.5**(`claude-sonnet-5-5`, Anthropic SDK, `app/narrative/llm.py`). `NARRATIVE_MODEL`·`NARRATIVE_EFFORT` 로 바꿀 수 있음. 거절되면 서버 쪽 대체 모델(`fallbacks="default"`) |
+> | 컬럼 매핑 모델 | `gpt-4.1-nano` | `gpt-6-luna`(OpenAI 그대로, `MAPPING_MODEL`) |
+> | 키 | `OPENAI_API_KEY` 하나 | 매핑 `OPENAI_API_KEY` + 서술 `ANTHROPIC_API_KEY`(없으면 서술은 규칙 문장) |
+> | 재현성(§4.3 4) | temperature=0 + seed 로 같은 입력 → 같은 성적서 | 온도·seed 를 보내지 않습니다(Sonnet 5.5 가 받지 않음). 숫자·판정은 코드가 계산하므로 늘 같고, "같은 성적서"는 발급 때 저장한 보관본이 보장합니다. 다시 만들기는 같은 요청을 한 번 더 부르는 것입니다 |
+> | 옛 동기 경로 마감 | 없음 | `/api/generate-narrative` 는 슬롯 대기까지 120초 안에 끝나지 않으면 200 + 규칙 문장(사유 busy·timeout) |
 
 
 > 작성일: 2026-06-23

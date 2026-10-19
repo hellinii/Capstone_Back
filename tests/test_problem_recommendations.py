@@ -94,9 +94,9 @@ def _rec(pid, priority="LOW", category="개선", action="재학습을 검토한�
             "action": action, "expected_impact": impact}
 
 
-async def _run(make_fake_openai_client, recs, fs=None):
+async def _run(make_fake_anthropic_client, recs, fs=None):
     fs = fs or _fact_sheet()
-    client = make_fake_openai_client(_llm_json(recs))
+    client = make_fake_anthropic_client(_llm_json(recs))
     req = NarrativeRequest(task_type=TaskType.binary, report_purpose="internal", fact_sheet=fs)
     return await generate_narrative(client, req)
 
@@ -131,18 +131,49 @@ def test_fact_sheet_problems_bounded_and_unique():
 
 def test_response_schema_problem_id_is_enum_of_request_ids():
     schema = build_response_schema(_problems())
-    recs = schema["json_schema"]["schema"]["properties"]["recommendations"]
+    recs = schema["properties"]["recommendations"]
     assert recs["items"]["properties"]["problem_id"] == {"type": "string", "enum": ["P1", "P2", "P3"]}
     assert "problem_id" in recs["items"]["required"]
     assert set(recs["items"]["required"]) == set(recs["items"]["properties"])  # strict: 전부 required
     assert "maxItems" not in recs
 
 
-def test_response_schema_without_problems_allows_no_recommendations():
+def test_response_schema_without_problems_has_no_recommendations_property():
+    """문제가 없으면 권고 속성 자체가 없다 — 구조화 출력은 maxItems 를 받지 않아 '빈 배열만'을 말할 수 없다."""
     for problems in ([], None):
-        recs = build_response_schema(problems)["json_schema"]["schema"]["properties"]["recommendations"]
-        assert recs["maxItems"] == 0
-        assert recs["items"]["properties"]["problem_id"] == {"type": "string"}  # 빈 enum 은 스키마가 아니다
+        schema = build_response_schema(problems)
+        assert "recommendations" not in schema["properties"]
+        assert "recommendations" not in schema["required"]
+        assert set(schema["required"]) == set(schema["properties"])
+
+
+_FORBIDDEN_SCHEMA_KEYWORDS = {"maxItems", "minimum", "maximum", "minLength", "maxLength"}
+
+
+def _walk_schema(node):
+    if isinstance(node, dict):
+        yield node
+        for v in node.values():
+            yield from _walk_schema(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _walk_schema(v)
+
+
+@pytest.mark.parametrize("problems", [None, "some"])
+def test_response_schema_uses_only_structured_output_keywords(problems):
+    """구조화 출력이 받지 않는 키워드가 없고(minItems 는 0·1 만), 추론·근거 칸이 없다(reasoning_extraction)."""
+    schema = build_response_schema(_problems() if problems else None)
+    nodes = list(_walk_schema(schema))
+    assert len(nodes) > 5
+    assert not [n for n in nodes if _FORBIDDEN_SCHEMA_KEYWORDS & set(n)]
+    assert all(n.get("minItems", 0) in (0, 1) for n in nodes)
+    names = {k.lower() for n in nodes for k in (n.get("properties") or {})}
+    assert names and not {k for k in names if any(w in k for w in ("reason", "rationale", "trace", "thought"))}
+    for n in nodes:
+        if n.get("type") == "object":
+            assert n.get("additionalProperties") is False
+            assert set(n["required"]) == set(n["properties"])
 
 
 def test_user_prompt_explains_problems():
@@ -158,8 +189,8 @@ def test_user_prompt_explains_problems():
 
 # ── 서버 후처리(LLM 경로) ───────────────────────────────────────────────────────
 
-async def test_llm_recommendations_drop_unknown_and_empty_ids(make_fake_openai_client):
-    resp = await _run(make_fake_openai_client, [
+async def test_llm_recommendations_drop_unknown_and_empty_ids(make_fake_anthropic_client):
+    resp = await _run(make_fake_anthropic_client, [
         _rec("P9", action="목록에 없는 문제"),
         _rec("", action="번호 없는 권고"),
         _rec("   ", action="공백 번호"),
@@ -172,8 +203,8 @@ async def test_llm_recommendations_drop_unknown_and_empty_ids(make_fake_openai_c
     assert {r.problem_id for r in resp.recommendations} == {"P1", "P2", "P3"}
 
 
-async def test_llm_recommendations_fill_missing_problem_with_template(make_fake_openai_client):
-    resp = await _run(make_fake_openai_client, [_rec("P2", action="임계값 다시 고르기")])
+async def test_llm_recommendations_fill_missing_problem_with_template(make_fake_anthropic_client):
+    resp = await _run(make_fake_anthropic_client, [_rec("P2", action="임계값 다시 고르기")])
     assert resp.meta.source == "llm"
     ids = [r.problem_id for r in resp.recommendations]
     assert ids == ["P1", "P2", "P3"]
@@ -183,34 +214,34 @@ async def test_llm_recommendations_fill_missing_problem_with_template(make_fake_
     assert p3.category == _PROBLEM_TEMPLATES["imbalance_effect"][0]
 
 
-async def test_llm_recommendations_order_by_problem_then_llm_order(make_fake_openai_client):
-    resp = await _run(make_fake_openai_client, [
+async def test_llm_recommendations_order_by_problem_then_llm_order(make_fake_anthropic_client):
+    resp = await _run(make_fake_anthropic_client, [
         _rec("P3", action="c1"), _rec("P1", action="a1"), _rec("P2", action="b1"),
         _rec("P1", action="a2"), _rec("P3", action="c2"),
     ])
     assert [r.action for r in resp.recommendations] == ["a1", "a2", "b1", "c1", "c2"]
 
 
-async def test_llm_recommendations_not_truncated_to_five(make_fake_openai_client):
+async def test_llm_recommendations_not_truncated_to_five(make_fake_anthropic_client):
     recs = [_rec(pid, action=f"권고 {pid}-{k}") for pid in ("P1", "P2", "P3") for k in "abc"]
-    resp = await _run(make_fake_openai_client, recs)
+    resp = await _run(make_fake_anthropic_client, recs)
     assert len(resp.recommendations) == 9
 
 
-async def test_llm_priority_forced_from_problem(make_fake_openai_client):
-    resp = await _run(make_fake_openai_client, [
+async def test_llm_priority_forced_from_problem(make_fake_anthropic_client):
+    resp = await _run(make_fake_anthropic_client, [
         _rec("P1", priority="LOW"), _rec("P2", priority="HIGH"), _rec("P3", priority="LOW"),
     ])
     assert [r.priority for r in resp.recommendations] == ["HIGH", "MEDIUM", "MEDIUM"]
 
 
 @pytest.mark.parametrize("impact", ["재현율 0.8 달성", "통과율 50% 회복", "200건 전부 정분류"])
-async def test_impact_with_number_falls_back_whole(make_fake_openai_client, impact):
+async def test_impact_with_number_falls_back_whole(make_fake_anthropic_client, impact):
     """기대 효과의 숫자는 허용 목록 안(목표값 0.8·점수 50·표본 200)이어도 예측값이라 받지 않는다 — 전체 폴백.
 
     허용 목록 밖 숫자는 그보다 먼저 grounding 이 잡으므로, 여기서는 grounding 을 통과하는 숫자로 고정한다.
     """
-    resp = await _run(make_fake_openai_client, [
+    resp = await _run(make_fake_anthropic_client, [
         _rec("P1"), _rec("P2", impact=impact), _rec("P3"),
     ])
     assert resp.meta.source == "fallback"
@@ -219,9 +250,9 @@ async def test_impact_with_number_falls_back_whole(make_fake_openai_client, impa
     assert all(not has_number_token(r.expected_impact) for r in resp.recommendations)
 
 
-async def test_impact_number_ignored_on_dropped_recommendation(make_fake_openai_client):
+async def test_impact_number_ignored_on_dropped_recommendation(make_fake_anthropic_client):
     """버려지는 권고(모르는 번호)의 기대 효과는 성적서에 실리지 않으니 폴백 사유가 아니다."""
-    resp = await _run(make_fake_openai_client, [_rec("P7", impact="0.8 달성"), _rec("P1")])
+    resp = await _run(make_fake_anthropic_client, [_rec("P7", impact="0.8 달성"), _rec("P1")])
     assert resp.meta.source == "llm"
     assert [r.problem_id for r in resp.recommendations] == ["P1", "P2", "P3"]
 
@@ -233,18 +264,18 @@ def test_has_number_token_follows_grounding_tokens():
     assert has_number_token("-0.1 개선")
 
 
-async def test_llm_recommendations_dropped_when_no_problems(make_fake_openai_client):
-    resp = await _run(make_fake_openai_client, [_rec("P1")], fs=_fact_sheet(problems=[]))
+async def test_llm_recommendations_dropped_when_no_problems(make_fake_anthropic_client):
+    resp = await _run(make_fake_anthropic_client, [_rec("P1")], fs=_fact_sheet(problems=[]))
     assert resp.meta.source == "llm"
     assert resp.recommendations == []
 
 
-async def test_llm_schema_sent_with_request_problem_ids(make_fake_openai_client):
+async def test_llm_schema_sent_with_request_problem_ids(make_fake_anthropic_client):
     fs = _fact_sheet()
-    client = make_fake_openai_client(_llm_json([_rec("P1")]))
+    client = make_fake_anthropic_client(_llm_json([_rec("P1")]))
     await generate_narrative(client, NarrativeRequest(task_type=TaskType.binary, fact_sheet=fs))
-    sent = client.chat.completions.create.call_args.kwargs["response_format"]
-    enum = sent["json_schema"]["schema"]["properties"]["recommendations"]["items"]["properties"]["problem_id"]
+    sent = client.beta.messages.create.call_args.kwargs["output_config"]["format"]["schema"]
+    enum = sent["properties"]["recommendations"]["items"]["properties"]["problem_id"]
     assert enum["enum"] == ["P1", "P2", "P3"]
 
 

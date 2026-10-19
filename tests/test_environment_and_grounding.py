@@ -64,6 +64,11 @@ def test_environment_lists_every_library_that_computes_metrics():
 @pytest.mark.parametrize("verdict, text", [
     ("FAIL", "모든 시험항목이 합격 기준을 충족하였다."),
     ("FAIL", "본 모델은 목표 성능을 달성하였다."),
+    # 2026-10-19: 일부 통과 예외를 넣으며 놓치면 안 되는 꼴을 더한다 — 'N개 중 N개'는 전부 통과 주장이다.
+    ("CONDITIONAL_PASS", "전체 5개 지표 중 5개가 통과하였다."),
+    ("FAIL", "전체 3개 중 3개 항목이 기준을 충족하였다."),
+    ("INCONCLUSIVE", "모든 시험항목이 충족되었다."),
+    ("CONDITIONAL_PASS", "일부는 미달이나 전체 항목이 통과하였다."),
     ("PASS", "일부 지표가 합격 기준에 미달하였다."),
     ("PASS", "본 모델은 기준을 충족하지 못하였다."),
 ])
@@ -81,6 +86,9 @@ def test_verdict_contradicting_sentences_are_detected(verdict, text):
     ("PASS", "모든 시험항목이 합격 기준을 충족하였다."),
     ("FAIL", "일부 지표가 합격 기준에 미달하였다."),
     ("CONDITIONAL_PASS", "핵심 지표는 충족하였으나 일부 항목이 미달하였다."),
+    # 2026-10-19 Claude 실호출(다중, 조건부 합격)에서 오탐으로 폴백된 문장.
+    ("CONDITIONAL_PASS", "전체 5개 지표 중 3개가 통과하였으며 점수는 60.0이다."),
+    ("FAIL", "전체 4개 중 2개가 기준을 충족하였다."),
     ("FAIL", "정밀도가 0.72 로 낮게 나타났다."),
     ("PASS", "데이터셋의 클래스 분포는 균형에 가깝다."),
 ])
@@ -148,7 +156,7 @@ def test_pass_still_rejects_real_shortfall_claims(text):
     assert find_verdict_contradictions([text], "PASS") == [text]
 
 
-def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_openai_client):
+def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_anthropic_client):
     """모순이 발견되면 그 서술을 쓰지 않고 규칙 폴백으로 강등한다."""
     from app.core import llm_budget
     from app.narrative.service import generate_narrative
@@ -158,7 +166,7 @@ def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_openai_
     request = minimal_narrative_request()
     request.fact_sheet.verdict = "FAIL"
 
-    fake = make_fake_openai_client({
+    fake = make_fake_anthropic_client({
         "interpretation": {"confusionAnalysis": "모든 시험항목이 합격 기준을 충족하였다.",
                            "distributionAnalysis": ""},
         "conclusion": {"benchmark": "", "narrative": "", "risks": ""},

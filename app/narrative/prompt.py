@@ -225,77 +225,67 @@ def build_user_prompt(
 
 
 def build_response_schema(problems: list | None = None) -> dict:
-    """OpenAI structured output (strict json_schema). meta 는 서버가 채우므로 제외.
+    """서술 응답의 JSON 스키마 본문(Claude 구조화 출력 `output_config.format.schema`). meta 는 서버가 채우므로 제외.
 
     권고는 문제 목록(list[ProblemFact])에 묶는다(서술 설계 D22): problem_id 는 그 요청의 문제 번호들만 고를 수 있는 enum 이다.
-    문제가 없으면 권고 배열을 maxItems 0 으로 막는다(빈 enum 은 스키마가 아니므로 그때는 문자열로 둔다).
-    서버 후처리(service._align_recommendations)가 같은 규칙을 다시 지킨다 — 스키마는 첫 방어선이다.
+    문제가 없으면 recommendations 속성 자체를 뺀다 — 구조화 출력은 maxItems 를 받지 않아 "빈 배열만"을 스키마로
+    말할 수 없다. 서버 후처리(service._align_recommendations)가 같은 규칙을 다시 지킨다 — 스키마는 첫 방어선이다.
+    maxItems·minimum·maximum·minLength·maxLength 를 쓰지 않고 minItems 는 0·1 만 쓴다(구조화 출력 제약).
+    추론 과정·근거 칸을 두지 않는다(reasoning_extraction 거절 — app.narrative.llm 머리말).
     """
     ids = [p.id for p in (problems or [])]
-    problem_id_schema: dict = {"type": "string", "enum": ids} if ids else {"type": "string"}
-    recommendations_schema: dict = {
-        "type": "array",
-        "items": {
+    properties: dict = {
+        "interpretation": {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "problem_id": problem_id_schema,
-                "priority": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-                "category": {"type": "string"},
-                "action": {"type": "string"},
-                "expected_impact": {"type": "string"},
+                "confusion_analysis": {"type": "string"},
+                "distribution_analysis": {"type": "string"},
             },
-            "required": ["problem_id", "priority", "category", "action", "expected_impact"],
+            "required": ["confusion_analysis", "distribution_analysis"],
+        },
+        "conclusion": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "verdict": {"type": "string"},
+                "benchmark": {"type": "string"},
+                "narrative": {"type": "string"},
+                "risks": {"type": "string"},
+            },
+            "required": ["verdict", "benchmark", "narrative", "risks"],
+        },
+        "recommendation_narrative": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "data_quality": {"type": "string"},
+                "model_ops": {"type": "string"},
+            },
+            "required": ["data_quality", "model_ops"],
         },
     }
-    if not ids:
-        recommendations_schema["maxItems"] = 0
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "narrative_result",
-            "strict": True,
-            "schema": {
+    required = ["interpretation", "conclusion", "recommendation_narrative"]
+    if ids:
+        properties["recommendations"] = {
+            "type": "array",
+            "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "interpretation": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "confusion_analysis": {"type": "string"},
-                            "distribution_analysis": {"type": "string"},
-                        },
-                        "required": ["confusion_analysis", "distribution_analysis"],
-                    },
-                    "conclusion": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "verdict": {"type": "string"},
-                            "benchmark": {"type": "string"},
-                            "narrative": {"type": "string"},
-                            "risks": {"type": "string"},
-                        },
-                        "required": ["verdict", "benchmark", "narrative", "risks"],
-                    },
-                    "recommendation_narrative": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "data_quality": {"type": "string"},
-                            "model_ops": {"type": "string"},
-                        },
-                        "required": ["data_quality", "model_ops"],
-                    },
-                    "recommendations": recommendations_schema,
+                    "problem_id": {"type": "string", "enum": ids},
+                    "priority": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+                    "category": {"type": "string"},
+                    "action": {"type": "string"},
+                    "expected_impact": {"type": "string"},
                 },
-                "required": [
-                    "interpretation",
-                    "conclusion",
-                    "recommendation_narrative",
-                    "recommendations",
-                ],
+                "required": ["problem_id", "priority", "category", "action", "expected_impact"],
             },
-        },
+        }
+        required.append("recommendations")
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": properties,
+        "required": required,
     }

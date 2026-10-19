@@ -17,6 +17,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
@@ -31,6 +32,8 @@ from app.analysis.router import router as analyze_router
 from app.analysis.validation_router import router as validate_router
 from app.evaluation.router import router as evaluate_router
 from app.narrative.router import router as narrative_router
+from app.narrative import llm as narrative_llm
+from app.analysis.llm_mapper import mapping_model
 from app.issuance.router import router as reports_router
 
 logger = logging.getLogger(__name__)
@@ -50,11 +53,11 @@ async def lifespan(app: FastAPI):
     logger.info("발급 메타 DB 초기화 완료 (backend=%s)",
                 "sqlite" if DATABASE_URL.startswith("sqlite") else "postgresql")
 
+    # 클라이언트 둘: 컬럼 매핑은 OpenAI, 서술은 Anthropic(Claude). 키가 없으면 각자 규칙 폴백으로 동작한다.
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         logger.warning(
-            "OPENAI_API_KEY 미설정 — LLM 컬럼 자동 매핑 대신 규칙 기반 매핑이 동작하고 "
-            "7·8·9절 서술도 폴백 문구로 대체됩니다."
+            "OPENAI_API_KEY 미설정 — LLM 컬럼 자동 매핑 대신 규칙 기반 매핑이 동작합니다."
         )
         app.state.openai_client = None
     else:
@@ -65,7 +68,23 @@ async def lifespan(app: FastAPI):
             timeout=httpx.Timeout(45.0, connect=5.0),  # 전체 45s / 연결 5s
             max_retries=2,
         )
-        logger.info("OpenAI 클라이언트 초기화 완료")
+        logger.info("OpenAI 클라이언트 초기화 완료(컬럼 매핑)")
+
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if not anthropic_key:
+        logger.warning(
+            "ANTHROPIC_API_KEY 미설정 — 7·8·9절 서술이 규칙 기반 문장으로 대체됩니다."
+        )
+        app.state.anthropic_client = None
+    else:
+        # 시간 제한 × (재시도 + 1) 이 옛 서술 경로의 서버 마감 안에 들게 한다(app.narrative.llm).
+        # 시간 제한은 초 숫자로 준다 — anthropic 1.x 는 httpx 패키지의 Timeout 객체를 받지 않는다.
+        app.state.anthropic_client = AsyncAnthropic(
+            api_key=anthropic_key,
+            timeout=narrative_llm.CALL_TIMEOUT_SECONDS,
+            max_retries=narrative_llm.MAX_RETRIES,
+        )
+        logger.info("Anthropic 클라이언트 초기화 완료(서술)")
     yield
     logger.info("서버 종료")
 
@@ -150,6 +169,17 @@ async def health_check(request: Request):
     # **발급된 성적서 자체를 잃는다.** 연결 문자열은 노출하지 않고 종류만 알린다.
     backend, persistent = describe_backend(DATABASE_URL)
     body = {"status": "ok", "db_backend": backend, "persistent": persistent}
+    # 지금 떠 있는 리비전의 커밋(앞 7자). Render 가 RENDER_GIT_COMMIT 을 넣는다 — CI 배포 확인이 병합
+    # SHA 와 같아질 때까지 기다리는 근거다(새 빌드가 실패하면 옛 리비전이 계속 응답하므로). 없으면 null.
+    body["commit"] = (os.getenv("RENDER_GIT_COMMIT", "").strip()[:7] or None)
+    # LLM 키가 들어 있는지(값은 싣지 않는다)와 쓰는 모델. 키를 넣고 뺀 뒤 서술·매핑이 어느 길로
+    # 가는지 운영에서 바로 본다.
+    body["llm"] = {
+        "narrative": {"key": getattr(request.app.state, "anthropic_client", None) is not None,
+                      "model": narrative_llm.narrative_model()},
+        "mapping": {"key": getattr(request.app.state, "openai_client", None) is not None,
+                    "model": mapping_model()},
+    }
     if os.getenv("DIAG") == "1":
         body["diagnostics"] = {
             "client_host": request.client.host if request.client else None,
