@@ -37,6 +37,10 @@ _CTX_TOKEN_RE = re.compile(
     rf"|(?<![\d.])(?:[1-9]\.\d|\d+)\s*절{_NOT_SECTION_WORD}"
     rf"|\(\s*{_SECTION_IDS}(?:{_SECTION_SEP}{_SECTION_IDS})*\s*\)"
     rf"|(?<=절)\s+{_SECTION_IDS}(?!\d|[.,]\d|%)"
+    # 글 맨 앞의 소절 머리표("9.1 데이터 측면에서는…"). 2026-10-19 Claude 실호출에서 9절 두 칸 앞에 붙여 써
+    # 숫자 검문 폴백을 냈다("9.1 데이터 측면에서", "9.1에서 지목된"). 글 맨 앞에서, 실제 절 번호 뒤에
+    # 띄어쓰기 + 한글이나 절을 가리키는 조사(에서·에는·에·의·은·는)가 올 때만 지운다 — "9.1로 측정"은 값이다.
+    rf"|^\s*{_SECTION_IDS}(?=\s+[가-힣]|에서|에는|에|의|은|는)"
     r"|제\s*\d+\s*종"
 )
 
@@ -352,6 +356,19 @@ _CLAIMS_SOME_FAILED = re.compile(
 )
 
 
+_PARTIAL_COUNT = re.compile(r"(\d+)\s*개[^.\d]{0,10}?\s중\s*(\d+)\s*개")
+
+
+def _is_partial_count(claim: str) -> bool:
+    """'전체 5개 지표 중 3개가 통과'처럼 일부만 통과했다는 말인지. 'N개 중 N개'(전부)는 그대로 주장으로 본다.
+
+    2026-10-19 Claude 실호출에서 조건부 합격 서술의 '전체 5개 지표 중 3개가 통과하였으며'를 '전체 … 통과'
+    (전부 통과 주장)로 읽어 판정 모순 폴백을 냈다.
+    """
+    m = _PARTIAL_COUNT.search(claim)
+    return bool(m) and m.group(1) != m.group(2)
+
+
 def find_verdict_contradictions(texts: list[str], verdict: str) -> list[str]:
     """강제된 판정과 직접 모순되는 문장을 돌려준다(없으면 빈 목록).
 
@@ -363,7 +380,9 @@ def find_verdict_contradictions(texts: list[str], verdict: str) -> list[str]:
     for text in texts:
         if not isinstance(text, str) or not text.strip():
             continue
-        if verdict in ("FAIL", "CONDITIONAL_PASS", "INCONCLUSIVE") and _CLAIMS_ALL_PASSED.search(text):
+        if verdict in ("FAIL", "CONDITIONAL_PASS", "INCONCLUSIVE") and any(
+            not _is_partial_count(m.group(0)) for m in _CLAIMS_ALL_PASSED.finditer(text)
+        ):
             contradictions.append(text)
         elif verdict == "PASS" and _CLAIMS_SOME_FAILED.search(text):
             contradictions.append(text)
