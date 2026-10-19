@@ -173,3 +173,13 @@ def test_confusion_counts_have_no_ghost_rows():
     assert [row["label"] for row in rows] == ["a", "b"]
     b = rows[1]
     assert (b["tp"], b["fn"]) == (1, 1)  # 'z' 로 예측한 b 는 b 의 FN 이다
+
+
+def test_string_integer_decimal_matches_integer_prediction():
+    # JSON 의 "1.0"·"0.0" 글자 정답과 정수 예측 — 같은 클래스 '1'·'0' 이다(숫자 열의 1.0 과 같은 규칙).
+    r = _eval(["1.0", "0.0", "1.0", "0.0"], [1, 0, 1, 1], "binary", ["M1", "M21"], positive_class="1")
+    assert r["M1"] == pytest.approx(0.75)
+    assert r["M21"]["labels"] == ["0", "1"]
+    # 글자 '2.50' 같은 정수가 아닌 소수는 그대로다.
+    from app.evaluation.labels import normalize_label
+    assert normalize_label("2.50") == "2.50" and normalize_label(" 1.00 ") == "1"
