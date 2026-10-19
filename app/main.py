@@ -33,6 +33,7 @@ from app.analysis.validation_router import router as validate_router
 from app.evaluation.router import router as evaluate_router
 from app.narrative.router import router as narrative_router
 from app.narrative import llm as narrative_llm
+from app.analysis.llm_mapper import mapping_model
 from app.issuance.router import router as reports_router
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,17 @@ async def health_check(request: Request):
     # **발급된 성적서 자체를 잃는다.** 연결 문자열은 노출하지 않고 종류만 알린다.
     backend, persistent = describe_backend(DATABASE_URL)
     body = {"status": "ok", "db_backend": backend, "persistent": persistent}
+    # 지금 떠 있는 리비전의 커밋(앞 7자). Render 가 RENDER_GIT_COMMIT 을 넣는다 — CI 배포 확인이 병합
+    # SHA 와 같아질 때까지 기다리는 근거다(새 빌드가 실패하면 옛 리비전이 계속 응답하므로). 없으면 null.
+    body["commit"] = (os.getenv("RENDER_GIT_COMMIT", "").strip()[:7] or None)
+    # LLM 키가 들어 있는지(값은 싣지 않는다)와 쓰는 모델. 키를 넣고 뺀 뒤 서술·매핑이 어느 길로
+    # 가는지 운영에서 바로 본다.
+    body["llm"] = {
+        "narrative": {"key": getattr(request.app.state, "anthropic_client", None) is not None,
+                      "model": narrative_llm.narrative_model()},
+        "mapping": {"key": getattr(request.app.state, "openai_client", None) is not None,
+                    "model": mapping_model()},
+    }
     if os.getenv("DIAG") == "1":
         body["diagnostics"] = {
             "client_host": request.client.host if request.client else None,

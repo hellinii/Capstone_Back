@@ -115,10 +115,11 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
     # 1-1. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
     #      **429 가 아니라 200 + 폴백이다** — 프론트는 비 200 을 폴백이 아니라 오류로
     #      처리해 7·8·9절이 '생성 예정' 안내로 인쇄된다(사용자에게는 서비스 고장으로 보인다).
-    if not llm_budget.try_consume():
+    #      서술 지갑은 매핑 지갑과 따로다 — 옛 경로는 호출 1번이 보고서 1건이다.
+    if not llm_budget.narrative.try_consume():
         logger.warning(
-            "LLM 시간당 예산 소진(%d회) → 규칙 폴백으로 강등합니다.",
-            llm_budget.MAX_LLM_CALLS_PER_HOUR,
+            "서술 시간당 예산 소진(보고서 %d건) → 규칙 폴백으로 강등합니다.",
+            llm_budget.narrative.limit,
         )
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="budget_exceeded")
 

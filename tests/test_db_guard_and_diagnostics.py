@@ -106,3 +106,31 @@ def test_health_exposes_diagnostics_when_enabled(monkeypatch):
     assert diag is not None, "DIAG=1 인데 진단이 없다"
     assert diag["forwarded_for"] == "203.0.113.7, 10.0.0.1"
     assert "client_host" in diag
+
+
+# ── /health 커밋·LLM 키 (서술 라운드 S1) ─────────────────────────────────────
+
+def test_health_reports_commit_short_sha(monkeypatch):
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567")
+    assert client.get("/health").json()["commit"] == "0123456"
+    monkeypatch.delenv("RENDER_GIT_COMMIT")
+    assert client.get("/health").json()["commit"] is None
+
+
+def test_health_reports_llm_key_presence_and_models_without_secrets(monkeypatch):
+    from app.main import app
+
+    monkeypatch.setenv("NARRATIVE_MODEL", "claude-x")
+    monkeypatch.setenv("MAPPING_MODEL", "gpt-x")
+    body = client.get("/health").json()
+    assert body["llm"] == {
+        "narrative": {"key": False, "model": "claude-x"},
+        "mapping": {"key": False, "model": "gpt-x"},
+    }
+    # 키가 있으면 True — 값 자체는 어디에도 싣지 않는다.
+    app.state.anthropic_client = object()
+    app.state.openai_client = object()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+    r = client.get("/health")
+    assert r.json()["llm"]["narrative"]["key"] is True and r.json()["llm"]["mapping"]["key"] is True
+    assert "secret" not in r.text

@@ -55,7 +55,7 @@ async def resolve_column_mapping(
 
     # 시간당 예산 소진 → 규칙 폴백(ISSUES.md G-03, 결정 9). 429 로 거절하면 프론트가
     # throw 해서 에러 화면으로 간다 — 폴백 매핑은 이미 있으므로 강등이 옳다.
-    if not llm_budget.try_consume():
+    if not llm_budget.mapping.try_consume():
         logger.warning(
             "LLM 시간당 예산 소진(%d회) → 규칙 기반 폴백 컬럼 매핑으로 강등합니다.",
             llm_budget.MAX_LLM_CALLS_PER_HOUR,
