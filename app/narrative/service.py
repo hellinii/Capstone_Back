@@ -10,7 +10,10 @@ fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비�
 - 사용처: app.narrative.router(generate_narrative_endpoint), tests
 """
 import asyncio
+import contextlib
 import logging
+import time
+from dataclasses import asdict
 
 from app.narrative.schemas import BenchmarkRefOut, ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
 from app.narrative.baselines import build_benchmark_refs
@@ -26,7 +29,7 @@ from app.narrative.grounding import (
     _collect_grounding_texts,
 )
 from app.core import llm_budget
-from app.core.concurrency import llm_slot, run_cpu_bound
+from app.core.concurrency import narrative_slot, run_cpu_bound
 
 logger = logging.getLogger(__name__)
 
@@ -94,25 +97,84 @@ def _align_recommendations(recs: list, problems: list) -> list[RecommendationOut
     return aligned
 
 
-async def generate_narrative(client, req: NarrativeRequest) -> NarrativeResponse:
+async def generate_narrative(client, req: NarrativeRequest, **narrate_options) -> NarrativeResponse:
     """
     LLM 서술 생성 진입점.
     - client is None(무키) / LLM 호출 실패 / grounding 위반 → 규칙 폴백.
     - verdict 는 항상 fact_sheet 값으로 강제(LLM echo 무시).
     - 벤치마크 비교값(benchmark_refs)은 서술 경로와 무관하게 응답에 함께 싣는다 — 8.1 에 참조
       범위를 숫자로 찍는다(재료 목록 9절).
+    - narrate_options 는 작업 번호 경로(app.narrative.jobs)가 넘기는 _narrate 의 키워드 인자다. 옛 경로는
+      넘기지 않아 S1 동작(서버 마감 120초·호출마다 지갑 1건) 그대로다.
     """
     fs = req.fact_sheet
     derived, benchmark_refs, whitelist = await run_cpu_bound(
         _prepare_facts, fs, req.task_type.value, req.client_inputs
     )
-    resp = await _narrate(client, req, fs, derived, benchmark_refs, whitelist)
+    resp = await _narrate(client, req, fs, derived, benchmark_refs, whitelist, **narrate_options)
     resp.benchmark_refs = [BenchmarkRefOut(**ref) for ref in benchmark_refs]
     return resp
 
 
-async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, whitelist) -> NarrativeResponse:
-    """서술 본문 — LLM 또는 규칙 폴백. 반환 경로가 여럿이라 공통 부착은 호출자가 한다."""
+async def _no_stage(_stage: str) -> None:
+    return None
+
+
+# _narrate 의 deadline 기본값 표시 — 옛 경로의 서버 마감(NARRATIVE_DEADLINE_SECONDS)을 호출 때 읽는다.
+# None 은 "마감 없음"이다(작업 번호 경로: 작업 전체 제한이 바깥에서 덮는다).
+_LEGACY_DEADLINE = object()
+
+
+async def _narrate(
+    client,
+    req: NarrativeRequest,
+    fs,
+    derived,
+    benchmark_refs,
+    whitelist,
+    *,
+    budget_reserved: bool = False,
+    forced_reason: str | None = None,
+    deadline=_LEGACY_DEADLINE,
+    slot_wait: float | None = None,
+    effort: str | None = None,
+    on_stage=_no_stage,
+    trace: dict | None = None,
+) -> NarrativeResponse:
+    """서술 본문 — LLM 또는 규칙 폴백. 반환 경로가 여럿이라 공통 부착은 호출자가 한다.
+
+    작업 번호 경로가 쓰는 인자(옛 경로는 모두 기본값):
+    - budget_reserved: 작업을 만들 때 서술 지갑을 이미 예약했다 — 여기서 다시 쓰지 않는다.
+    - forced_reason: AI 를 부르지 않고 이 사유의 규칙 문장으로 끝낸다(입력 상한 초과·지갑 소진 등).
+    - deadline: 슬롯 대기 + 호출 전체 마감(초). 주지 않으면 옛 경로의 NARRATIVE_DEADLINE_SECONDS, None 이면 마감 없음.
+    - slot_wait: 슬롯 대기만의 상한. 넘으면 규칙 문장(busy). None 이면 따로 두지 않는다(마감이 덮음).
+    - effort: 이 호출의 effort. None 이면 llm 의 기본(NARRATIVE_EFFORT).
+    - on_stage: 단계가 바뀔 때 부르는 async 함수 — generating(슬롯을 얻고 호출 직전) · checking(응답을 받고
+      검사 시작).
+    - trace: 내부 기록을 채울 dict(고객에게 가지 않는다) — reason·calls(호출 기록)·slot_wait_seconds·grounding.
+    """
+    record = trace if trace is not None else {}
+    record.setdefault("calls", [])
+    resp = await _narrate_body(
+        client, req, fs, derived, benchmark_refs, whitelist, record,
+        budget_reserved=budget_reserved, forced_reason=forced_reason,
+        deadline=NARRATIVE_DEADLINE_SECONDS if deadline is _LEGACY_DEADLINE else deadline,
+        slot_wait=slot_wait, effort=effort, on_stage=on_stage,
+    )
+    record["source"] = resp.meta.source
+    record["reason"] = resp.meta.reason
+    record["grounding"] = resp.meta.grounding.model_dump()
+    return resp
+
+
+async def _narrate_body(
+    client, req, fs, derived, benchmark_refs, whitelist, record: dict, *,
+    budget_reserved: bool, forced_reason: str | None, deadline: float | None, slot_wait: float | None,
+    effort: str | None, on_stage,
+) -> NarrativeResponse:
+    # 0. 호출 전에 사유가 정해진 경우(작업 번호 경로) → 폴백
+    if forced_reason is not None:
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason=forced_reason)
 
     # 1. 무키 → 폴백
     if client is None:
@@ -127,6 +189,7 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
         # 종전처럼 500 이 아니라 규칙 폴백 — 요청 조립 실패도 서술 실패의 하나다.
         logger.exception("서술 요청 조립 실패 → 규칙 폴백(assembly_error)")
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")
+    record["prompt_chars"] = len(system) + len(user)
     if len(system) + len(user) > MAX_NARRATIVE_PROMPT_CHARS:
         logger.warning(
             "서술 요청이 너무 큼(%d자 > %d자) → 규칙 폴백(input_too_large)",
@@ -137,34 +200,41 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
     # 1-2. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
     #      **429 가 아니라 200 + 폴백이다** — 프론트는 비 200 을 폴백이 아니라 오류로
     #      처리해 7·8·9절이 '생성 예정' 안내로 인쇄된다(사용자에게는 서비스 고장으로 보인다).
-    #      서술 지갑은 매핑 지갑과 따로다 — 옛 경로는 호출 1번이 보고서 1건이다.
-    if not llm_budget.narrative.try_consume():
+    #      서술 지갑은 매핑 지갑과 따로다 — 옛 경로는 호출 1번이 보고서 1건이다. 작업 번호 경로는 작업을
+    #      만들 때 이미 예약했다(budget_reserved).
+    if not budget_reserved and not llm_budget.narrative.try_consume():
         logger.warning(
             "서술 시간당 예산 소진(보고서 %d건) → 규칙 폴백으로 강등합니다.",
             llm_budget.narrative.limit,
         )
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="budget_exceeded")
 
-    # 2. LLM 호출 — 슬롯 대기까지 서버 마감 안에서.
+    # 2. LLM 호출 — 슬롯 대기까지 서버 마감 안에서. 슬롯 대기에 따로 상한이 있으면 그것도 본다.
     slot = {"acquired": False}
+    waited_from = time.perf_counter()
 
     async def _call():
-        async with llm_slot():
-            slot["acquired"] = True
-            return await call_narrative_llm(client, system=system, user=user, schema=schema)
+        async with asyncio.timeout(slot_wait):
+            await stack.enter_async_context(narrative_slot())
+        slot["acquired"] = True
+        record["slot_wait_seconds"] = round(time.perf_counter() - waited_from, 3)
+        await on_stage("generating")
+        return await call_narrative_llm(client, system=system, user=user, schema=schema, effort=effort)
 
     try:
-        async with asyncio.timeout(NARRATIVE_DEADLINE_SECONDS):
+        async with contextlib.AsyncExitStack() as stack, asyncio.timeout(deadline):
             result = await _call()
     except TimeoutError:
         reason = "timeout" if slot["acquired"] else "busy"
-        logger.warning("서술 서버 마감(%.0f초) 초과 → 규칙 폴백(%s)", NARRATIVE_DEADLINE_SECONDS, reason)
+        logger.warning("서술 마감(마감 %s초·슬롯 대기 %s초) 초과 → 규칙 폴백(%s)", deadline, slot_wait, reason)
         return build_fallback_narrative(fs, benchmark_refs, derived, reason=reason)
     except Exception:
         # call_narrative_llm 은 SDK 오류를 failure 로 돌려준다. 그 밖의 예외(조용한 품질 강등 지점, G-06)도
         # 500 이 아니라 규칙 폴백으로.
         logger.exception("LLM 서술 호출 중 예기치 않은 오류 → 규칙 폴백(api_error)")
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="api_error")
+    record["calls"].append(asdict(result.record))
+    await on_stage("checking")
     if result.failure is not None:
         # 거절(세 경우 모두)·잘림·모델 없음·시간 초과·API 오류·JSON 오류 — 사유는 그대로 싣고, 자세한 것은
         # llm 의 호출 기록 로그에 있다(거절 종류·응답 모델·토큰).

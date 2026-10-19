@@ -1,0 +1,486 @@
+"""app/narrative/jobs.py — 서술 작업 번호(job) 방식 (서술 라운드 S3a, 계획 설계 요지 7·10).
+
+옛 경로(`POST /api/generate-narrative`)는 요청 하나로 서술을 받는다 — 서버 마감 120초, 프론트는 160초에 끊는다.
+품질 우선으로 서술이 몇 분 걸려도 되게 하려면 요청과 생성을 떼어야 한다. 그래서 새 경로 둘을 둔다.
+
+- `POST /api/narrative/jobs` : 사실 시트를 받아 작업 번호와 8.1 벤치마크 표를 **즉시** 돌려준다. 서술은
+  BackgroundTasks 로 `run_job` 이 만든다. 8.1 표가 여기서 오므로 서술이 실패해도 표는 남는다(점검 유-2).
+- `GET /api/narrative/jobs/{id}` : 단계(대기·생성 중·검사 중·다시 만드는 중·완료·실패)와 결과.
+
+옛 경로는 그대로 둔다 — 운영 중인 옛 프론트가 쓰고, 작업 번호를 옛 주소에 넣으면 옛 프론트가 빈 서술을
+완성본으로 굳힌다(점검 유-7).
+
+## 끝나는 방식
+
+- **완료(done)**: 서술이 생겼다. AI 가 썼든(llm) 규칙 문장으로 대체됐든(fallback) 완성본이다 — 칸마다 출처를
+  싣는다. 키 없음·지갑 소진·AI 호출 실패·숫자 검문 위반·입력 상한 초과는 모두 규칙 문장으로 **완료**한다.
+  입력 상한(사실 시트 칸별 상한) 초과는 422 로 돌려보내지 않는다 — 다시 만들어도 같은 입력이라 풀리지 않는
+  막다른 길이 되기 때문이다(점검 유-11). 상한 안으로 줄인 뒤 규칙 문장으로 끝낸다(사유 input_too_large).
+- **실패(failed)**: 서술이 없다. 전체 10분 제한을 넘김(timeout), 서버 재시작 등으로 멈춤(lost — 조회할 때
+  판정), 작업 중 예기치 않은 오류(error). 프론트는 "서술 다시 만들기"를 준다.
+
+## 기록 둘 (계획 원칙 6)
+
+- 고객용(result_json → 조회 응답): 8.1 표, 서술 본문, 칸별 출처. 번호만 알면 열리므로 이것만 싣는다.
+- 내부용(internal_json): 실패 종류·강등 사유·호출 기록(응답 모델·거절 종류·토큰·비용)·단계별 시각·슬롯 대기.
+  입력(사실 시트·고객 입력)은 서버에 남기지 않는다 — 작업은 메모리의 요청으로 돌고, 재시작되면 유실이 된다.
+
+## 남용 방어 (계획 10)
+
+- 서술 지갑: 작업을 만들 때 보고서 1건을 예약한다(AI 를 부를 작업만). 소진이면 규칙 문장으로 완료.
+- 작업 생성 지갑(narrative_jobs): 시간당 작업 수. 넘으면 429 — AI 비용이 아니라 DB 행 수를 막는다.
+- 호출 1회: 작업 경로의 클라이언트는 재시도 0(`max_retries=0`)·호출 시간 제한 JOB_CALL_TIMEOUT_SECONDS 로
+  부른다 — 작업 하나의 HTTP 시도는 이번 단계(S3a, S1 한 번 호출을 감쌈)에서 1회다.
+- 서술 슬롯 대기 상한: 넘으면 규칙 문장(busy).
+
+상호작용
+- 의존(import): app.narrative.service(generate_narrative), app.narrative.baselines, app.narrative.models,
+  app.narrative.schemas, app.core.database(SessionLocal), app.core.llm_budget, app.core.concurrency
+- 사용처: app.narrative.router, tests
+"""
+import asyncio
+import copy
+import json
+import logging
+import os
+import time
+import uuid
+from datetime import datetime, timedelta
+
+from fastapi.concurrency import run_in_threadpool
+from pydantic import ValidationError
+from sqlalchemy import delete, update
+
+from app.core import database, llm_budget
+from app.core.concurrency import run_cpu_bound
+from app.narrative.baselines import build_benchmark_refs
+from app.narrative.models import NarrativeJob, _utcnow
+from app.narrative.schemas import (
+    BenchmarkRefOut,
+    LimitExceeded,
+    NarrativeJobCreated,
+    NarrativeJobOut,
+    NarrativeJobResult,
+    NarrativeRequest,
+    NarrativeResponse,
+)
+from app.narrative.service import generate_narrative
+
+logger = logging.getLogger(__name__)
+
+# ── 시간 ──────────────────────────────────────────────────────────────────────
+# 전체 제한 — 슬롯 대기·생성·검사를 합쳐 이 시간을 넘으면 실패(timeout). 사용자 결정 "품질 우선(5~10분 허용)".
+JOB_DEADLINE_SECONDS = 600.0
+# 작업 경로 AI 호출 1회의 시간 제한(재시도 0). 넘으면 그 호출은 실패로 끝나고 규칙 문장(사유 timeout)으로 완료한다.
+JOB_CALL_TIMEOUT_SECONDS = 300.0
+# 서술 슬롯 대기 상한. 넘으면 규칙 문장(사유 busy).
+JOB_SLOT_WAIT_SECONDS = 120.0
+# 유실 판정. 진행 중인 작업은 단계가 바뀔 때마다 updated_at 을 고친다. 가장 긴 무변화 구간은 호출 1회
+# (슬롯 대기 상한보다 길다)이므로, 그보다 여유만큼 더 오래 바뀌지 않았으면 작업이 멈춘 것이다.
+LOST_IDLE_SECONDS = JOB_CALL_TIMEOUT_SECONDS + 60.0
+# 만든 뒤 전체 제한 + 이만큼이 지나도 진행 중이면 유실(run_job 의 제한이 먼저 끝내므로 여유를 둔다).
+LOST_GRACE_SECONDS = 30.0
+
+# ── 보관 ──────────────────────────────────────────────────────────────────────
+
+
+def _env_number(name: str, default: float) -> float:
+    """보관 시간 환경변수. 비었거나 숫자가 아니거나 0 이하면 기본값."""
+    raw = os.getenv(name, "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def result_ttl() -> timedelta:
+    """끝난 작업의 결과 글을 지우기까지(`NARRATIVE_RESULT_TTL_HOURS`, 기본 24시간).
+
+    프론트는 완료를 보면 결과를 평가 기록(run)에 저장하므로, 서버의 결과 글은 이어 조회용이다.
+    """
+    return timedelta(hours=_env_number("NARRATIVE_RESULT_TTL_HOURS", 24.0))
+
+
+def record_retention() -> timedelta:
+    """작업 행(내부 기록 포함)을 지우기까지(`NARRATIVE_JOB_RETENTION_DAYS`, 기본 90일).
+
+    내부 기록은 결과 글을 지운 뒤에도 남기되, 무인증 경로라 무한히 쌓이면 발급 DB 가 찬다.
+    """
+    return timedelta(days=_env_number("NARRATIVE_JOB_RETENTION_DAYS", 90.0))
+
+
+# 지금 응답이 가진 칸(소절 번호). 7.3(추가 관찰)은 S4b·S5 에서 응답에 생길 때 더한다.
+SECTION_IDS = ("7.1", "7.2", "8.1", "8.2", "8.3", "9")
+
+
+class JobRateLimited(Exception):
+    """작업 생성 시간당 상한을 넘었다 — 라우터가 429 로 돌려준다."""
+
+
+def get_session_factory():
+    """작업 표에 쓰는 세션 팩토리(FastAPI 의존성). 테스트는 인메모리 DB 의 팩토리로 바꿔 끼운다.
+
+    BackgroundTasks 로 도는 run_job 은 요청 범위의 세션을 쓸 수 없어(응답 뒤 닫힘) 팩토리를 넘겨받는다.
+    """
+    return database.SessionLocal
+
+
+# ── 순수 함수 ─────────────────────────────────────────────────────────────────
+
+
+def iso_utc(moment: datetime) -> str:
+    """tz 없는 UTC 시각 → 'YYYY-MM-DDTHH:MM:SSZ'."""
+    return moment.replace(microsecond=0).isoformat() + "Z"
+
+
+def is_lost(*, created_at: datetime, updated_at: datetime, now: datetime) -> bool:
+    """진행 중인 작업이 멈췄는가. 마지막 갱신 뒤 LOST_IDLE_SECONDS, 또는 만든 뒤 전체 제한 + 여유를 넘으면(초과)."""
+    idle = (now - updated_at).total_seconds()
+    age = (now - created_at).total_seconds()
+    return idle > LOST_IDLE_SECONDS or age > JOB_DEADLINE_SECONDS + LOST_GRACE_SECONDS
+
+
+def is_expired(*, finished_at: datetime | None, now: datetime) -> bool:
+    """끝난 작업의 결과 글을 지울 때가 됐는가(초과)."""
+    return finished_at is not None and now - finished_at > result_ttl()
+
+
+def section_sources(source: str) -> dict[str, str]:
+    """칸별 출처. 이번 단계(S3a)의 생성은 S1 한 번 호출이라 모든 칸이 같은 출처다 — S5 에서 칸마다 갈린다."""
+    value = "llm" if source == "llm" else "fallback"
+    return {sid: value for sid in SECTION_IDS}
+
+
+def customer_result(resp: NarrativeResponse) -> dict:
+    """옛 응답에서 고객용만 남긴다 — meta(모델·사유·숫자 검문 위반)를 칸별 출처로 바꾼다."""
+    result = NarrativeJobResult(
+        interpretation=resp.interpretation,
+        conclusion=resp.conclusion,
+        recommendation_narrative=resp.recommendation_narrative,
+        recommendations=resp.recommendations,
+        section_sources=section_sources(resp.meta.source),
+    )
+    return result.model_dump(mode="json")
+
+
+def total_cost(calls: list[dict]) -> float | None:
+    """호출 기록의 비용 합. 하나라도 단가를 모르면(None) None — 추정하지 않는다."""
+    if any(c.get("cost_usd") is None for c in calls):
+        return None
+    return round(sum(c["cost_usd"] for c in calls), 6)
+
+
+# ── 입력 상한 초과 → 줄이기 ─────────────────────────────────────────────────────
+# 클래스 단위 칸은 잘라 내면 남은 값으로 쓴 문장이 틀린다(예: 앞 256개 클래스 중에서 고른 "가장 약한 클래스").
+# 그래서 클래스 단위 칸은 통째로 비우고, 클래스와 무관한 목록(지표·문제)과 글자는 상한까지 자른다.
+_CLASS_LEVEL_KEYS = {
+    ("fact_sheet", "confusion"): None,
+    ("fact_sheet", "distribution"): None,
+    ("fact_sheet", "per_class"): [],
+    ("fact_sheet", "class_averages"): [],
+    ("fact_sheet", "confusion_counts"): [],
+}
+
+
+# 줄이기를 되풀이하는 최대 횟수. 겹친 목록은 바깥 → 안쪽 순으로 한 겹씩 드러난다(가장 깊은 것: 문제 목록 → 문제
+# 하나의 칸). 몇 겹이면 충분하다 — 넘으면 고칠 수 없는 입력으로 보고 422.
+_MAX_TRIM_ROUNDS = 4
+
+
+def _is_limit_error(err: dict) -> bool:
+    if err.get("type") in ("too_long", "string_too_long"):
+        return True
+    return isinstance((err.get("ctx") or {}).get("error"), LimitExceeded)
+
+
+def _clear_or_trim(raw: dict, err: dict) -> str:
+    """오류 하나를 고친다. 고친 자리(점 표기)를 돌려준다. 고칠 수 없는 모양이면 LookupError·TypeError."""
+    loc = tuple(err["loc"])
+    if loc[:1] == ("client_inputs",):
+        raw["client_inputs"] = None  # 규칙 문장은 고객 입력을 쓰지 않는다
+        return "client_inputs"
+    for prefix, empty in _CLASS_LEVEL_KEYS.items():
+        if loc[: len(prefix)] == prefix:
+            raw[prefix[0]][prefix[1]] = copy.copy(empty)
+            return ".".join(prefix)
+    parent = raw
+    for key in loc[:-1]:
+        parent = parent[key]
+    last = loc[-1]
+    if err["type"] in ("too_long", "string_too_long"):
+        parent[last] = parent[last][: err["ctx"]["max_length"]]
+    elif last == "threshold":  # 레이블별 임계값 dict
+        parent[last] = None
+    elif last == "evidence":
+        parent[last] = {}
+    else:
+        raise LookupError(loc)
+    return ".".join(str(k) for k in loc)
+
+
+def parse_request(raw) -> tuple[NarrativeRequest, list[str]]:
+    """요청 본문을 검증한다. 입력 상한만 넘었으면 상한 안으로 줄여 (요청, 고친 자리 목록)을 돌려준다.
+
+    상한이 아닌 오류(필수 칸 없음·형식 틀림)가 하나라도 있으면 원래 ValidationError 를 그대로 던진다 —
+    라우터가 422 로 돌려준다(프론트의 조립 버그라 다시 만들어도 같다는 점은 같지만, 고칠 근거가 없다).
+    """
+    try:
+        return NarrativeRequest.model_validate(raw), []
+    except ValidationError as exc:
+        first = exc
+    # 고친 뒤 다시 검증하면 새 오류가 드러날 수 있다 — pydantic 은 목록 길이가 넘으면 그 목록의 항목 오류를
+    # 함께 알리지 않는다(문제 18개 중 하나의 제목이 길면, 16개로 자른 뒤에야 제목 오류가 나온다). 그래서
+    # 상한 오류만 남는 동안 몇 번 되풀이한다. 고치는 자리는 매번 줄기만 하므로 몇 번이면 끝난다.
+    trimmed = copy.deepcopy(raw)
+    changed: set[str] = set()
+    errors = first.errors()
+    for _ in range(_MAX_TRIM_ROUNDS):
+        if not errors or not all(_is_limit_error(e) for e in errors):
+            raise first
+        try:
+            changed.update(_clear_or_trim(trimmed, e) for e in errors)
+        except (LookupError, TypeError, KeyError):
+            raise first from None
+        try:
+            return NarrativeRequest.model_validate(trimmed), sorted(changed)
+        except ValidationError as again:
+            errors = again.errors()
+    raise first
+
+
+# ── DB (동기 — run_in_threadpool 로 부른다) ──────────────────────────────────────
+
+
+def _db_insert(factory, job_id: str, benchmark_refs: list[dict], internal: dict, now: datetime) -> None:
+    with factory() as db:
+        # 정리를 먼저 한다 — 별도 스케줄러 없이, 작업이 생길 때마다 시간이 지난 것을 치운다.
+        db.execute(
+            update(NarrativeJob)
+            .where(NarrativeJob.finished_at < now - result_ttl(), NarrativeJob.result_json.is_not(None))
+            .values(result_json=None)
+        )
+        db.execute(delete(NarrativeJob).where(NarrativeJob.created_at < now - record_retention()))
+        db.add(NarrativeJob(
+            id=job_id, status="running", stage="queued",
+            result_json=json.dumps({"benchmark_refs": benchmark_refs}, ensure_ascii=False),
+            internal_json=json.dumps(internal, ensure_ascii=False),
+            created_at=now, updated_at=now,
+        ))
+        db.commit()
+
+
+def _db_set_stage(factory, job_id: str, stage: str, now: datetime) -> bool:
+    """진행 중일 때만 단계를 바꾼다(끝난 작업 — 유실로 판정된 것 포함 — 은 그대로)."""
+    with factory() as db:
+        res = db.execute(
+            update(NarrativeJob)
+            .where(NarrativeJob.id == job_id, NarrativeJob.status == "running")
+            .values(stage=stage, updated_at=now)
+        )
+        db.commit()
+        return res.rowcount == 1
+
+
+def _db_finish(factory, job_id: str, *, status: str, narrative: dict | None, internal: dict, now: datetime) -> bool:
+    """진행 중일 때만 끝 상태를 쓴다. 이미 끝났으면(유실 판정 뒤 늦게 끝남) 아무것도 바꾸지 않고 False."""
+    with factory() as db:
+        job = db.get(NarrativeJob, job_id)
+        if job is None or job.status != "running":
+            return False
+        result = json.loads(job.result_json) if job.result_json else {}
+        if narrative is not None:
+            result["narrative"] = narrative
+        merged = {**json.loads(job.internal_json or "{}"), **internal}
+        merged["stages"] = json.loads(job.internal_json or "{}").get("stages", []) + internal.get("stages", [])
+        res = db.execute(
+            update(NarrativeJob)
+            .where(NarrativeJob.id == job_id, NarrativeJob.status == "running")
+            .values(
+                status=status, stage=status,
+                result_json=json.dumps(result, ensure_ascii=False),
+                internal_json=json.dumps(merged, ensure_ascii=False),
+                updated_at=now, finished_at=now,
+            )
+        )
+        db.commit()
+        return res.rowcount == 1
+
+
+def _db_read(factory, job_id: str, now: datetime) -> dict | None:
+    """작업 하나를 읽는다. 진행 중인데 멈췄으면 여기서 유실로 끝내고, 보관 시간이 지난 결과 글은 지운다."""
+    with factory() as db:
+        job = db.get(NarrativeJob, job_id)
+        if job is None:
+            return None
+        if job.status == "running" and is_lost(created_at=job.created_at, updated_at=job.updated_at, now=now):
+            internal = json.loads(job.internal_json or "{}")
+            internal["failure"] = "lost"
+            internal["lost_judged_at"] = iso_utc(now)
+            internal["last_stage"] = job.stage
+            res = db.execute(
+                update(NarrativeJob)
+                .where(NarrativeJob.id == job_id, NarrativeJob.status == "running")
+                .values(status="failed", stage="failed", updated_at=now, finished_at=now,
+                        internal_json=json.dumps(internal, ensure_ascii=False))
+            )
+            db.commit()
+            if res.rowcount == 1:
+                logger.warning("서술 작업 %s 유실 판정(마지막 단계 %s)", job_id, internal["last_stage"])
+            db.refresh(job)
+        elif job.result_json is not None and is_expired(finished_at=job.finished_at, now=now):
+            job.result_json = None
+            db.commit()
+            db.refresh(job)
+        return {
+            "id": job.id, "status": job.status, "stage": job.stage,
+            "result": json.loads(job.result_json) if job.result_json else None,
+            "failure": json.loads(job.internal_json or "{}").get("failure"),
+            "created_at": job.created_at, "updated_at": job.updated_at,
+        }
+
+
+# ── 경로가 부르는 함수 ─────────────────────────────────────────────────────────
+
+
+async def create_job(raw, *, client, session_factory, background_tasks) -> NarrativeJobCreated:
+    """작업을 만들고 즉시 돌려준다. ValidationError(422)·JobRateLimited(429)는 라우터가 응답으로 바꾼다."""
+    request, trimmed = await run_cpu_bound(parse_request, raw)
+    if not llm_budget.narrative_jobs.try_consume():
+        logger.warning("서술 작업 생성 시간당 상한(%d건) 초과 → 429", llm_budget.narrative_jobs.limit)
+        raise JobRateLimited()
+
+    benchmark_refs = [
+        BenchmarkRefOut(**ref).model_dump(mode="json")
+        for ref in build_benchmark_refs(request.task_type.value, request.fact_sheet.metrics)
+    ]
+    # AI 를 부를 작업만 서술 지갑에서 보고서 1건을 예약한다. 사유가 이미 정해진 작업은 AI 를 부르지 않는다.
+    forced_reason = None
+    if trimmed:
+        forced_reason, budget = "input_too_large", "not_needed"
+        logger.warning("서술 작업 입력이 상한을 넘어 줄임 → 규칙 문장으로 완료(input_too_large): %s", trimmed)
+    elif client is None:
+        budget = "no_key"
+    elif llm_budget.narrative.try_consume():
+        budget = "reserved"
+    else:
+        forced_reason, budget = "budget_exceeded", "exceeded"
+        logger.warning("서술 시간당 예산 소진(보고서 %d건) → 규칙 문장으로 완료", llm_budget.narrative.limit)
+
+    now = _utcnow()
+    job_id = str(uuid.uuid4())
+    internal = {
+        "task_type": request.task_type.value,
+        "report_purpose": request.report_purpose.value,
+        "budget": budget,
+        "trimmed": trimmed,
+        "stages": [{"stage": "queued", "at": iso_utc(now)}],
+    }
+    await run_in_threadpool(_db_insert, session_factory, job_id, benchmark_refs, internal, now)
+    background_tasks.add_task(
+        run_job, job_id,
+        session_factory=session_factory, client=client, request=request,
+        budget_reserved=budget == "reserved", forced_reason=forced_reason,
+    )
+    return NarrativeJobCreated(job_id=job_id, status="running", stage="queued", benchmark_refs=benchmark_refs)
+
+
+async def run_job(
+    job_id: str,
+    *,
+    session_factory,
+    client,
+    request: NarrativeRequest,
+    budget_reserved: bool = False,
+    forced_reason: str | None = None,
+) -> None:
+    """작업 하나를 끝까지 돌린다(BackgroundTasks). 예외를 밖으로 던지지 않는다 — 끝 상태를 DB 에 쓴다.
+
+    테스트는 이 함수를 직접 await 해 단계와 기록을 본다.
+    """
+    started = time.perf_counter()
+    trace: dict = {"calls": []}
+    stages: list[dict] = []
+
+    async def on_stage(stage: str) -> None:
+        moment = _utcnow()
+        stages.append({"stage": stage, "at": iso_utc(moment)})
+        try:
+            await run_in_threadpool(_db_set_stage, session_factory, job_id, stage, moment)
+        except Exception:
+            # 단계 표시는 진행 안내일 뿐이다 — 쓰기에 실패해도 서술은 계속 만든다(못 쓰면 유실 판정이 앞당겨질 뿐).
+            logger.exception("서술 작업 %s 단계(%s) 기록 실패", job_id, stage)
+
+    narrative = None
+    failure = None
+    try:
+        async with asyncio.timeout(JOB_DEADLINE_SECONDS):
+            # 작업 경로의 호출은 재시도 0·호출 시간 제한 JOB_CALL_TIMEOUT_SECONDS (옛 경로 클라이언트 설정과 따로).
+            job_client = (
+                client.with_options(timeout=JOB_CALL_TIMEOUT_SECONDS, max_retries=0) if client is not None else None
+            )
+            resp = await generate_narrative(
+                job_client, request,
+                budget_reserved=budget_reserved, forced_reason=forced_reason,
+                deadline=None, slot_wait=JOB_SLOT_WAIT_SECONDS,
+                on_stage=on_stage, trace=trace,
+            )
+            narrative = customer_result(resp)
+    except TimeoutError:
+        failure = "timeout"
+        logger.warning("서술 작업 %s 전체 제한(%.0f초) 초과 → 실패(timeout)", job_id, JOB_DEADLINE_SECONDS)
+    except Exception:
+        failure = "error"
+        logger.exception("서술 작업 %s 예기치 않은 오류 → 실패(error)", job_id)
+
+    moment = _utcnow()
+    status = "done" if failure is None else "failed"
+    stages.append({"stage": status, "at": iso_utc(moment)})
+    calls = trace.get("calls", [])
+    internal = {
+        "failure": failure,
+        "source": trace.get("source"),
+        "reason": trace.get("reason"),
+        "grounding": trace.get("grounding"),
+        "calls": calls,
+        "http_attempts": len(calls),
+        "cost_usd": total_cost(calls),
+        "slot_wait_seconds": trace.get("slot_wait_seconds"),
+        "prompt_chars": trace.get("prompt_chars"),
+        "seconds_total": round(time.perf_counter() - started, 3),
+        "stages": stages,
+    }
+    try:
+        written = await run_in_threadpool(
+            _db_finish, session_factory, job_id, status=status, narrative=narrative, internal=internal, now=moment,
+        )
+    except Exception:
+        logger.exception("서술 작업 %s 끝 상태(%s) 기록 실패 — 조회 때 유실로 판정된다", job_id, status)
+        return
+    if not written:
+        logger.warning("서술 작업 %s 은 이미 끝나 있었다(유실 판정 뒤 늦게 끝남) — 결과를 버린다", job_id)
+    logger.info("서술 작업 %s 기록 %s", job_id, json.dumps({"status": status, **internal}, ensure_ascii=False))
+
+
+async def read_job(job_id: str, *, session_factory) -> NarrativeJobOut | None:
+    """작업 조회. 없으면 None(라우터가 404)."""
+    row = await run_in_threadpool(_db_read, session_factory, job_id, _utcnow())
+    if row is None:
+        return None
+    result = row["result"]
+    status, stage, failure = row["status"], row["stage"], row["failure"]
+    narrative = None
+    if status == "done":
+        if result is None or "narrative" not in result:
+            # 결과 글을 보관 시간이 지나 지웠다 — 고객에게는 다시 만들어야 하는 실패로 보인다.
+            status, stage, failure = "failed", "failed", "expired"
+        else:
+            narrative = NarrativeJobResult(**result["narrative"])
+    elif status == "running":
+        failure = None
+    return NarrativeJobOut(
+        job_id=row["id"], status=status, stage=stage, failure=failure,
+        benchmark_refs=[BenchmarkRefOut(**r) for r in (result or {}).get("benchmark_refs", [])],
+        result=narrative,
+        created_at=iso_utc(row["created_at"]), updated_at=iso_utc(row["updated_at"]),
+    )

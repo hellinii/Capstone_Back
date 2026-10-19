@@ -19,11 +19,12 @@
 타임아웃에 걸리는데, 그것은 오프로드 이전에도 마찬가지였다(직렬화돼 있었으므로).
 
 상호작용
-- 의존(import): asyncio, weakref, fastapi.concurrency(run_in_threadpool)
+- 의존(import): asyncio, os, weakref, fastapi.concurrency(run_in_threadpool)
 - 사용처: app.analysis.router / app.analysis.validation_router / app.evaluation.router /
   app.narrative.service
 """
 import asyncio
+import os
 import weakref
 from contextlib import asynccontextmanager
 from typing import Any, Callable, TypeVar
@@ -36,10 +37,24 @@ T = TypeVar("T")
 # 512 MB 한도에서 DataFrame 이 여러 벌 상주해도 견딜 수 있는 값으로 잡았다.
 MAX_CONCURRENT_CPU_TASKS = 2
 
+def _env_slots(name: str, default: int) -> int:
+    """동시 칸 수 환경변수. 비었거나 숫자가 아니거나 1 미만이면 기본값 — 오타가 기동 실패나 0칸(영원히 대기)이 되지 않게."""
+    raw = os.getenv(name, "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 1 else default
+
+
 # 동시에 진행할 수 있는 외부 LLM 호출 수(G-03). 워커 수를 알 수 없는 환경에서
 # 프로세스 로컬 세마포어는 **과허용 방향으로만 틀리는** 유일한 총량 장치다 —
 # 워커가 N개면 실효 상한이 N배로 느슨해질 뿐 정상 사용자를 잘못 막지 않는다.
-MAX_CONCURRENT_LLM_CALLS = 4
+#
+# 칸을 매핑과 서술로 나눈다(서술 라운드 S3a). 한 칸을 같이 쓰면 오래 걸리는 서술 작업 넷이 칸을 다 차지해
+# 업로드 직후의 매핑이 서술이 끝날 때까지 기다린다(반대로 매핑이 몰리면 서술이 밀린다).
+MAX_CONCURRENT_MAPPING_CALLS = _env_slots("MAPPING_LLM_SLOTS", 2)
+MAX_CONCURRENT_NARRATIVE_CALLS = _env_slots("NARRATIVE_LLM_SLOTS", 4)
 
 # asyncio.Semaphore 는 처음 대기가 발생할 때 실행 중인 이벤트 루프에 묶인다. 테스트는
 # TestClient 마다 새 루프를 만들 수 있으므로 모듈 전역에 하나를 두면 'bound to a
@@ -48,7 +63,10 @@ MAX_CONCURRENT_LLM_CALLS = 4
 _cpu_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
     weakref.WeakKeyDictionary()
 )
-_llm_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+_mapping_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+    weakref.WeakKeyDictionary()
+)
+_narrative_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
     weakref.WeakKeyDictionary()
 )
 
@@ -72,11 +90,22 @@ async def run_cpu_bound(func: Callable[..., T], /, *args: Any, **kwargs: Any) ->
 
 
 @asynccontextmanager
-async def llm_slot():
-    """외부 LLM 호출 하나를 점유한다. 무인증 과금 경로의 총량 장치(G-03).
+async def mapping_slot():
+    """컬럼 매핑 LLM 호출 하나를 점유한다. 무인증 과금 경로의 총량 장치(G-03).
 
     거절이 아니라 대기다 — 정상 사용자를 잘못 막지 않는 것이 우선이고, 남용은
-    입력 상한·재시도 축소가 함께 맡는다.
+    입력 상한·재시도 축소·시간당 예산이 함께 맡는다.
     """
-    async with _get_semaphore(_llm_semaphores, MAX_CONCURRENT_LLM_CALLS):
+    async with _get_semaphore(_mapping_semaphores, MAX_CONCURRENT_MAPPING_CALLS):
+        yield
+
+
+@asynccontextmanager
+async def narrative_slot():
+    """서술 LLM 호출 하나를 점유한다. 매핑 칸과 따로다.
+
+    대기에 상한을 두는 것은 호출하는 쪽이다 — 옛 경로는 서버 마감 안에서, 작업 번호 경로는 슬롯 대기
+    상한(app.narrative.jobs)으로 기다리고, 넘으면 규칙 문장(사유 busy)이 된다.
+    """
+    async with _get_semaphore(_narrative_semaphores, MAX_CONCURRENT_NARRATIVE_CALLS):
         yield

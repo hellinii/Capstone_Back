@@ -53,10 +53,12 @@ def make_fake_openai_client():
 # 필드 이름(stop_details·usage.iterations 등)이 실제와 어긋나면 테스트가 깨지게 한다.
 import inspect as _inspect
 
+from anthropic import AsyncAnthropic as _AsyncAnthropic
 from anthropic.resources.beta.messages import AsyncMessages as _AsyncBetaMessages
 from anthropic.types.beta import BetaMessage as _BetaMessage
 
 _BETA_CREATE_SIGNATURE = _inspect.signature(_AsyncBetaMessages.create)
+_WITH_OPTIONS_SIGNATURE = _inspect.signature(_AsyncAnthropic.with_options)
 
 
 def fake_beta_message(
@@ -118,6 +120,14 @@ def _make_fake_anthropic_client(content=None, *, raise_exc=None, responses=None,
         return fake_beta_message(content, **message_kwargs)
 
     client.beta.messages.create = AsyncMock(side_effect=_create)
+
+    def _with_options(*args, **kwargs):
+        # 작업 번호 경로는 client.with_options(timeout=…, max_retries=0) 로 부른다. 실제 SDK 서명에 묶어 보고
+        # 같은 가짜를 돌려준다(호출 기록이 한 곳에 모이게). 넘긴 인자는 with_options.call_args 로 본다.
+        _WITH_OPTIONS_SIGNATURE.bind(None, *args, **kwargs)
+        return client
+
+    client.with_options = MagicMock(side_effect=_with_options)
     return client
 
 
@@ -145,3 +155,14 @@ def _no_real_llm_clients(monkeypatch):
     app.state.anthropic_client = None
     yield
     app.state.openai_client, app.state.anthropic_client = prev
+
+
+@pytest.fixture(autouse=True)
+def _fresh_llm_wallets():
+    """시간당 지갑(매핑·서술·서술 작업 생성)은 프로세스 전역이다. 테스트끼리 쓴 양이 쌓여 상한에 닿으면
+    무관한 테스트가 규칙 문장으로 강등되므로 테스트마다 비운다."""
+    from app.core import llm_budget
+
+    llm_budget.reset()
+    yield
+    llm_budget.reset()

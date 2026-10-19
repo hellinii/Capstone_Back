@@ -150,10 +150,11 @@ async def test_analyze_still_retries_on_schema_rejection(make_fake_openai_client
     )
 
 
-def test_llm_concurrency_cap_value_is_pinned():
+def test_llm_concurrency_cap_values_are_pinned():
     """[G-03] 동시 LLM 호출 상한 — 워커 수를 몰라도 안전한 유일한 총량 장치다.
 
     워커가 N개면 실효 상한이 N배로 느슨해질 뿐 정상 사용자를 잘못 막지 않는다
-    (과허용 방향으로만 틀린다).
+    (과허용 방향으로만 틀린다). 서술 라운드 S3a 에서 매핑 2칸·서술 4칸으로 나눴다.
     """
-    assert concurrency.MAX_CONCURRENT_LLM_CALLS == 4
+    assert concurrency.MAX_CONCURRENT_MAPPING_CALLS == 2
+    assert concurrency.MAX_CONCURRENT_NARRATIVE_CALLS == 4

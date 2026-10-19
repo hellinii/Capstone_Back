@@ -247,8 +247,8 @@ async def test_deadline_while_waiting_for_slot_falls_back_as_busy(monkeypatch, m
     monkeypatch.setattr(service, "NARRATIVE_DEADLINE_SECONDS", 0.05)
     client = make_fake_anthropic_client(_CLEAN)
     async with contextlib.AsyncExitStack() as stack:
-        for _ in range(concurrency.MAX_CONCURRENT_LLM_CALLS):
-            await stack.enter_async_context(concurrency.llm_slot())
+        for _ in range(concurrency.MAX_CONCURRENT_NARRATIVE_CALLS):
+            await stack.enter_async_context(concurrency.narrative_slot())
         resp = await generate_narrative(client, _request())
     assert resp.meta.source == "fallback" and resp.meta.reason == "busy"
     client.beta.messages.create.assert_not_called()

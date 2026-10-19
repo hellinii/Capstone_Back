@@ -39,10 +39,16 @@ Start Command 에 있고 저장소에서 확인할 수 없다(`render.yaml` 이 
 - `mapping`: 컬럼 매핑 호출 1건 = 1. `LLM_CALLS_PER_HOUR`(기본 60). 모듈 함수(try_consume·remaining·
   MAX_LLM_CALLS_PER_HOUR)는 종전대로 이 지갑을 가리킨다.
 - `narrative`: 서술 **보고서** 1건 = 1(옛 경로는 호출 1번이 보고서 1건). `NARRATIVE_REPORTS_PER_HOUR`(기본 30).
+  작업 번호 경로는 작업을 만들 때 보고서 1건을 **예약**한다(app.narrative.jobs). 예약은 돌려주지 않는다 —
+  AI 를 부르지 않고 끝나도(요청이 너무 큼 등) 센 채로 둔다. 과소비 방향으로만 틀린다.
+- `narrative_jobs`: 서술 **작업 생성** 1건 = 1. `NARRATIVE_JOBS_PER_HOUR`(기본 200). AI 비용이 아니라 DB 행을
+  막는다 — 키가 없거나 서술 지갑이 비어도 작업은 규칙 문장으로 끝나며 행을 하나씩 남기므로, 무인증 경로를
+  되풀이해 부르면 발급 DB(Neon 무료 용량)가 찬다. 넘으면 작업 경로가 429 를 준다(새 프론트만 쓰는 경로라
+  옛 프론트의 '비 200 = 빈 서술' 문제가 없다).
 
 상호작용
 - 의존(import): time, threading
-- 사용처: app.analysis.analysis_service(mapping), app.narrative.service(narrative)
+- 사용처: app.analysis.analysis_service(mapping), app.narrative.service(narrative), app.narrative.jobs(narrative·narrative_jobs)
 """
 import os
 import threading
@@ -97,9 +103,12 @@ class Wallet:
 MAX_LLM_CALLS_PER_HOUR = int(os.getenv("LLM_CALLS_PER_HOUR", "60"))
 # 서술: 시간당 허용 보고서 수. Sonnet 5.5 보고서 1건은 매핑 1건보다 훨씬 비싸 따로 센다.
 MAX_NARRATIVE_REPORTS_PER_HOUR = int(os.getenv("NARRATIVE_REPORTS_PER_HOUR", "30"))
+# 서술 작업 생성: 시간당 허용 작업 수. 정상 사용(보고서 몇 건에 다시 만들기 몇 번)보다 훨씬 크게 잡는다.
+MAX_NARRATIVE_JOBS_PER_HOUR = int(os.getenv("NARRATIVE_JOBS_PER_HOUR", "200"))
 
 mapping = Wallet("mapping", MAX_LLM_CALLS_PER_HOUR)
 narrative = Wallet("narrative", MAX_NARRATIVE_REPORTS_PER_HOUR)
+narrative_jobs = Wallet("narrative_jobs", MAX_NARRATIVE_JOBS_PER_HOUR)
 
 
 def try_consume(now: float | None = None) -> bool:
@@ -113,6 +122,7 @@ def remaining(now: float | None = None) -> int:
 
 
 def reset() -> None:
-    """두 지갑을 모두 비운다(테스트 전용)."""
+    """지갑을 모두 비운다(테스트 전용)."""
     mapping.reset()
     narrative.reset()
+    narrative_jobs.reset()

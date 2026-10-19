@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 from app.core.schemas import ColumnMapping, ColumnRole, TaskType, VALID_ROLES_BY_TASK
 from app.analysis.schemas import AnalysisResponse
 from app.analysis.prompt_builder import build_system_prompt, build_user_prompt, MAX_PROMPT_COLUMNS
-from app.core.concurrency import llm_slot
+from app.core.concurrency import mapping_slot
 from app.analysis.reconcile import reconcile_llm_columns
 from app.analysis.metadata import extract_metadata
 
@@ -100,7 +100,7 @@ async def analyze_columns_with_llm(
     model = mapping_model()
 
     try:
-        async with llm_slot():
+        async with mapping_slot():
             response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -113,7 +113,7 @@ async def analyze_columns_with_llm(
         # SDK max_retries=2 와 곱해지면서 익명 요청 1건의 과금 호출이 최대 6회,
         # 최악 벽시계가 약 270초였다(E-18). 그런 실패는 그대로 위로 던져
         # analysis_service 의 규칙 폴백으로 즉시 강등시킨다.
-        async with llm_slot():
+        async with mapping_slot():
             response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
