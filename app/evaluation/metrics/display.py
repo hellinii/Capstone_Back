@@ -36,8 +36,4 @@ def judged_text(value: float, threshold: float, meets: bool, digits: int = DEFAU
             return text
     scale = 10 ** MAX_DIGITS
     cut = math.ceil(value * scale) / scale if meets else math.floor(value * scale) / scale
-    if not meets and cut >= threshold:
-        cut = threshold - 1 / scale
-    if meets and cut < threshold:
-        cut = threshold
     return _text(cut, MAX_DIGITS)

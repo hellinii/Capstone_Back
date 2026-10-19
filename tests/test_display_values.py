@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from app.evaluation.engine import evaluate
+from app.evaluation.metrics.binary import threshold_gain_notable
 from app.evaluation.metrics.display import judged_text
 
 
@@ -65,3 +66,12 @@ def test_threshold_gain_carries_notable_and_text():
     assert isinstance(g["notable"], bool)
     assert g["notable"] == (g["gain"] >= 0.1)
     assert float(g["gain_text"]) == pytest.approx(g["gain"])
+
+
+@pytest.mark.parametrize("gain, notable", [
+    (0.09996, False),               # 넷째 자리로는 0.1 — 반올림 전 값으로 판정하면 부적합이 아니다
+    (0.0999999999999998, True),     # 0.9 − 0.8 같은 뺄셈 잡음 — 꼭 0.10 은 부적합
+    (0.1, True), (0.1409, True), (0.0, False),
+])
+def test_threshold_gain_notable_uses_unrounded_gain(gain, notable):
+    assert threshold_gain_notable(gain) is notable

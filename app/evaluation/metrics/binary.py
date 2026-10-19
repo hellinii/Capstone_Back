@@ -15,6 +15,14 @@ from app.evaluation.metrics.display import judged_text
 
 # 임계값 조정 여지가 '임계값 부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40) — 판정은 이 모듈 한 곳.
 THRESHOLD_GAIN_NOTABLE = 0.10
+
+
+def threshold_gain_notable(gain: float) -> bool:
+    """반올림 전 gain ≥ 0.10 인지 — 9자리로 뺄셈 잡음만 걷는다(counts._clean 과 같은 자릿수).
+
+    넷째 자리로 반올림한 값으로 판정하면 실제 0.09996 이 0.1 이 되어 '부적합'이 된다(계획 검토 P1-9).
+    """
+    return round(float(gain), 9) >= THRESHOLD_GAIN_NOTABLE
 from typing import Dict, Any
 from sklearn.metrics import (
     confusion_matrix,
@@ -198,7 +206,7 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
     gain = max(0.0, max_f1 - current)
     # '임계값 부적합'(≥ 0.10) 판정은 반올림 전 값으로 여기 한 곳에서 한다(S2). 종전에는 프론트 문제 목록과
     # 백엔드 서술이 각자 넷째 자리 gain 으로 판정해, 실제 0.09996 이 0.1 로 반올림되어 부적합이 됐다.
-    notable = round(gain, 9) >= THRESHOLD_GAIN_NOTABLE
+    notable = threshold_gain_notable(gain)
     return {
         "max_f1": round(max_f1, 4),
         "current_f1": round(current, 4),
