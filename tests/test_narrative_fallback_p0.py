@@ -98,7 +98,7 @@ def test_multilabel_imbalance_uses_label_gap_only():
                              majority_minus_minority_f1=0.3, majority_class="sports", minority_class="tech")
     resp, _ = _run(_fs(imbalance_effect=ie))
     text = resp.interpretation.distribution_analysis
-    assert "다수 레이블(sports)와 소수 레이블(tech)의 F1 차이(0.3)가 기준(0.1) 이상" in text
+    assert "다수 레이블(sports)과 소수 레이블(tech)의 F1 차이(0.3)가 기준(0.1) 이상" in text
     assert "매크로" not in text and "소수 레이블의 성능 지표 해석" in text
 
 
@@ -242,3 +242,58 @@ async def test_service_passes_task_type_so_multilabel_fallback_uses_label_cells(
     resp = await generate_narrative(None, req)
     assert resp.meta.reason == "no_key"
     assert "레이블 칸 800칸" in resp.interpretation.confusion_analysis
+
+
+# ── 운영 프론트(9-22) 옛 판정 규칙의 조건부 합격(S1 배포 전 점검에서 발견) ─────────────
+# 옛 computeVerdict 는 목표값이 하나도 없거나 핵심 지표가 산출되지 않으면 미달이 없어도 CONDITIONAL_PASS 다.
+
+def test_old_front_conditional_pass_without_any_target_does_not_claim_failure_or_all_passed():
+    fs = _fs(verdict="CONDITIONAL_PASS", score=0.0, metrics=[
+        _m("M1", "Accuracy", 0.505, None, "info"), _m("M4", "F1 Score", 0.512, None, "info")])
+    resp, texts = _run(fs)
+    n, r = resp.conclusion.narrative, resp.conclusion.risks
+    assert n == "목표값이 설정된 지표가 없어 목표 충족 여부로 판정하지 못했으며, 종합 판정은 '조건부 합격'이다."
+    assert r == "목표값이 설정된 지표가 없어 목표 미달 위험을 판단하지 못했다."
+    assert "미달하여" not in n and "모든 시험항목" not in r and "통과율" not in n
+    assert find_verdict_contradictions(texts, fs.verdict) == []
+
+
+def test_old_front_conditional_pass_with_core_unavailable_does_not_claim_noncore_failure():
+    fs = _fs(verdict="CONDITIONAL_PASS", score=100.0, metrics=[_m("M9", "AUROC", 0.88, 0.80, "pass")])
+    resp, texts = _run(fs)
+    n = resp.conclusion.narrative
+    assert n.startswith("목표값이 설정된 지표 중 목표에 미달한 지표는 없으나 핵심 지표가 산출되지 않아 종합 판정은 '조건부 합격'이다.")
+    assert "핵심이 아닌 지표가 목표에 미달" not in n
+    assert "확인하지 못했다" in resp.conclusion.risks and "위험은 없다" not in resp.conclusion.risks
+    assert find_verdict_contradictions(texts, fs.verdict) == []
+
+
+
+# ── 독립 검토(S1) 반영 ──────────────────────────────────────────────────────
+
+def test_negative_accuracy_gap_does_not_claim_minority_is_better():
+    """S1-4-FB-01: 정확도 − 매크로 F1 이 음수인 것은 소수 클래스가 더 잘 맞았다는 뜻이 아니다(엔진에서 나오는 값)."""
+    for level, cls in (("no_distortion", 0.0763), ("affected", 0.15)):
+        resp, _ = _run(_fs(imbalance_effect=_ie(level, -0.0022, cls, ir=6.5)))
+        text = resp.interpretation.distribution_analysis
+        assert "소수 클래스의 F1 이 더 높다" not in text
+        assert "정확도와 매크로 F1 의 차이(-0.0022)는 기준(0.1) 미만이다." in text
+
+
+def test_target_zero_never_prints_minus_zero():
+    """S1-4-FB-02: 목표 0, 값 −0.00003 은 넷째 자리로도 0 — '-0' 이 아니라 '근소하게 못 미침'."""
+    resp, texts = _run(_fs(verdict="FAIL", score=0.0, metrics=[_m("M20", "MCC", -0.00003, 0.0, "fail", True)]))
+    joined = " ".join(texts)
+    assert "-0," not in joined and "(-0" not in joined
+    assert "MCC(목표 0에 근소하게 못 미침)" in resp.conclusion.narrative
+
+
+def test_inconclusive_cause_without_metrics_has_no_dangling_dash():
+    """T2: 판정 대상이 0개(no_judged)면 프론트가 metrics=[] 를 보낸다."""
+    p = ProblemFact(id="P1", kind="inconclusive", priority="HIGH", title="판정 대상 지표 없음", source_section="8.2",
+                    recommend_section="9.2", evidence={"cause": "판정 대상 지표 없음", "reason": "no_judged",
+                                                      "metrics": [], "judged_count": 0})
+    resp, _ = _run(_fs(verdict="INCONCLUSIVE", score=0.0, problems=[p], metrics=[_m("M1", "Accuracy", 0.9, None, "info")]))
+    n = resp.conclusion.narrative
+    assert "종합 판정은 '판정 불가'이다(원인: 판정 대상 지표 없음)." in n
+    assert " — " not in n

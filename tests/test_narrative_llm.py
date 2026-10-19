@@ -65,7 +65,7 @@ async def test_request_shape(make_fake_anthropic_client):
         assert banned not in kw, banned
 
 
-@pytest.mark.parametrize("value, expected", [("high", "high"), (" MEDIUM ", "medium"), ("bogus", "low"), ("", "low")])
+@pytest.mark.parametrize("value, expected", [("high", "high"), (" MEDIUM ", "medium"), ("xhigh", "xhigh"), ("max", "max"), ("bogus", "low"), ("", "low")])
 async def test_effort_from_env(monkeypatch, make_fake_anthropic_client, value, expected):
     monkeypatch.setenv("NARRATIVE_EFFORT", value)
     client = make_fake_anthropic_client(_CLEAN)
@@ -303,3 +303,53 @@ def test_router_uses_anthropic_client(monkeypatch, make_fake_anthropic_client):
     body = TestClient(app).post("/api/generate-narrative", json=json.loads(_request().model_dump_json())).json()
     assert body["meta"]["source"] == "llm", body["meta"]
     assert fake.beta.messages.create.call_count == 1
+
+
+
+# ── 독립 검토(S1) 반영 ──────────────────────────────────────────────────────
+
+async def test_cost_uses_requested_model_when_message_iteration_has_no_model():
+    """BE-LLM-01: SDK 에서 message 항목의 model 은 선택 칸이다 — 비면 요청한 모델의 단가로 센다."""
+    import json
+
+    it = _it("message", None, 1000, 500)
+    msg = fake_beta_message(json.dumps(_CLEAN), usage=(1000, 500), iterations=[it])
+    assert msg.usage.iterations[0].model is None
+    result = await llm.call_narrative_llm(_client_returning(msg), system="s", user="u", schema={"type": "object"})
+    assert result.record.cost_usd == pytest.approx(1000 * 2 / 1e6 + 500 * 10 / 1e6)
+    assert result.record.iterations[0]["model"] == "claude-sonnet-5-5"
+
+
+async def test_request_assembly_failure_falls_back_without_calling(monkeypatch, make_fake_anthropic_client):
+    """T5: 프롬프트 조립 실패는 500 이 아니라 규칙 폴백(assembly_error)이고, AI 도 지갑도 쓰지 않는다."""
+    def boom(*_a, **_k):
+        raise ValueError("조립 실패")
+
+    monkeypatch.setattr(service, "build_user_prompt", boom)
+    client = make_fake_anthropic_client(_CLEAN)
+    resp = await generate_narrative(client, _request())
+    assert resp.meta.reason == "assembly_error"
+    client.beta.messages.create.assert_not_called()
+    assert llm_budget.narrative.remaining() == llm_budget.narrative.limit
+
+
+async def test_oversized_prompt_falls_back_before_spending_wallet(monkeypatch, make_fake_anthropic_client):
+    """OPS-1: 무인증 경로로 거대한 사실 시트를 보내도 AI 를 부르지 않는다(지갑도 그대로)."""
+    monkeypatch.setattr(service, "build_user_prompt", lambda *_a, **_k: "x" * (service.MAX_NARRATIVE_PROMPT_CHARS + 1))
+    client = make_fake_anthropic_client(_CLEAN)
+    resp = await generate_narrative(client, _request())
+    assert resp.meta.source == "fallback" and resp.meta.reason == "input_too_large"
+    client.beta.messages.create.assert_not_called()
+    assert llm_budget.narrative.remaining() == llm_budget.narrative.limit
+
+
+def test_normal_prompt_is_far_below_size_cap():
+    from app.narrative.baselines import build_benchmark_refs
+    from app.narrative.derived import compute_derived
+    from app.narrative.prompt import build_system_prompt, build_user_prompt
+
+    fs = _no_special_fact_sheet()
+    d = compute_derived(fs)
+    size = len(build_system_prompt("external", "binary", fs)) + len(
+        build_user_prompt(fs.model_dump(), build_benchmark_refs("binary", fs.metrics), d, None))
+    assert size * 5 < service.MAX_NARRATIVE_PROMPT_CHARS

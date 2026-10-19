@@ -47,8 +47,11 @@ def _value_target(value: float, threshold: float) -> tuple[str, str]:
     v, t = _num(value), _num(threshold)
     if v != t or value == threshold:
         return v, t
-    v4 = f"{round(float(value), 4):.4f}".rstrip("0").rstrip(".")
-    t4 = f"{round(float(threshold), 4):.4f}".rstrip("0").rstrip(".")
+    def four(x: float) -> str:
+        text = f"{round(float(x), 4):.4f}".rstrip("0").rstrip(".")
+        return "0" if text == "-0" else text
+
+    v4, t4 = four(value), four(threshold)
     if v4 != t4:
         return v4, t4
     return "", t
@@ -114,14 +117,18 @@ def _imbalance_sentence(ie) -> str:
     if ie.accuracy_minus_macro_f1 is not None:
         gaps.append(("정확도와 매크로 F1 의 차이", ie.accuracy_minus_macro_f1))
     gaps.append((
-        f"다수 {unit}({ie.majority_class})와 소수 {unit}({ie.minority_class})의 F1 차이",
+        f"다수 {unit}({ie.majority_class}){'과' if unit == '레이블' else '와'} 소수 {unit}({ie.minority_class})의 F1 차이",
         ie.majority_minus_minority_f1,
     ))
     over = [(n, v) for n, v in gaps if ie.level == "affected" and v >= 0.1]
     under = [(n, v) for n, v in gaps if (n, v) not in over]
 
+    class_gap_name = gaps[-1][0]
+
     def under_text(name: str, value: float) -> str:
-        if value < 0:
+        # '소수 쪽 F1 이 더 높다'는 다수 F1 − 소수 F1 이 음수일 때만 맞다. 정확도 − 매크로 F1 이 음수인 것은
+        # 평균 F1 이 정확도보다 높다는 뜻일 뿐이다(독립 검토 S1-4-FB-01).
+        if value < 0 and name == class_gap_name:
             return f"{name}({value})는 음수로 소수 {unit}의 F1 이 더 높다"
         if value >= 0.1:  # 반올림해 기준과 같아 보이지만 엔진은 기준 미만으로 봤다
             return f"{name}는 기준(0.1) 미만이다"
@@ -195,6 +202,11 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
     )
 
 
+def _judged(fs: FactSheet) -> list:
+    """목표값이 설정된 지표(판정 대상). 목표값 0·음수도 목표다 — 없음은 None 뿐."""
+    return [m for m in fs.metrics if m.threshold is not None]
+
+
 def _failed(fs: FactSheet) -> list:
     """목표에 미달한 판정 대상 지표(목표값 0·음수 미달도 미달이다)."""
     return [m for m in fs.metrics if m.status == "fail" and m.threshold is not None]
@@ -229,11 +241,21 @@ def _verdict_narrative(fs: FactSheet, derived: dict) -> str:
                 text += f" 핵심이 아닌 지표 중에도 목표에 미달한 지표가 있다{listing('목표 미달 지표', others)}."
         else:
             text = f"핵심 지표가 목표에 미달하여 종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
-    elif fs.verdict == "CONDITIONAL_PASS":
+    elif fs.verdict == "CONDITIONAL_PASS" and failed:
         text = (
             "핵심 지표는 모두 목표를 충족하였으나 핵심이 아닌 지표가 목표에 미달하여 "
             f"종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
         )
+    elif fs.verdict == "CONDITIONAL_PASS":
+        # 운영 프론트(9-22)의 옛 판정 규칙은 미달이 없어도 조건부 합격을 낸다 — 목표값이 하나도 없을 때와
+        # 핵심 지표가 산출되지 않았을 때. 그때 '비핵심 미달'이라 쓰면 거짓이다(S1 배포 전 점검에서 발견).
+        if not _judged(fs):
+            text = f"목표값이 설정된 지표가 없어 목표 충족 여부로 판정하지 못했으며, 종합 판정은 '{vlabel}'이다."
+        else:
+            text = (
+                "목표값이 설정된 지표 중 목표에 미달한 지표는 없으나 핵심 지표가 산출되지 않아 "
+                f"종합 판정은 '{vlabel}'이다."
+            )
     elif fs.verdict == "INCONCLUSIVE":
         cause = next((p for p in fs.problems if p.kind == "inconclusive"), None)
         ev = cause.evidence if cause else {}
@@ -277,6 +299,12 @@ def _risks(fs: FactSheet) -> str:
             risks += " 다만 종합 판정이 '판정 불가'여서 판정에 따른 위험은 확인하지 못했다."
     elif fs.verdict == "INCONCLUSIVE":
         risks = "종합 판정이 '판정 불가'여서 목표 충족 여부에 따른 위험을 확인하지 못했다."
+    elif fs.verdict == "CONDITIONAL_PASS" and _judged(fs):
+        # 미달 없는 조건부 합격(옛 규칙 — 핵심 지표 미산출). '모두 충족하여 위험은 없다'는 판정과 모순이다.
+        risks = "목표값이 설정된 지표 중 목표에 미달한 지표는 없으나, 핵심 지표가 산출되지 않아 그에 따른 위험은 확인하지 못했다."
+    elif not _judged(fs):
+        # 목표값이 하나도 없으면 '모든 시험항목이 목표를 충족'은 확인하지 않은 것을 확인한 것처럼 읽힌다.
+        risks = "목표값이 설정된 지표가 없어 목표 미달 위험을 판단하지 못했다."
     elif near:
         # "식별된 기준 미달 위험은 없다"와 아슬아슬 문장이 함께 실리면 서로 어긋나므로 앞 문장을 바꾼다.
         risks = "목표값이 설정된 모든 시험항목이 목표를 충족하였다."

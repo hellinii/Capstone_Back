@@ -93,14 +93,21 @@ class LLMResult:
     record: CallRecord
 
 
-def _iteration_entries(response) -> list[dict]:
-    """usage.iterations 를 (종류, 모델, 입력, 출력) 목록으로. 비면 맨 위 usage 한 줄."""
+def _iteration_entries(response, requested_model: str) -> list[dict]:
+    """usage.iterations 를 (종류, 모델, 입력, 출력) 목록으로. 비면 맨 위 usage 한 줄.
+
+    SDK 에서 message 항목의 model 은 선택 칸이다(fallback_message 는 필수). 비어 있으면 요청한 모델이 처리한
+    시도이므로 요청 모델로 채운다 — 그러지 않으면 평범한 성공 호출의 비용이 빈칸이 된다(독립 검토 BE-LLM-01).
+    """
     usage = response.usage
     entries = []
     for it in (getattr(usage, "iterations", None) or []):
+        model = getattr(it, "model", None)
+        if model is None and it.type == "message":
+            model = requested_model
         entries.append({
             "type": it.type,
-            "model": getattr(it, "model", None),
+            "model": model,
             "input_tokens": it.input_tokens or 0,
             "output_tokens": it.output_tokens or 0,
         })
@@ -132,7 +139,7 @@ def _fill_from_response(record: CallRecord, response) -> None:
     if details is not None:
         record.refusal_category = getattr(details, "category", None)
         record.recommended_model = getattr(details, "recommended_model", None)
-    entries = _iteration_entries(response)
+    entries = _iteration_entries(response, record.requested_model)
     record.iterations = entries
     record.served_by_fallback = any(e["type"] == "fallback_message" for e in entries)
     record.input_tokens = sum(e["input_tokens"] for e in entries)

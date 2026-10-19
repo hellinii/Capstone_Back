@@ -66,9 +66,10 @@ async def test_narrative_call_uses_selected_model(monkeypatch, make_fake_anthrop
     assert resp.meta.model == expected  # 응답에 적는 모델 = 실제로 답한 모델
 
 
-async def test_mapping_calls_use_selected_model_including_retry(monkeypatch, make_fake_openai_client):
-    """스키마 거부 재시도(D5a)까지 두 호출 모두 고른 모델을 쓴다."""
-    monkeypatch.setenv("MAPPING_MODEL", "gpt-x-map")
+@pytest.mark.parametrize("model, with_temperature", [("gpt-x-map", False), ("gpt-4.1-mini", True)])
+async def test_mapping_calls_use_selected_model_including_retry(monkeypatch, make_fake_openai_client, model, with_temperature):
+    """스키마 거부 재시도(D5a)까지 두 호출 모두 고른 모델을 쓰고, temperature 규칙도 두 호출에 같다."""
+    monkeypatch.setenv("MAPPING_MODEL", model)
     rejected = httpx.Response(400, request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
     fake = make_fake_openai_client(
         raise_exc=openai.BadRequestError(message="invalid schema", response=rejected, body=None)
@@ -77,8 +78,8 @@ async def test_mapping_calls_use_selected_model_including_retry(monkeypatch, mak
     with pytest.raises(openai.BadRequestError):
         await analyze_columns_with_llm(fake, TaskType.binary, list(df.columns), df)
     calls = fake.chat.completions.create.call_args_list
-    assert [c.kwargs["model"] for c in calls] == ["gpt-x-map", "gpt-x-map"]
-    assert ["temperature" in c.kwargs for c in calls] == [False, False]  # gpt-4 계열이 아니면 재시도에도 없다
+    assert [c.kwargs["model"] for c in calls] == [model, model]
+    assert ["temperature" in c.kwargs for c in calls] == [with_temperature, with_temperature]
 
 
 def test_retired_model_not_hardcoded_in_app():

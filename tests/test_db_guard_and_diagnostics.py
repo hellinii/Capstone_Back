@@ -134,3 +134,16 @@ def test_health_reports_llm_key_presence_and_models_without_secrets(monkeypatch)
     r = client.get("/health")
     assert r.json()["llm"]["narrative"]["key"] is True and r.json()["llm"]["mapping"]["key"] is True
     assert "secret" not in r.text
+
+
+
+def test_health_llm_key_fields_are_not_swapped():
+    """T1: 한쪽 키만 있을 때 칸이 서로 바뀌지 않는다(운영에서 서술이 어느 길로 가는지 보는 근거)."""
+    from app.main import app
+
+    app.state.anthropic_client, app.state.openai_client = object(), None
+    llm = client.get("/health").json()["llm"]
+    assert (llm["narrative"]["key"], llm["mapping"]["key"]) == (True, False)
+    app.state.anthropic_client, app.state.openai_client = None, object()
+    llm = client.get("/health").json()["llm"]
+    assert (llm["narrative"]["key"], llm["mapping"]["key"]) == (False, True)

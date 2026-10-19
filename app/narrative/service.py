@@ -35,6 +35,12 @@ logger = logging.getLogger(__name__)
 # 빈 서술 대신 규칙 문장이 간다. llm.CALL_TIMEOUT_SECONDS × (llm.MAX_RETRIES + 1) 이 이 값 안에 든다(테스트 고정).
 NARRATIVE_DEADLINE_SECONDS = 120.0
 
+# 서술 AI 에 보내는 user 프롬프트의 글자 수 상한. 무인증 공개 경로라 칸별 상한만으로는 본문 2MB 안에서
+# 약 96만 자짜리 요청을 만들 수 있고, Sonnet 5.5 는 그것을 받아 한 건에 약 0.7달러를 받는다(독립 검토 OPS-1).
+# 정상 요청은 클래스가 많아도 수만 자 안이다. 넘으면 AI 를 부르지 않고 지갑도 쓰지 않은 채 규칙 문장
+# (사유 input_too_large). 사실 시트 칸별 상한·422 는 S4b 에서 따로 정한다.
+MAX_NARRATIVE_PROMPT_CHARS = 80_000
+
 
 def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
     """파생값·기준치·숫자 화이트리스트 준비 — 순수 CPU 구간(스레드풀로 오프로드된다).
@@ -112,7 +118,23 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
     if client is None:
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="no_key")
 
-    # 1-1. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
+    # 1-1. 요청 조립 + 크기 상한 — 지갑을 쓰기 전에 본다(너무 큰 요청이 예산을 먹지 않게).
+    try:
+        system = build_system_prompt(req.report_purpose.value, req.task_type.value, fs)
+        user = build_user_prompt(fs.model_dump(), benchmark_refs, derived, req.client_inputs)
+        schema = build_response_schema(fs.problems)
+    except Exception:
+        # 종전처럼 500 이 아니라 규칙 폴백 — 요청 조립 실패도 서술 실패의 하나다.
+        logger.exception("서술 요청 조립 실패 → 규칙 폴백(assembly_error)")
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")
+    if len(system) + len(user) > MAX_NARRATIVE_PROMPT_CHARS:
+        logger.warning(
+            "서술 요청이 너무 큼(%d자 > %d자) → 규칙 폴백(input_too_large)",
+            len(system) + len(user), MAX_NARRATIVE_PROMPT_CHARS,
+        )
+        return build_fallback_narrative(fs, benchmark_refs, derived, reason="input_too_large")
+
+    # 1-2. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
     #      **429 가 아니라 200 + 폴백이다** — 프론트는 비 200 을 폴백이 아니라 오류로
     #      처리해 7·8·9절이 '생성 예정' 안내로 인쇄된다(사용자에게는 서비스 고장으로 보인다).
     #      서술 지갑은 매핑 지갑과 따로다 — 옛 경로는 호출 1번이 보고서 1건이다.
@@ -124,14 +146,6 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="budget_exceeded")
 
     # 2. LLM 호출 — 슬롯 대기까지 서버 마감 안에서.
-    try:
-        system = build_system_prompt(req.report_purpose.value, req.task_type.value, fs)
-        user = build_user_prompt(fs.model_dump(), benchmark_refs, derived, req.client_inputs)
-        schema = build_response_schema(fs.problems)
-    except Exception:
-        # 종전처럼 500 이 아니라 규칙 폴백 — 요청 조립 실패도 서술 실패의 하나다.
-        logger.exception("서술 요청 조립 실패 → 규칙 폴백(assembly_error)")
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")
     slot = {"acquired": False}
 
     async def _call():

@@ -1115,7 +1115,7 @@ def test_fallback_distribution_multilabel_uses_label_gap_only():
     ie = _imbalance(accuracy_minus_macro_f1=None, majority_minus_minority_f1=-0.04, level="no_distortion")
     fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": ie})
     text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.distribution_analysis
-    assert "다수 레이블(neg)와 소수 레이블(pos)의 F1 차이(-0.04)는 음수로 소수 레이블의 F1 이 더 높다." in text
+    assert "다수 레이블(neg)과 소수 레이블(pos)의 F1 차이(-0.04)는 음수로 소수 레이블의 F1 이 더 높다." in text
     assert "매크로 F1" not in text
 
 

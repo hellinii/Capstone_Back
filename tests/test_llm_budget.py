@@ -162,3 +162,19 @@ def test_column_analysis_calls_llm_within_budget(make_fake_openai_client):
     ))
 
     client.chat.completions.create.assert_called()
+
+
+
+def test_wallet_limits_read_their_env_names(monkeypatch):
+    """T6: 운영에서 상한을 낮출 때 쓰는 환경변수 이름을 실제로 읽는다(import 때 한 번)."""
+    import importlib
+
+    monkeypatch.setenv("NARRATIVE_REPORTS_PER_HOUR", "5")
+    monkeypatch.setenv("LLM_CALLS_PER_HOUR", "7")
+    try:
+        reloaded = importlib.reload(llm_budget)
+        assert reloaded.narrative.limit == 5 and reloaded.mapping.limit == 7
+    finally:
+        monkeypatch.delenv("NARRATIVE_REPORTS_PER_HOUR")
+        monkeypatch.delenv("LLM_CALLS_PER_HOUR")
+        importlib.reload(llm_budget)
