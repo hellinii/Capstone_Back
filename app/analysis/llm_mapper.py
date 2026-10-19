@@ -9,6 +9,7 @@ reconcile 로 실제 헤더에 정렬한 뒤 메타데이터를 붙여 AnalysisR
 - 사용처: app.analysis.analysis_service / scripts.llm_smoke_analyze
 """
 import json
+import os
 
 import openai
 import pandas as pd
@@ -20,6 +21,15 @@ from app.analysis.prompt_builder import build_system_prompt, build_user_prompt, 
 from app.core.concurrency import llm_slot
 from app.analysis.reconcile import reconcile_llm_columns
 from app.analysis.metadata import extract_metadata
+
+
+# 컬럼 매핑 모델. 코드 기본값 = 운영값(종전 nano 모델은 2026-10-23 종료). 호출마다 읽는다.
+DEFAULT_MAPPING_MODEL = "gpt-4.1-mini"
+
+
+def mapping_model() -> str:
+    """컬럼 매핑에 쓸 모델 이름(`MAPPING_MODEL`, 비었으면 코드 기본값)."""
+    return os.getenv("MAPPING_MODEL", "").strip() or DEFAULT_MAPPING_MODEL
 
 
 def _build_response_schema(task_type: TaskType, columns: list[str] | None = None) -> dict:
@@ -77,11 +87,12 @@ async def analyze_columns_with_llm(
     # 컬럼이 지나치게 많으면 동적 enum 자체가 증폭 수단이 된다 — enum 을 포기하고
     # reconcile 의 컬럼명 정렬에 맡긴다(G-03).
     schema_columns = columns if len(columns) <= MAX_PROMPT_COLUMNS else None
+    model = mapping_model()
 
     try:
         async with llm_slot():
             response = await client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model=model,
                 messages=messages,
                 response_format=_build_response_schema(task_type, schema_columns),
                 temperature=0,
@@ -94,7 +105,7 @@ async def analyze_columns_with_llm(
         # analysis_service 의 규칙 폴백으로 즉시 강등시킨다.
         async with llm_slot():
             response = await client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model=model,
                 messages=messages,
                 response_format=_build_response_schema(task_type, None),
                 temperature=0,

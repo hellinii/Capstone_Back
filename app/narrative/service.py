@@ -11,6 +11,7 @@ fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비�
 """
 import json
 import logging
+import os
 
 from app.narrative.schemas import BenchmarkRefOut, ConclusionOut, InterpretationOut, NarrativeMeta, NarrativeRequest, NarrativeResponse, RecommendationNarrativeOut, RecommendationOut
 from app.narrative.baselines import build_benchmark_refs
@@ -29,7 +30,14 @@ from app.core.concurrency import llm_slot, run_cpu_bound
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4.1-nano"
+# 서술 생성 모델. 코드 기본값 = 운영값(종전 nano 모델은 2026-10-23 종료). 환경변수로 바꿀 수 있게
+# 호출마다 읽는다 — 배포 뒤 모델만 갈아 끼울 때 코드를 고치지 않아도 된다.
+DEFAULT_NARRATIVE_MODEL = "gpt-4.1-mini"
+
+
+def narrative_model() -> str:
+    """서술 생성에 쓸 모델 이름(`NARRATIVE_MODEL`, 비었으면 코드 기본값)."""
+    return os.getenv("NARRATIVE_MODEL", "").strip() or DEFAULT_NARRATIVE_MODEL
 
 
 def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
@@ -119,10 +127,11 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="budget_exceeded")
 
     # 2. LLM 호출
+    model = narrative_model()
     try:
         async with llm_slot():
             response = await client.chat.completions.create(
-                model=_MODEL,
+                model=model,
                 messages=[
                     {"role": "system", "content": build_system_prompt(req.report_purpose.value, req.task_type.value, fs)},
                     {
@@ -197,7 +206,7 @@ async def _narrate(client, req: NarrativeRequest, fs, derived, benchmark_refs, w
             ),
             recommendation_narrative=RecommendationNarrativeOut(**rec_narr),
             recommendations=aligned,
-            meta=NarrativeMeta(source="llm", model=_MODEL, grounding=grounding),
+            meta=NarrativeMeta(source="llm", model=model, grounding=grounding),
         )
     except Exception:
         logger.exception("narrative 조립/검증 실패 → 규칙 폴백(assembly_error)")
