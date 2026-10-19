@@ -183,3 +183,22 @@ def test_string_integer_decimal_matches_integer_prediction():
     # 글자 '2.50' 같은 정수가 아닌 소수는 그대로다.
     from app.evaluation.labels import normalize_label
     assert normalize_label("2.50") == "2.50" and normalize_label(" 1.00 ") == "1"
+
+
+def test_string_decimal_classes_match_probability_column_names():
+    # 검토 P1 회귀: 글자 '1.0' 정답이 '1' 이 된 뒤에도 prob_1.0 컬럼 이름이 같은 클래스로 맞아야 한다.
+    df = pd.DataFrame({
+        "y_true": ["0.0", "1.0", "2.0", "1.0"],
+        "prob_0.0": [0.8, 0.1, 0.1, 0.2], "prob_1.0": [0.1, 0.8, 0.1, 0.7], "prob_2.0": [0.1, 0.1, 0.8, 0.1],
+    })
+    maps = [{"role": "y_true", "column": "y_true"}] + [
+        {"role": "prob_per_class", "column": c} for c in ("prob_0.0", "prob_1.0", "prob_2.0")]
+    r = evaluate(df, maps, "multiclass", ["M1"])
+    assert "error" not in r, r
+    assert r["M1"] == 1.0
+
+
+def test_large_integer_decimal_text_keeps_its_digits():
+    from app.evaluation.labels import normalize_label
+    assert normalize_label("12345678901234567891.0") == "12345678901234567891"
+    assert normalize_label("-0.0") == "0" and normalize_label("+7.00") == "7"

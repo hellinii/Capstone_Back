@@ -190,7 +190,8 @@ def calculate_confusion_matrix(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
         
     # 클래스 이름·순서는 분포·M22·건수와 같은 한 벌(sort_labels — 숫자면 수치 순서)이다. 종전 sorted(np.unique)
     # 는 문자열 숫자를 ['1','10','2'] 로 늘어놓아 한 성적서에 순서가 두 벌이었다(점검 BE-12). 예측에만 있는
-    # 클래스(유령)는 열로 남는다 — 정답 행의 오분류가 어디로 갔는지 보여 준다.
+    # 클래스(유령)도 줄·열로 남는다(줄은 모두 0) — 정답 행의 오분류가 어디로 갔는지 보여 준다. 클래스 수를 셀 때는
+    # 정답 클래스(evaluation_classes)를 쓸 것 — confusion_counts 는 유령 줄을 뺀다.
     labels = sort_labels(np.concatenate((np.asarray(y_true), np.asarray(y_pred))))
     cm = confusion_matrix(y_true, y_pred, labels=labels)
 

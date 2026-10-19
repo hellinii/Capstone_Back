@@ -218,7 +218,8 @@ def _resolve_probability_labels(cols: List[str], known: List[str], kind: str) ->
     막는다 — 잘못 짝지으면 전 행의 예측이 뒤바뀐 채 겉보기 정상인 성적서가 나온다.
     (validation_checks 의 argmax 검사가 D-07 에서 택한 것과 같은 원칙.)
     """
-    labels = [_label_from_column(c) for c in cols]
+    # 컬럼 이름에서 뽑은 클래스도 정답과 같은 표기로 맞춘다(prob_1.0 → '1') — 정답 글자 '1.0' 은 '1' 이 된다.
+    labels = [normalize_label(_label_from_column(c)) for c in cols]
     known_set = {normalize_label(k) for k in known}
     if len(set(labels)) != len(labels):
         raise ValueError(

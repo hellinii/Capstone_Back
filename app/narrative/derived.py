@@ -11,7 +11,8 @@ LLM 은 계산하지 않으며 이 값들만 인용한다.
 from app.narrative.schemas import FactSheet
 
 # 임계값 조정 여지가 '부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40) — notable 이 없는 옛 요청에만 쓴다.
-THRESHOLD_GAIN_NOTABLE = 0.10
+# 숫자는 엔진 한 곳(metrics.binary)에서 가져온다.
+from app.evaluation.metrics.binary import THRESHOLD_GAIN_NOTABLE  # noqa: E402
 
 
 def threshold_tuning_needed(fs: FactSheet) -> bool:

@@ -192,6 +192,8 @@ def check_label_notation(df_clean: pd.DataFrame, mapping_dict: dict) -> list[Val
     """
     from app.evaluation.preprocessor import label_notation_changes
 
+    if not any(mapping_dict.get(k) for k in ("y_true", "true_class", "y_pred", "predicted_class")):
+        return []  # 하드 라벨 역할이 없는 매핑(멀티레이블) — 셀은 파서가 이미 같은 표기로 읽는다
     changes = label_notation_changes(df_clean, mapping_dict)
     return [ValidationCheckItem(
         name="Label notation",

@@ -42,14 +42,18 @@ def label_text(value: Any) -> str:
 
     정수 값 float(1.0)은 `'1'` 로 쓴다. 빈 칸 하나 때문에 pandas 가 정수 컬럼을 float 로
     읽어도 정수 컬럼('1')과 같은 표기가 된다. 공백까지 지우는 표준 표기는 normalize_label 이다.
-    공백 차이를 알려야 하는 곳(검증의 Class mismatch — 평가는 ' cat' 과 'cat' 을 다른 클래스로
-    센다)은 이 함수를 쓴다.
+    공백이 남은 원래 표기가 필요한 곳(preprocessor.label_notation_changes — 무엇이 합쳐졌는지 알리는 곳)이
+    이 함수를 쓴다. 평가·검증의 클래스 비교는 normalize_label 이다(S2).
     """
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     # 글자로 온 정수 소수('1.0'·'2.00')도 같은 표기다 — JSON 의 "1.0" 과 CSV 의 1 이 다른 클래스가 되지 않게.
     if isinstance(value, str) and _INTEGER_DECIMAL.match(value.strip()):
-        return value.replace(value.strip(), str(int(float(value.strip()))))
+        # float 을 거치지 않는다 — 큰 정수('12345678901234567891.0')가 정밀도를 잃어 다른 값이 되지 않게.
+        digits = re.sub(r"\.0+$", "", value.strip()).lstrip("+")
+        if digits.lstrip("-").strip("0") == "":
+            digits = "0"
+        return value.replace(value.strip(), digits)
     return str(value)
 
 
