@@ -86,6 +86,13 @@
     },
     {
       "group": "common",
+      "handling": "같은 클래스로 계산(행은 그대로)",
+      "name": "Label notation",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
       "handling": "Exclude only rows with missing or invalid values",
       "name": "Excluded samples",
       "result": "1 rows",

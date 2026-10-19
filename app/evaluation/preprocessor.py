@@ -19,7 +19,8 @@ import pandas as pd
 
 from app.core.schemas import METRIC_REQUIREMENTS, PREDICTION_ROLES_BY_TASK, TaskType
 from app.evaluation.labels import (
-    default_positive_class, find_label, normalize_distribution, normalize_label, parse_label_cell, sort_labels,
+    default_positive_class, find_label, label_text, normalize_distribution, normalize_label, parse_label_cell,
+    sort_labels,
 )
 
 from .frame import build_evaluation_frame
@@ -39,7 +40,11 @@ def _guard_identical_true_pred(mapping_dict: dict) -> None:
 
 
 def _coerce_label_types(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
-    """3. y_true 기준으로 y_pred dtype 강제 캐스팅."""
+    """3. 확률 컬럼을 예측으로 잘못 매핑했는지 막는다(정수 정답 · 소수 예측).
+
+    종전에는 이어서 y_pred 를 y_true 의 dtype 으로 강제 캐스팅했다. 지금은 다음 단계(_normalize_hard_labels)가
+    둘을 같은 문자열 표기로 맞추므로 캐스팅하지 않는다.
+    """
     y_true_col = mapping_dict.get('y_true') or mapping_dict.get('true_class')
     y_pred_col = mapping_dict.get('y_pred') or mapping_dict.get('predicted_class')
     if y_true_col and y_pred_col:
@@ -59,11 +64,78 @@ def _coerce_label_types(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
                     f"매핑하지 않았는지 확인해주세요."
                 )
 
-        try:
-            df[y_pred_col] = pred_series.astype(true_type)
-        except Exception:
-            raise ValueError(f"예측 라벨 '{y_pred_col}'을 정답 라벨 '{y_true_col}'의 타입({true_type})으로 강제 변환할 수 없습니다.")
     return df
+
+
+_HARD_LABEL_ROLES = (("정답", ("y_true", "true_class")), ("예측", ("y_pred", "predicted_class")))
+
+NOTATION_WARNING_HEAD = "라벨 표기를 맞췄습니다 — 앞뒤 공백이나 숫자 표기만 다른 값은 같은 클래스로 계산합니다: "
+
+
+def label_notation_changes(df: pd.DataFrame, mapping_dict: dict) -> List[str]:
+    """정답·예측 하드 라벨 중 표기를 맞추면 바뀌는 값 — 역할마다 "정답 ' cat' → 'cat'" 한 줄(없으면 빈 목록).
+
+    바뀐다고 보는 것: 앞뒤 공백이 있는 값, 같은 표준 표기로 모이는 원래 값이 둘 이상인 것('cat'·' cat').
+    숫자 열의 1.0 처럼 표기만 다른 값 하나는 데이터가 합쳐진 것이 아니라 넣지 않는다. 평가 경고와 검증 화면의
+    "Label notation" 항목이 이 함수 하나를 본다 — 검증이 미리 말한 것과 평가가 실제로 한 것이 같아야 한다.
+    """
+    changes: List[str] = []
+    for role_name, role_keys in _HARD_LABEL_ROLES:
+        col = next((mapping_dict[k] for k in role_keys if mapping_dict.get(k)), None)
+        if not col or col not in df.columns:
+            continue
+        texts_by_name: Dict[str, set] = {}
+        for v in pd.Series(df[col]).dropna().unique():
+            texts_by_name.setdefault(normalize_label(v), set()).add(label_text(v))
+        changed = [
+            f"{' · '.join(repr(t) for t in sorted(texts))} → {name!r}"
+            for name, texts in texts_by_name.items()
+            if len(texts) > 1 or next(iter(texts)) != name
+        ]
+        if changed:
+            changes.append(f"{role_name} {', '.join(changed)}")
+    return changes
+
+
+def _normalize_hard_labels(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, Any]) -> pd.DataFrame:
+    """3-1. 정답·예측 하드 라벨을 같은 표기(normalize_label)로 맞춘다.
+
+    화면·metadata·분포는 normalize_label 로 ' cat' 과 'cat', 1.0 과 1 을 같은 클래스로 보여 주는데, 종전에는
+    지표 계산이 원래 값을 그대로 비교했다. 그래서 정답 ' cat'·예측 'cat' 이면 Accuracy 가 0.5(실제 1.0)였고,
+    ', ' 로 구분한 CSV 는 예측 값이 ' cat' 이 되어 M1 이 0.0 이었으며, 정답 안에 'cat'·' cat' 이 섞이면 한쪽이
+    클래스별 표에서 빠졌다. 이 단계 뒤로는 모든 지표·건수·분포가 같은 문자열 클래스를 본다.
+    표기가 실제로 바뀐 값은 경고로 알린다(label_notation_changes).
+    """
+    changes = label_notation_changes(df, mapping_dict)
+    for _role_name, role_keys in _HARD_LABEL_ROLES:
+        col = next((mapping_dict[k] for k in role_keys if mapping_dict.get(k)), None)
+        if col and col in df.columns:
+            df[col] = df[col].map(lambda v: v if pd.isna(v) else normalize_label(v))
+    if changes:
+        logs["warnings"].append(NOTATION_WARNING_HEAD + "; ".join(changes) + ".")
+    return df
+
+
+def _check_binary_classes(df: pd.DataFrame, mapping_dict: dict, task_type: str) -> None:
+    """3-2. 이진 분류인데 정답·예측(표기를 맞춘 뒤)의 클래스가 둘을 넘으면 막는다.
+
+    sklearn 의 이진 지표는 클래스가 셋이면 'Target is multiclass' 로 죽거나(Precision·F1 측정 불가), 양성 하나만
+    보는 지표(M7·M8)는 나머지 둘을 음성으로 뭉쳐 겉보기 정상인 값을 낸다. 한 성적서에 두 셈법이 섞이지 않게
+    평가 전에 멈춘다.
+    """
+    if task_type != 'binary':
+        return
+    classes: set = set()
+    for key in ('y_true', 'y_pred'):
+        col = mapping_dict.get(key)
+        if col and col in df.columns:
+            classes |= {normalize_label(v) for v in pd.Series(df[col]).dropna().unique()}
+    if len(classes) > 2:
+        names = ", ".join(repr(c) for c in sort_labels(classes))
+        raise ValueError(
+            f"이진 분류인데 정답·예측에 클래스가 {len(classes)}개 있습니다({names}). "
+            "두 클래스만 남도록 데이터를 고치거나 다중 클래스로 평가해 주세요."
+        )
 
 
 # 파서는 labels.parse_label_cell 하나뿐이다(ISSUES.md D-04). 종전에는 라벨을 만드는
@@ -470,6 +542,7 @@ def preprocess_data(
     if len(df) == 0:
         raise ValueError("결측치를 제외하고 나니 평가할 데이터가 하나도 남지 않았습니다.")
     df = _coerce_label_types(df, mapping_dict)
+    df = _normalize_hard_labels(df, mapping_dict, logs)
     df = _parse_multilabel_columns(df, mapping_dict)
     df = _validate_score_columns(df, role_columns)
     # 확률이 float 로 강제되고 [0,1] 로 검증된 **뒤에** 파생한다 — 그 전에는 비교 연산이
@@ -478,6 +551,10 @@ def preprocess_data(
         df, role_columns, task_type, decision_threshold, metadata or {}, logs,
         selected_metric_ids,
     )
+    _check_binary_classes(df, {**mapping_dict, **(
+        {logs["derived_prediction"]["target_role"]: logs["derived_prediction"]["column"]}
+        if logs.get("derived_prediction") else {}
+    )}, task_type)
     _coerce_latency(df, mapping_dict, logs)
     _check_prob_sum(df, task_type, prob_cols, logs)
     _warn_ghost_classes(df, mapping_dict, logs)

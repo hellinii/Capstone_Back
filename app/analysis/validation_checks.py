@@ -19,7 +19,7 @@ import pandas as pd
 
 from app.analysis.schemas import ValidationCheckItem
 from app.analysis.validator import find_column_conflicts, find_invalid_roles
-from app.evaluation.labels import label_text
+from app.evaluation.labels import normalize_label
 from app.evaluation.preprocessor import probability_names_problem
 
 
@@ -155,10 +155,10 @@ def check_class_mismatch(df_clean: pd.DataFrame, mapping_dict: dict) -> list[Val
     y_pred_col = mapping_dict.get("y_pred") or mapping_dict.get("predicted_class")
 
     if y_true_col and y_pred_col and y_true_col in df_clean.columns and y_pred_col in df_clean.columns:
-        # 숫자 표기만 맞춘다(빈 칸 때문에 float 이 된 정답 1.0 ↔ 정수 예측 1). 앞뒤 공백은 남겨
-        # ' cat' ↔ 'cat' 불일치는 계속 알린다 — 평가는 둘을 다른 클래스로 센다.
-        true_classes = {label_text(v) for v in df_clean[y_true_col].unique()}
-        pred_classes = {label_text(v) for v in df_clean[y_pred_col].unique()}
+        # 평가와 같은 표기(normalize_label)로 비교한다 — 빈 칸 때문에 float 이 된 정답 1.0 ↔ 정수 예측 1,
+        # ' cat' ↔ 'cat' 은 평가가 같은 클래스로 센다(S2). 표기 차이는 check_label_notation 이 따로 알린다.
+        true_classes = {normalize_label(v) for v in df_clean[y_true_col].dropna().unique()}
+        pred_classes = {normalize_label(v) for v in df_clean[y_pred_col].dropna().unique()}
         extra_in_pred = pred_classes - true_classes
         if extra_in_pred:
             return [ValidationCheckItem(
@@ -180,6 +180,24 @@ def check_class_mismatch(df_clean: pd.DataFrame, mapping_dict: dict) -> list[Val
         result="N/A",
         handling="Counted as a misclassification of the true class (rows are kept)",
         status="pass",
+        group="common",
+    )]
+
+
+def check_label_notation(df_clean: pd.DataFrame, mapping_dict: dict) -> list[ValidationCheckItem]:
+    """3-4b. 라벨 표기 맞춤 — 앞뒤 공백·숫자 표기만 다른 정답·예측 값을 평가가 같은 클래스로 합친다(S2).
+
+    결과 칸은 평가 경고와 같은 한국어 문구다(프론트가 영문 낱말 바꾸기를 하지 않는 항목). 무엇이 무엇으로
+    합쳐졌는지는 preprocessor.label_notation_changes 하나가 정한다 — 평가 경고와 같은 함수다.
+    """
+    from app.evaluation.preprocessor import label_notation_changes
+
+    changes = label_notation_changes(df_clean, mapping_dict)
+    return [ValidationCheckItem(
+        name="Label notation",
+        result="; ".join(changes) if changes else "None",
+        handling="같은 클래스로 계산(행은 그대로)",
+        status="warning" if changes else "pass",
         group="common",
     )]
 
@@ -291,7 +309,13 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: dict[
 
     # Binary 클래스 수 검사
     if y_true_col and y_true_col in df_clean.columns:
-        n_classes = df_clean[y_true_col].nunique()
+        # 평가와 같은 표기로 센다 — ' cat'·'cat'·'dog' 는 두 클래스다. 예측에만 있는 클래스도 센다(평가는
+        # 이진에서 정답·예측 클래스가 둘을 넘으면 멈춘다 — preprocessor._check_binary_classes).
+        names = {normalize_label(v) for v in df_clean[y_true_col].dropna().unique()}
+        y_pred_col = mapping_dict.get("y_pred")
+        if y_pred_col and y_pred_col in df_clean.columns:
+            names |= {normalize_label(v) for v in df_clean[y_pred_col].dropna().unique()}
+        n_classes = len(names)
         if n_classes != 2:
             items.append(ValidationCheckItem(
                 name="Binary class system error",

@@ -335,7 +335,7 @@ def test_build_frame_raises_on_missing_required_column():
         build_evaluation_frame(df, mappings, "binary")
 
 
-# ── S10: Class mismatch 는 float↔int 표기만 맞추고 앞뒤 공백 차이는 계속 알린다 ────────
+# ── S10·S2: Class mismatch 는 평가와 같은 표기(normalize_label)로 비교하고, 표기 차이는 따로 알린다 ────────
 
 def test_blank_true_cell_does_not_raise_false_class_mismatch():
     """[S10] 정답 칸 하나가 비어 y_true 가 float(0.0·1.0), y_pred 가 int(0·1)로 읽히면
@@ -358,12 +358,16 @@ def test_blank_true_cell_does_not_raise_false_class_mismatch():
     item = next(d for d in body["validation_details"] if d["name"] == "Class mismatch")
     assert item["status"] == "pass", item
     assert item["result"] == "None"
+    notation = next(d for d in body["validation_details"] if d["name"] == "Label notation")
+    assert notation["status"] == "pass", notation
 
 
 def test_class_mismatch_unit_numeric_spelling_and_whitespace():
-    """표기 비교 규칙을 함수 단위로 고정한다: 1.0↔1 은 같고, ' cat'↔'cat' 은 다르다."""
+    """표기 비교 규칙을 함수 단위로 고정한다: 1.0↔1, ' cat'↔'cat' 은 같은 클래스다(S2 — 평가가 같은 표기로
+    맞춘다). 종전에는 공백 차이를 '예측에 미정의 클래스'로 알렸는데, 화면(HTML)에서 앞 공백이 안 보여 '있는
+    클래스가 미정의'라는 문장이 됐고 평가는 실제로 둘을 다른 클래스로 셌다."""
     import pandas as _pd
-    from app.analysis.validation_checks import check_class_mismatch
+    from app.analysis.validation_checks import check_class_mismatch, check_label_notation
 
     mapping = {"y_true": "t", "y_pred": "p"}
     same = check_class_mismatch(_pd.DataFrame({"t": [0.0, 1.0, 1.0], "p": [0, 1, 0]}), mapping)[0]
@@ -374,18 +378,16 @@ def test_class_mismatch_unit_numeric_spelling_and_whitespace():
     assert extra.status == "warning"
     assert extra.result == "Pred has unknown classes: 2"
 
-    # 앞뒤 공백 불일치는 평가에서 다른 클래스로 세므로 숨기지 않는다
-    space = check_class_mismatch(
-        _pd.DataFrame({"t": [" cat", "dog"], "p": ["cat", "dog"]}), mapping
-    )[0]
-    assert space.status == "warning"
-    assert space.result == "Pred has unknown classes: cat"
-    # 공백이 예측 쪽에 있어도 알린다(양쪽 다 공백을 보존해야 한다)
-    pred_space = check_class_mismatch(
-        _pd.DataFrame({"t": ["cat", "dog"], "p": [" cat", "dog"]}), mapping
-    )[0]
-    assert pred_space.status == "warning"
-    assert pred_space.result == "Pred has unknown classes:  cat"
+    # 앞뒤 공백 차이는 미지 클래스가 아니다 — 대신 표기 맞춤 항목이 무엇을 합쳤는지 말한다
+    for t, p, expected in (
+        ([" cat", "dog"], ["cat", "dog"], "정답 ' cat' → 'cat'"),
+        (["cat", "dog"], [" cat", "dog"], "예측 ' cat' → 'cat'"),
+    ):
+        df = _pd.DataFrame({"t": t, "p": p})
+        assert check_class_mismatch(df, mapping)[0].status == "pass"
+        notation = check_label_notation(df, mapping)[0]
+        assert notation.status == "warning"
+        assert expected in notation.result
 
     # 소수 라벨(0.5)은 정수로 뭉개지 않는다
     frac = check_class_mismatch(_pd.DataFrame({"t": [0.0, 1.0], "p": [0.5, 1.0]}), mapping)[0]

@@ -34,6 +34,7 @@
 from typing import Any, Iterable, List
 import ast
 import math
+import re
 
 
 def label_text(value: Any) -> str:
@@ -46,7 +47,13 @@ def label_text(value: Any) -> str:
     """
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
+    # 글자로 온 정수 소수('1.0'·'2.00')도 같은 표기다 — JSON 의 "1.0" 과 CSV 의 1 이 다른 클래스가 되지 않게.
+    if isinstance(value, str) and _INTEGER_DECIMAL.match(value.strip()):
+        return value.replace(value.strip(), str(int(float(value.strip()))))
     return str(value)
+
+
+_INTEGER_DECIMAL = re.compile(r"^[+-]?\d+\.0+$")
 
 
 def normalize_label(value: Any) -> str:

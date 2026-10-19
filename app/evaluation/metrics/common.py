@@ -95,9 +95,10 @@ def _label_kwargs(df: pd.DataFrame, mapping_dict: dict, y_true) -> dict:
     classes = evaluation_classes(df, mapping_dict)
     if not classes:
         return {}
-    original = pd.Series(df[mapping_dict.get('y_true') or mapping_dict.get('true_labels')])
-    by_name = {normalize_label(v): v for v in original.dropna().unique()}
-    return {"labels": [by_name[c] for c in classes if c in by_name]}
+    # 전처리(_normalize_hard_labels)가 정답·예측을 normalize_label 표기로 맞췄으므로 표준 이름이 곧 데이터 값이다.
+    # 종전에는 원래 값으로 되찾았는데, ' cat'·'cat' 처럼 같은 이름으로 모이는 값이 둘이면 하나만 남아 다른 쪽
+    # 클래스가 매크로 지표와 클래스별 표에서 통째로 빠졌다(점검 BE-13).
+    return {"labels": classes}
 
 def calculate_accuracy(df: pd.DataFrame, mapping_dict: dict) -> float:
     """M1: Accuracy"""
@@ -187,12 +188,15 @@ def calculate_confusion_matrix(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
             "matrix": cm.tolist() # 클래스별 2x2 행렬의 리스트
         }
         
-    labels = sorted(np.unique(np.concatenate((y_true, y_pred))))
+    # 클래스 이름·순서는 분포·M22·건수와 같은 한 벌(sort_labels — 숫자면 수치 순서)이다. 종전 sorted(np.unique)
+    # 는 문자열 숫자를 ['1','10','2'] 로 늘어놓아 한 성적서에 순서가 두 벌이었다(점검 BE-12). 예측에만 있는
+    # 클래스(유령)는 열로 남는다 — 정답 행의 오분류가 어디로 갔는지 보여 준다.
+    labels = sort_labels(np.concatenate((np.asarray(y_true), np.asarray(y_pred))))
     cm = confusion_matrix(y_true, y_pred, labels=labels)
-    
+
     return {
         "type": "multiclass_or_binary",
-        "labels": [str(l) for l in labels],
+        "labels": list(labels),
         "matrix": cm.tolist()
     }
 

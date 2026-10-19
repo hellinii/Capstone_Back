@@ -148,8 +148,8 @@ def _macro_stat(kind: str, beta: float = 1.0) -> Callable:
 
 
 def _m11_stat(tp, t, p, n):
-    # M11 은 labels 인자 없이 계산한다 — 정답 ∪ 예측 클래스 전부의 macro F1.
-    return _masked_mean(_fbeta_per_class(tp, t, p, 1.0), (t > 0) | (p > 0))
+    # M11 도 클래스 집합을 정답으로 고정한다(multiclass.calculate_macro_average) — M4 와 같은 macro F1.
+    return _masked_mean(_fbeta_per_class(tp, t, p, 1.0), t > 0)
 
 
 def _m13_stat(tp, t, p, n):

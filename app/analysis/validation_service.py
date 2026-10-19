@@ -137,6 +137,7 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     # 3-3~3-5. 공통 검사
     details += checks.check_duplicate_id(df_clean, mapping_dict)
     details += checks.check_class_mismatch(df_clean, mapping_dict)
+    details += checks.check_label_notation(df_clean, mapping_dict)
     details += checks.check_excluded_samples(excluded_rows)
 
     # 3-6. task_type 별 추가 검사 (레지스트리 디스패치)

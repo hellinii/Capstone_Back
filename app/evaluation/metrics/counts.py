@@ -49,7 +49,12 @@ def calculate_confusion_counts(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     else:
         matrix = np.array(cm["matrix"])
         total = int(matrix.sum())
+        # 줄은 정답 클래스만 둔다. 예측에만 있는 클래스(유령)는 평가 클래스가 아니다 — 그 예측은 정답 클래스 줄의
+        # FN 으로 이미 세어진다. 줄을 두면 tp 0·fn 0·fp k 인 '클래스'가 사실 시트에 실렸다.
+        classes = set(common.evaluation_classes(df, mapping_dict))
         for i, label in enumerate(cm["labels"]):
+            if label not in classes:
+                continue
             tp = int(matrix[i, i])
             fp = int(matrix[:, i].sum()) - tp
             fn = int(matrix[i, :].sum()) - tp

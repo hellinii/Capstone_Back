@@ -12,12 +12,18 @@ import numpy as np
 from typing import Dict, Any
 from sklearn.metrics import precision_recall_fscore_support
 
-from .common import _get_true_pred
+from .common import _get_true_pred, _label_kwargs
 
 def calculate_macro_average(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, float]:
-    """M11: Macro Average"""
+    """M11: Macro Average
+
+    클래스 집합을 정답(y_true)으로 고정한다 — M2~M5·M22 와 같은 규칙(C-03). 종전에는 labels 인자가 없어 예측에만
+    있는 클래스가 분모에 들어가, 한 성적서의 M4 와 M11 매크로 F1 이 0.7302 / 0.5476 처럼 갈렸다(점검 D-V1).
+    """
     y_true, y_pred = _get_true_pred(df, mapping_dict)
-    p, r, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='macro', zero_division=0)
+    p, r, f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, average='macro', zero_division=0, **_label_kwargs(df, mapping_dict, y_true),
+    )
     return {"precision": float(p), "recall": float(r), "f1_score": float(f1)}
 
 def calculate_micro_average(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, float]:
