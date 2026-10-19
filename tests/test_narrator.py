@@ -971,6 +971,13 @@ def test_threshold_tuning_boundary(gain, notable):
     assert compute_derived(fs)["threshold_tuning"] is notable
 
 
+@pytest.mark.parametrize("gain, notable", [(0.1, False), (0.0999, True)])
+def test_threshold_tuning_reads_engine_notable(gain, notable):
+    """엔진이 반올림 전 값으로 정한 notable 이 실리면 그것을 따른다 — 실제 0.09996 은 4자리로 0.1 이지만 부적합이 아니다."""
+    fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=gain, notable=notable))
+    assert compute_derived(fs)["threshold_tuning"] is notable
+
+
 def test_threshold_tuning_absent_without_gain():
     assert "threshold_tuning" not in compute_derived(_sample_fact_sheet())
 

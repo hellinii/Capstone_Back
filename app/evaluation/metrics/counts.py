@@ -25,6 +25,7 @@ from app.evaluation.labels import normalize_label
 from app.evaluation.preprocessor import class_distribution_of
 
 from . import binary, common
+from .display import judged_text
 
 
 def calculate_confusion_counts(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
@@ -166,8 +167,17 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     else:
         level = "no_distortion"
 
+    over_gap = lambda gap: _clean(gap) >= IMBALANCE_F1_GAP  # noqa: E731 — 판정과 같은 식
     return {
         "level": level,
+        # 판정과 같은 쪽으로 읽히게 자릿수를 늘린 표시 문자열(S2) — 1.49996 은 넷째 자리로 1.5 지만 '경미'다.
+        # 성적서·사실 시트·7.2 문장이 숫자를 찍을 때 이 값을 쓴다. 아래 숫자 칸은 종전과 같다.
+        "display": {
+            "imbalance_ratio": judged_text(ratio, IMBALANCE_MILD_BELOW, _clean(ratio) >= IMBALANCE_MILD_BELOW),
+            "accuracy_minus_macro_f1": None if accuracy_gap is None
+            else judged_text(accuracy_gap, IMBALANCE_F1_GAP, over_gap(accuracy_gap)),
+            "majority_minus_minority_f1": judged_text(class_gap, IMBALANCE_F1_GAP, over_gap(class_gap)),
+        },
         "imbalance_ratio": round(ratio, 4),
         "accuracy_minus_macro_f1": None if accuracy_gap is None else round(accuracy_gap, 4),
         "majority_minus_minority_f1": round(class_gap, 4),

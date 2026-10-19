@@ -10,15 +10,22 @@ LLM 은 계산하지 않으며 이 값들만 인용한다.
 """
 from app.narrative.schemas import FactSheet
 
-# 임계값 조정 여지가 '부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40). 프론트 문제 목록의
-# threshold_tuning 과 같은 기준이며, 둘 다 실린 4자리 gain 으로 판정한다(계약 §1.3).
+# 임계값 조정 여지가 '부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40) — notable 이 없는 옛 요청에만 쓴다.
 THRESHOLD_GAIN_NOTABLE = 0.10
 
 
 def threshold_tuning_needed(fs: FactSheet) -> bool:
-    """f1_threshold_gain.gain ≥ 0.10 인지 — 서버 쪽 판정은 여기 한 곳(프롬프트·폴백이 읽는다)."""
+    """임계값 부적합인지 — 평가 엔진이 반올림 전 값으로 정한 notable 을 읽는다(S2, 프론트 문제 목록과 같은 값).
+
+    notable 이 없는 옛 요청만 실린 4자리 gain ≥ 0.10 으로 판정한다(그때는 0.09996 이 0.1 로 반올림돼 걸린다).
+    S4b 에서 이 함수를 지우고 엔진 notable 만 읽는다(계획 설계 요지 4).
+    """
     gain = fs.f1_threshold_gain
-    return gain is not None and gain.gain >= THRESHOLD_GAIN_NOTABLE
+    if gain is None:
+        return False
+    if gain.notable is not None:
+        return gain.notable
+    return gain.gain >= THRESHOLD_GAIN_NOTABLE
 
 
 def _find_pos_idx(labels: list, positive_class) -> int:

@@ -283,6 +283,11 @@
       },
       "imbalance_effect": {
         "accuracy_minus_macro_f1": 0.0036,
+        "display": {
+          "accuracy_minus_macro_f1": "0.0036",
+          "imbalance_ratio": "1.2982",
+          "majority_minus_minority_f1": "0.1177"
+        },
         "imbalance_ratio": 1.2982,
         "level": "mild",
         "majority_class": "dog",

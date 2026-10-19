@@ -348,6 +348,11 @@
       },
       "imbalance_effect": {
         "accuracy_minus_macro_f1": null,
+        "display": {
+          "accuracy_minus_macro_f1": null,
+          "imbalance_ratio": "1.1031",
+          "majority_minus_minority_f1": "0.0134"
+        },
         "imbalance_ratio": 1.1031,
         "level": "mild",
         "majority_class": "finance",

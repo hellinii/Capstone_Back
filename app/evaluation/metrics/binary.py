@@ -11,6 +11,10 @@ import pandas as pd
 import numpy as np
 
 from app.evaluation.labels import default_positive_class, find_label
+from app.evaluation.metrics.display import judged_text
+
+# 임계값 조정 여지가 '임계값 부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40) — 판정은 이 모듈 한 곳.
+THRESHOLD_GAIN_NOTABLE = 0.10
 from typing import Dict, Any
 from sklearn.metrics import (
     confusion_matrix,
@@ -170,7 +174,8 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
       양성 기준은 TP·FP 건수(counts)·M7·M8 과 같다(`_binary_confusion_counts`).
     - gain = max(0, max_f1 − current_f1). y_pred 를 직접 올리면 그 예측이 곡선 위의 점이
       아닐 수 있어 차이가 음수가 될 수 있다 — 그때는 "올릴 여지 없음"이므로 0.
-    값은 4자리로 반올림해 싣는다. "≥ 0.10 이면 임계값 부적합" 판정은 프론트가 실린 gain 으로 한다.
+    값은 4자리로 반올림해 싣는다. "≥ 0.10 이면 임계값 부적합" 판정은 반올림 전 값으로 여기서 해 notable 로
+    싣고(S2), 판정과 같은 쪽으로 읽히는 표시 문자열을 gain_text 로 싣는다.
     """
     y_true, y_score = _get_true_score(df, mapping_dict)
     positive = _resolve_positive_value(y_true, mapping_dict.get('_positive_class'))
@@ -190,9 +195,15 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
     _tn, fp, fn, tp = _binary_confusion_counts(df, mapping_dict)
     current = float(2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) > 0 else 0.0
     max_f1 = float(f1[best])
+    gain = max(0.0, max_f1 - current)
+    # '임계값 부적합'(≥ 0.10) 판정은 반올림 전 값으로 여기 한 곳에서 한다(S2). 종전에는 프론트 문제 목록과
+    # 백엔드 서술이 각자 넷째 자리 gain 으로 판정해, 실제 0.09996 이 0.1 로 반올림되어 부적합이 됐다.
+    notable = round(gain, 9) >= THRESHOLD_GAIN_NOTABLE
     return {
         "max_f1": round(max_f1, 4),
         "current_f1": round(current, 4),
-        "gain": round(max(0.0, max_f1 - current), 4),
+        "gain": round(gain, 4),
         "best_threshold": round(float(thresholds[best]), 4),
+        "notable": notable,
+        "gain_text": judged_text(gain, THRESHOLD_GAIN_NOTABLE, notable),
     }

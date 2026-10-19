@@ -235,10 +235,17 @@
         "best_threshold": 0.03,
         "current_f1": 0.5123,
         "gain": 0.136,
-        "max_f1": 0.6483
+        "gain_text": "0.136",
+        "max_f1": 0.6483,
+        "notable": true
       },
       "imbalance_effect": {
         "accuracy_minus_macro_f1": 0.0001,
+        "display": {
+          "accuracy_minus_macro_f1": "0.0001",
+          "imbalance_ratio": "1.1053",
+          "majority_minus_minority_f1": "-0.0149"
+        },
         "imbalance_ratio": 1.1053,
         "level": "mild",
         "majority_class": "0",

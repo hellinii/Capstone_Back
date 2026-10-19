@@ -189,6 +189,10 @@ class F1ThresholdGainFact(BaseModel):
     current_f1:     float = Field(ge=0.0, le=1.0)
     gain:           float = Field(ge=0.0, le=1.0, description="max(0, max_f1 − current_f1)")
     best_threshold: float = Field(description="최대 F1 을 내는 결정 임계값")
+    notable:        bool | None = Field(
+        default=None,
+        description="엔진이 반올림 전 gain 으로 정한 '임계값 부적합'(≥ 0.10, S2). 없으면(옛 요청) gain 으로 판정",
+    )
 
 
 class ImbalanceEffectFact(BaseModel):
