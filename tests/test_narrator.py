@@ -1010,11 +1010,11 @@ def test_fallback_risks_mention_near_target_pass_metrics():
 
     risks = resp.conclusion.risks
     assert (
-        "목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Recall(0.81, 기준 0.8, 차이 0.01)로, "
-        "표본이 달라지면 기준에 미달할 위험이 있다." in risks
+        "목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Recall(0.81, 목표 0.8, 차이 0.01)로, "
+        "표본이 달라지면 목표에 미달할 위험이 있다." in risks
     )
     assert "Accuracy(" not in risks
-    assert "식별된 기준 미달 위험은 없다" not in risks
+    assert "식별된 목표 미달 위험은 없다" not in risks
     assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
     # 합격 성적서의 이 서술이 판정 모순으로 걸리지 않는다.
     from app.narrative.grounding import find_verdict_contradictions
@@ -1025,7 +1025,7 @@ def test_fallback_risks_skip_near_target_fail_and_absent_flags():
     """근소 미달(near_target 이지만 fail)은 아슬아슬 '합격'이 아니다. 키가 없으면 종전 문장 그대로."""
     fs = _sample_fact_sheet()
     assert build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.risks == (
-        "기준 미달 지표는 Recall(0.7, 기준 0.8)로, 해당 영역의 성능 저하 위험이 존재한다."
+        "목표에 미달한 지표가 있어 해당 영역의 성능 저하 위험이 존재한다(목표 미달 지표: Recall(0.7, 목표 0.8))."
     )
     near_fail = _bare_fact_sheet(metrics=[_near_metric(value=0.79, margin=-0.01, status="fail")])
     assert "아슬아슬" not in build_fallback_narrative(
@@ -1039,18 +1039,18 @@ def test_fallback_metric_numbers_use_report_digits():
     failed = _bare_fact_sheet(metrics=[MetricFact(
         metric_id="M3", display_name="Recall", value=raw, threshold=0.8, status="fail")])
     resp = build_fallback_narrative(failed, [], compute_derived(failed), "no_key")
-    assert "Recall(0.547, 기준 0.8)" in resp.conclusion.risks
+    assert "Recall(0.547, 목표 0.8)" in resp.conclusion.risks
     assert "0.5473" not in " ".join(_all_texts(resp))
     assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed))).passed
 
     near = _bare_fact_sheet(metrics=[_near_metric(value=0.80789, threshold=0.8, margin=0.00789)])
     near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
-    assert "Recall(0.808, 기준 0.8, 차이 0.008)" in near_risks
+    assert "Recall(0.808, 목표 0.8, 차이 0.008)" in near_risks
 
     ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.78123, threshold=0.8, low=0.712345, high=0.83456)])
     ci_resp = build_fallback_narrative(ci, [], compute_derived(ci), "no_key")
     assert "F1 Score(구간 0.712~0.835, 목표 0.8)" in " ".join(_all_texts(ci_resp))
-    assert "F1 Score(0.781, 기준 0.8)" in ci_resp.conclusion.risks
+    assert "F1 Score(0.781, 목표 0.8)" in ci_resp.conclusion.risks
 
 
 def test_fallback_long_threshold_is_rounded_at_every_site():
@@ -1060,11 +1060,11 @@ def test_fallback_long_threshold_is_rounded_at_every_site():
     failed = _bare_fact_sheet(metrics=[MetricFact(
         metric_id="M3", display_name="Recall", value=0.5, threshold=t, status="fail")])
     risks = build_fallback_narrative(failed, [], compute_derived(failed), "no_key").conclusion.risks
-    assert "Recall(0.5, 기준 0.667)" in risks
+    assert "Recall(0.5, 목표 0.667)" in risks
 
     near = _bare_fact_sheet(metrics=[_near_metric(value=0.68, threshold=t, margin=0.68 - t)])
     near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
-    assert "Recall(0.68, 기준 0.667, 차이 0.013)" in near_risks
+    assert "Recall(0.68, 목표 0.667, 차이 0.013)" in near_risks
 
     ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.6, threshold=t, low=0.55, high=0.7)])
     ci_texts = " ".join(_all_texts(build_fallback_narrative(ci, [], compute_derived(ci), "no_key")))
@@ -1085,20 +1085,23 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
     assert "최대폭" not in build_fallback_narrative(small, [], compute_derived(small), "no_key").conclusion.risks
 
 
-@pytest.mark.parametrize("level, expected, absent", [
-    ("affected",
-     "불균형 비율은 3.2로 불균형이 있고, 정확도와 매크로 F1 의 차이는 0.12, 다수 클래스(neg)와 소수 클래스(pos)의 "
-     "F1 차이는 0.18로 0.1 이상 벌어져 불균형이 성능 수치에 영향을 준 것으로 보인다.",
+# 서술 라운드 S1: 문장을 기준 이상인 차이만 근거로 쓰게 고쳤다(점검 BE-02). 엔진이 낼 수 없는 조합
+# (no_distortion 인데 두 차이 0.12·0.18, mild 인데 비율 3.2)은 엔진이 실제로 낼 값으로 바꿨다.
+@pytest.mark.parametrize("level, values, expected, absent", [
+    ("affected", {},
+     "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있고, 정확도와 매크로 F1 의 차이(0.12)와 다수 클래스(neg)와 "
+     "소수 클래스(pos)의 F1 차이(0.18)가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다.",
      "왜곡은 관찰되지 않았다"),
-    ("no_distortion",
-     "불균형 비율은 3.2로 불균형이 있으나, 정확도와 매크로 F1 의 차이는 0.12, 다수 클래스(neg)와 소수 클래스(pos)의 "
-     "F1 차이는 0.18로 0.1 미만이어서 불균형에 의한 성능 왜곡은 관찰되지 않았다.",
+    ("no_distortion", {"accuracy_minus_macro_f1": 0.05, "majority_minus_minority_f1": 0.03},
+     "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있으나, 불균형에 의한 성능 왜곡은 관찰되지 않았다. "
+     "정확도와 매크로 F1 의 차이(0.05)는 기준(0.1) 미만이다. 다수 클래스(neg)와 소수 클래스(pos)의 F1 "
+     "차이(0.03)는 기준(0.1) 미만이다.",
      "영향을 준"),
-    ("mild", "불균형 비율은 3.2로 1.5 미만이어서 불균형은 경미하다.", "불균형이 있"),
+    ("mild", {"imbalance_ratio": 1.3}, "불균형 비율(1.3)이 1.5 미만이어서 불균형은 경미하다.", "불균형이 있"),
 ])
-def test_fallback_distribution_follows_imbalance_level(level, expected, absent):
+def test_fallback_distribution_follows_imbalance_level(level, values, expected, absent):
     """7.2 의 결론은 엔진이 낸 level 로만 쓴다 — distribution.imbalance_ratio(1.857)로 다시 판정하지 않는다."""
-    fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": _imbalance(level=level)})
+    fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": _imbalance(level=level, **values)})
     derived = compute_derived(fs)
     resp = build_fallback_narrative(fs, [], derived, reason="no_key")
     text = resp.interpretation.distribution_analysis
@@ -1112,7 +1115,7 @@ def test_fallback_distribution_multilabel_uses_label_gap_only():
     ie = _imbalance(accuracy_minus_macro_f1=None, majority_minus_minority_f1=-0.04, level="no_distortion")
     fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": ie})
     text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.distribution_analysis
-    assert "다수 레이블(neg)와 소수 레이블(pos)의 F1 차이는 -0.04로 0.1 미만" in text
+    assert "다수 레이블(neg)와 소수 레이블(pos)의 F1 차이(-0.04)는 음수로 소수 레이블의 F1 이 더 높다." in text
     assert "매크로 F1" not in text
 
 

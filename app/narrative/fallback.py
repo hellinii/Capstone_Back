@@ -7,10 +7,12 @@ fact_sheet 의 실제 계산값(+ compute_derived 파생값)만 템플릿에 삽
 """
 from app.narrative.schemas import ConclusionOut, FactSheet, GroundingInfo, InterpretationOut, NarrativeMeta, NarrativeResponse, ProblemFact, RecommendationNarrativeOut, RecommendationOut
 
+# 판정 이름 — 성적서 8.2 판정 상자(프론트 ConclusionSection VERDICT_CONFIG)와 같은 이름 한 벌.
+# 종전 '조건부 적합'·'부적합(불합격)'은 같은 절의 상자 이름과 달라 한 화면에 두 이름이 찍혔다.
 _VERDICT_LABEL = {
-    "PASS": "적합(합격)",
-    "CONDITIONAL_PASS": "조건부 적합",
-    "FAIL": "부적합(불합격)",
+    "PASS": "최종 합격",
+    "CONDITIONAL_PASS": "조건부 합격",
+    "FAIL": "최종 불합격",
     "INCONCLUSIVE": "판정 불가",
 }
 _POSITION_LABEL = {"above": "상위", "within": "범위 내", "below": "하위"}
@@ -33,6 +35,31 @@ def _num(value) -> str:
         return str(value)
     text = f"{round(float(value), _METRIC_DIGITS):.{_METRIC_DIGITS}f}".rstrip("0").rstrip(".")
     return "0" if text == "-0" else text
+
+
+def _value_target(value: float, threshold: float) -> tuple[str, str]:
+    """미달 지표의 값과 목표를 찍는다. 셋째 자리로 같아 보이면 넷째 자리까지 늘린다.
+
+    0.7999 를 셋째 자리로 찍으면 '0.8, 목표 0.8' 인데 미달이라 읽는 사람에게 모순이다. 넷째 자리까지가
+    허용 목록(grounding._add)의 표기다. 넷째 자리로도 같으면 값 대신 '목표에 근소하게 못 미침'을 쓴다
+    (빈 문자열을 돌려 호출부가 고른다).
+    """
+    v, t = _num(value), _num(threshold)
+    if v != t or value == threshold:
+        return v, t
+    v4 = f"{round(float(value), 4):.4f}".rstrip("0").rstrip(".")
+    t4 = f"{round(float(threshold), 4):.4f}".rstrip("0").rstrip(".")
+    if v4 != t4:
+        return v4, t4
+    return "", t
+
+
+def _metric_vs_target(m) -> str:
+    """'지표명(값, 목표 t)' — 값이 목표와 같아 보이면 자릿수를 늘리거나 '목표 t에 근소하게 못 미침'."""
+    v, t = _value_target(m.value, m.threshold)
+    if not v:
+        return f"{m.display_name}(목표 {t}에 근소하게 못 미침)"
+    return f"{m.display_name}({v}, 목표 {t})"
 
 
 def _pct(ratio: float) -> str:
@@ -68,35 +95,64 @@ def _error_ratio_sentence(er) -> str:
 def _imbalance_sentence(ie) -> str:
     """7.2 불균형 결론 한 문장(서술 설계 D20). level 판정은 평가 엔진이 했고 여기서는 읽기만 한다.
 
-    숫자는 imbalance_effect 의 값과 두 기준(1.5·0.1)뿐이라 허용 목록 안이다. 정확도 − 매크로 F1 이
-    없으면(멀티레이블) 다수·소수 '레이블'의 F1 차이만 쓴다.
+    엔진은 두 차이 중 **하나만** 0.10 이상이어도 '영향 있음'이다. 그래서 기준 이상인 차이만 근거로 쓰고,
+    나머지는 '기준 미만'으로 따로 쓴다(종전에는 두 차이를 다 늘어놓고 '0.1 이상 벌어져'를 붙여, 기준 미만·
+    음수 차이까지 넘은 것처럼 썼다 — 점검 BE-02). 다수 F1 − 소수 F1 이 음수면 소수 쪽이 더 잘 맞은 것이다.
+    값은 엔진이 넷째 자리로 반올림해 싣는다 — 반올림하면 기준과 같아 보이는데 엔진이 기준 미만으로 본
+    값은 숫자 없이 '기준 미만'만 쓴다(0.1 미만인데 '0.1' 로 찍히는 모순을 피한다).
+    숫자는 imbalance_effect 의 값과 두 기준(1.5·0.1)뿐이라 허용 목록 안이다. 숫자는 괄호 안에 둬 조사를 숫자
+    받침에 맞출 일이 없게 한다. 정확도 − 매크로 F1 이 없으면(멀티레이블) 다수·소수 '레이블'의 F1 차이만 쓴다.
     """
     ir = ie.imbalance_ratio
-    if ie.level == "mild":
-        return f"불균형 비율은 {ir}로 1.5 미만이어서 불균형은 경미하다."
     unit = "레이블" if ie.accuracy_minus_macro_f1 is None else "클래스"
-    gaps = []
+    if ie.level == "mild":
+        # 1.49996 은 넷째 자리로 1.5 가 된다 — 엔진은 1.5 미만(경미)으로 봤다.
+        ratio = "불균형 비율이" if ir >= 1.5 else f"불균형 비율({ir})이"
+        return f"{ratio} 1.5 미만이어서 불균형은 경미하다."
+
+    gaps = []  # (이름, 값)
     if ie.accuracy_minus_macro_f1 is not None:
-        gaps.append(f"정확도와 매크로 F1 의 차이는 {ie.accuracy_minus_macro_f1}")
-    gaps.append(
-        f"다수 {unit}({ie.majority_class})와 소수 {unit}({ie.minority_class})의 F1 차이는 "
-        f"{ie.majority_minus_minority_f1}"
-    )
-    gap_text = ", ".join(gaps)
-    if ie.level == "affected":
-        return (
-            f"불균형 비율은 {ir}로 불균형이 있고, {gap_text}로 0.1 이상 벌어져 불균형이 성능 수치에 "
-            f"영향을 준 것으로 보인다. 소수 {unit}의 성능 지표 해석에 유의가 필요하다."
-        )
+        gaps.append(("정확도와 매크로 F1 의 차이", ie.accuracy_minus_macro_f1))
+    gaps.append((
+        f"다수 {unit}({ie.majority_class})와 소수 {unit}({ie.minority_class})의 F1 차이",
+        ie.majority_minus_minority_f1,
+    ))
+    over = [(n, v) for n, v in gaps if ie.level == "affected" and v >= 0.1]
+    under = [(n, v) for n, v in gaps if (n, v) not in over]
+
+    def under_text(name: str, value: float) -> str:
+        if value < 0:
+            return f"{name}({value})는 음수로 소수 {unit}의 F1 이 더 높다"
+        if value >= 0.1:  # 반올림해 기준과 같아 보이지만 엔진은 기준 미만으로 봤다
+            return f"{name}는 기준(0.1) 미만이다"
+        return f"{name}({value})는 기준(0.1) 미만이다"
+
+    head = f"불균형 비율({ir})이 1.5 이상이어서 불균형이 있"
+    if over:
+        named = "와 ".join(f"{n}({v})" for n, v in over)
+        text = f"{head}고, {named}가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다."
+        if under:
+            text += " " + " ".join(under_text(n, v) + "." for n, v in under)
+        return text + f" 소수 {unit}의 성능 지표 해석에 유의가 필요하다."
     return (
-        f"불균형 비율은 {ir}로 불균형이 있으나, {gap_text}로 0.1 미만이어서 불균형에 의한 성능 왜곡은 "
-        "관찰되지 않았다."
+        f"{head}으나, 불균형에 의한 성능 왜곡은 관찰되지 않았다. "
+        + " ".join(under_text(n, v) + "." for n, v in under)
     )
 
 
 def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
     conf = derived.get("confusion")
-    if conf:
+    if conf and conf.get("unit") == "label_cell":
+        # 멀티레이블 — 합계는 표본이 아니라 레이블 칸(표본 수 × 레이블 수)이다. '전체 N건'이라 쓰면 7.2 의
+        # 표본 수와 어긋난다(점검 BE-09). 경계·확신 오류 문장(D30)과 같은 '레이블 칸' 단위로 쓴다.
+        parts = [
+            f"레이블별 혼동 행렬을 합친 레이블 칸 {conf['total']}칸 중 {conf['misclassified']}칸이 틀렸다"
+            f"(맞은 칸 {conf['correct']}칸)."
+        ]
+        if "fn" in conf:
+            parts.append(f"있어야 할 레이블을 놓친 칸(FN)은 {conf['fn']}칸, 없는 레이블을 붙인 칸(FP)은 {conf['fp']}칸이다.")
+        confusion_analysis = " ".join(parts)
+    elif conf:
         parts = [
             f"혼동 행렬 기준 전체 {conf['total']}건 중 {conf['misclassified']}건이 오분류되었다"
             f"(정분류 {conf['correct']}건)."
@@ -114,7 +170,13 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         cd = fs.distribution.class_distribution
         pct = dist["percentages"]
         items = ", ".join(f"{k} {v}건({pct.get(k, 0)}%)" for k, v in cd.items())
-        s = f"평가 데이터셋은 총 {dist['total']}건이며, 클래스 분포는 {items}이다."
+        if dist.get("unit") == "label":
+            s = (
+                f"평가 데이터셋은 총 {dist['total']}건이며, 레이블별 등장 분포는 {items}이다"
+                "(한 표본에 레이블이 여럿일 수 있어 비율을 모두 더하면 전체를 넘을 수 있다)."
+            )
+        else:
+            s = f"평가 데이터셋은 총 {dist['total']}건이며, 클래스 분포는 {items}이다."
         ir = fs.distribution.imbalance_ratio
         # 불균형의 결론은 평가 엔진이 낸 imbalance_effect.level 로만 쓴다(D20). 종전에는 여기서
         # IR ≤ 1.5 를 '균형'으로 따로 판정해, 엔진의 '1.5 미만 = 경미'와 경계가 어긋났다.
@@ -131,6 +193,108 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         confusion_analysis=confusion_analysis,
         distribution_analysis=distribution_analysis,
     )
+
+
+def _failed(fs: FactSheet) -> list:
+    """목표에 미달한 판정 대상 지표(목표값 0·음수 미달도 미달이다)."""
+    return [m for m in fs.metrics if m.status == "fail" and m.threshold is not None]
+
+
+def _verdict_narrative(fs: FactSheet, derived: dict) -> str:
+    """8.2 판정 문장 — 판정 규칙(서술 설계 D19)의 사유로 쓴다. 통과율은 판정 근거가 아니라 참고다.
+
+    종전에는 'N개 중 M개가 기준을 충족하여(통과율 x%), 종합 판정은 …'이라 써서, 불합격이 '대부분 충족해서
+    불합격'처럼 읽히고 판정 불가에도 통과율이 근거처럼 붙었다(점검 BE-03).
+    - FAIL: 핵심 지표 미달. 사실 시트에 is_core 가 없으면(옛 프론트) 어느 지표가 핵심인지 모르므로 미달 지표를
+      적고 '핵심 지표가 목표에 미달'이라는 규칙만 쓴다(FAIL 이면 규칙상 핵심 미달이 있다).
+    - CONDITIONAL_PASS: 핵심은 모두 충족, 핵심이 아닌 지표 미달(규칙상 미달 지표는 모두 비핵심이다).
+    - INCONCLUSIVE: 문제 목록의 판정 불가 원인(evidence.cause·metrics). 문제 목록이 없으면(옛 프론트) 규칙의 두 경우.
+    - PASS: 판정 대상 지표가 모두 목표 충족.
+    통과율은 판정 대상(목표가 설정된 지표)이 있을 때만 '참고로' 덧붙인다.
+    """
+    vlabel = _VERDICT_LABEL.get(fs.verdict, fs.verdict)
+    failed = _failed(fs)
+    has_core_info = any(m.is_core for m in fs.metrics)
+
+    def listing(label: str, metrics: list) -> str:
+        # 지표 목록은 문장 끝 괄호에 둔다 — 이름 뒤 조사(가/이)를 이름 받침에 맞출 일이 없게.
+        return f"({label}: {', '.join(_metric_vs_target(m) for m in metrics)})" if metrics else ""
+
+    if fs.verdict == "FAIL":
+        core_failed = [m for m in failed if m.is_core] if has_core_info else []
+        if core_failed:
+            text = f"핵심 지표가 목표에 미달하여 종합 판정은 '{vlabel}'이다{listing('미달한 핵심 지표', core_failed)}."
+            others = [m for m in failed if not m.is_core]
+            if others:
+                text += f" 핵심이 아닌 지표 중에도 목표에 미달한 지표가 있다{listing('목표 미달 지표', others)}."
+        else:
+            text = f"핵심 지표가 목표에 미달하여 종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
+    elif fs.verdict == "CONDITIONAL_PASS":
+        text = (
+            "핵심 지표는 모두 목표를 충족하였으나 핵심이 아닌 지표가 목표에 미달하여 "
+            f"종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
+        )
+    elif fs.verdict == "INCONCLUSIVE":
+        cause = next((p for p in fs.problems if p.kind == "inconclusive"), None)
+        ev = cause.evidence if cause else {}
+        metrics = [str(x) for x in (ev.get("metrics") or [])]
+        if ev.get("cause"):
+            what = f"{ev['cause']} — {', '.join(metrics)}" if metrics else str(ev["cause"])
+            text = f"합격 여부를 판정할 수 없어 종합 판정은 '{vlabel}'이다(원인: {what})."
+        else:
+            text = (
+                "핵심 지표가 산출되지 않았거나 판정 대상 지표가 없어 합격 여부를 판정할 수 없으므로 "
+                f"종합 판정은 '{vlabel}'이다."
+            )
+    elif fs.verdict == "PASS":
+        text = f"목표값이 설정된 판정 대상 지표가 모두 목표를 충족하여 종합 판정은 '{vlabel}'이다."
+    else:
+        text = f"종합 판정은 '{vlabel}'이다."
+
+    counts = derived.get("counts", {})
+    target, passed = counts.get("target", 0), counts.get("passed", 0)
+    if target > 0:
+        text += f" 참고로 목표값이 설정된 지표 {target}개 중 {passed}개가 목표를 충족하였다(통과율 {fs.score}%)."
+    return text
+
+
+def _risks(fs: FactSheet) -> str:
+    """8.3 위험 문장의 앞부분(미달·판정 불가·아슬아슬). 임계값 조정 여지는 호출부가 덧붙인다.
+
+    판정 불가에 '모든 시험항목이 기준을 충족'이라 쓰면 확인하지 못한 것을 확인한 것처럼 읽히고 판정 모순
+    검사에도 걸린다(점검 BE-03) — 판정 불가는 미달이 없어도 '위험을 확인하지 못했다'로 쓴다.
+    '임계값이 설정된'은 '목표값이 설정된'으로 쓴다 — 같은 8.3 에 결정 임계값 문장이 함께 나온다.
+    """
+    failed = _failed(fs)
+    # 아슬아슬 합격(D12) — near_target 판정은 프론트가 했고 여기서는 합격한 지표만 골라 읽는다.
+    near = [m for m in fs.metrics if m.near_target and m.status == "pass"]
+    if failed:
+        risks = (
+            "목표에 미달한 지표가 있어 해당 영역의 성능 저하 위험이 존재한다"
+            f"(목표 미달 지표: {', '.join(_metric_vs_target(m) for m in failed)})."
+        )
+        if fs.verdict == "INCONCLUSIVE":
+            risks += " 다만 종합 판정이 '판정 불가'여서 판정에 따른 위험은 확인하지 못했다."
+    elif fs.verdict == "INCONCLUSIVE":
+        risks = "종합 판정이 '판정 불가'여서 목표 충족 여부에 따른 위험을 확인하지 못했다."
+    elif near:
+        # "식별된 기준 미달 위험은 없다"와 아슬아슬 문장이 함께 실리면 서로 어긋나므로 앞 문장을 바꾼다.
+        risks = "목표값이 설정된 모든 시험항목이 목표를 충족하였다."
+    else:
+        risks = "목표값이 설정된 모든 시험항목이 목표를 충족하여 식별된 목표 미달 위험은 없다."
+    if near:
+        # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
+        items = ", ".join(
+            f"{m.display_name}({_num(m.value)}, 목표 {_num(m.threshold)}, 차이 {_num(m.margin)})"
+            if m.margin is not None
+            else f"{m.display_name}({_num(m.value)}, 목표 {_num(m.threshold)})"
+            for m in near
+        )
+        risks += (
+            f" 목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 {items}로, "
+            "표본이 달라지면 목표에 미달할 위험이 있다."
+        )
+    return risks
 
 
 def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> ConclusionOut:
@@ -153,21 +317,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     else:
         benchmark = "비교 가능한 내부 참조 기준치가 없어 벤치마크 비교를 생략한다."
 
-    counts = derived.get("counts", {})
-    target = counts.get("target", 0)
-    passed = counts.get("passed", 0)
-    vlabel = _VERDICT_LABEL.get(fs.verdict, fs.verdict)
-    narrative = (
-        f"임계값이 설정된 시험항목 {target}개 중 {passed}개가 기준을 충족하여"
-        f"(통과율 {fs.score}%), 종합 판정은 '{vlabel}'이다."
-    )
-    failed_metrics = [
-        m for m in fs.metrics
-        if m.status == "fail" and m.threshold is not None  # 목표값 0·음수 미달도 미달이다
-    ]
-    failed = [m.display_name for m in failed_metrics]
-    if failed:
-        narrative += f" 기준 미달 항목은 {', '.join(failed)}이다."
+    narrative = _verdict_narrative(fs, derived)
     # 신뢰구간이 목표값을 포함하는 지표(D29) — 판정은 compute_derived 가 한 곳에서 한다.
     # 8.2(종합 총평)에 둔다: 판정을 얼마나 믿을 수 있는지는 판정을 설명하는 자리의 말이다.
     # 숫자는 구간 양 끝·목표값·신뢰수준(95)뿐이라 허용 목록 안이다.
@@ -183,30 +333,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
             "표본 변동에 따라 해당 지표의 판정이 달라질 수 있다."
         )
 
-    # 아슬아슬 합격(D12) — near_target 판정은 프론트가 했고 여기서는 합격한 지표만 골라 읽는다.
-    near = [m for m in fs.metrics if m.near_target and m.status == "pass"]
-    if failed_metrics:
-        items = ", ".join(
-            f"{m.display_name}({_num(m.value)}, 기준 {_num(m.threshold)})" for m in failed_metrics
-        )
-        risks = f"기준 미달 지표는 {items}로, 해당 영역의 성능 저하 위험이 존재한다."
-    elif near:
-        # "식별된 기준 미달 위험은 없다"와 아슬아슬 문장이 함께 실리면 서로 어긋나므로 앞 문장을 바꾼다.
-        risks = "임계값이 설정된 모든 시험항목이 기준을 충족하였다."
-    else:
-        risks = "임계값이 설정된 모든 시험항목이 기준을 충족하여 식별된 기준 미달 위험은 없다."
-    if near:
-        # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
-        items = ", ".join(
-            f"{m.display_name}({_num(m.value)}, 기준 {_num(m.threshold)}, 차이 {_num(m.margin)})"
-            if m.margin is not None
-            else f"{m.display_name}({_num(m.value)}, 기준 {_num(m.threshold)})"
-            for m in near
-        )
-        risks += (
-            f" 목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 {items}로, "
-            "표본이 달라지면 기준에 미달할 위험이 있다."
-        )
+    risks = _risks(fs)
     # 임계값 조정 여지(D40) — 기준(0.10) 판정은 compute_derived 가 한 곳에서 한다.
     if derived.get("threshold_tuning"):
         g = fs.f1_threshold_gain

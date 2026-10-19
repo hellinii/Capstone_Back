@@ -43,7 +43,7 @@ def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
     여러 개 만들므로 행렬 차원에 대해 제곱으로 커진다(G-04b 실측: 2500x2500 입력이
     이벤트 루프를 15.1 초 막았다).
     """
-    derived = compute_derived(fs)
+    derived = compute_derived(fs, task_type=task_type_value)
     benchmark_refs = build_benchmark_refs(task_type_value, fs.metrics)
     whitelist = build_number_whitelist(fs, benchmark_refs, derived, client_inputs)
     return derived, benchmark_refs, whitelist
