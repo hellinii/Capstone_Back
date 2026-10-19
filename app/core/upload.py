@@ -34,8 +34,14 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 _CHUNK_SIZE = 1024 * 1024
 
 
-def _format_bytes(n: int) -> str:
-    return f"{n / (1024 * 1024):.1f} MB"
+def format_mib(n: int) -> str:
+    """바이트 수를 MiB 로 적는다 — 딱 떨어지면 정수("20 MiB"), 아니면 소수 한 자리.
+
+    상한이 2의 거듭제곱 단위(20 × 1024 × 1024)라 "MB" 로 적으면 값이 어긋난다(M6). 프론트 업로드 안내
+    (Capstone_Front/src/lib/upload/uploadLimits.ts)도 MiB 로 적는다.
+    """
+    mib = n / (1024 * 1024)
+    return f"{int(mib)} MiB" if mib == int(mib) else f"{mib:.1f} MiB"
 
 
 def extract_extension(filename: str) -> str:
@@ -73,7 +79,7 @@ async def read_upload_guarded(file: UploadFile) -> tuple[str, bytes]:
             raise HTTPException(
                 status_code=413,
                 detail=(
-                    f"파일이 너무 큽니다. 최대 {_format_bytes(limit)} 까지 업로드할 수 있습니다."
+                    f"파일이 너무 큽니다. 평가 파일은 {format_mib(limit)} 이하만 올릴 수 있습니다."
                 ),
             )
         chunks.append(chunk)

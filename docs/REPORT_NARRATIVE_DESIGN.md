@@ -8,6 +8,17 @@
 >
 > 이 문서를 남겨 두는 이유는 **왜 그렇게 만들었는가**를 잃지 않기 위해서입니다.
 > 앞으로 갱신하지 않습니다(ISSUES.md H-09, 2026-09-07 ★결정 11).
+>
+> **2026-10 서술 모델 전환(본문은 고치지 않고 여기에만 적음).** OpenAI 가 2026-10-23 에 `gpt-4.1-nano` 를
+> 종료해, 본문의 "gpt-4.1-nano + temperature=0 + seed=4213"은 더 이상 현행이 아닙니다.
+>
+> | 구분 | 본문 | **현행** |
+> |---|---|---|
+> | 서술 모델 | `gpt-4.1-nano`(OpenAI) | **Claude Sonnet 5.5**(`claude-sonnet-5-5`, Anthropic SDK, `app/narrative/llm.py`). `NARRATIVE_MODEL`·`NARRATIVE_EFFORT` 로 바꿀 수 있음. 거절되면 서버 쪽 대체 모델(`fallbacks="default"`) |
+> | 컬럼 매핑 모델 | `gpt-4.1-nano` | `gpt-6-luna`(OpenAI 그대로, `MAPPING_MODEL`) |
+> | 키 | `OPENAI_API_KEY` 하나 | 매핑 `OPENAI_API_KEY` + 서술 `ANTHROPIC_API_KEY`(없으면 서술은 규칙 문장) |
+> | 재현성(§4.3 4) | temperature=0 + seed 로 같은 입력 → 같은 성적서 | 온도·seed 를 보내지 않습니다(Sonnet 5.5 가 받지 않음). 숫자·판정은 코드가 계산하므로 늘 같고, "같은 성적서"는 발급 때 저장한 보관본이 보장합니다. 다시 만들기는 같은 요청을 한 번 더 부르는 것입니다 |
+> | 옛 동기 경로 마감 | 없음 | `/api/generate-narrative` 는 슬롯 대기까지 120초 안에 끝나지 않으면 200 + 규칙 문장(사유 busy·timeout) |
 
 
 > 작성일: 2026-06-23
@@ -146,6 +157,8 @@
 
 ### 4.5 입력 — FactSheet (LLM에 주입할 "사실 시트")
 
+> **고객 입력(client_inputs) 길이(2026-10-19).** 사실 시트와 함께 오는 고객 입력은 직렬화 길이 20,000자까지 받는다(`MAX_CLIENT_INPUTS_CHARS`). 길이는 **공백 없는 JSON**(`json.dumps(…, ensure_ascii=False, separators=(",", ":"))`)으로 잰다 — 프론트 `JSON.stringify` 와 같은 기준이라 한글 1자는 1자로 센다. 프론트는 상한의 90%(18,000자)를 목표로 가장 긴 자유 글부터 잘라 보내(`fitClientInputs`), 넘어서 서술 전체가 422 로 빠지는 일을 막는다. 지시문에 가는 작업 유형 이름은 이진 분류 / 다중 클래스 분류 / 다중 레이블 분류다(`TASK_TYPE_LABELS`).
+
 원시 CSV/DataFrame/확률은 **절대 미주입**. 오직 계산된 fact만:
 
 - `task_type`, `n_samples`, `dropped_rows`, `warnings`
@@ -273,6 +286,7 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 - **프론트**: 컬럼 매핑 UI(`src/components/column-mapping/`)에 "응답시간" 역할 추가, `latency` MOCK 제거
 - **컬럼 미매핑 시**: 섹션을 "측정 안 됨(N/A)"으로 렌더 + LLM에 미주입(`fact_sheet.latency = {available:false}`)
 - LLM은 latency 컬럼이 있을 때만 실제 지연 수치를 인용 (화이트리스트에 포함됨). 없으면 지연 수치 생성 원천 봉쇄
+- **이름과 단위(2026-10-19)**: 규칙 폴백 매퍼가 `latency`·`latency_ms`·`inference_time(_ms)`·`response_time(_ms)`·`elapsed_ms` 를 지연시간 역할로 잡는다. 단위는 이름으로도 데이터로도 확정할 수 없어 ms 가정을 유지하고, 값이 모두 1 미만이면 검증 단계가 "초 단위로 보임" 경고(`Latency unit`)를 낸다(막지는 않음). 자세한 규칙은 [ARCHITECTURE.md §9](ARCHITECTURE.md)
 
 ---
 

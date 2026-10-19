@@ -180,3 +180,85 @@ pytest -q                          # 테스트 (tests/)
 | **E-11** | run 하나당 수십만 바이트가 localStorage 에 쌓여 quota 초과 시 저장이 실패할 수 있다 | 저장 실패가 진행 중인 입력을 잃게 하지는 않는다(try/catch). 서버 보관본이 생겼으므로(F-01) 위험은 종전보다 낮다 |
 | **E-15** | 평가·검증 요청에 타임아웃·재시도가 없다(컬럼 분석에만 있다) | 평가·검증은 사용자가 결과를 기다리는 전면 작업이라 조용한 재시도가 오히려 혼란스럽다. 현행 유지 |
 | **E-14** | LLM 서술 생성 중(최대 160초) 이탈했다가 재진입하면 평가와 서술이 다시 실행된다 | 캐시 히트 조건이 `isEvaluated`(서술 병합 완료)라 그렇다. 미완 상태를 캐시하면 반쪽 성적서가 완성본으로 굳는다 — 재실행이 안전한 쪽이다 |
+
+---
+
+## 9. 입력 규칙과 상한 — 프론트와 맞추는 값 (2026-10-19, 평가 흐름 만들기 라운드)
+
+프론트(`Capstone_Front`)가 같은 값을 쓰는 규칙은 아래 자리에 **한 번만** 둔다. 프론트 테스트가 이 파일들을
+읽어 대조하므로(옆 저장소가 없으면 건너뜀) 값을 바꾸면 프론트도 함께 바꾼다.
+
+| 규칙 | 값 | 자리(백엔드) |
+|---|---|---|
+| 서술 요청 고객 입력 상한 | 20,000자. **공백 없는 JSON**(`","`·`":"`, 한글 그대로)으로 잰다 — 프론트 `JSON.stringify` 와 같은 수. 프론트는 상한의 90%(18,000자)로 맞춰 보낸다 | `app/narrative/schemas.py` `MAX_CLIENT_INPUTS_CHARS`·`client_inputs_length` |
+| 발급 비고·발급자·정정 사유 상한 | 각각 200자(앞뒤 공백을 뗀 길이). 넘으면 422, `detail[].msg` 가 한국어("발급 비고는 200자 이하로 적어 주세요(지금 201자).", "정정 사유를 적어 주세요."). 공백뿐인 비고는 '최초 발급', 공백 발급자는 기관 기본값 | `app/issuance/schemas.py` `MAX_ISSUANCE_TEXT_CHARS` |
+| 업로드 크기 상한 | 20 MiB(20 × 1024 × 1024 바이트). 413 문구 "파일이 너무 큽니다. 평가 파일은 20 MiB 이하만 올릴 수 있습니다." | `app/core/upload.py` `MAX_UPLOAD_BYTES`·`format_mib` |
+| 확률 컬럼 이름 접두어 | `prob_`·`probability_`·`score_`·`p_` + 클래스·레이블 이름(예: `prob_cat`, `score_sports`) | `app/evaluation/preprocessor.py` `PROB_COLUMN_PREFIXES` |
+| 작업 유형 한국어 이름 | 이진 분류 / 다중 클래스 분류 / 다중 레이블 분류. AI 서술 지시문에 이 이름이 간다. 이미 발급된 성적서는 저장된 이름 그대로다 | `app/narrative/prompt.py` `TASK_TYPE_LABELS` |
+| 새 검증 항목 이름 | `Probability column names`(error) · `Latency unit`(warning). 프론트 검증 화면이 한국어 이름 표로 바꿔 보인다 | `app/analysis/validation_checks.py` `PROBABILITY_COLUMN_NAMES_CHECK`·`LATENCY_UNIT_CHECK` |
+
+### 9.1 규칙 폴백 매퍼 (OpenAI 키가 없거나 LLM 이 실패할 때)
+
+`app/analysis/fallback_mapper.py` 의 `fallback_role` 이 컬럼 **이름만** 보고 역할을 고른다. 이름은 낱말로 쪼갠다 —
+구분자(`_` `-` 공백 `.`)와 camelCase 경계(`imageId` → image, id). 순서대로 보고 처음 맞는 것을 쓴다.
+
+1. 정답 이름(`y_true`·`label`·`target`·`ground_truth`·`actual`·`true_label(s)` …) → `y_true`(멀티레이블은 `true_labels`)
+2. 예측 이름(`y_pred`·`pred`·`prediction`·`predicted`·`pred_label(s)` …) → `y_pred`(멀티레이블은 `pred_labels`)
+3. 지연시간 이름(`latency`·`latency_ms`·`inference_time(_ms)`·`response_time(_ms)`·`elapsed_ms`, 또는 낱말 `latency`) → `latency`
+4. 낱말 `id`·`idx`·`index`·`uid`·`uuid`, 또는 붙여 쓴 식별자 이름(`sampleid`·`rowid`·`userid`·`fileid` 등 목록) → `sample_id`. `valid_flag`·`width` 처럼 'id' 가 **들어 있기만** 한 이름은 잡지 않는다
+5. 낱말 `prob`·`proba`·`probability`·`score`(복수형·숫자 꼬리 `probs`·`scores`·`prob1` 포함), 또는 `p_` 로 시작 → 유형의 확률 역할(`score_positive`·`prob_per_class`·`score_per_label`). 이진은 낱말 `positive` 도. `position` 같은 이름은 잡지 않는다
+6. 그 밖은 `ignore` + "규칙으로 판단하지 못했다" 안내
+
+한 컬럼만 받는 역할(샘플 ID·정답·예측·이진 확률·지연시간)을 두 번째 컬럼이 또 잡으면, 첫 컬럼만 그 역할로 두고
+나머지는 `ignore` 로 내린 뒤 `column_notes` 에 `status="duplicate_role"` 안내를 싣는다 — 역할이 겹치면 매핑 확정이
+막히기 때문이다. 단 이진에서 양성 확률 후보가 여럿(`prob_0`·`prob_1`)이면 기본 양성 클래스(§9.2)
+이름이 붙은 컬럼을 남긴다 — 첫 컬럼을 남기면 음성 확률이 양성 확률로 들어가 AUROC 가 조용히 뒤집힌다. 이름이 맞는
+후보가 없으면 첫 컬럼. 확률 역할은 클래스·레이블마다 한 컬럼이라 여러 컬럼을 그대로 받는다.
+
+자동 매핑 AI 지시문(`app/analysis/prompt_builder.py`)도 다중·멀티 확률 컬럼을 확률 역할로 안내한다(종전에는
+"확률 컬럼도 ignore"라고 적어 y_pred 없는 파일의 예측이 사라졌다). 지시문의 역할 집합은 `VALID_ROLES_BY_TASK` 와 같다.
+
+### 9.2 양성 클래스 기본값
+
+사용자가 양성 클래스를 고르지 않았을 때의 기본값은 `app/evaluation/labels.py` `default_positive_class` 하나에서 정한다.
+자동 판단(`analysis/metadata.py`)·지표 계산·확률에서 예측 파생(`preprocessor.py`)이 모두 이 함수를 쓴다. 지표 계산은
+`metrics/binary.py` 의 `_resolve_positive_value` 한 곳에서 양성을 정하고, Precision·Recall·F1(`metrics/common.py`
+`_get_binary_kwargs`)·신뢰구간·혼동 수 집계도 그 함수를 부른다. 양성이 지정되면 그 표기의 원래 값(§9.4)을, 지정되지
+않으면(metadata 없이 API 를 직접 부른 경우) 이 기본값을 쓴다.
+
+1. 숫자면 큰 값(1 > 0)
+2. 알려진 짝(yes/no·true/false·positive/negative·spam/ham·malignant/benign·fraud/normal …)이면 정해진 값
+3. 그 밖은 정렬 순서(숫자면 수치 순, 아니면 사전 순)의 **뒤쪽** 값 — 임시로 고른 것이라 `positive_class_ambiguous=true` 로 알린다
+
+종전에는 3번에서 자동 판단만 **앞쪽**을 골라 화면에 보인 양성과 성적서 수치의 양성이 달랐다('cat'·'dog' 이면 화면은
+cat, 지표는 dog). 이제 셋 다 dog 다. 지난 평가는 저장된 양성 값을 쓰므로 영향이 없다. 양성 미지정일 때
+Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/normal 이면 종전엔 그 셋만 normal 을 양성으로 봤다).
+프론트는 양성을 늘 보내므로 화면 결과는 바뀌지 않는다.
+
+### 9.3 검증 단계에서 미리 보는 것 (`/api/validate-data`)
+
+- **확률 컬럼 이름**(`Probability column names`, error): 다중·멀티에서 예측 컬럼 없이 확률만 매핑하고, 고른 지표가 예측을
+  쓰면 평가는 확률 컬럼 이름으로 클래스를 확정해 예측을 만든다. 이름으로 확정할 수 없으면(예: 클래스가 cat/dog 인데
+  컬럼이 prob_a·prob_b) 종전에는 검증을 통과한 뒤 평가에서 400 으로 막혔다. 이제 평가와 **같은 함수**
+  (`preprocessor.derivation_source`·`probability_names_problem`)로 검증이 미리 보고 막는다. 예측 컬럼이 있거나 이름이
+  맞으면 항목을 내지 않는다. 이진은 확률 컬럼이 하나라 이름을 보지 않는다.
+- **지연시간 단위**(`Latency unit`, warning): 지연시간 역할은 ms 로 읽는다. 값이 모두 1 미만이면 초로 적은 것으로 보여
+  경고한다. 1 ms 미만으로 도는 모델도 있어 막지 않는다 — 단위는 데이터만으로 확정할 수 없다.
+
+### 9.4 클래스 표기
+
+데이터의 클래스 값과 화면·API 가 주고받는 클래스 이름은 다를 수 있다. 빈 칸이 하나라도 있으면 pandas 가 정수 정답
+컬럼을 float 로 읽어 1 이 1.0 이 되고, 문자열 클래스에는 앞뒤 공백(`' cat'`)이 붙어 있을 수 있다.
+
+- **주고받는 이름은 표기 하나**: `app/evaluation/labels.py` `normalize_label` — 정수 값 float 는 소수점 없이(1.0 → `'1'`),
+  앞뒤 공백은 뗀다(`' cat'` → `'cat'`). metadata 의 클래스 목록·`positive_class`, 응답의 `derived_prediction.positive_class`·
+  `negative_class`, `confusion_counts.positive_class` 가 모두 이 표기다. 그래서 정답이 float 이면 양성은 `'1.0'` 이 아니라
+  `'1'` 로 나간다(정수·문자열 정답은 종전과 같다). 이미 저장된 옛 run 의 metadata 에는 `'1.0'` 이 남아 있을 수 있다.
+- **원래 값은 `find_label` 로 되찾는다**: `y_true == 양성` 처럼 데이터 값과 비교하는 곳은 `str()` 로 맞춰 보지 않고
+  `labels.find_label(값들, 표기)` 로 원래 값(1.0·`' cat'`)을 찾아 쓴다. 쓰는 곳: 이진 예측 파생(`preprocessor.py`),
+  `binary._resolve_positive_value`(§9.2). 다중 예측 파생은 같은 규칙으로 만든 표기 → 원래 값 표를 쓴다. 표기를 만들어
+  내보내는 쪽(metadata 의 이진 클래스 판단·알려진 정답 목록·확률 컬럼 클래스 확정)은 `normalize_label` 을 쓴다.
+- **검증의 클래스 불일치 검사는 숫자 표기만 맞춘다**: `validation_checks.check_class_mismatch` 는 `labels.label_text`
+  (정수 값 float → 정수 표기, 공백은 그대로)로 비교한다. 정답 1.0 과 예측 1 은 같은 클래스로 보고, 정답 `' cat'` 과
+  예측 `'cat'` 처럼 공백이 다른 것은 계속 경고한다 — 평가는 둘을 다른 클래스로 세기 때문이다. `normalize_label` 은
+  `label_text` 에 공백 제거를 더한 것이라 숫자 표기 규칙은 한 곳에 있다.

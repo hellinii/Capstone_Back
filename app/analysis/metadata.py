@@ -10,14 +10,10 @@ binary 는 양성/음성 클래스 자동 판단(_detect_binary_classes)까지 �
 import pandas as pd
 
 from app.core.schemas import ColumnMapping, ColumnRole, DataMetadata, TaskType
-from app.evaluation.labels import normalize_distribution, normalize_label, parse_label_cell, sort_labels
+from app.evaluation.labels import (
+    default_positive_class, normalize_distribution, normalize_label, parse_label_cell, sort_labels,
+)
 
-
-# ── 양성 클래스 자동 판단 규칙 ────────────────────────────────────────────────
-# 숫자형: 큰 값이 Positive (1 > 0, True > False)
-# 문자열 known patterns: 아래에 정의된 것만 자동 판단, 나머지는 ambiguous 처리
-_KNOWN_POSITIVE = {"1", "yes", "true", "positive", "pos", "spam", "malignant", "fraud", "1.0"}
-_KNOWN_NEGATIVE = {"0", "no", "false", "negative", "neg", "ham", "benign", "normal", "0.0"}
 
 # 컬럼별 고유값 목록을 담는 상한. 이 목록은 "이 컬럼을 라벨로 쓰면 어떤 클래스가 있는가"를
 # 보여주기 위한 것이라, 이보다 값이 다양한 컬럼(id, score 등)은 라벨 후보가 아니다.
@@ -26,38 +22,19 @@ MAX_UNIQUE_VALUES_PER_COLUMN = 200
 
 def _detect_binary_classes(series: pd.Series) -> tuple[str | None, str | None, bool]:
     """
-    Binary y_true 컬럼에서 양성/음성 클래스를 자동 추론합니다.
+    Binary y_true 컬럼에서 양성/음성 클래스를 자동 추론합니다 — 규칙은 labels.default_positive_class
+    하나다(M5: 지표 계산·예측 파생과 같은 값). 값이 둘이 아니면 판단하지 않는다(None, None, True).
 
     Returns:
         (positive_class, negative_class, is_ambiguous)
         is_ambiguous=True 이면 사용자 확인이 필요합니다.
     """
-    unique_vals = [str(v) for v in series.dropna().unique()]
-    if len(unique_vals) != 2:
+    pos, neg, ambiguous = default_positive_class(series.dropna().unique())
+    if neg is None:
         return None, None, True  # 2개 값이 아니면 판단 불가
-
-    a, b = unique_vals[0], unique_vals[1]
-    a_lower, b_lower = a.lower(), b.lower()
-
-    # 숫자형: 큰 값이 Positive
-    try:
-        fa, fb = float(a), float(b)
-        if fa > fb:
-            return a, b, False
-        else:
-            return b, a, False
-    except ValueError:
-        pass
-
-    # Known pattern 매칭
-    if a_lower in _KNOWN_POSITIVE and b_lower in _KNOWN_NEGATIVE:
-        return a, b, False
-    if b_lower in _KNOWN_POSITIVE and a_lower in _KNOWN_NEGATIVE:
-        return b, a, False
-
-    # 판단 불가 → 알파벳순으로 첫 번째를 Positive로 임시 지정 후 ambiguous 표시
-    pos, neg = sorted([a, b])
-    return pos, neg, True
+    # 표기는 column_unique_values 와 같은 normalize_label — str(1.0) = '1.0' 이면 프론트가 목록에 없는 양성으로
+    # 보고 비운다(빈 칸 섞인 정수 정답). 평가 쪽은 labels.find_label 로 원래 값을 되찾는다.
+    return normalize_label(pos), normalize_label(neg), ambiguous
 
 
 def extract_metadata(

@@ -8,6 +8,9 @@ ISSUES.md G-03 (2026-09-07 ★확정된 제품 결정 9 — "인증은 넣지 �
 7·8·9절이 '생성 예정' 안내로 인쇄된다. 즉 예산 초과를 미들웨어(429)로 구현하면 사용자는
 '서비스 고장'을 보게 된다. 규칙 폴백은 이미 두 경로에 다 있으므로, 필요한 것은
 **새 강등 사유 하나**뿐이다.
+
+서술 라운드 S1 부터 지갑이 둘이다 — 매핑(호출 1건 = 1, 기본 60)과 서술(보고서 1건 = 1, 기본 30).
+한쪽을 다 써도 다른 쪽은 계속 호출된다.
 """
 import pytest
 
@@ -57,43 +60,70 @@ def test_remaining_reports_what_is_left():
 
 # ── 두 LLM 경로가 예산 초과 시 200 + 규칙 폴백으로 강등한다 ────────────────
 
-async def test_narrative_degrades_to_rule_fallback_when_budget_is_spent(make_fake_openai_client):
+async def test_narrative_degrades_to_rule_fallback_when_budget_is_spent(make_fake_anthropic_client):
     from app.narrative.schemas import NarrativeRequest
     from app.narrative.service import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
 
-    for _ in range(llm_budget.MAX_LLM_CALLS_PER_HOUR):
-        llm_budget.try_consume()
+    for _ in range(llm_budget.narrative.limit):
+        llm_budget.narrative.try_consume()
 
-    client = make_fake_openai_client({"interpretation": {}, "conclusion": {}})
+    client = make_fake_anthropic_client({"interpretation": {}, "conclusion": {}})
     result = await generate_narrative(client, minimal_narrative_request())
 
     assert result.meta.source == "fallback"
     assert result.meta.reason == "budget_exceeded"
     # 예산이 소진됐으면 실제 호출이 일어나면 안 된다 — 그것이 상한의 존재 이유다.
-    client.chat.completions.create.assert_not_called()
+    client.beta.messages.create.assert_not_called()
 
 
-async def test_narrative_still_calls_llm_within_budget(make_fake_openai_client):
+async def test_narrative_still_calls_llm_within_budget(make_fake_anthropic_client):
     from app.narrative.service import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
 
-    client = make_fake_openai_client({"interpretation": {}, "conclusion": {}})
+    client = make_fake_anthropic_client({"interpretation": {}, "conclusion": {}})
     await generate_narrative(client, minimal_narrative_request())
 
-    client.chat.completions.create.assert_called()
+    client.beta.messages.create.assert_called()
 
 
-def test_budget_is_shared_between_both_llm_endpoints():
-    """두 엔드포인트가 같은 지갑을 쓴다 — 한쪽만 막으면 상한이 두 배가 된다."""
-    import app.analysis.analysis_service as analysis_service
-    import app.narrative.service as narrative_service
+def test_wallets_are_separate_objects_with_their_own_limits():
+    assert llm_budget.mapping is not llm_budget.narrative
+    assert llm_budget.mapping.limit == llm_budget.MAX_LLM_CALLS_PER_HOUR == 60
+    assert llm_budget.narrative.limit == llm_budget.MAX_NARRATIVE_REPORTS_PER_HOUR == 30
 
-    assert analysis_service.llm_budget is narrative_service.llm_budget
+
+async def test_spent_narrative_wallet_does_not_block_mapping(make_fake_openai_client):
+    import pandas as pd
+
+    from app.analysis.analysis_service import resolve_column_mapping
+    from app.core.schemas import TaskType
+
+    while llm_budget.narrative.try_consume():
+        pass
+    client = make_fake_openai_client({
+        "column_mappings": [{"column": "y_true", "role": "y_true", "sample_values": []}],
+    })
+    df = pd.DataFrame({"y_true": [1, 0], "y_pred": [1, 0]})
+    await resolve_column_mapping(client=client, task_type=TaskType.binary, columns=list(df.columns), df=df)
+    client.chat.completions.create.assert_called_once()
+    assert llm_budget.mapping.remaining() == llm_budget.mapping.limit - 1
+
+
+async def test_spent_mapping_wallet_does_not_block_narrative(make_fake_anthropic_client):
+    from app.narrative.service import generate_narrative
+    from tests.narrative_fixtures import minimal_narrative_request
+
+    while llm_budget.mapping.try_consume():
+        pass
+    client = make_fake_anthropic_client({"interpretation": {}, "conclusion": {}})
+    await generate_narrative(client, minimal_narrative_request())
+    client.beta.messages.create.assert_called_once()
+    assert llm_budget.narrative.remaining() == llm_budget.narrative.limit - 1  # 보고서 1건 = 1
 
 
 def test_column_analysis_degrades_to_rule_fallback_when_budget_is_spent(make_fake_openai_client):
-    """[G-03] 컬럼 분석도 같은 지갑을 쓴다 — 한쪽만 막으면 실효 상한이 두 배가 된다."""
+    """[G-03] 컬럼 분석은 매핑 지갑이 비면 규칙 폴백으로 강등한다."""
     import pandas as pd
 
     from app.analysis.analysis_service import resolve_column_mapping
@@ -132,3 +162,19 @@ def test_column_analysis_calls_llm_within_budget(make_fake_openai_client):
     ))
 
     client.chat.completions.create.assert_called()
+
+
+
+def test_wallet_limits_read_their_env_names(monkeypatch):
+    """T6: 운영에서 상한을 낮출 때 쓰는 환경변수 이름을 실제로 읽는다(import 때 한 번)."""
+    import importlib
+
+    monkeypatch.setenv("NARRATIVE_REPORTS_PER_HOUR", "5")
+    monkeypatch.setenv("LLM_CALLS_PER_HOUR", "7")
+    try:
+        reloaded = importlib.reload(llm_budget)
+        assert reloaded.narrative.limit == 5 and reloaded.mapping.limit == 7
+    finally:
+        monkeypatch.delenv("NARRATIVE_REPORTS_PER_HOUR")
+        monkeypatch.delenv("LLM_CALLS_PER_HOUR")
+        importlib.reload(llm_budget)

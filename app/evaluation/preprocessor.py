@@ -18,7 +18,9 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 
 from app.core.schemas import METRIC_REQUIREMENTS, PREDICTION_ROLES_BY_TASK, TaskType
-from app.evaluation.labels import normalize_distribution, normalize_label, parse_label_cell, sort_labels
+from app.evaluation.labels import (
+    default_positive_class, find_label, normalize_distribution, normalize_label, parse_label_cell, sort_labels,
+)
 
 from .frame import build_evaluation_frame
 
@@ -120,7 +122,9 @@ def _validate_score_columns(df: pd.DataFrame, role_columns: Dict[str, List[str]]
     return df
 
 
-_PROB_COLUMN_PREFIXES = ("prob_", "probability_", "score_", "p_")
+# 확률 컬럼 이름의 접두어 — '접두어 + 클래스·레이블 이름'(prob_cat·score_sports). 이름에서 클래스를 확정할 때
+# 쓰는 단일 출처다. 프론트 업로드·매핑 화면의 이름 안내가 이 튜플을 대조한다(프론트 테스트가 이 줄을 읽는다).
+PROB_COLUMN_PREFIXES = ("prob_", "probability_", "score_", "p_")
 
 # 파생 예측이 들어갈 컬럼명. 원본 컬럼과 충돌하지 않도록 접두어를 붙인다.
 DERIVED_PREDICTION_COLUMN = "__derived_prediction__"
@@ -128,7 +132,7 @@ DERIVED_PREDICTION_COLUMN = "__derived_prediction__"
 
 def _label_from_column(col: str) -> str:
     """확률 컬럼명에서 클래스·레이블 이름을 뽑는다('prob_cat' → 'cat')."""
-    for prefix in _PROB_COLUMN_PREFIXES:
+    for prefix in PROB_COLUMN_PREFIXES:
         if col.startswith(prefix) and len(col) > len(prefix):
             return col[len(prefix):]
     return col
@@ -143,7 +147,7 @@ def _resolve_probability_labels(cols: List[str], known: List[str], kind: str) ->
     (validation_checks 의 argmax 검사가 D-07 에서 택한 것과 같은 원칙.)
     """
     labels = [_label_from_column(c) for c in cols]
-    known_set = {str(k) for k in known}
+    known_set = {normalize_label(k) for k in known}
     if len(set(labels)) != len(labels):
         raise ValueError(
             f"확률 컬럼명에서 뽑은 {kind} 이름이 중복됩니다({labels}). "
@@ -191,6 +195,70 @@ def prediction_is_needed(task_type: str, selected_metric_ids: List[str] | None) 
     )
 
 
+def derivation_source(
+    role_columns: Dict[str, List[str]], task_type: str, selected_metric_ids: List[str] | None,
+) -> List[str]:
+    """확률에서 예측을 파생할 때 쓸 확률 컬럼 — 파생하지 않으면 빈 목록.
+
+    파생하는 조건은 이 함수 하나에서 정한다. 평가(_derive_predictions)와 검증 단계의 이름 검사
+    (probability_names_problem)가 같이 쓴다 — 둘이 다르게 판정하면 검증을 통과한 데이터가 평가에서
+    400 으로 막힌다(M3).
+    - 하드 예측이 매핑돼 있으면 파생하지 않는다(SPEC §1 규칙 1 — 둘 다 있으면 y_pred 우선).
+    - 고른 지표가 예측을 쓰지 않으면 파생하지 않는다(prediction_is_needed).
+    - 파생할 확률이 없으면 예측 없이 계산 가능한 지표(M23 등)만 남는다.
+    """
+    primary = 'pred_labels' if task_type == 'multilabel' else 'y_pred'
+    if role_columns.get(primary):
+        return []
+    if not prediction_is_needed(task_type, selected_metric_ids):
+        return []
+    return list(role_columns.get(
+        {'binary': 'score_positive', 'multiclass': 'prob_per_class'}.get(task_type, 'score_per_label'),
+        [],
+    ))
+
+
+def _known_targets(task_type: str, df: pd.DataFrame, truth_col: str, metadata: Dict[str, Any]) -> List[str]:
+    """확률 컬럼 이름과 맞춰 볼 클래스(다중)·레이블(멀티) 이름 — 메타데이터가 있으면 그것, 없으면 정답 컬럼에서."""
+    if task_type == 'multilabel':
+        known = metadata.get('detected_labels') or sorted(
+            {l for cell in df[truth_col] for l in parse_label_cell(cell)}
+        )
+    else:
+        known = metadata.get('detected_classes') or list(pd.Series(df[truth_col]).dropna().unique())
+    # 표기는 normalize_label — 빈 칸 섞인 정수 정답(1.0)·앞뒤 공백(' cat')도 prob_1·prob_cat 과 맞는다.
+    return [normalize_label(k) for k in known]
+
+
+def probability_names_problem(
+    df: pd.DataFrame,
+    role_columns: Dict[str, List[str]],
+    task_type: str,
+    metadata: Dict[str, Any] | None,
+    selected_metric_ids: List[str] | None,
+) -> str | None:
+    """평가가 확률에서 예측을 파생할 때 컬럼 이름으로 클래스·레이블을 확정할 수 있는가(M3).
+
+    확정할 수 없으면 평가가 400 으로 낼 문구를, 되거나 파생하지 않으면 None 을 돌려준다. 검증 단계가
+    평가 전에 같은 판정을 미리 본다 — 이름 규칙은 '접두어(PROB_COLUMN_PREFIXES) + 클래스·레이블 이름'.
+    이진은 확률 컬럼이 하나라 이름을 보지 않는다.
+    """
+    if task_type not in ('multiclass', 'multilabel'):
+        return None
+    source = derivation_source(role_columns, task_type, selected_metric_ids)
+    if not source:
+        return None
+    truth_col = role_columns.get('y_true', role_columns.get('true_labels', [None]))[0]
+    if truth_col is None or truth_col not in df.columns:
+        return None
+    kind = "클래스" if task_type == 'multiclass' else "레이블"
+    try:
+        _resolve_probability_labels(source, _known_targets(task_type, df, truth_col, metadata or {}), kind)
+    except ValueError as e:
+        return str(e)
+    return None
+
+
 def _derive_predictions(
     df: pd.DataFrame,
     role_columns: Dict[str, List[str]],
@@ -208,18 +276,9 @@ def _derive_predictions(
     이미 하드 예측이 매핑돼 있으면 아무것도 하지 않는다(SPEC §1 규칙 1 — 둘 다 있으면
     y_pred 우선). 그래서 기존 요청의 결과는 한 값도 바뀌지 않는다.
     """
-    primary = 'pred_labels' if task_type == 'multilabel' else 'y_pred'
-    if role_columns.get(primary):
-        return df
-    if not prediction_is_needed(task_type, selected_metric_ids):
-        return df
-
-    source = role_columns.get(
-        {'binary': 'score_positive', 'multiclass': 'prob_per_class'}.get(task_type, 'score_per_label'),
-        [],
-    )
+    source = derivation_source(role_columns, task_type, selected_metric_ids)
     if not source:
-        return df  # 파생할 확률도 없다 — 예측 없이 계산 가능한 지표(M23 등)만 남는다.
+        return df
 
     truth_col = role_columns.get('y_true', role_columns.get('true_labels', [None]))[0]
     out = DERIVED_PREDICTION_COLUMN
@@ -228,38 +287,36 @@ def _derive_predictions(
         col = source[0]
         threshold = _threshold_for(decision_threshold, col)
         classes = list(pd.Series(df[truth_col]).dropna().unique())
-        positive = metadata.get('positive_class')
-        negative = metadata.get('negative_class')
-        if positive is None or str(positive) not in {str(c) for c in classes}:
-            positive = sorted(classes, key=str)[-1] if classes else 1
-        if negative is None or str(negative) not in {str(c) for c in classes}:
-            remaining = [c for c in classes if str(c) != str(positive)]
+        # metadata 의 양성·음성은 표기('1'·'cat')다. 정답 라벨의 실제 값(dtype·공백 포함)으로 되찾아 쓴다 —
+        # 0/1 로 만들면 문자열 정답과 섞여 sklearn 이 'mix of binary and unknown targets' 로 죽고, str() 로
+        # 맞춰 보면 빈 칸 섞인 정수 정답(1.0)에서 사용자가 고른 양성을 못 찾아 기본값으로 바꿔 버린다.
+        positive = find_label(classes, metadata.get('positive_class'))
+        if positive is None:
+            # 기본 양성은 자동 판단·지표 계산과 같은 함수로 정한다(M5).
+            positive = default_positive_class(classes)[0] if classes else 1
+        negative = find_label(classes, metadata.get('negative_class'))
+        if negative is None:
+            remaining = [c for c in classes if normalize_label(c) != normalize_label(positive)]
             if not remaining:
                 raise ValueError(
                     "정답 컬럼에 클래스가 하나뿐이라 확률에서 예측을 파생할 수 없습니다."
                 )
             negative = remaining[0]
-        # 정답 라벨의 실제 값(dtype 포함)으로 만든다. 0/1 로 만들면 문자열 정답과 섞여
-        # sklearn 이 'mix of binary and unknown targets' 로 죽는다.
-        positive = next(c for c in classes if str(c) == str(positive))
-        negative = next(c for c in classes if str(c) == str(negative))
         df[out] = [positive if v >= threshold else negative for v in df[col]]
         logs["derived_prediction"] = {
             "method": "threshold", "threshold": threshold,
             "source_columns": [col], "target_role": "y_pred",
-            "positive_class": str(positive), "negative_class": str(negative),
+            "positive_class": normalize_label(positive), "negative_class": normalize_label(negative),
         }
 
     elif task_type == 'multiclass':
         if decision_threshold is not None:
             logs["warnings"].append(
-                "multiclass 는 확률의 argmax 로 예측을 파생하므로 decision_threshold 는 "
-                "사용되지 않았습니다."
+                "다중 클래스는 확률이 가장 큰 클래스를 예측으로 쓰므로 결정 임계값은 쓰지 않았습니다."
             )
-        known = metadata.get('detected_classes') or list(pd.Series(df[truth_col]).dropna().unique())
-        labels = _resolve_probability_labels(source, [str(k) for k in known], "클래스")
+        labels = _resolve_probability_labels(source, _known_targets(task_type, df, truth_col, metadata), "클래스")
         classes = list(pd.Series(df[truth_col]).dropna().unique())
-        by_name = {str(c): c for c in classes}
+        by_name = {normalize_label(c): c for c in classes}  # 표기 → 원래 값(1.0·' cat')
         picks = df[source].astype(float).values.argmax(axis=1)
         df[out] = [by_name.get(labels[i], labels[i]) for i in picks]
         logs["derived_prediction"] = {
@@ -269,10 +326,7 @@ def _derive_predictions(
         }
 
     else:  # multilabel
-        known = metadata.get('detected_labels') or sorted(
-            {l for labels in df[truth_col] if isinstance(labels, list) for l in labels}
-        )
-        labels = _resolve_probability_labels(source, [str(k) for k in known], "레이블")
+        labels = _resolve_probability_labels(source, _known_targets(task_type, df, truth_col, metadata), "레이블")
         thresholds = {c: _threshold_for(decision_threshold, c) for c in source}
         values = df[source].astype(float)
         df[out] = [
@@ -289,10 +343,19 @@ def _derive_predictions(
 
     logs["derived_prediction"]["column"] = out
     logs["warnings"].append(
-        "하드 예측 컬럼이 없어 확률·점수에서 예측을 파생했습니다"
-        f"({logs['derived_prediction']['method']}). 파생값은 모델의 실제 출력이 아닙니다."
+        f"예측 컬럼이 없어 {_DERIVATION_TEXT[logs['derived_prediction']['method']]}. "
+        "이렇게 만든 예측은 모델이 직접 낸 값이 아닙니다."
     )
     return df
+
+
+# 평가 경고(화면 [평가] 안내·성적서)에 찍는 파생 방식 — 내부 이름(argmax 등) 대신 쉬운 말.
+# 매핑 확인 단계의 안내(analysis/validator.py _WARNING_CONDITIONS)와 같은 설명이다.
+_DERIVATION_TEXT = {
+    "threshold": "양성 클래스 점수가 결정 임계값 이상이면 양성으로 예측했습니다",
+    "argmax": "클래스별 확률이 가장 큰 클래스를 예측으로 썼습니다",
+    "threshold_per_label": "레이블별 점수가 그 레이블의 결정 임계값 이상이면 그 레이블을 예측으로 썼습니다",
+}
 
 
 def _coerce_latency(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, Any]) -> None:
@@ -336,22 +399,30 @@ def _warn_ghost_classes(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, An
         )
 
 
-def _extract_class_distribution(df: pd.DataFrame, mapping_dict: dict, task_type: str, logs: Dict[str, Any]) -> None:
-    """6. 클래스 분포 추출."""
+def class_distribution_of(df: pd.DataFrame, mapping_dict: dict, task_type: str) -> Dict[str, int]:
+    """평가 프레임의 정답 컬럼에서 클래스(레이블)별 등장 횟수를 센다 — 분포의 단일 출처.
+
+    평가(`preprocess_data`)와 데이터 검증(`validation_service`)이 **같은 프레임**에 이 함수를
+    불러, 검증 화면이 미리 보는 불균형 비율(IR)과 성적서 3절의 IR 이 같은 값이 된다.
+    멀티레이블 셀은 파싱 전 원문이어도 되고 이미 리스트여도 된다(`parse_label_cell` 은 둘 다 받는다).
+    """
     class_dist: Dict[str, int] = {}
-    y_true_col_for_dist = mapping_dict.get('y_true') or mapping_dict.get('true_class') or mapping_dict.get('true_labels')
-    if y_true_col_for_dist and y_true_col_for_dist in df.columns:
+    col = mapping_dict.get('y_true') or mapping_dict.get('true_class') or mapping_dict.get('true_labels')
+    if col and col in df.columns:
         if task_type == 'multilabel':
-            # df[y_true_col_for_dist]는 이미 파서를 거쳐 리스트 형태임
-            for labels in df[y_true_col_for_dist].dropna():
-                if isinstance(labels, list):
-                    for label in labels:
-                        class_dist[label] = class_dist.get(label, 0) + 1
+            for cell in df[col]:
+                for label in parse_label_cell(cell):
+                    class_dist[label] = class_dist.get(label, 0) + 1
         else:
-            class_dist = df[y_true_col_for_dist].value_counts().to_dict()
+            class_dist = df[col].value_counts().to_dict()
     # 키 표현형과 순서를 표준화한다 — 종전 `{str(k): v}` 는 int 1 과 str '1' 을 뭉개며
     # 카운트를 **덮어썼고**, 사전순 정렬이 ['1','10','2'] 로 클래스 순서를 뒤집었다(D-04).
-    logs["class_distribution"] = normalize_distribution(class_dist)
+    return normalize_distribution(class_dist)
+
+
+def _extract_class_distribution(df: pd.DataFrame, mapping_dict: dict, task_type: str, logs: Dict[str, Any]) -> None:
+    """6. 클래스 분포 추출."""
+    logs["class_distribution"] = class_distribution_of(df, mapping_dict, task_type)
 
 
 def collect_role_columns(mappings: List[Dict[str, str]]) -> Dict[str, List[str]]:

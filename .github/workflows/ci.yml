@@ -104,24 +104,33 @@ jobs:
       - name: 배포 완료 확인 (새 리비전이 실제로 응답하는가)
         env:
           HEALTH_URL: https://capstone-back-59z8.onrender.com/health
+          EXPECTED: ${{ github.sha }}
         run: |
-          echo "새 리비전 기동을 기다립니다 (최대 10분)..."
-          for i in $(seq 1 60); do
+          want="${EXPECTED:0:7}"
+          echo "커밋 ${want} 리비전이 응답하기를 기다립니다 (최대 15분)..."
+          for i in $(seq 1 90); do
             # Render free 는 콜드스타트가 길어 타임아웃을 넉넉히 준다.
             body=$(curl -fsS --max-time 60 "${HEALTH_URL}" 2>/dev/null || true)
             if [ -n "${body}" ]; then
-              echo "응답: ${body}"
-              # 영속 DB 로 붙어 있는지도 함께 본다 — 휘발성으로 강등되면 재시작마다
-              # 채번 시퀀스와 발급된 성적서 보관본이 사라진다(G-07).
-              if echo "${body}" | grep -q '"persistent":true'; then
-                echo "::notice::배포 확인 완료 (영속 DB)"
+              got=$(printf '%s' "${body}" | python3 -c "import json,sys;print(json.load(sys.stdin).get('commit') or '')" 2>/dev/null || true)
+              # 옛 리비전(빌드 중·빌드 실패)도 200 으로 응답한다 — 커밋이 같아질 때까지 기다린다.
+              # commit 칸이 null 이면 Render 가 RENDER_GIT_COMMIT 을 주지 않는 것이다: 경고만 남기고 확인을 끝낸다.
+              if [ "${got}" = "${want}" ] || printf '%s' "${body}" | grep -q '"commit":null'; then
+                echo "응답: ${body}"
+                [ "${got}" = "${want}" ] || echo "::warning::/health 에 커밋이 없습니다 — 배포 커밋은 Render 대시보드에서 확인하세요."
+                # 영속 DB 로 붙어 있는지도 함께 본다 — 휘발성으로 강등되면 재시작마다
+                # 채번 시퀀스와 발급된 성적서 보관본이 사라진다(G-07).
+                if echo "${body}" | grep -q '"persistent":true'; then
+                  echo "::notice::배포 확인 완료 (커밋 ${got:-미확인}, 영속 DB)"
+                  exit 0
+                fi
+                echo "::warning::서비스는 떴으나 휘발성 DB 입니다 — DATABASE_URL 을 확인하세요."
+                echo "::notice::배포 확인 완료 (휘발성 DB 경고)"
                 exit 0
               fi
-              echo "::warning::서비스는 떴으나 휘발성 DB 입니다 — DATABASE_URL 을 확인하세요."
-              echo "::notice::배포 확인 완료 (휘발성 DB 경고)"
-              exit 0
+              echo "아직 이전 리비전(commit=${got:-없음})"
             fi
             sleep 10
           done
-          echo "::error::10분 안에 /health 가 응답하지 않았습니다. Render 로그를 확인하세요."
+          echo "::error::15분 안에 커밋 ${want} 리비전이 응답하지 않았습니다. Render 로그(빌드 실패·기동 실패)를 확인하세요."
           exit 1

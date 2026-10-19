@@ -64,6 +64,11 @@ def test_environment_lists_every_library_that_computes_metrics():
 @pytest.mark.parametrize("verdict, text", [
     ("FAIL", "모든 시험항목이 합격 기준을 충족하였다."),
     ("FAIL", "본 모델은 목표 성능을 달성하였다."),
+    # 2026-10-19: 일부 통과 예외를 넣으며 놓치면 안 되는 꼴을 더한다 — 'N개 중 N개'는 전부 통과 주장이다.
+    ("CONDITIONAL_PASS", "전체 5개 지표 중 5개가 통과하였다."),
+    ("FAIL", "전체 3개 중 3개 항목이 기준을 충족하였다."),
+    ("INCONCLUSIVE", "모든 시험항목이 충족되었다."),
+    ("CONDITIONAL_PASS", "일부는 미달이나 전체 항목이 통과하였다."),
     ("PASS", "일부 지표가 합격 기준에 미달하였다."),
     ("PASS", "본 모델은 기준을 충족하지 못하였다."),
 ])
@@ -81,6 +86,9 @@ def test_verdict_contradicting_sentences_are_detected(verdict, text):
     ("PASS", "모든 시험항목이 합격 기준을 충족하였다."),
     ("FAIL", "일부 지표가 합격 기준에 미달하였다."),
     ("CONDITIONAL_PASS", "핵심 지표는 충족하였으나 일부 항목이 미달하였다."),
+    # 2026-10-19 Claude 실호출(다중, 조건부 합격)에서 오탐으로 폴백된 문장.
+    ("CONDITIONAL_PASS", "전체 5개 지표 중 3개가 통과하였으며 점수는 60.0이다."),
+    ("FAIL", "전체 4개 중 2개가 기준을 충족하였다."),
     ("FAIL", "정밀도가 0.72 로 낮게 나타났다."),
     ("PASS", "데이터셋의 클래스 분포는 균형에 가깝다."),
 ])
@@ -89,7 +97,66 @@ def test_consistent_sentences_pass(verdict, text):
     assert find_verdict_contradictions([text], verdict) == []
 
 
-def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_openai_client):
+@pytest.mark.parametrize("text", [
+    "Recall 은 목표값과의 차이가 작아 표본이 달라지면 기준에 미달할 위험이 있다.",
+    "F1 Score 는 아슬아슬하게 합격해 미달 가능성이 남아 있다.",
+    "표본 변동에 따라 미달 위험이 존재한다.",
+    "다른 데이터에서는 기준에 미달할 가능성이 있다.",
+    "운영 환경에서는 기준에 미달할 우려가 있다.",
+    "표본이 바뀌면 기준에 미달할 수 있다.",
+    "임계값이 설정된 모든 시험항목이 기준을 충족하여 식별된 기준 미달 위험은 없다.",
+    # 세션 3 검토 — 가정·권고 꼴도 미달 주장이 아니다.
+    "표본이 바뀌면 Recall 이 기준을 충족하지 못할 수도 있다.",
+    "운영 데이터에서는 기준에 이르지 못할 가능성이 있다.",
+    "재평가에서는 불합격으로 판정될 수 있다.",
+    "표본 변동으로 판정이 미달로 바뀔 수 있다.",
+    "결정 임계값을 점검해 기준 미달을 예방한다.",
+    "Recall 미달 방지를 위해 소수 클래스를 보강한다.",
+    "Recall 은 미달 리스크가 남아 있다.",
+    # 세션 3 검토 2 — (으)로 뒤 앞일을 말하는 꼴(받침 ㄹ: 떨어질·내려갈·될)만 가정이다.
+    "표본이 줄면 Recall 이 미달로 떨어질 위험이 있다.",
+    "운영 데이터에서는 미달로 내려갈 가능성이 있다.",
+    "재평가 시 미충족으로 분류될 우려가 있다.",
+    "표본이 바뀌면 불합격으로 이어질 수도 있다.",
+])
+def test_pass_allows_hypothetical_shortfall_wording(text):
+    """[B7, D12] 아슬아슬 합격을 8.3 에 쓰면 합격 성적서에도 '미달 위험·가능성'이 나온다.
+
+    미달했다는 주장이 아니라 미달할 수 있다는 경고라 판정과 모순되지 않는다. 종전 정규식은 '미달'
+    한 글자만 보고 이 문장들까지 잡아 맞는 서술을 폴백으로 강등했다.
+    """
+    assert find_verdict_contradictions([text], "PASS") == []
+
+
+@pytest.mark.parametrize("text", [
+    "Recall 이 기준에 미달하였다.",
+    "기준 미달 항목은 Recall 이다.",
+    "Recall 은 목표에 미달했다.",
+    "본 모델은 불합격이다.",
+    "Recall 은 목표를 미충족하였다.",
+    # 같은 글 안에 경고와 진짜 미달 주장이 함께 있으면 진짜 쪽에서 걸린다.
+    "Accuracy 는 미달할 위험이 있고, Recall 은 기준에 미달하였다.",
+    "Recall 은 기준을 충족하지 못하였다.",
+    "Recall 은 기준에 이르지 못했다.",
+    "Recall 은 미달로 판정되었다.",
+    "Recall 은 불합격으로 판정되어 개선 가능성이 있다.",
+    # 세션 3 검토 2 — (으)로 뒤가 이미 일어난 일(되어·돼·나타나·이어져)이면 위험을 덧붙여도 미달 주장이다.
+    "재현율이 미달로 판정되어 위험이 크다.",
+    "Recall 은 미달로 확인되어 우려된다.",
+    "Recall 은 불합격으로 이어져 리스크가 있다.",
+    "Recall 은 미충족으로 분류돼 위험하다.",
+    "Recall 은 미달로 나타나 위험하다.",
+    # 세션 3 검토 3 — 받침이 ㄹ 이어도 능동 판단 동사(볼·판단할·평가할·간주할)는 지금 결과를 미달로 보는 주장이다.
+    "재현율이 기준 미달로 볼 수 있다.",
+    "재현율은 미달로 판단할 수 있다.",
+    "정밀도는 불합격으로 평가할 수 있다.",
+    "재현율은 미달로 간주할 수 있다.",
+])
+def test_pass_still_rejects_real_shortfall_claims(text):
+    assert find_verdict_contradictions([text], "PASS") == [text]
+
+
+def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_anthropic_client):
     """모순이 발견되면 그 서술을 쓰지 않고 규칙 폴백으로 강등한다."""
     from app.core import llm_budget
     from app.narrative.service import generate_narrative
@@ -99,7 +166,7 @@ def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_openai_
     request = minimal_narrative_request()
     request.fact_sheet.verdict = "FAIL"
 
-    fake = make_fake_openai_client({
+    fake = make_fake_anthropic_client({
         "interpretation": {"confusionAnalysis": "모든 시험항목이 합격 기준을 충족하였다.",
                            "distributionAnalysis": ""},
         "conclusion": {"benchmark": "", "narrative": "", "risks": ""},

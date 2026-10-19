@@ -33,17 +33,45 @@
 """
 from typing import Any, Iterable, List
 import ast
+import math
+
+
+def label_text(value: Any) -> str:
+    """라벨 하나의 숫자 표기만 맞춘 문자열 — 앞뒤 공백은 **그대로** 둔다.
+
+    정수 값 float(1.0)은 `'1'` 로 쓴다. 빈 칸 하나 때문에 pandas 가 정수 컬럼을 float 로
+    읽어도 정수 컬럼('1')과 같은 표기가 된다. 공백까지 지우는 표준 표기는 normalize_label 이다.
+    공백 차이를 알려야 하는 곳(검증의 Class mismatch — 평가는 ' cat' 과 'cat' 을 다른 클래스로
+    센다)은 이 함수를 쓴다.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def normalize_label(value: Any) -> str:
-    """라벨 하나를 표준 표현형(문자열)으로.
+    """라벨 하나를 표준 표현형(문자열)으로 — label_text 표기에서 앞뒤 공백까지 지운다.
 
     숫자는 소수점 없는 정수로 만든다 — pandas 가 정수 컬럼을 float 로 읽으면 라벨이
     `'1.0'` 이 되어 `'1'` 과 다른 라벨이 된다.
     """
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value).strip()
+    return label_text(value).strip()
+
+
+def find_label(values: Iterable[Any], name: Any) -> Any | None:
+    """표준 표기 `name` 에 해당하는 **원래 값**(dtype·앞뒤 공백 그대로)을 찾는다 — 없으면 None.
+
+    화면·metadata 는 클래스를 normalize_label 표기('1'·'cat')로 주고받지만 데이터의 값은 1.0·' cat'
+    일 수 있다. `y_true == 양성` 처럼 원래 값과 비교해야 하는 곳은 str() 로 맞춰 보지 말고 이 함수로
+    되찾는다(빈 칸 섞인 정수 정답이 float 이 되어 '1' ≠ '1.0' 이 되던 문제).
+    """
+    if name is None:
+        return None
+    target = normalize_label(name)
+    for v in values:
+        if normalize_label(v) == target:
+            return v
+    return None
 
 
 def parse_label_cell(item: Any) -> List[str]:
@@ -99,3 +127,50 @@ def normalize_distribution(distribution: dict) -> dict:
     for key, count in distribution.items():
         merged[normalize_label(key)] = merged.get(normalize_label(key), 0) + int(count)
     return {label: merged[label] for label in sort_labels(merged.keys())}
+
+
+# ── 양성 클래스 기본값(M5) ────────────────────────────────────────────────────
+# 사용자가 양성 클래스를 고르지 않았을 때 무엇을 양성으로 볼지 정하는 규칙은 이 함수 하나다. 종전에는
+# 세 곳이 따로 정했다 — 자동 판단(analysis.metadata)은 모르는 두 문자열이면 **앞쪽**을, 지표 계산
+# (metrics.binary)과 예측 파생(preprocessor)은 **뒤쪽**을 골라, 화면에 보인 양성과 성적서 수치의 양성이
+# 달랐다. SPEC §0("문자면 알파벳 후순위")에 맞춰 뒤쪽으로 모았다.
+#
+# 순서: ① 숫자면 큰 값(1 > 0) ② 알려진 짝(yes/no·spam/ham·fraud/normal …)이면 정해진 값
+#       ③ 그 밖은 표준 순서(sort_labels)의 뒤쪽 값 — 임시로 고른 것이라 ambiguous 로 알린다.
+KNOWN_POSITIVE = frozenset({"1", "yes", "true", "positive", "pos", "spam", "malignant", "fraud", "1.0"})
+KNOWN_NEGATIVE = frozenset({"0", "no", "false", "negative", "neg", "ham", "benign", "normal", "0.0"})
+
+
+def _is_missing(value: Any) -> bool:
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
+def default_positive_class(values: Iterable[Any]) -> tuple[Any | None, Any | None, bool]:
+    """정답 값들에서 기본 양성·음성 클래스를 고른다 → (양성, 음성, 사용자 확인 필요 여부).
+
+    돌려주는 값은 **입력에 있던 원래 값**(dtype 그대로)이라 `y_true == 양성` 비교에 바로 쓴다.
+    값 종류가 둘이 아니면 이진 판단이 안 되므로 음성은 None, ambiguous 는 True 이고, 양성은 표준
+    순서의 뒤쪽 값을 임시로 준다(값이 하나도 없으면 None).
+    """
+    raw: dict[str, Any] = {}
+    for v in values:
+        if not _is_missing(v):
+            raw.setdefault(normalize_label(v), v)
+    if not raw:
+        return None, None, True
+    order = sort_labels(raw)
+    if len(order) != 2:
+        return raw[order[-1]], None, True
+
+    first, last = order
+    try:
+        float(first), float(last)
+        return raw[last], raw[first], False  # 숫자 — sort_labels 가 수치 순서라 뒤쪽이 큰 값
+    except ValueError:
+        pass
+    lf, ll = first.lower(), last.lower()
+    if lf in KNOWN_POSITIVE and ll in KNOWN_NEGATIVE:
+        return raw[first], raw[last], False
+    if ll in KNOWN_POSITIVE and lf in KNOWN_NEGATIVE:
+        return raw[last], raw[first], False
+    return raw[last], raw[first], True

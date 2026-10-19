@@ -2,12 +2,15 @@
 llm_smoke_analyze.py — 컬럼 매핑 + 메타데이터 추출 수동 스모크 스크립트.
 
 pytest 테스트가 아니라 실제 OPENAI_API_KEY 로 LLM 분석을 왕복 확인하는 CLI.
-레포 루트에서: python scripts/llm_smoke_analyze.py
+레포 루트에서: python scripts/llm_smoke_analyze.py [파일 경로 ...]
+파일을 주면 그 파일만, 안 주면 tests/data 아래 전부. 모델은 MAPPING_MODEL(없으면 코드 기본값).
+파일마다 걸린 시간을 찍는다(운영 클라이언트 시간 제한 45초 안인지 본다).
 """
 
 import asyncio
 import os
 import sys
+import time
 
 # 레포 루트를 sys.path 에 추가 (app.* 절대 import 를 위해)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +20,7 @@ from openai import AsyncOpenAI
 
 from app.core.schemas import TaskType
 from app.core.parsing import parse_file_content
-from app.analysis.llm_mapper import analyze_columns_with_llm
+from app.analysis.llm_mapper import analyze_columns_with_llm, mapping_model
 
 load_dotenv()
 
@@ -56,8 +59,12 @@ async def main():
         print("❌ .env 파일에 OPENAI_API_KEY를 설정해주세요!")
         return
 
-    client = AsyncOpenAI(api_key=api_key)
-    test_files = collect_test_files()
+    client = AsyncOpenAI(api_key=api_key, max_retries=0)
+    if len(sys.argv) > 1:
+        test_files = [(os.path.abspath(p), detect_task_type(p)) for p in sys.argv[1:]]
+    else:
+        test_files = collect_test_files()
+    print(f"🤖 매핑 모델: {mapping_model()}")
 
     print(f"📁 총 {len(test_files)}개 파일 테스트 시작\n")
     success, fail = 0, 0
@@ -73,7 +80,9 @@ async def main():
                 content = f.read()
 
             columns, df = parse_file_content(content, filename)
+            started = time.perf_counter()
             result = await analyze_columns_with_llm(client, task_type, columns, df)
+            print(f"     ⏱  {time.perf_counter() - started:.2f}초")
 
             # 컬럼 매핑 출력
             for m in result.column_mappings:
