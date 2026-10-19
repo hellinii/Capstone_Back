@@ -66,6 +66,18 @@ def test_oversized_upload_rejected_at_real_limit():
     assert r.status_code == 413, r.text[:200]
 
 
+def test_oversized_upload_message_is_korean_mib():
+    """[M6] 413 문구는 한국어·MiB 다 — "20.0 MB" 처럼 단위가 어긋난 표기를 쓰지 않는다."""
+    assert upload_mod.format_mib(upload_mod.MAX_UPLOAD_BYTES) == "20 MiB"
+    assert upload_mod.format_mib(int(1.5 * 1024 * 1024)) == "1.5 MiB"
+
+    row = b"1,1,1\n"
+    big = b"id,y_true,y_pred\n" + row * ((upload_mod.MAX_UPLOAD_BYTES // len(row)) + 1)
+    r = _post("/api/analyze-columns", {"task_type": "binary"}, "big.csv", big)
+    assert r.status_code == 413
+    assert r.json()["detail"] == "파일이 너무 큽니다. 평가 파일은 20 MiB 이하만 올릴 수 있습니다."
+
+
 @pytest.mark.parametrize("path,form", UPLOAD_ROUTES)
 def test_upload_just_under_limit_passes_size_gate(path, form, monkeypatch):
     """[G-04a] 상한 이하 업로드는 크기 게이트를 통과한다 (413 이 아니어야 한다)."""

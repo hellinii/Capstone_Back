@@ -156,3 +156,39 @@ def test_engine_rejects_same_true_pred_column():
     result = run_evaluation(df, mappings, "binary", ["M1"])
     assert "error" in result           # 전처리 백스톱이 잡아 error 반환
     assert result.get("M1") != 1.0    # 가짜 100% 아님
+
+
+# ── S10: 사용자에게 보이는 매핑 안내는 내부 역할 이름 없이 쉬운 한국어로 ─────────────
+
+_INTERNAL_WORDS = sorted({r.value for r in ColumnRole} | {"argmax", "Binary", "M9", "M10", "M19"})
+
+
+def _user_messages(task_type: TaskType, mappings: list) -> list[str]:
+    response = validate_mapping(ConfirmMappingRequest(task_type=task_type, column_mappings=mappings))
+    return [e.message for e in response.errors] + [w.message for w in response.warnings]
+
+
+@pytest.mark.parametrize("task_type", list(TaskType))
+def test_mapping_notices_have_no_internal_role_names(task_type):
+    """예측·점수 없이 정답만 매핑하면 경고(예측 파생 안내)와 오류가 뜬다 — 문장에 역할 코드가 없어야 한다."""
+    from app.analysis.validator import _WARNING_CONDITIONS
+
+    warning_messages = [m for _, _, m in _WARNING_CONDITIONS[task_type]]
+    assert warning_messages, "경고 문구가 비어 있다"
+    truth = ColumnRole.true_labels if task_type == TaskType.multilabel else ColumnRole.y_true
+    shown = _user_messages(task_type, [_cm("t", truth)])
+    for message in warning_messages:
+        assert message in shown
+    for message in warning_messages:
+        hits = [w for w in _INTERNAL_WORDS if w in message]
+        assert not hits, f"{message!r} 에 내부 이름 {hits}"
+
+
+def test_binary_pred_or_score_error_is_plain_korean():
+    shown = _user_messages(TaskType.binary, [_cm("t", ColumnRole.y_true)])
+    assert "이진 분류 평가는 예측 컬럼이나 양성 클래스 점수 컬럼 중 하나 이상이 필요합니다." in shown
+
+
+def test_multiclass_derivation_notice_wording():
+    shown = _user_messages(TaskType.multiclass, [_cm("t", ColumnRole.y_true)])
+    assert any(m.startswith("예측 컬럼이 없어 클래스별 확률이 가장 큰 클래스를 예측으로 씁니다.") for m in shown)

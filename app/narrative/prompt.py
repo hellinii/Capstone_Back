@@ -12,8 +12,10 @@ import json
 from app.narrative.derived import threshold_tuning_needed
 
 
-# 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예").
-TASK_TYPE_LABELS = {"binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "멀티레이블 분류"}
+# 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예"). 한국어 이름은 이 셋으로 통일한다(W9,
+# 2026-10-18 사용자 결정) — 프론트 성적서의 TASK_TYPE_LABELS 와 같은 글자다. 이미 발급된 성적서는 저장된
+# 이름 그대로 두고, 새 서술 요청부터 이 이름이 AI 에 간다.
+TASK_TYPE_LABELS = {"binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "다중 레이블 분류"}
 
 
 # 규칙 10 — 예측을 확률에서 파생했을 때 방법마다 다른 한 문장(고정 문구 9 와 같은 구분).
@@ -150,7 +152,7 @@ def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> st
         "3. conclusion.verdict 는 fact_sheet.verdict 값을 그대로 사용한다. 값은 PASS(합격), "
         "CONDITIONAL_PASS(조건부 합격), FAIL(불합격), INCONCLUSIVE(판정 불가: 핵심 지표가 산출되지 "
         "않았거나 판정 대상 지표가 없음) 중 하나다. 판정 불가면 합격이나 불합격으로 단정하지 마라. "
-        "metrics 의 is_core=true 는 의뢰자가 지정한 핵심 지표다.\n"
+        "metrics 의 is_core=true 는 판정에 쓰는 핵심 지표다(의뢰자가 정했거나 분류 유형의 기본값).\n"
         "4. benchmark 서술에는 benchmark_refs 의 source_note(기준의 출처·성격)를 반드시 포함하고, "
         "'공개 벤치마크 평균'처럼 단정하지 마라. benchmark_refs 가 비어 있으면 비교를 주장하지 마라.\n"
         "5. 과장 없이 사실 기반으로, 평가기관 성적서 문체(객관적·간결)로 작성한다.\n"

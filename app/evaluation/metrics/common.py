@@ -15,6 +15,7 @@ import numpy as np
 from typing import Dict, Any
 
 from app.evaluation.labels import normalize_label, parse_label_cell, sort_labels
+from app.evaluation.metrics.binary import _resolve_positive_value
 from sklearn.metrics import (
     accuracy_score, 
     precision_score, 
@@ -104,18 +105,14 @@ def calculate_accuracy(df: pd.DataFrame, mapping_dict: dict) -> float:
     return float(accuracy_score(y_true, y_pred))
 
 def _get_binary_kwargs(y_true, mapping_dict):
-    """이진 분류를 위한 kwargs 반환 (pos_label 추론)"""
-    classes = np.sort(np.unique(y_true))
-    pos_label = mapping_dict.get('_positive_class')
-    if pos_label is None:
-        pos_label = classes[-1] if len(classes) > 0 else 1
-    try:
-        if np.issubdtype(y_true.dtype, np.number):
-            pos_label = type(y_true.iloc[0])(pos_label)
-        else:
-            pos_label = str(pos_label)
-    except Exception:
-        pass
+    """이진 분류를 위한 kwargs 반환 (pos_label 결정).
+
+    양성은 binary._resolve_positive_value 한 함수로 정한다 — 지정된 표기('1'·'cat')면 데이터의 원래 값
+    (1.0·' cat')을 찾고, 미지정이면 labels.default_positive_class(M5)를 쓴다. 종전에는 미지정일 때
+    정렬 뒤쪽(classes[-1])을 써서 fraud/normal 이면 precision·recall·F1 은 normal, binary.py 지표는
+    fraud 를 양성으로 봤다.
+    """
+    pos_label = _resolve_positive_value(y_true, mapping_dict.get('_positive_class'))
     return {"pos_label": pos_label, "average": "binary", "zero_division": 0}
 
 def calculate_precision(df: pd.DataFrame, mapping_dict: dict) -> float:

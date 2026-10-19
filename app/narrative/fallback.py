@@ -20,6 +20,21 @@ _QUALITY_LABEL = {"better": "우수", "within": "기준 범위 내", "worse": "�
 _TARGET_POSITION_LABEL = {"below": "참조 범위보다 낮음", "within": "참조 범위 안", "above": "참조 범위보다 높음"}
 
 
+# 지표 값·목표값을 찍는 자릿수 — 성적서(프론트 formatMetricValue·새 성적서 targetDigits)가 셋째 자리다.
+_METRIC_DIGITS = 3
+
+
+def _num(value) -> str:
+    """지표 값·목표값·차이·구간 끝을 성적서와 같은 셋째 자리로(끝의 0 은 뺀다).
+
+    반올림한 값(round(v, 3))은 허용 목록(_add)이 넣는 표기라 grounding 을 통과한다.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    text = f"{round(float(value), _METRIC_DIGITS):.{_METRIC_DIGITS}f}".rstrip("0").rstrip(".")
+    return "0" if text == "-0" else text
+
+
 def _pct(ratio: float) -> str:
     """비율을 백분율 소수 1자리로 — 허용 목록(_add)의 백분율 표기와 같은 반올림."""
     return f"{round(ratio * 100, 1):g}%"
@@ -159,7 +174,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     ci_names = set(derived.get("ci_contains_target") or [])
     if ci_names:
         items = ", ".join(
-            f"{m.display_name}(구간 {m.ci_low}~{m.ci_high}, 목표 {m.threshold})"
+            f"{m.display_name}(구간 {_num(m.ci_low)}~{_num(m.ci_high)}, 목표 {_num(m.threshold)})"
             for m in fs.metrics
             if m.display_name in ci_names
         )
@@ -172,7 +187,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     near = [m for m in fs.metrics if m.near_target and m.status == "pass"]
     if failed_metrics:
         items = ", ".join(
-            f"{m.display_name}({m.value}, 기준 {m.threshold})" for m in failed_metrics
+            f"{m.display_name}({_num(m.value)}, 기준 {_num(m.threshold)})" for m in failed_metrics
         )
         risks = f"기준 미달 지표는 {items}로, 해당 영역의 성능 저하 위험이 존재한다."
     elif near:
@@ -183,9 +198,9 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
     if near:
         # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
         items = ", ".join(
-            f"{m.display_name}({m.value}, 기준 {m.threshold}, 차이 {m.margin})"
+            f"{m.display_name}({_num(m.value)}, 기준 {_num(m.threshold)}, 차이 {_num(m.margin)})"
             if m.margin is not None
-            else f"{m.display_name}({m.value}, 기준 {m.threshold})"
+            else f"{m.display_name}({_num(m.value)}, 기준 {_num(m.threshold)})"
             for m in near
         )
         risks += (

@@ -252,7 +252,46 @@ def test_multiclass_ignores_threshold_but_says_so():
     req = _mc_request()
     req.decision_threshold = 0.7
     body = _post_evaluate(_MC_CSV, req).json()
-    assert any("argmax" in w for w in body["warnings"]), body["warnings"]
+    assert any("결정 임계값은 쓰지 않았습니다" in w for w in body["warnings"]), body["warnings"]
+
+
+_INTERNAL_NAMES = ("argmax", "threshold", "multiclass", "decision_threshold", "score_positive",
+                   "prob_per_class", "score_per_label", "하드 예측")
+
+
+def _derivation_warnings(body):
+    found = [w for w in body["warnings"] if "예측 컬럼이 없어" in w]
+    assert found, body["warnings"]
+    return found
+
+
+@pytest.mark.parametrize(
+    "csv, req, expected",
+    [
+        (lambda: _BINARY_CSV, lambda: _binary_request(0.5), "양성 클래스 점수가 결정 임계값 이상이면 양성으로"),
+        (lambda: _MC_CSV, lambda: _mc_request(), "클래스별 확률이 가장 큰 클래스를"),
+        (lambda: _ML_CSV, lambda: _ml_request(0.5), "레이블별 점수가 그 레이블의 결정 임계값 이상이면"),
+    ],
+    ids=["binary", "multiclass", "multilabel"],
+)
+def test_evaluation_derivation_warning_is_plain_korean(csv, req, expected):
+    """S10 검토: 평가 경고(화면 [평가] 안내·성적서)가 "(argmax)"·"(threshold_per_label)" 같은
+    내부 이름을 그대로 찍었다. 매핑 안내와 같은 쉬운 말로 방식을 적는다."""
+    resp = _post_evaluate(csv(), req())  # _ML_CSV 는 파일 아래쪽에 있어 늦게 읽는다
+    assert resp.status_code == 200, resp.text
+    warnings = _derivation_warnings(resp.json())
+    assert any(expected in w for w in warnings), warnings
+    for w in warnings:
+        assert not [n for n in _INTERNAL_NAMES if n in w], w
+
+
+def test_multiclass_threshold_ignored_warning_is_plain_korean():
+    req = _mc_request()
+    req.decision_threshold = 0.7
+    warnings = _post_evaluate(_MC_CSV, req).json()["warnings"]
+    hit = [w for w in warnings if "결정 임계값은 쓰지 않았습니다" in w]
+    assert hit, warnings
+    assert not [n for n in _INTERNAL_NAMES if n in hit[0]], hit[0]
 
 
 # ── multilabel: 레이블별 threshold 파생 (A-01) ─────────────────────────────

@@ -288,6 +288,67 @@ def test_api_reissue_accepts_real_note(client):
     assert r.json()["history"][-1]["note"] == "지표 표기 오류 정정"
 
 
+# ── B16: 비고·정정 사유·발급자 200자 상한과 한국어 422 문구 ─────────────────────
+
+def _detail_msgs(r) -> list[str]:
+    return [d["msg"] for d in r.json()["detail"]]
+
+
+def test_issuance_text_limit_constant():
+    """B16: 상한은 200자다 — 프론트 대화상자의 maxLength 가 이 상수를 대조한다."""
+    from app.issuance.schemas import MAX_ISSUANCE_TEXT_CHARS
+
+    assert MAX_ISSUANCE_TEXT_CHARS == 200
+
+
+def test_api_issue_note_and_issuer_limit_200(client):
+    """B16: 발급 비고·발급자는 200자까지 받고 201자는 한국어 문구로 422."""
+    ok = client.post("/api/reports/issue", json={"run_id": "run-lim-ok", "note": "가" * 200, "issuer": "나" * 200})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["history"][0]["note"] == "가" * 200
+    assert ok.json()["issuer"] == "나" * 200
+
+    r = client.post("/api/reports/issue", json={"run_id": "run-lim-note", "note": "가" * 201})
+    assert r.status_code == 422
+    assert _detail_msgs(r) == ["발급 비고는 200자 이하로 적어 주세요(지금 201자)."]
+
+    r = client.post("/api/reports/issue", json={"run_id": "run-lim-issuer", "issuer": "나" * 201})
+    assert r.status_code == 422
+    assert _detail_msgs(r) == ["발급자는 200자 이하로 적어 주세요(지금 201자)."]
+
+
+def test_api_issue_blank_note_becomes_first_issue(client):
+    """B16: 공백뿐인 비고는 비운 것으로 보고 '최초 발급'을, 공백 발급자는 기관 기본값을 쓴다."""
+    r = client.post("/api/reports/issue", json={"run_id": "run-blank-note", "note": "   ", "issuer": "  "})
+    assert r.status_code == 200, r.text
+    assert r.json()["history"][0]["note"] == "최초 발급"
+    assert r.json()["issuer"] == "한국 AI 인증원 평가부"
+
+
+def test_api_issue_note_trimmed_before_limit(client):
+    """B16: 앞뒤 공백을 뗀 길이로 잰다 — 200자 + 공백은 통과하고 공백 없이 저장된다."""
+    r = client.post("/api/reports/issue", json={"run_id": "run-trim-lim", "note": "  " + "가" * 200 + "  "})
+    assert r.status_code == 200, r.text
+    assert r.json()["history"][0]["note"] == "가" * 200
+
+
+def test_api_reissue_note_limit_200(client):
+    """B16: 정정 사유는 200자까지, 201자는 한국어 문구로 422(버전 그대로). 빈 사유도 한국어 문구."""
+    no = client.post("/api/reports/issue", json={"run_id": "run-re-lim"}).json()["report_no"]
+
+    r = client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-re-lim", "note": "가" * 201})
+    assert r.status_code == 422
+    assert _detail_msgs(r) == ["정정 사유는 200자 이하로 적어 주세요(지금 201자)."]
+    assert client.get(f"/api/reports/{no}").json()["version"] == "v1.0"
+
+    blank = client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-re-lim", "note": "  "})
+    assert _detail_msgs(blank) == ["정정 사유를 적어 주세요."]
+
+    r = client.post(f"/api/reports/{no}/reissue", json={"run_id": "run-re-lim", "note": "가" * 200})
+    assert r.status_code == 200, r.text
+    assert r.json()["history"][-1]["note"] == "가" * 200
+
+
 def test_api_reissue_note_is_trimmed(client):
     """[F-06] 앞뒤 공백은 제거해 저장한다 — 인쇄물에 들쭉날쭉한 여백이 남지 않게."""
     issued = client.post("/api/reports/issue", json={"run_id": "run-note-trim"}).json()

@@ -343,6 +343,33 @@ def test_client_inputs_size_limited():
         )
 
 
+def test_client_inputs_length_is_compact_json_like_the_frontend():
+    """B7: 공백 없는 JSON 으로 잰다 — 프론트 JSON.stringify 와 같은 수. 한글은 1자로 센다."""
+    from app.narrative.schemas import client_inputs_length
+
+    v = {"declarations": {"사용 방식": "배치", "목록": [1, 2]}, "note": "가나다"}
+    expected = '{"declarations":{"사용 방식":"배치","목록":[1,2]},"note":"가나다"}'
+    assert client_inputs_length(v) == len(expected)
+
+
+def test_client_inputs_limit_boundary_is_exact():
+    """B7: 직렬화 길이가 정확히 상한이면 통과, 한 자 더 많으면 422(ValidationError)."""
+    from app.narrative.schemas import MAX_CLIENT_INPUTS_CHARS, client_inputs_length
+
+    fs = _sample_fact_sheet()
+    # {"a":{"b":"…","c":"…"}} — 기본 구분자였다면 공백 3자가 더해져 상한을 넘는 꼴로 만든다.
+    base = {"a": {"b": "", "c": "가"}}
+    filler = MAX_CLIENT_INPUTS_CHARS - client_inputs_length(base)
+    at_limit = {"a": {"b": "나" * filler, "c": "가"}}
+    assert client_inputs_length(at_limit) == MAX_CLIENT_INPUTS_CHARS
+    ok = NarrativeRequest(task_type=TaskType.binary, fact_sheet=fs, client_inputs=at_limit)
+    assert ok.client_inputs == at_limit
+
+    over = {"a": {"b": "나" * (filler + 1), "c": "가"}}
+    with pytest.raises(ValidationError):
+        NarrativeRequest(task_type=TaskType.binary, fact_sheet=fs, client_inputs=over)
+
+
 def test_client_inputs_reach_the_prompt():
     from app.narrative.prompt import build_user_prompt
 
@@ -388,8 +415,32 @@ def test_system_prompt_names_the_task_type():
     """분류 유형 이름이 AI 에 직접 간다(재료 목록 2절 "작업 유형 — AI 예")."""
     from app.narrative.prompt import build_system_prompt
 
+    assert "이진 분류" in build_system_prompt("internal", "binary")
     assert "다중 클래스 분류" in build_system_prompt("internal", "multiclass")
-    assert "멀티레이블 분류" in build_system_prompt("internal", "multilabel")
+    # W9: 한국어 이름은 '다중 레이블 분류'로 통일한다(옛 '멀티레이블 분류'는 AI 에 가지 않는다).
+    multilabel = build_system_prompt("internal", "multilabel")
+    assert "다중 레이블 분류" in multilabel
+    assert "멀티레이블 분류" not in multilabel
+
+
+def test_system_prompt_core_metric_line_is_neutral():
+    """W8: 핵심 지표는 의뢰자가 바꾸지 않으면 분류 유형의 기본값이다. AI 지시문이 '의뢰자가 지정'이라고
+    단정하면 성적서 6.1(기본값 사용)과 서술이 갈린다. 세 유형 모두 중립 문장만 간다."""
+    from app.narrative.prompt import build_system_prompt
+
+    for task_type in ("binary", "multiclass", "multilabel"):
+        prompt = build_system_prompt("internal", task_type, _sample_fact_sheet())
+        assert "is_core=true 는 판정에 쓰는 핵심 지표다(의뢰자가 정했거나 분류 유형의 기본값)" in prompt
+        assert "의뢰자가 지정" not in prompt
+
+
+def test_task_type_labels_are_korean_names():
+    """W9: 프론트 성적서 TASK_TYPE_LABELS 와 같은 세 이름(프론트 대조 테스트가 이 표를 읽는다)."""
+    from app.narrative.prompt import TASK_TYPE_LABELS
+
+    assert TASK_TYPE_LABELS == {
+        "binary": "이진 분류", "multiclass": "다중 클래스 분류", "multilabel": "다중 레이블 분류",
+    }
 
 
 def test_derived_prediction_threshold_is_allowed_in_narrative():
@@ -979,6 +1030,46 @@ def test_fallback_risks_skip_near_target_fail_and_absent_flags():
     near_fail = _bare_fact_sheet(metrics=[_near_metric(value=0.79, margin=-0.01, status="fail")])
     assert "아슬아슬" not in build_fallback_narrative(
         near_fail, [], compute_derived(near_fail), "no_key").conclusion.risks
+
+
+def test_fallback_metric_numbers_use_report_digits():
+    """S10: 규칙 폴백 8절이 "Recall(0.5473684210526316, 기준 0.8)"처럼 반올림 안 한 수를 찍었다.
+    성적서처럼 셋째 자리까지만 쓴다(끝의 0 은 뺀다). 자리마다 따로 고정한다 — 미달·아슬아슬·신뢰구간."""
+    raw = 0.5473684210526316
+    failed = _bare_fact_sheet(metrics=[MetricFact(
+        metric_id="M3", display_name="Recall", value=raw, threshold=0.8, status="fail")])
+    resp = build_fallback_narrative(failed, [], compute_derived(failed), "no_key")
+    assert "Recall(0.547, 기준 0.8)" in resp.conclusion.risks
+    assert "0.5473" not in " ".join(_all_texts(resp))
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed))).passed
+
+    near = _bare_fact_sheet(metrics=[_near_metric(value=0.80789, threshold=0.8, margin=0.00789)])
+    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
+    assert "Recall(0.808, 기준 0.8, 차이 0.008)" in near_risks
+
+    ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.78123, threshold=0.8, low=0.712345, high=0.83456)])
+    ci_resp = build_fallback_narrative(ci, [], compute_derived(ci), "no_key")
+    assert "F1 Score(구간 0.712~0.835, 목표 0.8)" in " ".join(_all_texts(ci_resp))
+    assert "F1 Score(0.781, 기준 0.8)" in ci_resp.conclusion.risks
+
+
+def test_fallback_long_threshold_is_rounded_at_every_site():
+    """S10 검토: 목표값이 0.8 처럼 짧으면 반올림을 빼도 테스트가 통과했다. 긴 목표값(2/3)으로
+    미달·아슬아슬·신뢰구간 세 자리의 목표값을 따로 고정한다."""
+    t = 2 / 3
+    failed = _bare_fact_sheet(metrics=[MetricFact(
+        metric_id="M3", display_name="Recall", value=0.5, threshold=t, status="fail")])
+    risks = build_fallback_narrative(failed, [], compute_derived(failed), "no_key").conclusion.risks
+    assert "Recall(0.5, 기준 0.667)" in risks
+
+    near = _bare_fact_sheet(metrics=[_near_metric(value=0.68, threshold=t, margin=0.68 - t)])
+    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
+    assert "Recall(0.68, 기준 0.667, 차이 0.013)" in near_risks
+
+    ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.6, threshold=t, low=0.55, high=0.7)])
+    ci_texts = " ".join(_all_texts(build_fallback_narrative(ci, [], compute_derived(ci), "no_key")))
+    assert "F1 Score(구간 0.55~0.7, 목표 0.667)" in ci_texts
+    assert "0.6666" not in ci_texts
 
 
 def test_fallback_risks_state_threshold_gain_only_when_notable():

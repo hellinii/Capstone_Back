@@ -34,7 +34,7 @@ def calculate_confusion_counts(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
         positive = binary._resolve_positive_value(y_true, mapping_dict.get("_positive_class"))
         return {
             "type": "binary",
-            "positive_class": str(positive),
+            "positive_class": normalize_label(positive),  # 표기는 metadata 와 같게('1', '1.0' 아님)
             "tp": tp,
             "tn": tn,
             "fp": fp,
