@@ -420,11 +420,16 @@ class NarrativeJobResult(BaseModel):
 
 
 class NarrativeJobCreated(BaseModel):
-    """작업을 만든 즉시의 응답. 8.1 표는 서술 성공·실패와 무관하게 여기서 받는다(점검 유-2)."""
-    job_id:         str
+    """작업을 만든 즉시의 응답. 8.1 표는 서술 성공·실패와 무관하게 여기서 받는다(점검 유-2).
+
+    보통은 job_id 와 status=running 이다. 작업 행 시간당 상한을 넘으면 행을 만들지 않고 job_id=None, status=done,
+    result(규칙 문장)를 바로 싣는다 — 프론트는 조회 없이 그 결과를 완성본으로 쓴다.
+    """
+    job_id:         str | None
     status:         JobStatus
     stage:          JobStage
     benchmark_refs: list[BenchmarkRefOut] = []
+    result:         NarrativeJobResult | None = None
 
 
 class NarrativeJobOut(BaseModel):

@@ -158,3 +158,36 @@ def test_llm_concurrency_cap_values_are_pinned():
     """
     assert concurrency.MAX_CONCURRENT_MAPPING_CALLS == 2
     assert concurrency.MAX_CONCURRENT_NARRATIVE_CALLS == 4
+
+
+
+@pytest.mark.parametrize("raw, expected", [("", 2), ("abc", 2), ("0", 2), ("-1", 2), ("3", 3), (" 5 ", 5)])
+def test_slot_env_values_fall_back_to_default(monkeypatch, raw, expected):
+    """칸 수 환경변수의 오타·0 이 기동 실패나 0칸(영원히 대기)이 되지 않는다."""
+    monkeypatch.setenv("SOME_SLOTS", raw)
+    assert concurrency._env_slots("SOME_SLOTS", 2) == expected
+
+
+async def test_mapping_uses_mapping_slots_not_narrative_slots(make_fake_openai_client):
+    """매핑 칸이 다 차면 매핑은 기다리고, 서술 칸이 다 차도 매핑은 바로 돈다(칸 분리, 서술 라운드 S3a)."""
+    import asyncio
+    import contextlib
+
+    df = pd.DataFrame({"id": [1], "y_true": [0], "y_pred": [1]})
+    content = {"mappings": [], "suggested_task_type": "binary"}
+
+    fake = make_fake_openai_client(content)
+    async with contextlib.AsyncExitStack() as stack:
+        for _ in range(concurrency.MAX_CONCURRENT_NARRATIVE_CALLS):
+            await stack.enter_async_context(concurrency.narrative_slot())
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(analyze_columns_with_llm(fake, TaskType.binary, list(df.columns), df), 2)
+    assert fake.chat.completions.create.call_count == 1
+
+    blocked = make_fake_openai_client(content)
+    async with contextlib.AsyncExitStack() as stack:
+        for _ in range(concurrency.MAX_CONCURRENT_MAPPING_CALLS):
+            await stack.enter_async_context(concurrency.mapping_slot())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(analyze_columns_with_llm(blocked, TaskType.binary, list(df.columns), df), 0.2)
+    blocked.chat.completions.create.assert_not_called()

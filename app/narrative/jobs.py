@@ -28,7 +28,8 @@
 ## 남용 방어 (계획 10)
 
 - 서술 지갑: 작업을 만들 때 보고서 1건을 예약한다(AI 를 부를 작업만). 소진이면 규칙 문장으로 완료.
-- 작업 생성 지갑(narrative_jobs): 시간당 작업 수. 넘으면 429 — AI 비용이 아니라 DB 행 수를 막는다.
+- 작업 행 지갑(narrative_jobs): 시간당 작업 행 수 — AI 비용이 아니라 DB 행 수를 막는다. 넘으면 행 없이 규칙 문장
+  결과를 작업 생성 응답에 바로 담는다(429 로 막지 않는다).
 - 호출 1회: 작업 경로의 클라이언트는 재시도 0(`max_retries=0`)·호출 시간 제한 JOB_CALL_TIMEOUT_SECONDS 로
   부른다 — 작업 하나의 HTTP 시도는 이번 단계(S3a, S1 한 번 호출을 감쌈)에서 1회다.
 - 서술 슬롯 대기 상한: 넘으면 규칙 문장(busy).
@@ -42,6 +43,7 @@ import asyncio
 import copy
 import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -84,14 +86,18 @@ LOST_GRACE_SECONDS = 30.0
 # ── 보관 ──────────────────────────────────────────────────────────────────────
 
 
-def _env_number(name: str, default: float) -> float:
-    """보관 시간 환경변수. 비었거나 숫자가 아니거나 0 이하면 기본값."""
+def _env_number(name: str, default: float, maximum: float) -> float:
+    """보관 시간 환경변수. 비었거나 숫자가 아니거나 0 이하·무한·상한 초과면 기본값.
+
+    상한을 두는 이유: '지우지 않음' 뜻으로 아주 큰 값을 넣으면 `now - timedelta(...)` 가 OverflowError 를 내
+    작업 생성이 매번 500 이 된다.
+    """
     raw = os.getenv(name, "").strip()
     try:
         value = float(raw)
     except ValueError:
         return default
-    return value if value > 0 else default
+    return value if math.isfinite(value) and 0 < value <= maximum else default
 
 
 def result_ttl() -> timedelta:
@@ -99,7 +105,7 @@ def result_ttl() -> timedelta:
 
     프론트는 완료를 보면 결과를 평가 기록(run)에 저장하므로, 서버의 결과 글은 이어 조회용이다.
     """
-    return timedelta(hours=_env_number("NARRATIVE_RESULT_TTL_HOURS", 24.0))
+    return timedelta(hours=_env_number("NARRATIVE_RESULT_TTL_HOURS", 24.0, maximum=24.0 * 365))
 
 
 def record_retention() -> timedelta:
@@ -107,15 +113,11 @@ def record_retention() -> timedelta:
 
     내부 기록은 결과 글을 지운 뒤에도 남기되, 무인증 경로라 무한히 쌓이면 발급 DB 가 찬다.
     """
-    return timedelta(days=_env_number("NARRATIVE_JOB_RETENTION_DAYS", 90.0))
+    return timedelta(days=_env_number("NARRATIVE_JOB_RETENTION_DAYS", 90.0, maximum=3650.0))
 
 
 # 지금 응답이 가진 칸(소절 번호). 7.3(추가 관찰)은 S4b·S5 에서 응답에 생길 때 더한다.
 SECTION_IDS = ("7.1", "7.2", "8.1", "8.2", "8.3", "9")
-
-
-class JobRateLimited(Exception):
-    """작업 생성 시간당 상한을 넘었다 — 라우터가 429 로 돌려준다."""
 
 
 def get_session_factory():
@@ -146,20 +148,27 @@ def is_expired(*, finished_at: datetime | None, now: datetime) -> bool:
     return finished_at is not None and now - finished_at > result_ttl()
 
 
-def section_sources(source: str) -> dict[str, str]:
-    """칸별 출처. 이번 단계(S3a)의 생성은 S1 한 번 호출이라 모든 칸이 같은 출처다 — S5 에서 칸마다 갈린다."""
+def section_sources(source: str, *, template_recommendations: bool = False) -> dict[str, str]:
+    """칸별 출처. 이번 단계(S3a)의 생성은 S1 한 번 호출이라 칸이 대개 같은 출처다 — S5 에서 칸마다 갈린다.
+
+    예외 하나: AI 가 쓴 응답이어도 권고가 없는 문제의 권고 줄은 규칙 템플릿으로 채운다(service._align_recommendations).
+    그때 9칸을 AI 로 적으면 규칙 문장을 AI 가 쓴 것처럼 표시하게 되므로 9칸은 fallback 으로 적는다.
+    """
     value = "llm" if source == "llm" else "fallback"
-    return {sid: value for sid in SECTION_IDS}
+    out = {sid: value for sid in SECTION_IDS}
+    if template_recommendations:
+        out["9"] = "fallback"
+    return out
 
 
-def customer_result(resp: NarrativeResponse) -> dict:
+def customer_result(resp: NarrativeResponse, *, template_recommendations: bool = False) -> dict:
     """옛 응답에서 고객용만 남긴다 — meta(모델·사유·숫자 검문 위반)를 칸별 출처로 바꾼다."""
     result = NarrativeJobResult(
         interpretation=resp.interpretation,
         conclusion=resp.conclusion,
         recommendation_narrative=resp.recommendation_narrative,
         recommendations=resp.recommendations,
-        section_sources=section_sources(resp.meta.source),
+        section_sources=section_sources(resp.meta.source, template_recommendations=template_recommendations),
     )
     return result.model_dump(mode="json")
 
@@ -344,16 +353,27 @@ def _db_read(factory, job_id: str, now: datetime) -> dict | None:
 
 
 async def create_job(raw, *, client, session_factory, background_tasks) -> NarrativeJobCreated:
-    """작업을 만들고 즉시 돌려준다. ValidationError(422)·JobRateLimited(429)는 라우터가 응답으로 바꾼다."""
-    request, trimmed = await run_cpu_bound(parse_request, raw)
-    if not llm_budget.narrative_jobs.try_consume():
-        logger.warning("서술 작업 생성 시간당 상한(%d건) 초과 → 429", llm_budget.narrative_jobs.limit)
-        raise JobRateLimited()
+    """작업을 만들고 즉시 돌려준다. ValidationError(422)는 라우터가 응답으로 바꾼다.
 
+    작업 행 시간당 상한을 넘으면 행을 만들지 않고 규칙 문장 결과를 이 응답에 바로 담는다(job_id 없음, status done).
+    429 로 막으면 한 사람이 상한을 다 썼을 때 다른 모든 사용자가 1시간 동안 서술도 8.1 표도 받지 못한다(S3a 검토).
+    """
+    request, trimmed = await run_cpu_bound(parse_request, raw)
     benchmark_refs = [
         BenchmarkRefOut(**ref).model_dump(mode="json")
         for ref in build_benchmark_refs(request.task_type.value, request.fact_sheet.metrics)
     ]
+    if not llm_budget.narrative_jobs.try_consume():
+        logger.warning(
+            "서술 작업 행 시간당 상한(%d건) 초과 → 행 없이 규칙 문장으로 바로 완료(job_limit)",
+            llm_budget.narrative_jobs.limit,
+        )
+        resp = await generate_narrative(None, request, forced_reason="job_limit")
+        return NarrativeJobCreated(
+            job_id=None, status="done", stage="done", benchmark_refs=benchmark_refs,
+            result=NarrativeJobResult(**customer_result(resp)),
+        )
+
     # AI 를 부를 작업만 서술 지갑에서 보고서 1건을 예약한다. 사유가 이미 정해진 작업은 AI 를 부르지 않는다.
     forced_reason = None
     if trimmed:
@@ -376,7 +396,14 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
         "trimmed": trimmed,
         "stages": [{"stage": "queued", "at": iso_utc(now)}],
     }
-    await run_in_threadpool(_db_insert, session_factory, job_id, benchmark_refs, internal, now)
+    try:
+        await run_in_threadpool(_db_insert, session_factory, job_id, benchmark_refs, internal, now)
+    except Exception:
+        # 행을 못 남겼으면 쓴 지갑을 돌려준다 — DB 장애가 서술 지갑(옛 경로와 같이 씀)까지 비우지 않게.
+        llm_budget.narrative_jobs.refund()
+        if budget == "reserved":
+            llm_budget.narrative.refund()
+        raise
     background_tasks.add_task(
         run_job, job_id,
         session_factory=session_factory, client=client, request=request,
@@ -425,7 +452,9 @@ async def run_job(
                 deadline=None, slot_wait=JOB_SLOT_WAIT_SECONDS,
                 on_stage=on_stage, trace=trace,
             )
-            narrative = customer_result(resp)
+            narrative = customer_result(
+                resp, template_recommendations=bool(trace.get("recommendations_from_template")),
+            )
     except TimeoutError:
         failure = "timeout"
         logger.warning("서술 작업 %s 전체 제한(%.0f초) 초과 → 실패(timeout)", job_id, JOB_DEADLINE_SECONDS)
@@ -437,14 +466,17 @@ async def run_job(
     status = "done" if failure is None else "failed"
     stages.append({"stage": status, "at": iso_utc(moment)})
     calls = trace.get("calls", [])
+    # 호출 도중에 전체 제한이 끊으면 호출 기록이 남지 않는다 — 시작한 시도 수로 세고, 비용은 모름(None)으로 둔다.
+    attempts = max(len(calls), trace.get("attempts_started", 0))
     internal = {
         "failure": failure,
         "source": trace.get("source"),
         "reason": trace.get("reason"),
         "grounding": trace.get("grounding"),
         "calls": calls,
-        "http_attempts": len(calls),
-        "cost_usd": total_cost(calls),
+        "http_attempts": attempts,
+        "cost_usd": total_cost(calls) if attempts == len(calls) else None,
+        "recommendations_from_template": trace.get("recommendations_from_template", []),
         "slot_wait_seconds": trace.get("slot_wait_seconds"),
         "prompt_chars": trace.get("prompt_chars"),
         "seconds_total": round(time.perf_counter() - started, 3),
@@ -476,8 +508,6 @@ async def read_job(job_id: str, *, session_factory) -> NarrativeJobOut | None:
             status, stage, failure = "failed", "failed", "expired"
         else:
             narrative = NarrativeJobResult(**result["narrative"])
-    elif status == "running":
-        failure = None
     return NarrativeJobOut(
         job_id=row["id"], status=status, stage=stage, failure=failure,
         benchmark_refs=[BenchmarkRefOut(**r) for r in (result or {}).get("benchmark_refs", [])],

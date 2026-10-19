@@ -41,10 +41,10 @@ Start Command 에 있고 저장소에서 확인할 수 없다(`render.yaml` 이 
 - `narrative`: 서술 **보고서** 1건 = 1(옛 경로는 호출 1번이 보고서 1건). `NARRATIVE_REPORTS_PER_HOUR`(기본 30).
   작업 번호 경로는 작업을 만들 때 보고서 1건을 **예약**한다(app.narrative.jobs). 예약은 돌려주지 않는다 —
   AI 를 부르지 않고 끝나도(요청이 너무 큼 등) 센 채로 둔다. 과소비 방향으로만 틀린다.
-- `narrative_jobs`: 서술 **작업 생성** 1건 = 1. `NARRATIVE_JOBS_PER_HOUR`(기본 200). AI 비용이 아니라 DB 행을
+- `narrative_jobs`: 서술 **작업 행** 1건 = 1. `NARRATIVE_JOBS_PER_HOUR`(기본 200). AI 비용이 아니라 DB 행을
   막는다 — 키가 없거나 서술 지갑이 비어도 작업은 규칙 문장으로 끝나며 행을 하나씩 남기므로, 무인증 경로를
-  되풀이해 부르면 발급 DB(Neon 무료 용량)가 찬다. 넘으면 작업 경로가 429 를 준다(새 프론트만 쓰는 경로라
-  옛 프론트의 '비 200 = 빈 서술' 문제가 없다).
+  되풀이해 부르면 발급 DB(Neon 무료 용량)가 찬다. 넘으면 **429 가 아니라** 행을 만들지 않고 규칙 문장 결과를
+  작업 생성 응답에 바로 담는다(app.narrative.jobs) — 누가 상한을 다 써도 다른 사용자는 완성본과 8.1 표를 받는다.
 
 상호작용
 - 의존(import): time, threading
@@ -93,18 +93,35 @@ class Wallet:
             self._prune(moment)
             return max(0, self.limit - len(self._calls))
 
+    def refund(self) -> None:
+        """가장 최근에 쓴 한 번을 돌려준다 — 쓴 뒤의 일이 실패해 그 한 번이 쓰이지 않았을 때(예: 작업 행 저장 실패)."""
+        with self._lock:
+            if self._calls:
+                self._calls.pop()
+
     def reset(self) -> None:
         """기록을 비운다(테스트 전용)."""
         with self._lock:
             self._calls.clear()
 
 
+def _env_limit(name: str, default: int) -> int:
+    """시간당 상한 환경변수. 비었거나 정수가 아니거나 1 미만이면 기본값 — 오타가 기동 실패(int 변환 예외)나
+    상한 0(모든 호출 강등)이 되지 않게."""
+    raw = os.getenv(name, "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 1 else default
+
+
 # 매핑: 시간당 허용 호출 수. 환경변수로 낮출 수 있게 두되 기본값은 결정문의 60 이다.
-MAX_LLM_CALLS_PER_HOUR = int(os.getenv("LLM_CALLS_PER_HOUR", "60"))
+MAX_LLM_CALLS_PER_HOUR = _env_limit("LLM_CALLS_PER_HOUR", 60)
 # 서술: 시간당 허용 보고서 수. Sonnet 5.5 보고서 1건은 매핑 1건보다 훨씬 비싸 따로 센다.
-MAX_NARRATIVE_REPORTS_PER_HOUR = int(os.getenv("NARRATIVE_REPORTS_PER_HOUR", "30"))
-# 서술 작업 생성: 시간당 허용 작업 수. 정상 사용(보고서 몇 건에 다시 만들기 몇 번)보다 훨씬 크게 잡는다.
-MAX_NARRATIVE_JOBS_PER_HOUR = int(os.getenv("NARRATIVE_JOBS_PER_HOUR", "200"))
+MAX_NARRATIVE_REPORTS_PER_HOUR = _env_limit("NARRATIVE_REPORTS_PER_HOUR", 30)
+# 서술 작업 생성: 시간당 허용 작업 수(행을 남기는 작업). 정상 사용(보고서 몇 건에 다시 만들기 몇 번)보다 훨씬 크게 잡는다.
+MAX_NARRATIVE_JOBS_PER_HOUR = _env_limit("NARRATIVE_JOBS_PER_HOUR", 200)
 
 mapping = Wallet("mapping", MAX_LLM_CALLS_PER_HOUR)
 narrative = Wallet("narrative", MAX_NARRATIVE_REPORTS_PER_HOUR)

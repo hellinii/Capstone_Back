@@ -240,6 +240,17 @@ def test_parse_request_keeps_422_when_any_error_is_not_a_limit():
         jobs.parse_request(dup)
 
 
+@pytest.mark.parametrize("path, value", [
+    (("fact_sheet", "confusion"), {"labels": ["0", "1"], "matrix": [["x", 1], [0, 1]]}),  # 칸 안의 형식 오류
+    (("fact_sheet", "per_class"), [{"label": "0", "support": "많음"}]),
+    (("fact_sheet", "metrics"), [{"metric_id": "M1", "display_name": "x", "value": "높음", "status": "pass"}]),
+])
+def test_parse_request_does_not_clear_fields_for_non_limit_errors(path, value):
+    """클래스 단위 칸이라도 상한이 아닌 형식 오류는 비우지 않고 422 다 — 조립 버그를 규칙 문장으로 숨기지 않는다."""
+    with pytest.raises(ValidationError):
+        jobs.parse_request(_over((path, value)))
+
+
 def test_parse_request_does_not_mutate_the_input():
     body = _over((("fact_sheet", "per_class"), [{"label": str(i)} for i in range(N)]))
     jobs.parse_request(body)
@@ -263,6 +274,7 @@ async def test_no_key_job_finishes_with_rule_sentences(factory):
     assert (view.status, view.stage, view.failure) == ("done", "done", None)
     assert set(view.result.section_sources.values()) == {"fallback"}
     assert _stages(factory, job_id) == ["queued", "done"]
+    assert _row(factory, job_id).finished_at is not None
     internal = _internal(factory, job_id)
     assert (internal["source"], internal["reason"], internal["budget"]) == ("fallback", "no_key", "no_key")
     assert internal["http_attempts"] == 0 and internal["calls"] == []
@@ -286,6 +298,8 @@ async def test_llm_job_goes_through_all_stages_and_records_internally(factory, m
     assert internal["cost_usd"] == pytest.approx(0.007)
     assert internal["slot_wait_seconds"] is not None and internal["prompt_chars"] > 0
     assert internal["failure"] is None
+    assert internal["seconds_total"] > 0 and internal["task_type"] == "binary"
+    assert internal["recommendations_from_template"] == []
     # 입력은 서버에 남기지 않는다
     row = _row(factory, job_id)
     assert _SECRET not in row.internal_json and _SECRET not in (row.result_json or "")
@@ -311,10 +325,14 @@ async def test_stage_is_generating_while_the_call_is_in_flight(factory, make_fak
 
     fake.beta.messages.create.side_effect = gated
     job_id, tasks = await _create(factory, client=fake)
+    # 만든 지 좀 된 작업처럼 — 단계가 바뀌면 updated_at 이 지금으로 와야 유실 판정이 다시 센다.
+    earlier = _utcnow() - timedelta(seconds=200)
+    _age(factory, job_id, created_at=earlier, updated_at=earlier)
     running = asyncio.create_task(_run_pending(tasks))
     await asyncio.wait_for(entered.wait(), 5)
     view = await jobs.read_job(job_id, session_factory=factory)
     assert (view.status, view.stage, view.result, view.failure) == ("running", "generating", None, None)
+    assert _row(factory, job_id).updated_at > _utcnow() - timedelta(seconds=30)
     gate.set()
     await running
     assert (await jobs.read_job(job_id, session_factory=factory)).stage == "done"
@@ -358,7 +376,21 @@ async def test_whole_job_deadline_fails_as_timeout(factory, monkeypatch, make_fa
     view = await jobs.read_job(job_id, session_factory=factory)
     assert (view.status, view.stage, view.failure, view.result) == ("failed", "failed", "timeout", None)
     assert len(view.benchmark_refs) > 0  # 8.1 표는 서술 실패와 무관하게 남는다
-    assert _internal(factory, job_id)["failure"] == "timeout"
+    internal = _internal(factory, job_id)
+    assert internal["failure"] == "timeout"
+    # 호출 도중에 끊겨 호출 기록은 없지만 요청은 나갔다 — 시도 1, 비용은 모름(0 이 아니다)
+    assert (internal["calls"], internal["http_attempts"], internal["cost_usd"]) == ([], 1, None)
+
+
+async def test_job_path_is_not_bound_by_the_old_route_deadline(factory, monkeypatch, make_fake_anthropic_client):
+    """옛 경로의 서버 마감(120초)은 작업 경로에 걸리지 않는다 — 작업은 전체 10분 제한만 받는다."""
+    from app.narrative import service
+
+    monkeypatch.setattr(service, "NARRATIVE_DEADLINE_SECONDS", 0.05)
+    fake = make_fake_anthropic_client(_CLEAN, delay=0.3)
+    job_id, tasks = await _create(factory, client=fake)
+    await _run_pending(tasks)
+    assert _internal(factory, job_id)["source"] == "llm"
 
 
 async def test_unexpected_error_fails_as_error(factory, monkeypatch):
@@ -379,7 +411,8 @@ async def test_slot_wait_limit_finishes_as_busy_without_calling(factory, monkeyp
     async with contextlib.AsyncExitStack() as stack:
         for _ in range(concurrency.MAX_CONCURRENT_NARRATIVE_CALLS):
             await stack.enter_async_context(concurrency.narrative_slot())
-        await _run_pending(tasks)
+        # 대기 상한이 배선돼 있지 않으면 칸이 비지 않아 영원히 기다린다 — 테스트가 멈추지 않게 바깥 제한을 둔다.
+        await asyncio.wait_for(_run_pending(tasks), 5)
     fake.beta.messages.create.assert_not_called()
     assert _internal(factory, job_id)["reason"] == "busy"
     assert (await jobs.read_job(job_id, session_factory=factory)).status == "done"
@@ -440,11 +473,21 @@ async def test_old_route_still_consumes_its_own_report(make_fake_anthropic_clien
     assert llm_budget.narrative.remaining() == before - 1
 
 
-async def test_job_creation_limit_raises(factory):
+async def test_job_row_limit_completes_immediately_without_a_row(factory, make_fake_anthropic_client):
+    """상한을 넘으면 429 가 아니라 행 없이 규칙 문장 결과를 바로 준다 — 한 사람이 상한을 다 써도 남은 사용자는
+    완성본과 8.1 표를 받는다(S3a 검토)."""
     while llm_budget.narrative_jobs.try_consume():
         pass
-    with pytest.raises(jobs.JobRateLimited):
-        await _create(factory)
+    fake = make_fake_anthropic_client(_CLEAN)
+    before = llm_budget.narrative.remaining()
+    tasks = BackgroundTasks()
+    created = await jobs.create_job(_body(_request()), client=fake, session_factory=factory, background_tasks=tasks)
+    assert (created.job_id, created.status, created.stage) == (None, "done", "done")
+    assert created.result.section_sources == jobs.section_sources("fallback")
+    assert [r.model_dump() for r in created.benchmark_refs] == [
+        r.model_dump() for r in (await generate_narrative(None, _request())).benchmark_refs]
+    assert tasks.tasks == [] and llm_budget.narrative.remaining() == before
+    fake.beta.messages.create.assert_not_called()
     with factory() as db:
         assert db.query(NarrativeJob).count() == 0
 
@@ -473,10 +516,11 @@ async def test_stalled_job_is_judged_lost_on_read_and_stays_failed(factory, make
     assert (view.status, view.stage, view.failure) == ("failed", "failed", "lost")
     internal = _internal(factory, job_id)
     assert internal["failure"] == "lost" and internal["last_stage"] == "queued"
+    assert internal["lost_judged_at"].endswith("Z")
     # 늦게 끝난 작업이 실패를 완료로 뒤집지 않는다
     await _run_pending(tasks)
     again = await jobs.read_job(job_id, session_factory=factory)
-    assert (again.status, again.failure, again.result) == ("failed", "lost", None)
+    assert (again.status, again.stage, again.failure, again.result) == ("failed", "failed", "lost", None)
 
 
 async def test_running_job_within_limits_is_not_lost(factory):
@@ -519,8 +563,8 @@ def test_post_then_get_round_trip_without_key(api):
     created = api.post("/api/narrative/jobs", json=_body())
     assert created.status_code == 200, created.text
     body = created.json()
-    assert set(body) == {"job_id", "status", "stage", "benchmark_refs"}
-    assert (body["status"], body["stage"]) == ("running", "queued")
+    assert set(body) == {"job_id", "status", "stage", "benchmark_refs", "result"}
+    assert (body["status"], body["stage"], body["result"]) == ("running", "queued", None)
     got = api.get(f"/api/narrative/jobs/{body['job_id']}")
     assert got.status_code == 200
     view = got.json()
@@ -568,17 +612,22 @@ def test_oversized_input_completes_with_rule_sentences_not_422(api):
 def test_malformed_request_is_still_422(api):
     body = _body()
     del body["fact_sheet"]["verdict"]
+    before = llm_budget.narrative_jobs.remaining()
     r = api.post("/api/narrative/jobs", json=body)
     assert r.status_code == 422
     assert r.json()["detail"][0]["loc"] == ["body", "fact_sheet", "verdict"]
+    assert llm_budget.narrative_jobs.remaining() == before  # 잘못된 요청은 행 지갑을 쓰지 않는다
     assert api.post("/api/narrative/jobs", content=b"not json", headers={"content-type": "application/json"}).status_code == 422
 
 
-def test_rate_limit_is_429(api):
+def test_row_limit_over_http_is_200_with_result(api):
     while llm_budget.narrative_jobs.try_consume():
         pass
     r = api.post("/api/narrative/jobs", json=_body())
-    assert r.status_code == 429 and "잠시 후" in r.json()["detail"]
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["job_id"], body["status"]) == (None, "done")
+    assert body["result"]["section_sources"] == jobs.section_sources("fallback") and body["benchmark_refs"]
 
 
 def test_unknown_job_is_404(api):
@@ -615,3 +664,107 @@ def test_fake_with_options_rejects_args_the_sdk_does_not_take(make_fake_anthropi
     with pytest.raises(TypeError):
         fake.with_options(retries=0)
     assert fake_beta_message(_CLEAN).model == "claude-sonnet-5-5"
+
+
+# ── S3a 검토 반영 ───────────────────────────────────────────────────────────────
+
+def _problems_request(**kw) -> NarrativeRequest:
+    req = _request(**kw)
+    fs = req.fact_sheet.model_copy(update={"problems": [
+        schemas.ProblemFact(**_problem(1, recommend_section="9.1")),
+        schemas.ProblemFact(**_problem(2, kind="weakest_class", priority="MEDIUM", recommend_section="9.2")),
+    ]})
+    return req.model_copy(update={"fact_sheet": fs})
+
+
+async def test_template_filled_recommendations_mark_section_9_as_fallback(factory, make_fake_anthropic_client):
+    """AI 가 문제 하나에만 권고를 쓰면 다른 문제의 권고 줄은 규칙 템플릿이다 — 9칸을 AI 로 적지 않는다."""
+    content = {**_CLEAN, "recommendations": [
+        {"problem_id": "P1", "priority": "HIGH", "category": "데이터", "action": "라벨을 다시 확인한다", "expected_impact": "오류 감소"}]}
+    fake = make_fake_anthropic_client(content)
+    job_id, tasks = await _create(factory, client=fake, req=_problems_request())
+    await _run_pending(tasks)
+    view = await jobs.read_job(job_id, session_factory=factory)
+    assert view.result.section_sources == {**jobs.section_sources("llm"), "9": "fallback"}
+    assert [r.problem_id for r in view.result.recommendations] == ["P1", "P2"]
+    assert _internal(factory, job_id)["recommendations_from_template"] == ["P2"]
+
+
+def test_job_recommendations_match_the_old_route_with_problems(api):
+    body = _body(_problems_request())
+    old = TestClient(app).post("/api/generate-narrative", json=body).json()
+    job_id = api.post("/api/narrative/jobs", json=body).json()["job_id"]
+    result = api.get(f"/api/narrative/jobs/{job_id}").json()["result"]
+    assert result["recommendations"] == old["recommendations"] and len(result["recommendations"]) == 2
+
+
+async def test_job_passes_no_inner_deadline(factory, monkeypatch):
+    """작업 경로는 _narrate 에 마감 None(작업 전체 제한만)을 넘긴다 — 옛 경로 120초가 끼어들지 않게."""
+    seen = {}
+    original = jobs.generate_narrative
+
+    async def spy(client, req, **kw):
+        seen.update(kw)
+        return await original(client, req, **kw)
+
+    monkeypatch.setattr(jobs, "generate_narrative", spy)
+    _, tasks = await _create(factory)
+    await _run_pending(tasks)
+    assert seen["deadline"] is None and seen["slot_wait"] == jobs.JOB_SLOT_WAIT_SECONDS
+
+
+async def test_stage_write_failure_does_not_stop_the_job(factory, monkeypatch, make_fake_anthropic_client):
+    def broken(*_a, **_k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(jobs, "_db_set_stage", broken)
+    fake = make_fake_anthropic_client(_CLEAN)
+    job_id, tasks = await _create(factory, client=fake)
+    await _run_pending(tasks)
+    view = await jobs.read_job(job_id, session_factory=factory)
+    assert view.status == "done" and _internal(factory, job_id)["source"] == "llm"
+    assert fake.beta.messages.create.call_count == 1
+
+
+async def test_finish_write_failure_is_swallowed(factory, monkeypatch):
+    def broken(*_a, **_k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(jobs, "_db_finish", broken)
+    job_id, tasks = await _create(factory)
+    await _run_pending(tasks)  # 밖으로 던지지 않는다
+    assert _row(factory, job_id).status == "running"  # 조회 때 유실로 판정될 것이다
+
+
+async def test_insert_failure_refunds_both_wallets(factory, monkeypatch, make_fake_anthropic_client):
+    def broken(*_a, **_k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(jobs, "_db_insert", broken)
+    before = (llm_budget.narrative.remaining(), llm_budget.narrative_jobs.remaining())
+    with pytest.raises(RuntimeError):
+        await _create(factory, client=make_fake_anthropic_client(_CLEAN))
+    assert (llm_budget.narrative.remaining(), llm_budget.narrative_jobs.remaining()) == before
+
+
+@pytest.mark.parametrize("value", ["1e300", "inf", "nan", "1000000"])
+def test_huge_retention_values_fall_back_instead_of_overflowing(monkeypatch, value):
+    monkeypatch.setenv("NARRATIVE_JOB_RETENTION_DAYS", value)
+    monkeypatch.setenv("NARRATIVE_RESULT_TTL_HOURS", value)
+    assert jobs.record_retention() == timedelta(days=90)
+    assert jobs.result_ttl() == timedelta(hours=24)
+    _utcnow() - jobs.record_retention()  # 넘치지 않는다
+
+
+def test_env_values_are_wired_into_the_modules(tmp_path):
+    """칸 수·시간당 상한 환경변수가 실제로 모듈 값에 닿고, 오타는 기본값이 된다(새 인터프리터에서 import)."""
+    code = (
+        "from app.core import concurrency, llm_budget;"
+        "print(concurrency.MAX_CONCURRENT_MAPPING_CALLS, concurrency.MAX_CONCURRENT_NARRATIVE_CALLS,"
+        " llm_budget.MAX_NARRATIVE_JOBS_PER_HOUR, llm_budget.MAX_NARRATIVE_REPORTS_PER_HOUR, llm_budget.MAX_LLM_CALLS_PER_HOUR)"
+    )
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = {**os.environ, "MAPPING_LLM_SLOTS": "3", "NARRATIVE_LLM_SLOTS": "7", "NARRATIVE_JOBS_PER_HOUR": "200.0",
+           "NARRATIVE_REPORTS_PER_HOUR": "0", "LLM_CALLS_PER_HOUR": "45"}
+    out = subprocess.run([sys.executable, "-c", code], env=env, cwd=root, capture_output=True, text=True, check=True)
+    assert out.stdout.split() == ["3", "7", "200", "30", "45"]

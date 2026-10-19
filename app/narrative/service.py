@@ -219,6 +219,9 @@ async def _narrate_body(
         slot["acquired"] = True
         record["slot_wait_seconds"] = round(time.perf_counter() - waited_from, 3)
         await on_stage("generating")
+        # 시도를 호출 **전에** 센다 — 바깥 제한(작업 전체 10분)이 호출 도중에 끊으면 호출 기록이 남지 않는데,
+        # 요청은 이미 나가 과금됐을 수 있다. 내부 기록은 이 수로 '시도는 있었고 비용은 모름'을 적는다.
+        record["attempts_started"] = record.get("attempts_started", 0) + 1
         return await call_narrative_llm(client, system=system, user=user, schema=schema, effort=effort)
 
     try:
@@ -280,6 +283,9 @@ async def _narrate_body(
 
         # 권고를 문제 목록에 묶는다(D22). 기대 효과에 숫자가 있으면 전체 폴백 — 권고 하나만 바꿔 끼우면
         # 같은 LLM 이 쓴 9절 서술(recommendation_narrative)과 어긋날 수 있다.
+        # AI 가 권고를 쓰지 않아 규칙 템플릿으로 채운 문제 — 9칸 출처를 AI 로만 적지 않게 내부 기록에 남긴다.
+        answered = {str(r.get("problem_id") or "").strip() for r in recs if isinstance(r, dict)}
+        record["recommendations_from_template"] = [p.id for p in fs.problems if p.id not in answered]
         try:
             aligned = _align_recommendations(recs, fs.problems)
         except _ImpactNumber as exc:

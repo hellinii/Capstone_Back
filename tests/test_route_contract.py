@@ -144,7 +144,7 @@ def test_narrative_job_response_fields():
 
     고객용 응답이라 강등 사유·모델·숫자 검문 위반(옛 응답의 meta)은 없어야 한다 — 내부 기록에만 둔다.
     """
-    assert _fields("NarrativeJobCreated") == {"job_id", "status", "stage", "benchmark_refs"}
+    assert _fields("NarrativeJobCreated") == {"job_id", "status", "stage", "benchmark_refs", "result"}
     assert _fields("NarrativeJobOut") == {
         "job_id", "status", "stage", "failure", "benchmark_refs", "result", "created_at", "updated_at",
     }

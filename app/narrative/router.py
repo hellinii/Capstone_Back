@@ -48,7 +48,8 @@ async def generate_narrative_endpoint(
     description=(
         "옛 경로와 같은 요청 본문(NarrativeRequest)을 받아 작업 번호와 8.1 벤치마크 표를 즉시 돌려준다. "
         "서술은 뒤에서 만들고 GET /api/narrative/jobs/{job_id} 로 단계와 결과를 본다. 사실 시트가 칸별 입력 "
-        "상한을 넘으면 422 대신 상한 안으로 줄여 규칙 문장으로 완료한다. 작업 생성 시간당 상한을 넘으면 429."
+        "상한을 넘으면 422 대신 상한 안으로 줄여 규칙 문장으로 완료한다. 작업 행 시간당 상한을 넘으면 행 없이 "
+        "규칙 문장 결과를 이 응답에 바로 싣는다(job_id 없음, status done)."
     ),
     # 본문을 dict 로 받는 것은 입력 상한 초과를 422 대신 '규칙 문장으로 완료'로 바꾸기 위해서다(app.narrative.jobs).
     # 계약 문서에는 실제 모양(NarrativeRequest)을 싣는다.
@@ -73,10 +74,6 @@ async def create_narrative_job(
     except ValidationError as exc:
         raise RequestValidationError(
             [{**e, "loc": ("body", *e["loc"])} for e in exc.errors(include_url=False, include_context=False)]
-        ) from None
-    except jobs.JobRateLimited:
-        raise HTTPException(
-            status_code=429, detail="서술 작업 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
         ) from None
 
 
