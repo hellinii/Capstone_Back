@@ -19,6 +19,7 @@
 > | 프론트 | (미기재) | `https://capstone-beta-lilac.vercel.app` |
 > | 배포 경로 | Blueprint 자동 배포 | **CI 게이트 → 포크 미러(`hellinii/*`) → Deploy Hook**. `render.yaml` 의 `autoDeploy: false` 라 팀 레포 push 만으로는 배포되지 않습니다 |
 > | `PUT /api/organization` | 설계에 포함 | **제거됨**(ISSUES.md G-01) — 무인증으로 발급 완료된 모든 성적서의 기관 표기를 소급 변경할 수 있었습니다 |
+> | LLM 키(2026-10~) | `OPENAI_API_KEY` 하나 | 매핑 `OPENAI_API_KEY` + 서술 `ANTHROPIC_API_KEY`(Claude Sonnet 5.5). 둘 다 Render 대시보드 Environment 에만. 서술만 문제가 생기면 `ANTHROPIC_API_KEY` 만 지워 규칙 문장으로 돌린다. `/health` 의 `llm.*.key` 로 들어 있는지 본다 |
 
 
 > 현재 코드 구조는 docs/ARCHITECTURE.md 참조(이 문서는 설계 근거).
