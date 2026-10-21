@@ -48,6 +48,7 @@ from app.narrative.wording import (
     VERDICT_LABEL,
     class_descriptions,
     class_name,
+    is_not_provided,
     join_and,
     metric_num,
     metric_vs_target,
@@ -168,7 +169,7 @@ def _topic(ctx: Ctx) -> str:
 def _model_purpose(ctx: Ctx) -> str | None:
     model = ctx.client_inputs.get("model") if isinstance(ctx.client_inputs, dict) else None
     purpose = model.get("모델 용도") if isinstance(model, dict) else None
-    if not isinstance(purpose, str) or not purpose.strip() or purpose.strip() == NOT_PROVIDED:
+    if is_not_provided(purpose):
         return None
     return purpose.strip()
 
@@ -932,13 +933,10 @@ def _declared_average_values(ctx: Ctx) -> tuple[float, ...]:
     return (d.f1,) if d is not None and d.f1 is not None else ()
 
 
-# 프론트 reportMaterials.NOT_PROVIDED — 답이 없을 때 client_inputs 에 싣는 말(재료 선택 점검 4.2).
-NOT_PROVIDED = "제공되지 않음"
-
-
 def _metric_rationale(ctx: Ctx) -> str | None:
+    # "제공되지 않음 (의뢰자 제공: …)" 도 제공 아님 — 5절·점검 표가 빠짐으로 세는 것과 맞춘다(wording.is_not_provided).
     rationale = ctx.client_inputs.get("metric_rationale")
-    if not isinstance(rationale, str) or not rationale.strip() or rationale.strip() == NOT_PROVIDED:
+    if is_not_provided(rationale):
         return None
     return "지표 선택 기준은 의뢰자가 고른 이유로 5절에 찍힌다."
 

@@ -28,6 +28,7 @@ from app.narrative import fact_view
 from app.narrative.required_items import Conclusion, code_prints
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTIONS_BY_ID
+from app.narrative.wording import class_descriptions
 
 # 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예"). 한국어 이름은 이 셋으로 통일한다(W9,
 # 2026-10-18 사용자 결정) — 프론트 성적서의 TASK_TYPE_LABELS 와 같은 글자다. 이미 발급된 성적서는 저장된
@@ -67,7 +68,7 @@ SYSTEM_PROMPT = """너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 �
 16. 추가 관찰 칸은 결론 목록에 없는 것 가운데 사실 시트에서 찾은 특이사항만 쓴다. 쓸 때는 사실 시트의 숫자를 하나 이상 인용한다. 결론 목록의 내용을 되풀이하지 않고 권고도 쓰지 않는다. 찾은 것이 없으면 빈 글로 둔다.
 
 [고객 입력]
-17. 고객 입력은 의뢰자가 제공한 정보다. 서술에 자유롭게 반영하되, 값이 '제공되지 않음'이면 그 사실만 적고 내용을 지어내지 않는다.
+17. 고객 입력은 의뢰자가 제공한 정보다. 서술에 자유롭게 반영하되, 값이 '제공되지 않음'으로 시작하면 그 항목은 제공되지 않은 것이니 그 사실만 적고 내용을 지어내지 않는다. 그 뒤 괄호의 '의뢰자 제공: …' 글은 의뢰자가 남긴 참고 글일 뿐이라, 그 항목을 의뢰자가 정했거나 골랐다고 쓰지 않는다.
 18. '덜어 낸 표'에 이름이 있는 표는 사실 시트에 일부만 실렸다. 실리지 않은 항목을 없다고 쓰지 않는다.
 
 [권고]
@@ -343,10 +344,8 @@ def build_context(
         task_type=task_type, task_label=TASK_TYPE_LABELS.get(task_type, task_type), report_purpose=report_purpose,
     )
     client_view, dropped = fact_view.build_client_view(client_inputs)
-    descriptions = {}
-    raw = (client_inputs or {}).get("class_label_descriptions")
-    if isinstance(raw, dict):
-        descriptions = {str(k): str(v).strip() for k, v in raw.items() if str(v).strip()}
+    # 규칙 문장(fallback)과 같은 한 벌 — 빈 설명·'제공되지 않음'(으로 시작하는 글)·이름과 같은 설명은 뺀다(D37).
+    descriptions = class_descriptions(client_inputs)
     ctx = PromptContext(
         fs=fs, task_type=task_type, view=view, client_view=client_view, conclusions=conclusions,
         briefs=section_briefs(fs, derived, conclusions, task_type), class_descriptions=descriptions,

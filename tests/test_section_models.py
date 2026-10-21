@@ -86,6 +86,9 @@ async def test_filled_section_9_has_no_model(make_section_client):
     gen = await generator.generate_sections(fake, _binary())
     assert gen.trace["sections"]["9"]["outcome"] == "filled"
     assert gen.section_sources["9"] == "fallback" and gen.section_models["9"] is None
+    # 내부 기록도 출처로 거른 값 — 첫 호출의 모델이 남아 있어도 찍지 않는다(세션 B 변이 M40·M42).
+    assert gen.trace["sections"]["9"]["model"] is None
+    assert {sid: sec["model"] for sid, sec in gen.trace["sections"].items()} == gen.section_models
 
 
 async def test_final_recheck_template_has_no_model(make_section_client, monkeypatch):
@@ -96,6 +99,9 @@ async def test_final_recheck_template_has_no_model(make_section_client, monkeypa
     gen = await generator.generate_sections(fake, _binary())
     assert "8.2" in gen.trace["final_recheck"]
     assert gen.section_sources["8.2"] == "fallback" and gen.section_models["8.2"] is None
+    # 마지막 재검사 전에 8.2 는 AI 글이었다(st.model 에 장 모델이 남음) — 내부 기록은 출처로 거른 값(변이 M40).
+    assert gen.trace["sections"]["8.2"]["model"] is None
+    assert {sid: sec["model"] for sid, sec in gen.trace["sections"].items()} == gen.section_models
 
 
 async def test_no_key_has_all_keys_and_no_models():
@@ -111,3 +117,26 @@ async def test_customer_result_carries_section_models(make_section_client):
     assert out["section_models"] == gen.section_models
     assert set(out["section_models"]) == set(out["section_sources"]) == set(SECTION_IDS)
     assert NarrativeJobResult(**out).section_models == gen.section_models
+
+
+OBSERVATION = "FN 은 43건으로 오분류 가운데 가장 많다."
+
+
+async def test_llm_section_7_3_gets_chapter_7_model(make_section_client):
+    """7.3 을 AI 글로 받으면(비지 않은 추가 관찰이 검사를 통과) 출처 llm·모델은 7장 호출의 것(세션 B 검토 backend-2·변이 M34)."""
+    fake = _replying(make_section_client, {"section_7_1": D24_OK, "section_7_3": OBSERVATION})
+    gen = await generator.generate_sections(fake, _binary())
+    assert gen.trace["sections"]["7.3"]["outcome"] == "first"
+    assert gen.section_sources["7.3"] == "llm"
+    assert gen.section_models["7.3"] == "model-ch7"
+    assert gen.trace["sections"]["7.3"]["model"] == "model-ch7"
+
+
+async def test_dropped_section_7_3_has_no_model(make_section_client):
+    """반대 갈래 — 추가 관찰이 검사에 걸려 빠지면(dropped) 출처 fixed·모델 None."""
+    fake = _replying(make_section_client, {"section_7_1": D24_OK, "section_7_3": "통과율 12.345% 이다."})
+    gen = await generator.generate_sections(fake, _binary())
+    assert gen.trace["sections"]["7.3"]["outcome"] == "dropped"
+    assert gen.section_sources["7.3"] == "fixed"
+    assert gen.section_models["7.3"] is None
+    assert gen.trace["sections"]["7.3"]["model"] is None

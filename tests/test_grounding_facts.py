@@ -148,3 +148,22 @@ def test_imbalance_effect_four_values_are_allowed_only_when_sent():
     # display 없이 숫자 칸만 있어도(표시 문자열이 없는 경우) 값으로 허용한다.
     bare = ImbalanceEffectFact(**base, accuracy=0.5677, macro_f1=0.5621, majority_f1=0.6123, minority_f1=0.5123)
     assert _passes(_fs(imbalance_effect=bare), text)
+
+
+def test_imbalance_effect_four_values_use_their_display_strings():
+    """네 값의 표시 문자열이 원값의 평소 표기와 다를 때(판정 쪽으로 자릿수를 늘린 꼴) 그 표시 문자열이 허용 목록에 든다 —
+    값만 보고 넣으면 이 표기가 빠진다(세션 B 변이 M57·M58). 값마다 따로 본다."""
+    from app.narrative.schemas import ImbalanceEffectFact
+
+    shown = {"accuracy": "0.56771", "macro_f1": "0.56214", "majority_f1": "0.61237", "minority_f1": "0.51238"}
+    ie = ImbalanceEffectFact(
+        level="affected", imbalance_ratio=3.5, accuracy_minus_macro_f1=0.0056, majority_minus_minority_f1=0.1,
+        majority_class="neg", minority_class="pos",
+        accuracy=0.567712, macro_f1=0.562143, majority_f1=0.612374, minority_f1=0.512381,
+        display={"imbalance_ratio": "3.5", "accuracy_minus_macro_f1": "0.0056", "majority_minus_minority_f1": "0.1", **shown},
+    )
+    fs = _fs(imbalance_effect=ie)
+    for key, text in shown.items():
+        assert _passes(fs, f"값은 {text}이다."), key
+        # 표시 문자열이 길면 그보다 짧은 반올림 표기는 넣지 않는다(_add_judged) — 값만으로 넣으면 이 표기가 들어온다.
+        assert not _passes(fs, f"값은 {round(float(text), 3):.3f}이다."), key

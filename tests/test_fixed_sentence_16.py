@@ -177,6 +177,9 @@ async def test_generator_skips_8_1_when_printed_only(make_section_client):
     assert gen.response.conclusion.benchmark == ""
     assert gen.trace["section_8_1_fixed"] is True
     assert gen.trace["sections"]["8.1"]["http_calls"] == 0
+    # 내부 기록의 결과·사유도 고정 문구 16 몫으로 남는다(세션 B 변이 M27·M29).
+    assert gen.trace["sections"]["8.1"]["outcome"] == "fixed"
+    assert gen.trace["sections"]["8.1"]["reason"] == "no_benchmark"
     assert gen.section_models["8.1"] is None and gen.section_models["8.2"] is not None  # 고정 문구 칸은 모델 없음
     # 다른 칸은 그대로 AI — 8.1 의 fixed 는 전체 출처를 규칙 문장으로 떨어뜨리지 않는다.
     assert gen.section_sources["8.2"] == gen.section_sources["8.3"] == "llm"
@@ -196,6 +199,9 @@ async def test_generator_without_key_keeps_8_1_fixed_and_empty():
     assert gen.section_sources["8.1"] == "fixed"
     assert gen.response.conclusion.benchmark == ""
     assert gen.section_sources["8.2"] == "fallback"
+    # 키 없이 끝까지 가도(finish 의 규칙 문장 채우기) 8.1 의 결과·사유는 덮이지 않는다.
+    assert gen.trace["sections"]["8.1"]["outcome"] == "fixed"
+    assert gen.trace["sections"]["8.1"]["reason"] == "no_benchmark"
 
 
 async def test_generator_without_key_and_without_facts_keeps_old_sentence():

@@ -11,7 +11,7 @@
 
 상호작용
 - 의존(import): 없음(표준 라이브러리)
-- 사용처: app.narrative.fallback, app.narrative.required_items, tests
+- 사용처: app.narrative.fallback, app.narrative.required_items, app.narrative.prompt, tests
 """
 from __future__ import annotations
 
@@ -205,18 +205,32 @@ def join_and(items: list[str]) -> str:
 KOREAN_COUNT = {1: "한", 2: "두", 3: "세", 4: "네", 5: "다섯"}
 
 
+# ── 고객 입력의 '제공되지 않음' ──────────────────────────────────────────────────
+# 프론트 reportMaterials.NOT_PROVIDED — 답이 없을 때 client_inputs 에 싣는 말(재료 선택 점검 4.2).
+NOT_PROVIDED = "제공되지 않음"
+
+
+def is_not_provided(value) -> bool:
+    """고객 입력 한 칸이 제공되지 않았는가 — 비었거나(글이 아님 포함) '제공되지 않음'으로 시작한다.
+
+    프론트 materialRowText 는 '모름 + 글'·'기타 빈칸 + 글'을 "제공되지 않음 (의뢰자 제공: …)" 으로 보낸다. 값은 제공되지
+    않은 것이고 괄호 글은 의뢰자 참고 글이다(점검 표 2.0·1.4 도 빠짐으로 센다). 그래서 '같은가'가 아니라 '시작하는가'로
+    본다 — 고객 입력이 제공되었는지 보는 자리는 모두 이 함수 하나를 쓴다(지시문 규칙 17 과 같은 기준)."""
+    return not isinstance(value, str) or not value.strip() or value.strip().startswith(NOT_PROVIDED)
+
+
 # ── 클래스 이름(설명) — 작성 규칙 D37 ──────────────────────────────────────────
 
 
 def class_descriptions(client_inputs: dict | None) -> dict[str, str]:
-    """고객 입력의 클래스 설명(class_label_descriptions: {클래스: 설명}) — 빈 설명·'제공되지 않음'은 뺀다."""
+    """고객 입력의 클래스 설명(class_label_descriptions: {클래스: 설명}) — 빈 설명·'제공되지 않음'(으로 시작하는 글)은 뺀다."""
     raw = (client_inputs or {}).get("class_label_descriptions") if isinstance(client_inputs, dict) else None
     if not isinstance(raw, dict):
         return {}
     out: dict[str, str] = {}
     for k, v in raw.items():
         text = str(v).strip() if v is not None else ""
-        if text and text != "제공되지 않음" and text != str(k).strip():
+        if not is_not_provided(text) and text != str(k).strip():
             out[str(k).strip()] = text
     return out
 
