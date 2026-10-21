@@ -299,8 +299,8 @@ score = (합격 지표 수 / 전체 대상 지표 수) × 100   // 통과율
 
 다음 값들은 사용자/백엔드 무관하게 상수로 고정되어 있음 → **DB로 분리 예정**:
 
-- `performer` (평가 수행 기관: `orgName` "한국 AI 인증원", `evaluator`, `contact`) — 현재 `reportConstants.ts:DEFAULT_PERFORMER`
-- `signature` (발급처 "한국 AI 인증원 평가부", 발급 이력) — 현재 `buildSignature()`
+- `performer` (평가 수행 기관: `orgName` "리트머스", `evaluator`, `contact`) — 현재 `reportConstants.ts:DEFAULT_PERFORMER`
+- `signature` (발급처 "리트머스 평가부", 발급 이력) — 현재 `buildSignature()`
 - `reportId` (문서번호) — 현재 `new Date().getTime()` 기반 즉석 생성 → **DB 채번**으로 (재현 가능·추적 가능한 공식 문서번호)
 - `evalEnv.tools` (Python/scikit-learn 등 버전) — 설정값 또는 런타임 추출 검토
 

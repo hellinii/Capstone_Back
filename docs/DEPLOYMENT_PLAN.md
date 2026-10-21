@@ -66,6 +66,7 @@
 - **런타임 파일 쓰기 없음**: 업로드 CSV는 `await file.read()` → `io.BytesIO` 인메모리 처리. `Data/`는 테스트 전용 픽스처(커밋됨). → Render의 휘발성 디스크에서 문제없음.
 - **모델 타입 전부 이식 가능**: Integer/String(길이 없음)/DateTime(naive UTC)/FK만 사용. JSON 컬럼·server default·rowid 의존 없음.
 - **스타트업 훅**: `app/main.py` lifespan에서 `init_db()`(create_all) + `seed_organization()` → Neon 첫 부팅 시 테이블 자동 생성 + 기관 시드. 수동 마이그레이션 불필요.
+  - **기관 이름 변경("한국 AI 인증원" → "리트머스", 2026-10)**: 시드는 `organization` 이 비어 있을 때만 들어가므로 운영 DB 의 기존 행은 그대로 옛 이름이다. 배포 뒤 운영 DB 에서 한 번 직접 바꾼다 — `UPDATE organization SET org_name = '리트머스' WHERE id = 1;`. 이미 발급한 성적서의 `issuance.issuer`(발급 당시 스냅샷, 예 "한국 AI 인증원 평가부")는 바꾸지 않는다(발급 당시 그대로가 맞다).
 - **CORS**: `allow_origins=["*"]`, credentials 미사용 → Vercel 프로덕션/프리뷰 URL 모두 즉시 동작. 변경 불필요.
 - `GET /health` 엔드포인트 존재 → Render 헬스체크로 사용.
 
