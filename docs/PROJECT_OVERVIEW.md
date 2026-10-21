@@ -18,13 +18,13 @@
 | | Capstone_Front | Capstone_Back |
 |---|---|---|
 | 역할 | UI / 7단계 워크플로우 / 성적서 렌더 | 컬럼 매핑·검증·지표계산·LLM 서술·발급 API |
-| 스택 | React 18 · TS · Vite · Zustand · Tailwind/shadcn · pnpm | Python 3.12 · FastAPI · pandas · scikit-learn · OpenAI · SQLAlchemy · Pydantic |
+| 스택 | React 18 · TS · Vite · Zustand · Tailwind/shadcn · pnpm | Python 3.12 · FastAPI · pandas · scikit-learn · Anthropic · OpenAI · SQLAlchemy · Pydantic |
 | 배포 | **Vercel** | **Render** web service + **Neon PostgreSQL** (로컬은 SQLite) |
 | 원격 | github.com/hwanginyong02/Capstone_Front | github.com/hwanginyong02/Capstone_Back |
 
 - **task_type 3종**: `binary` / `multiclass` / `multilabel`.
 - **지표 식별자**: **M1~M23** (SPEC·프론트·API 공통). 백엔드 내부 변수명도 `METRIC_REQUIREMENTS` 로 통일돼 옛 `TC` 표기는 남아 있지 않다(2026-09-07 확인).
-- **LLM**: OpenAI `gpt-4.1-nano`를 두 곳에 사용 — ①컬럼 자동 매핑 ②성적서 서술. **키가 없거나 실패해도 규칙 기반 폴백**으로 서비스가 계속 동작한다.
+- **LLM**: 두 곳에 쓴다 — ①컬럼 자동 매핑은 OpenAI(`OPENAI_API_KEY`, `MAPPING_MODEL` 기본 `gpt-6-luna`), ②성적서 서술은 Anthropic Claude Sonnet 5.5(`ANTHROPIC_API_KEY`, `NARRATIVE_MODEL` 기본 `claude-sonnet-5-5`, 작업 경로 effort `NARRATIVE_JOB_EFFORT` 기본 high). 옛 매핑·서술 모델 `gpt-4.1-nano` 는 2026-10-23 에 종료됐다. **키가 없거나 실패해도 규칙 기반**으로 서비스가 계속 동작한다.
 - ⭐ **단일 진실 문서(SSoT)**: `Capstone_Front/SPEC.md` — 지표별 필수/선택 컬럼·컬럼 역할·task_type별 허용 지표·검증 규칙. **프론트/백 양쪽이 이 문서 기준으로 구현**한다.
 
 ---
@@ -67,7 +67,7 @@ Capstone_Back
     ├── core/                    # schemas(enum·역할규칙·지표요건표) · parsing(CSV/JSON→DataFrame) · database
     ├── analysis/                # 컬럼 매핑 + 데이터 검증 (llm_mapper / fallback_mapper / validator / metadata)
     ├── evaluation/              # ISO4213 지표 계산 (engine · metrics/{common,binary,multiclass,multilabel})
-    ├── narrative/               # LLM 서술(7·8·9절) (grounding 환각방어 · fallback · baselines)
+    ├── narrative/               # LLM 서술(7·8·9절) — jobs(작업 번호) · generator(장별 생성 + 칸별 검문) · required_items(결론 목록) · fallback(규칙 템플릿) · legacy(옛 경로)
     └── issuance/                # 성적서 발급/채번 DB 도메인 (models · service · serializers)
 ```
 
@@ -92,7 +92,9 @@ Capstone_Back
         → results(success/failed_metrics, M21 혼동행렬/M22 리포트/M23 불균형비, roc/pr_curve, latency)
 
 [리포트 Stage2 — LLM 서술]
-   └ POST /api/generate-narrative → narrative.service (파생값 → 화이트리스트 → LLM → grounding → 폴백)
+   └ POST /api/narrative/jobs → 작업 번호 + 8.1 표 즉시 → (뒤에서) narrative.generator: 결론 목록 → 장별 동시 호출 →
+        칸별 검사(숫자·판정 모순·권고·선언 숫자·형식) → 걸린 칸만 다시/규칙 문장 → GET /api/narrative/jobs/{id} 로 조회
+        ※ 옛 프론트는 POST /api/generate-narrative(한 번 호출, narrative.legacy)
         ※ verdict/score 는 프론트 computeVerdict 가 권위, 백엔드는 fact_sheet 값으로 강제
 
 [성적서 발급/조회]
@@ -112,13 +114,14 @@ Capstone_Back
 | POST `/api/confirm-mapping` | `lib/report/confirmMappingApi.ts` | `analysis/router.py` → `validate_mapping` | Step5 |
 | POST `/api/validate-data` | `hooks/useDataValidation.ts` | `analysis/validation_router.py` → `validate_dataset` | Step6 |
 | POST `/api/evaluate` | `hooks/useReportData.ts` | `evaluation/router.py` → `run_evaluation_pipeline` | 리포트 S1 |
-| POST `/api/generate-narrative` | `lib/report/fetchNarrative.ts` (payload=`buildFactSheet.ts`) | `narrative/router.py` → `generate_narrative` | 리포트 S2 |
+| POST `/api/narrative/jobs`, GET `/api/narrative/jobs/{id}` | `lib/report/narrativeJobApi.ts` (payload=`buildFactSheet.ts`) | `narrative/router.py` → `jobs.create_job`·`read_job` → `generator.generate_sections` | 리포트 S2 |
+| POST `/api/generate-narrative` (옛 경로) | 운영 main 프론트 `lib/report/fetchNarrative.ts` | `narrative/router.py` → `legacy.generate_narrative` | 리포트 S2(옛) |
 | GET `/api/organization`, POST `/api/reports/issue`·`{no}/reissue`, GET `/api/reports/{no}` | `lib/report/issuanceApi.ts` · `hooks/useIssuance.ts` | `issuance/router.py` → `service` | 발급 |
 
 - **`/api/validate-data` 와 `/api/evaluate` 는 동일 요청 구조** `EvaluateRequest`(`task_type, column_mappings[], selected_metric_ids[], metadata, beta`), multipart(`file` + `data`=JSON).
 - **role 어휘 변환(drift 방지 단일 출처 2함수)**: 요청 조립 `src/lib/mapping/translateRoleToBackend.ts`(task_type 의존), 응답 역변환 `translateRoleToFrontend.ts`. 백엔드 대응물은 `app/core/schemas.py` 의 `ColumnRole` / `VALID_ROLES_BY_TASK` / `METRIC_REQUIREMENTS`(= SPEC.md의 코드 구현).
   - 예: `y_true`→(binary/multiclass) `y_true` · (multilabel) `true_labels`; `score`→`score_positive`(binary); `prob_class_*`→`prob_per_class`(multiclass); `prob_label_*`→`score_per_label`(multilabel); 공통 `id`→`sample_id`, `latency`→`latency`, `ignore`→`ignore`.
-- **graceful 처리**: 조회(GET) 실패 시 `null`, 발급(POST) 실패 시 백엔드 `detail` throw, 서술 실패/무키 시 프론트 `EMPTY`("생성 예정"). snake_case→camelCase 및 KST 표기는 프론트에서 변환.
+- **graceful 처리**: 조회(GET) 실패 시 `null`, 발급(POST) 실패 시 백엔드 `detail` throw. 서술은 무키·호출 실패면 칸마다 규칙 문장으로 **완료**, 작업이 실패(시간 초과·유실)하면 프론트가 "서술 다시 만들기"를 주고 끝나지 않은 서술은 인쇄·발급을 잠근다. snake_case→camelCase 및 KST 표기는 프론트에서 변환.
 
 ---
 
@@ -130,7 +133,7 @@ Capstone_Back
 | `Capstone_Back/docs/ARCHITECTURE.md` | 백엔드 온보딩·구조 기준 — `app/` 도메인 구조, router→service→순수로직 패턴, 새 지표/API/테이블 추가 위치. (`Capstone_Back/README.md`는 2줄 stub) |
 | `Capstone_Back/docs/DEPLOYMENT_PLAN.md` | **배포 작업 시** — Render+Neon+Vercel, `DATABASE_URL`/`VITE_API_BASE_URL`, 콜드스타트. |
 | `Capstone_Back/docs/ISSUANCE_DB_DESIGN.md` | **발급/채번/재발급** 로직 수정 시 — 3테이블(organization·report·issuance)·연도별 채번. |
-| `Capstone_Back/docs/REPORT_NARRATIVE_DESIGN.md` | **성적서 서술(7·8·9절)** 수정 시 — LLM grounding·verdict/score 규칙·fallback·benchmark. |
+| `Capstone_Back/docs/REPORT_NARRATIVE_DESIGN.md` | **성적서 서술(7·8·9절)** 설계 이력 — LLM grounding·verdict/score 규칙·fallback·benchmark. 현행(작업 번호·칸별 검문 사다리·규칙 템플릿·결정 번호 색인)은 `docs/ARCHITECTURE.md` §10. |
 | `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. |
 | `Capstone_Front/docs/FRONTEND_DEVELOPMENT_GUIDELINE.md` | 프론트에 새 페이지/컴포넌트/유틸 추가 시 지킬 규칙. |
 | `Capstone_Front/README.md` | UI/스타일 작업 시 (색상·타이포·컴포넌트 패턴)과 7단계 목록. |
@@ -144,11 +147,11 @@ Capstone_Back
 ### 백엔드 (`Capstone_Back`)
 ```bash
 pip install -r requirements-dev.txt        # requirements.txt 포함
-cp .env.example .env                        # OPENAI_API_KEY(없으면 규칙폴백) / DATABASE_URL(없으면 SQLite data/app.db)
+cp .env.example .env                        # ANTHROPIC_API_KEY(서술) / OPENAI_API_KEY(매핑) — 없으면 규칙 기반 / DATABASE_URL(없으면 SQLite data/app.db)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 또는 python -m app.main
 pytest                                       # 테스트 (asyncio_mode=auto, pythonpath=.)
 ```
-첫 부팅 시 `init_db()`+`seed_organization()` 자동. OpenAI 키 없이도 기동됨.
+첫 부팅 시 `init_db()`+`seed_organization()` 자동(발급 표·서술 작업 표). 키 없이도 기동됨.
 
 ### 프론트 (`Capstone_Front`)
 ```bash
@@ -158,7 +161,7 @@ pnpm typecheck && pnpm test && pnpm build
 ```
 
 ### 배포
-- **백엔드 = Render** web service `capstone-back-59z8` (Python 3.12.13, region singapore, `healthCheckPath:/health`). 실제 URL 은 `https://capstone-back-59z8.onrender.com` — 계획서의 `capstone-back.onrender.com` 이 아니다(이름 선점으로 접미사가 붙었다). `autoDeploy:false` — 배포는 **CI(deploy job)의 Render Deploy Hook 호출이 유일 경로**. `DATABASE_URL`/`OPENAI_API_KEY`는 대시보드 입력(커밋 금지). ⚠️ 실제 Start Command는 대시보드 값 사용(`render.yaml`은 문서 정합용).
+- **백엔드 = Render** web service `capstone-back-59z8` (Python 3.12.13, region singapore, `healthCheckPath:/health`). 실제 URL 은 `https://capstone-back-59z8.onrender.com` — 계획서의 `capstone-back.onrender.com` 이 아니다(이름 선점으로 접미사가 붙었다). `autoDeploy:false` — 배포는 **CI(deploy job)의 Render Deploy Hook 호출이 유일 경로**. `DATABASE_URL`/`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`는 대시보드 입력(커밋 금지). ⚠️ 실제 Start Command는 대시보드 값 사용(`render.yaml`은 문서 정합용).
 - **CI** (`.github/workflows/ci.yml`): PR/push(`dev`,`main`) → test job(`pytest -q` + `/health`·`/api/organization` 스모크). `main` push & 통과 시 deploy job이 포크 미러 푸시 후 Deploy Hook POST.
 - **프론트 = Vercel** (`vercel.json`), **DB = Neon PostgreSQL**(`ap-southeast-1`).
 
