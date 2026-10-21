@@ -92,6 +92,16 @@ def test_contract_constants_match_backend():
     assert backend_only == {"MAX_CLIENT_INPUTS_CHARS", "MAX_DISPLAY_TEXT_CHARS"}
 
 
+def test_contract_benchmark_names_match_baselines():
+    """고정 문구 16 — 프론트가 들고 있는 기준표 지표 이름 사본(계약 constants)이 BASELINES 키와 같다(순서까지)."""
+    from app.narrative.baselines import BASELINES
+
+    names = CONTRACT_SPEC["constants"]["benchmark_metric_names"]
+    assert set(names) == set(BASELINES)
+    for task, table in BASELINES.items():
+        assert names[task] == list(table), task
+
+
 def test_contract_facts_fields_match_schema():
     declared = {key for key in CONTRACT_SPEC["facts"] if not key.startswith("$")}
     assert declared == set(schemas.NarrativeFactsFact.model_fields)

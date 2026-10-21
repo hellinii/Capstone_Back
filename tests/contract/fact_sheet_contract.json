@@ -40,7 +40,13 @@
     "PR_GAP_MIN": 0.1,
     "DISTRIBUTION_SHIFT_MIN": 0.1,
     "NEAR_TARGET_RATIO": 0.03,
-    "TOP_CONFUSION_PAIRS": 3
+    "TOP_CONFUSION_PAIRS": 3,
+    "$comment_benchmark_metric_names": "8.1 내부 참조 기준표(백엔드 app/narrative/baselines.py BASELINES)에 있는 지표 이름(표시 이름), 유형별. 프론트 src/lib/report/benchmarkBaselines.ts 가 같은 목록을 들고 고정 문구 16(기준치 없는 서술 지표)을 사실 시트보다 먼저 계산한다. 두 쪽 테스트가 자기 코드와 같은지 단언한다.",
+    "benchmark_metric_names": {
+      "binary": ["Accuracy", "Precision", "Recall", "F1 Score", "AUROC", "AUPRC", "MCC"],
+      "multiclass": ["Accuracy", "Precision", "Recall", "F1 Score"],
+      "multilabel": ["F1 Score", "Jaccard Index", "Hamming Loss"]
+    }
   },
   "changes_to_existing_fields": {
     "metrics[]": {
@@ -113,7 +119,7 @@
     "distribution_shift": {"type": "[{label, training_ratio, evaluation_ratio, difference, difference_text, flagged}]", "when": "status = compared", "rule": "두 쪽 클래스 이름은 normalize_label 과 같은 규칙(앞뒤 공백, 정수 실수 '1.0' → '1')으로 맞춰 비교. 대상 = 평가 정답 클래스 ∪ 학습 칸. training_ratio 분모 = 학습 칸 합, evaluation_ratio 분모 = 평가 class_distribution 합(멀티는 레이블 등장 합). difference = training − evaluation, flagged = |difference| ≥ 0.10. 넘으면 |difference| 큰 순으로 남긴다"},
     "ci_available": {"type": "bool", "rule": "엔진이 confidence_intervals 를 보냈는지. false 면 ci_skipped 는 []"},
     "ci_skipped": {"type": "[{metric_id, display_name, reason}]", "rule": "판정 대상인데 구간이 없는 지표 전부(reason 은 엔진 사유, 300자, 없으면 null). 판정 대상 전부가 생략돼도 남는다"},
-    "fixed_sentences": {"type": "[{id, section, text}]", "rule": "7~9절에 코드가 찍을 고정 문장 전부(AI·템플릿은 같은 숫자를 되풀이하지 않고 해석만). 지금: 9(7.1 앞, 파생 예측이 있을 때), 17(7.1, 확률이 있을 때), 12(7.2), 11a·11b(8.2), 18(8.3 — 승인 문안 그대로, 지표 ID 포함), 6(9, 문제 0개). 7·15·16 은 S7. 문장당 1000자"},
+    "fixed_sentences": {"type": "[{id, section, text}]", "rule": "7~9절에 코드가 찍을 고정 문장 전부(AI·템플릿은 같은 숫자를 되풀이하지 않고 해석만). 지금: 9(7.1 앞, 파생 예측이 있을 때), 17(7.1, 확률이 있을 때), 12(7.2), 16(8.1 표 아래 — 고른 서술 지표(산출 실패·M21·M22 제외) 중 기준표(constants.benchmark_metric_names)에 없는 것이 있을 때, 일부/전부 두 갈래), 11a·11b(8.2), 18(8.3 — 승인 문안 그대로, 지표 ID 포함), 6(9, 문제 0개). 7·15 은 S7. 문장당 1000자"},
     "omitted": {"type": "{[field]: int}", "rule": "자르기로 뺀 개수(언제나 '뺀 수'). 키는 칸 이름(per_class, confusion, confusion_counts, class_distribution, low_support_classes, prediction_bias, distribution_shift, facts_class_lists). 자르지 않았으면 빈 객체"}
   },
   "size_rules": [
