@@ -85,7 +85,8 @@ SECTION_TASKS: dict[str, str] = {
     "7.2": "평가 데이터의 클래스 분포와 불균형, 불균형이 성능 수치에 준 영향, 학습 데이터와의 분포 차이를 해석한다.",
     "7.3": (
         "결론 목록 밖에서 사실 시트로 찾은 특이사항만 쓴다. 사실 시트의 숫자를 하나 이상 인용한다. "
-        "결론 목록의 내용을 되풀이하지 않고, 권고를 쓰지 않으며, 찾은 것이 없으면 빈 글로 둔다."
+        "결론 목록·다른 칸의 내용을 되풀이하지 않고, 측정하지 않은 항목(지연시간 등)이나 권고를 쓰지 않으며, "
+        "찾은 것이 없으면 빈 글로 둔다."
     ),
     "8.1": (
         "내부 참조 기준 대비 모델 값의 위치(좋은 방향을 반영한 평가)와 목표값 수준을 쓴다. 기준의 출처·성격을 함께 밝히고 "
@@ -375,6 +376,20 @@ def build_user_message(ctx: PromptContext, section_ids, *, regenerate: bool = Fa
     ]
     if others:
         parts.append("[다른 칸의 결론 — 참고만 하고 이번 호출에서는 쓰지 않는다]\n" + _bullets(others))
+
+    # 다른 칸 옆에 코드가 숫자로 찍는 문장(고정 문구 17·18) — 이번 칸에서도 그 숫자를 되풀이하지 않는다. S5 실측에서
+    # 8.3·9.2 가 7.1 의 경계·확신 오류 건수를 다시 썼다(그 장 호출은 17 을 몰랐다).
+    printed_elsewhere = [
+        f"{c.section}절: \"{t}\""
+        for c in ctx.conclusions
+        if c.section not in section_ids and c.author == "fixed_interpret"
+        for t in _fixed_texts(ctx.fs, c.item_id)
+    ]
+    if printed_elsewhere:
+        parts.append(
+            "[다른 칸에 성적서가 숫자로 찍는 문장 — 이번 호출의 칸에서 그 숫자를 되풀이하지 않는다]\n"
+            + _bullets(printed_elsewhere)
+        )
 
     if ctx.class_descriptions:
         pairs = ", ".join(f"{k}({v})" for k, v in ctx.class_descriptions.items())

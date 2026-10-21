@@ -50,7 +50,8 @@ from app.narrative.sections import CHAPTERS, SECTION_IDS, SECTIONS_BY_ID
 
 logger = logging.getLogger(__name__)
 
-# 작업 경로 effort(사용자 결정 "품질 우선 — 5~10분 허용"). 코드 기본값 = 운영값, S5 실측으로 정한다.
+# 작업 경로 effort(사용자 결정 "품질 우선 — 5~10분 허용"). 코드 기본값 = 운영값. S5 실측(2026-10-21): high 로 장 셋 동시
+# 호출이 약 26초·한 건 약 0.13달러, 장별 출력 2~3천 토큰(상한 16000 에 여유) — high 로 정했다.
 DEFAULT_JOB_EFFORT = "high"
 
 # 남은 시간이 이보다 적으면 호출하지 않는다(응답을 받아도 검사·기록할 시간이 없다).

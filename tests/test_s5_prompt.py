@@ -241,3 +241,15 @@ def test_prompt_trimming_drops_big_tables_first(monkeypatch):
     assert prompt.fits(ctx)
     # 덜어 낸 수는 서술이 써도 된다(허용 목록에 넣었다).
     assert _canon(str(ctx.view["덜어 낸 표(일부만 실림)"]["혼동행렬"])) in whitelist
+
+
+def test_numbers_printed_in_other_sections_are_shown_with_a_do_not_repeat_note():
+    """S5 실측: 8.3·9.2 가 7.1 의 경계·확신 오류 건수(고정 문구 17)를 되풀이했다 — 다른 장 호출에도 알린다."""
+    req = _contract("binary")
+    ctx, _, _ = _ctx(req)
+    seventeen = next(s.text for s in req.fact_sheet.facts.fixed_sentences if s.id == "17")
+    msg8 = prompt.build_user_message(ctx, CHAPTERS["8"])
+    assert "[다른 칸에 성적서가 숫자로 찍는 문장" in msg8 and f'7.1절: "{seventeen}"' in msg8
+    msg7 = prompt.build_user_message(ctx, CHAPTERS["7"])
+    assert "8.3절: " in msg7.split("[다른 칸에 성적서가 숫자로 찍는 문장")[1]
+    assert f'7.1절: "{seventeen}"' not in msg7  # 자기 칸 문장은 '해석만 쓸 결론'에 있다
