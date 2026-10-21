@@ -1,0 +1,232 @@
+"""app/narrative/checks.py — 칸별 검사(서술 설계 D36 검문 사다리의 '검사', 계획 설계 요지 5).
+
+AI 가 쓴 칸 하나를 다섯 가지로 본다. 걸린 칸만 다시 만들고, 또 걸리면 그 칸만 규칙 템플릿으로 바꾸는 처리는
+app.narrative.generator 가 한다. 검사는 순수 함수다(호출·기록 없음).
+
+① 숫자: 그 칸 글의 숫자가 모두 허용 목록 안(app.narrative.grounding — 원본 사실 시트로 만든 목록).
+② 판정 모순: 강제된 판정과 어긋나는 문장(grounding.find_verdict_contradictions — 오탐·누락을 함께 고친 판, 점검 BE-04).
+③ 9칸: 기대 효과의 예측 수치(지표값·향상폭 — 사용자 결정 "막는 숫자는 예측 수치만", 다-9: '1차 원인'·'3개월 내'는
+   막지 않는다), 권고가 빠진 문제(D22 — 문제마다 권고 하나 이상).
+④ D24 선언 숫자: 그 칸의 D24 항목(7.1 위험 쪽 오류·8.2 선언 평균 방식·8.3 대화형 응답 시간)의 확인 숫자 중 하나가
+   글에 있는가(required_items.Conclusion.d24_values, 허용 목록과 같은 표기 변형). '특별한 것 없음'이면 항목이 없어 끈다.
+⑤ 형식: 빈 칸, 7.3 은 허용 숫자를 하나 이상 인용(D7·D38), 영어 판정 코드·필드명(작성 규칙 D37 — 운영에서 "판정은
+   FAIL이다"가 나왔다). 클래스·지표·고객 입력의 이름 속 밑줄 이름은 이름이라 뺀다.
+
+상호작용
+- 의존(import): app.narrative.grounding, app.narrative.required_items(Conclusion), app.narrative.schemas
+- 사용처: app.narrative.generator, tests
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from app.narrative.grounding import (
+    _CTX_TOKEN_RE,
+    _NUMBER_RE,
+    _add,
+    _canon,
+    _normalize_minus,
+    find_verdict_contradictions,
+    verify_grounding,
+)
+from app.narrative.required_items import Conclusion
+from app.narrative.schemas import FactSheet
+
+# 칸마다 AI 응답에서 검사할 글(응답 필드 점 표기). 9칸은 권고표의 글도 본다.
+REQUIRED_NON_EMPTY = ("7.1", "7.2", "8.1", "8.2", "8.3", "9")
+
+
+@dataclass
+class SectionCheck:
+    section: str
+    numbers: list[str] = field(default_factory=list)        # ① 허용 목록 밖 숫자
+    contradiction: bool = False                              # ② 판정 모순
+    impact_numbers: list[str] = field(default_factory=list)  # ③ 기대 효과의 예측 수치
+    missing_recommendations: list[str] = field(default_factory=list)  # ③ 권고가 없는 문제 번호
+    d24_missing: bool = False                                # ④ 선언 숫자 빠짐
+    format: list[str] = field(default_factory=list)          # ⑤ empty · no_citation · code_words
+    code_words: list[str] = field(default_factory=list)      # ⑤ 걸린 영어 코드·필드명
+
+    @property
+    def hard_failures(self) -> list[str]:
+        """다시 만들거나 템플릿으로 바꿔야 하는 사유(D24 빠짐은 따로 — 다시 만든 뒤에는 그대로 싣는다)."""
+        out = []
+        if self.numbers:
+            out.append("numbers")
+        if self.contradiction:
+            out.append("verdict_contradiction")
+        if self.impact_numbers:
+            out.append("impact_number")
+        if self.missing_recommendations:
+            out.append("missing_recommendation")
+        out.extend(self.format)
+        return out
+
+    @property
+    def passed(self) -> bool:
+        return not self.hard_failures and not self.d24_missing
+
+    def as_record(self) -> dict:
+        return {
+            "numbers": self.numbers,
+            "verdict_contradiction": self.contradiction,
+            "impact_numbers": self.impact_numbers,
+            "missing_recommendations": self.missing_recommendations,
+            "d24_missing": self.d24_missing,
+            "format": self.format,
+            "code_words": self.code_words,
+        }
+
+
+def section_texts(section_id: str, parts: dict) -> list[str]:
+    """칸 하나의 글(검사 대상) — 응답 필드(점 표기) → 값에서."""
+    if section_id == "9":
+        texts = [parts.get("recommendation_narrative.data_quality", ""), parts.get("recommendation_narrative.model_ops", "")]
+        for rec in parts.get("recommendations") or []:
+            texts.extend([rec.get("category", ""), rec.get("action", ""), rec.get("expected_impact", "")])
+        return texts
+    path = {
+        "7.1": "interpretation.confusion_analysis",
+        "7.2": "interpretation.distribution_analysis",
+        "7.3": "interpretation.additional_observations",
+        "8.1": "conclusion.benchmark",
+        "8.2": "conclusion.narrative",
+        "8.3": "conclusion.risks",
+    }[section_id]
+    return [parts.get(path, "")]
+
+
+# ── ③ 기대 효과의 예측 수치 ─────────────────────────────────────────────────────
+# 숫자 뒤에 차례·기간·횟수 단위가 오면 예측 수치가 아니다('1차 원인', '3개월 내', '2회 재평가'). 문제 번호(P1)는 앞 글자가
+# 영문이라 숫자로 읽지 않는다. 소수·백분율·%p 는 단위와 무관하게 예측 수치다(지표값·향상폭).
+_NOT_PREDICTION_UNIT = re.compile(r"\s*(?:차|단계|번째|순위|순차|개월|주|일|년|분기|시간|회|번|건의\s*사례)")
+
+
+def predicted_numbers(text: str) -> list[str]:
+    if not isinstance(text, str):
+        return []
+    stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(text))
+    found = []
+    for m in _NUMBER_RE.finditer(stripped):
+        token = m.group(0)
+        if _canon(token) is None:
+            continue
+        decimal_or_pct = "." in token or "%" in token or stripped[m.end():m.end() + 2].startswith("%p")
+        if not decimal_or_pct and _NOT_PREDICTION_UNIT.match(stripped, m.end()):
+            continue
+        found.append(token)
+    return found
+
+
+# ── ④ D24 선언 숫자 ─────────────────────────────────────────────────────────────
+
+
+def d24_present(text: str, values: tuple[float, ...]) -> bool:
+    """글에 확인 숫자 중 하나가 허용 목록과 같은 표기 변형(소수 1~4자리·백분율)으로 있는가."""
+    wanted: set = set()
+    for v in values:
+        _add(wanted, v)
+        _add(wanted, abs(v))
+    stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(text or ""))
+    return any(_canon(tok) in wanted for tok in _NUMBER_RE.findall(stripped))
+
+
+# ── ⑤ 형식 ─────────────────────────────────────────────────────────────────────
+_VERDICT_CODE = re.compile(r"(?<![A-Za-z_])(?:CONDITIONAL_PASS|INCONCLUSIVE|PASS|FAIL)(?![A-Za-z_])")
+_SNAKE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?![A-Za-z0-9_])")
+
+
+def name_exemptions(fs: FactSheet, client_inputs: dict | None) -> set[str]:
+    """밑줄이 든 이름 가운데 문장에 써도 되는 것 — 클래스·지표·고객 입력의 글(모델명 'my_model_v2' 등)."""
+    names: set[str] = set()
+
+    def scan(obj: Any) -> None:
+        if isinstance(obj, str):
+            names.update(_SNAKE.findall(obj))
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                scan(k)
+                scan(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                scan(item)
+
+    scan([m.display_name for m in fs.metrics])
+    scan([p.label for p in fs.per_class])
+    scan([r.label for r in fs.confusion_counts])
+    if fs.confusion:
+        scan(fs.confusion.labels)
+    if fs.distribution:
+        scan(list(fs.distribution.class_distribution))
+    if fs.derived_prediction:
+        scan(fs.derived_prediction.source_columns)
+    scan([p.title for p in fs.problems])
+    if fs.imbalance_effect:
+        scan([fs.imbalance_effect.majority_class, fs.imbalance_effect.minority_class])
+    if fs.facts is not None:
+        scan([r.label for r in fs.facts.distribution_shift])
+        if fs.facts.weakest_class:
+            scan(fs.facts.weakest_class.label)
+    scan(client_inputs or {})
+    return names
+
+
+def code_words(texts: list[str], exempt: set[str]) -> list[str]:
+    found: list[str] = []
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        found.extend(_VERDICT_CODE.findall(text))
+        found.extend(w for w in _SNAKE.findall(text) if w not in exempt)
+    return sorted(set(found))
+
+
+def _cites_allowed_number(text: str, whitelist: set) -> bool:
+    stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(text or ""))
+    return any(_canon(tok) in whitelist for tok in _NUMBER_RE.findall(stripped))
+
+
+def check_section(
+    section_id: str,
+    parts: dict,
+    *,
+    whitelist: set,
+    verdict: str,
+    conclusions: list[Conclusion],
+    problem_ids: list[str],
+    exempt: set[str],
+) -> SectionCheck:
+    """AI 가 쓴 칸 하나를 검사한다. parts 는 그 칸의 응답 필드(점 표기) → 값(9칸의 권고는 dict 목록)."""
+    result = SectionCheck(section=section_id)
+    texts = [t for t in section_texts(section_id, parts) if isinstance(t, str)]
+
+    # ⑤ 빈 칸 — 7.3 은 비면 '해당 없음'이라 빈 글이 정상이다. 빈 칸이면 다른 검사는 의미가 없다.
+    if section_id in REQUIRED_NON_EMPTY:
+        main = texts[:2] if section_id == "9" else texts
+        if any(not t.strip() for t in main) or (section_id == "9" and not parts.get("recommendations")):
+            result.format.append("empty")
+            return result
+    elif not any(t.strip() for t in texts):
+        return result  # 7.3 빈 글 — 통과(고정 문구 15)
+
+    result.numbers = verify_grounding(texts, whitelist).violations
+    result.contradiction = bool(find_verdict_contradictions(texts, verdict))
+    result.code_words = code_words(texts, exempt)
+    if result.code_words:
+        result.format.append("code_words")
+    if section_id == "7.3" and not _cites_allowed_number(texts[0], whitelist):
+        result.format.append("no_citation")
+
+    if section_id == "9":
+        recs = parts.get("recommendations") or []
+        for rec in recs:
+            result.impact_numbers.extend(predicted_numbers(rec.get("expected_impact", "")))
+        answered = {str(r.get("problem_id") or "").strip() for r in recs}
+        result.missing_recommendations = [pid for pid in problem_ids if pid not in answered]
+
+    for c in conclusions:
+        if c.section == section_id and c.d24_values and not d24_present(" ".join(texts), c.d24_values):
+            result.d24_missing = True
+    return result

@@ -137,6 +137,87 @@ def make_fake_anthropic_client():
     return _make_fake_anthropic_client
 
 
+# ── 작업 경로(장별 호출·칸 다시 만들기)용 가짜 ─────────────────────────────────────
+# 작업 경로는 호출마다 칸 스키마(app.narrative.prompt.response_schema)가 다르다 — 7장·8장·9장, 다시 만들 칸 하나.
+# 이 가짜는 요청의 스키마를 읽어 **요청한 칸 필드만** 채워 답한다. 기본 글은 숫자가 없어 어느 사실 시트에서도 검문을
+# 통과한다(7.3 은 빈 글 = 관찰 없음).
+DEFAULT_SECTION_TEXTS = {
+    "section_7_1": "혼동행렬에서 오분류가 고르게 나타난다.",
+    "section_7_2": "클래스 분포를 해석한 서술이다.",
+    "section_7_3": "",
+    "section_8_1": "내부 참조 기준과 비교한 서술이다.",
+    "section_8_2": "종합 판정의 사유를 적은 서술이다.",
+    "section_8_3": "운영상 위험을 적은 서술이다.",
+    "section_9_1": "데이터 측면의 권고 서술이다.",
+    "section_9_2": "모델 측면의 권고 서술이다.",
+}
+
+
+def requested_fields(kwargs) -> list[str]:
+    """호출 인자에서 이번에 요청한 칸 필드 이름(스키마 속성 순서)."""
+    return list(kwargs["output_config"]["format"]["schema"]["properties"])
+
+
+def section_reply(kwargs, texts: dict | None = None) -> dict:
+    """요청한 칸 필드만 채운 응답 본문. texts 가 필드를 덮는다(없는 필드는 기본 글, 권고는 문제마다 하나)."""
+    schema = kwargs["output_config"]["format"]["schema"]
+    texts = texts or {}
+    out = {}
+    for name, spec in schema["properties"].items():
+        if name == "recommendations":
+            ids = spec["items"]["properties"]["problem_id"]["enum"]
+            out[name] = texts.get(name, [
+                {"problem_id": i, "category": "점검", "action": "해당 문제를 점검하고 재평가한다.",
+                 "expected_impact": "판정의 근거가 분명해진다."}
+                for i in ids
+            ])
+        else:
+            out[name] = texts.get(name, DEFAULT_SECTION_TEXTS[name])
+    return out
+
+
+def _make_section_client(texts: dict | None = None, *, replies=None, delay=0.0, **message_kwargs):
+    """칸 스키마를 읽어 답하는 가짜 Anthropic 클라이언트.
+
+    - texts: 모든 호출에 같이 쓰는 칸 글(필드 이름 → 글).
+    - replies: 호출마다 차례로 쓸 것 — dict(그 호출의 칸 글을 덮음) · BetaMessage(그대로) · 예외(던짐) ·
+      callable(kwargs → 위 셋 중 하나) · None(texts 대로). 다 쓰면 texts 대로.
+    - delay: 응답 전에 기다릴 초. message_kwargs 는 fake_beta_message 로(stop_reason·usage 등).
+    호출 인자는 client.beta.messages.create.call_args_list 로 본다.
+    """
+    client = MagicMock()
+    queue = list(replies) if replies is not None else []
+
+    async def _create(*args, **kwargs):
+        _BETA_CREATE_SIGNATURE.bind(None, *args, **kwargs)
+        if delay:
+            await asyncio.sleep(delay)
+        item = queue.pop(0) if queue else None
+        if callable(item) and not isinstance(item, (dict, BaseException)):
+            item = item(kwargs)
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, _BetaMessage):
+            return item
+        merged = {**(texts or {}), **(item or {})}
+        return fake_beta_message(section_reply(kwargs, merged), **message_kwargs)
+
+    client.beta.messages.create = AsyncMock(side_effect=_create)
+
+    def _with_options(*args, **kwargs):
+        _WITH_OPTIONS_SIGNATURE.bind(None, *args, **kwargs)
+        return client
+
+    client.with_options = MagicMock(side_effect=_with_options)
+    return client
+
+
+@pytest.fixture
+def make_section_client():
+    """작업 경로용 — 요청한 칸만 채워 답하는 가짜 Anthropic 클라이언트 팩토리."""
+    return _make_section_client
+
+
 @pytest.fixture(autouse=True)
 def _no_real_llm_clients(monkeypatch):
     """모든 테스트에서 실제 LLM 을 부르지 않게 한다.

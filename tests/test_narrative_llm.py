@@ -212,7 +212,7 @@ def test_cost_unknown_model_is_none_not_guessed():
     (anthropic.APITimeoutError(request=_REQ), "timeout"),
     (anthropic.NotFoundError("no model", response=httpx2.Response(404, request=_REQ), body=None), "model_unavailable"),
     (anthropic.InternalServerError("down", response=httpx2.Response(500, request=_REQ), body=None), "api_error"),
-    (anthropic.RateLimitError("slow", response=httpx2.Response(429, request=_REQ), body=None), "api_error"),
+    (anthropic.RateLimitError("slow", response=httpx2.Response(429, request=_REQ), body=None), "rate_limited"),  # 작업 경로는 429 를 차례 호출로 다시 부른다(S5)
     (anthropic.APIConnectionError(request=_REQ), "api_error"),
 ])
 async def test_sdk_errors_map_to_reasons(make_fake_anthropic_client, exc, reason):

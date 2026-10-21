@@ -445,11 +445,20 @@ def _collect_grounding_texts(data: dict) -> list:
 # 품질 전반을 보증하지 않는다.
 
 # "전부 통과했다"는 주장. FAIL·CONDITIONAL_PASS 판정과 모순된다.
+# '전체'는 주어가 지표 전체일 때만 본다 — "전체 정확도는 기준을 통과했으나"처럼 흔한 말이라(점검 BE-04).
 _CLAIMS_ALL_PASSED = re.compile(
-    r"(모든|전\s*항목|전체)[^.]{0,20}(충족|합격|통과)(하|되|였|했|함|됨)"
-    r"|목표\s*성능을\s*달성"
+    r"(모든|전\s*항목|전체\s*(?:\d+\s*개|지표|항목|시험\s*항목|판정\s*대상))[^.]{0,20}(충족|합격|통과|만족)(하|되|였|했|함|됨)"
+    r"|(모든|전\s*항목|전부)[^.]{0,20}목표값?\s*(이상|이하)(이다|이었|입니다|으로|이며|이고)"
+    r"|목표\s*성능을\s*(달성|충족)"
     r"|기준을\s*모두\s*(충족|만족)"
 )
+# '모두 충족' 주장의 주어를 좁히는 말 — 앞 25자 안에 있으면 지표 전부가 아니라 그 묶음의 주장이다.
+# 조건부 합격: "핵심 지표는 기준을 모두 충족하였으나 보조 지표가 미달" 은 판정 규칙(D19 ③) 그대로다.
+# 최종 불합격: "그 외 모든 지표는 기준을 충족했다" 는 핵심 미달과 함께 참일 수 있다.
+_CORE_SUBJECT = re.compile(r"핵심\s*지표(?!가\s*아닌)")
+_NONCORE_SUBJECT = re.compile(r"그\s*외|나머지|비핵심|보조\s*지표|핵심이\s*아닌|핵심\s*지표가\s*아닌|그\s*밖의")
+# 판정 불가를 설명하는 문장 — "목표값이 설정된 지표는 모두 충족했으나 핵심 지표가 산출되지 않아 판정할 수 없다" 는 참이다.
+_INCONCLUSIVE_REASON = re.compile(r"산출되지\s*않|산출하지\s*못|산출에\s*실패|판정할\s*수\s*없|판정\s*불가|목표값이\s*(?:설정되지\s*않|없)")
 
 # "미달했다"는 주장. PASS 판정과 모순된다.
 # 단, "미달 가능성·미달 위험·미달할 우려"는 미달했다는 주장이 아니다. 아슬아슬 합격(near_target, D12)을
@@ -480,7 +489,22 @@ _HYPOTHETICAL = (
     r"(?!\s*(?:할|될)?\s*(?:가능성|위험|우려|리스크)"
     r"|\s*(?:할|될)\s*수\s*(?:도\s*)?있"
     r"|\s*(?:을|를)?\s*(?:예방|방지)"
-    rf"|\s*(?:으로|로)\s*(?!{_JUDGING_VERB}\s*수){_RIEUL_FINAL_WORD}\s*{_MAYBE})"
+    rf"|\s*(?:으로|로)\s*(?!{_JUDGING_VERB}\s*수){_RIEUL_FINAL_WORD}\s*{_MAYBE}"
+    # 점검 BE-04 의 오탐 — 조건("미달하면")·물음("미달 여부"·"미달로 바뀌는지"·"미달인지")·근접("미달에 가까운")·
+    # 규칙 설명("불합격으로 판정하는 규칙") — 미달했다는 주장이 아니다.
+    r"|\s*(?:하|되|이)?면(?![가-힣])"
+    r"|\s*여부"
+    r"|\s*(?:으로|로)\s*바뀌는지"
+    r"|\s*(?:하는지|되는지|인지)"
+    r"|\s*에\s*(?:가까|근접)"
+    r"|\s*(?:으로|로)\s*판정(?:하는|한다|합니다))"
+)
+# 부정 — "미달 지표는 없다"·"미달하지 않았다"·"충족하지 못한 지표는 없다"(점검 BE-04 의 오탐). 바로 뒤에 붙은 꼴만 본다 —
+# "미달하였으며 개선 여지가 없다"처럼 멀리 떨어진 '없다'는 미달 주장의 부정이 아니다.
+_NEGATED_FAILURE = re.compile(
+    r"(?:미달|미충족|불합격)(?:한|된|인)?\s*(?:지표|항목|시험\s*항목|핵심\s*지표)?\s*(?:은|는|이|가|도)?\s*(?:하나도\s*|전혀\s*)?없"
+    r"|(?:미달|미충족)하지\s*(?:않|아니)"
+    r"|충족하지\s*못한\s*(?:지표|항목|시험\s*항목)\s*(?:은|는|이|가|도)?\s*(?:하나도\s*|전혀\s*)?없"
 )
 _CLAIMS_SOME_FAILED = re.compile(
     rf"(미달|불합격|미충족){_HYPOTHETICAL}"
@@ -502,21 +526,103 @@ def _is_partial_count(claim: str) -> bool:
     return bool(m) and m.group(1) != m.group(2)
 
 
-def find_verdict_contradictions(texts: list[str], verdict: str) -> list[str]:
-    """강제된 판정과 직접 모순되는 문장을 돌려준다(없으면 빈 목록).
+# 판정 이름을 직접 말한 주장 — "종합 판정은 X이다", "X으로 판정되었다", "X 판정을 받았다"(점검 BE-04 의 누락: 불합격 성적서의
+# "종합 판정은 합격이다"를 놓쳤다). X 가 사실 시트 판정과 다르면 모순이다. "판정이 불합격으로 바뀔 수 있다"처럼 뒤에
+# 단정 꼴(이다·이며·으로 결정 …)이 없는 것은 주장이 아니다. 긴 이름부터 맞춘다(조건부 합격 ⊃ 합격, 불합격 ⊃ 합격).
+_VERDICT_WORD = (
+    r"(?:CONDITIONAL_PASS|INCONCLUSIVE|PASS|FAIL"
+    r"|(?:최종\s*)?(?:조건부\s*(?:합격|적합)|판정\s*불가|불합격|부적합|합격|적합))"
+)
+_Q = r"['\"‘’“”「」『』]?"
+_EXPLICIT_VERDICT = re.compile(
+    rf"판정\s*(?:은|이|결과는|결과가)\s*{_Q}\s*(?P<a>{_VERDICT_WORD}){_Q}\s*"
+    r"(?=이다|이며|이고|이었|입니다|임|으로\s*(?:결정|확정|나왔|나타났)|로\s*(?:결정|확정|나왔|나타났)|에\s*해당|[.,;]|$)"
+    rf"|{_Q}(?P<b>{_VERDICT_WORD}){_Q}\s*(?:으로|로)\s*(?:최종\s*|종합\s*)?판정(?:되었|됐|되어|되며|하였|했|받았|을\s*받)"
+    rf"|{_Q}(?P<c>{_VERDICT_WORD}){_Q}\s*판정을\s*받(?:았|은|아)"
+)
 
-    - FAIL / CONDITIONAL_PASS / INCONCLUSIVE 인데 "모두 충족했다" → 모순
+
+def _verdict_code(word: str) -> str:
+    w = re.sub(r"\s+", "", word).removeprefix("최종")
+    if w in ("CONDITIONAL_PASS", "조건부합격", "조건부적합"):
+        return "CONDITIONAL_PASS"
+    if w in ("INCONCLUSIVE", "판정불가"):
+        return "INCONCLUSIVE"
+    if w in ("FAIL", "불합격", "부적합"):
+        return "FAIL"
+    return "PASS"
+
+
+def claimed_verdicts(text: str) -> list[str]:
+    """글이 직접 말한 판정(코드값) 목록."""
+    out = []
+    for m in _EXPLICIT_VERDICT.finditer(text):
+        word = m.group("a") or m.group("b") or m.group("c")
+        out.append(_verdict_code(word))
+    return out
+
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?。])\s+|\n+")
+
+
+def _all_passed_claim(sentence: str, verdict: str) -> bool:
+    for m in _CLAIMS_ALL_PASSED.finditer(sentence):
+        if _is_partial_count(m.group(0)):
+            continue
+        window = sentence[max(0, m.start() - 25):m.end()]
+        if verdict == "CONDITIONAL_PASS" and _CORE_SUBJECT.search(window) and not _NONCORE_SUBJECT.search(window):
+            continue
+        if verdict == "FAIL" and _NONCORE_SUBJECT.search(window):
+            continue
+        if verdict == "INCONCLUSIVE" and _INCONCLUSIVE_REASON.search(sentence):
+            continue
+        if re.match(r"[^.]{0,12}(?:것은\s*아니|것이\s*아니|지\s*않|지\s*못)", sentence[m.end():]):
+            continue  # "모든 지표가 충족된 것은 아니다"
+        return True
+    return False
+
+
+# 규칙을 말하는 조건문 — "핵심 지표가 하나라도 미달하면 최종 불합격" 의 '불합격'은 이 성적서의 판정 주장이 아니다.
+_RULE_CONDITION_BEFORE = re.compile(r"면\s*(?:최종\s*)?$")
+
+
+def _some_failed_claim(sentence: str) -> bool:
+    negated = [m.span() for m in _NEGATED_FAILURE.finditer(sentence)]
+    for m in _CLAIMS_SOME_FAILED.finditer(sentence):
+        if any(a <= m.start() < b for a, b in negated):
+            continue
+        if _RULE_CONDITION_BEFORE.search(sentence[:m.start()]):
+            continue
+        return True
+    return False
+
+
+def find_verdict_contradictions(texts: list[str], verdict: str) -> list[str]:
+    """강제된 판정과 직접 모순되는 글을 돌려준다(없으면 빈 목록). 문장마다 본다.
+
+    - 판정 이름을 직접 말했는데(종합 판정은 X이다·X으로 판정되었다) X 가 판정과 다르다 → 모순.
+    - FAIL / CONDITIONAL_PASS / INCONCLUSIVE 인데 "모두 충족했다" → 모순. 단 주어가 좁혀진 주장은 뺀다 — 조건부 합격의
+      "핵심 지표는 모두 충족", 불합격의 "그 외 지표는 모두 충족", 판정 불가의 "…충족했으나 핵심 지표가 산출되지 않아".
       (판정 불가는 확인하지 못했다는 뜻이다. 다 충족했다고 쓰면 확인한 것처럼 읽힌다.)
-    - PASS 인데 "미달했다" → 모순
+    - PASS 인데 "미달했다" → 모순. 부정("미달 지표는 없다")·가정·조건("미달하면")·물음("미달 여부")은 뺀다.
+    회귀 문장 표: tests/test_s5_checks.py(점검 BE-04 의 19문장 포함).
     """
     contradictions: list[str] = []
     for text in texts:
         if not isinstance(text, str) or not text.strip():
             continue
-        if verdict in ("FAIL", "CONDITIONAL_PASS", "INCONCLUSIVE") and any(
-            not _is_partial_count(m.group(0)) for m in _CLAIMS_ALL_PASSED.finditer(text)
-        ):
-            contradictions.append(text)
-        elif verdict == "PASS" and _CLAIMS_SOME_FAILED.search(text):
+        hit = False
+        for sentence in _SENTENCE_SPLIT.split(text):
+            if not sentence.strip():
+                continue
+            if any(code != verdict for code in claimed_verdicts(sentence)):
+                hit = True
+            elif verdict in ("FAIL", "CONDITIONAL_PASS", "INCONCLUSIVE") and _all_passed_claim(sentence, verdict):
+                hit = True
+            elif verdict == "PASS" and _some_failed_claim(sentence):
+                hit = True
+            if hit:
+                break
+        if hit:
             contradictions.append(text)
     return contradictions

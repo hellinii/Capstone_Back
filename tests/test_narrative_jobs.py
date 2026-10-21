@@ -27,6 +27,7 @@ from app.main import app
 from app.narrative import jobs, schemas
 from app.narrative.models import NarrativeJob, _utcnow
 from app.narrative.schemas import NarrativeRequest
+from app.narrative import generator
 from app.narrative.legacy import generate_narrative
 from tests.conftest import fake_beta_message
 from tests.test_narrative_router import _sample_request
@@ -38,6 +39,16 @@ _CLEAN = {
     "recommendation_narrative": {"data_quality": "", "model_ops": ""},
 }
 _SECRET = "고객비밀입력-7731"
+
+# 칸별 출처(작업 경로 생성기, S5). _request() 는 문제 0개라 9칸은 코드가 정한 문장(fixed)이고 9장을 부르지 않는다.
+# 7.3 은 AI 가 관찰을 쓰지 않으면 고정 문구 15(fixed).
+FALLBACK_NO_PROBLEMS = {
+    "7.1": "fallback", "7.2": "fallback", "7.3": "fixed",
+    "8.1": "fallback", "8.2": "fallback", "8.3": "fallback", "9": "fixed",
+}
+LLM_NO_PROBLEMS = {"7.1": "llm", "7.2": "llm", "7.3": "fixed", "8.1": "llm", "8.2": "llm", "8.3": "llm", "9": "fixed"}
+FALLBACK_WITH_PROBLEMS = {**FALLBACK_NO_PROBLEMS, "9": "fallback"}
+LLM_WITH_PROBLEMS = {**LLM_NO_PROBLEMS, "9": "llm"}
 
 
 @pytest.fixture
@@ -147,17 +158,15 @@ def test_retention_env_falls_back_to_default(monkeypatch, value):
     assert jobs.result_ttl() == timedelta(hours=24)
 
 
-def test_section_sources_are_the_seven_sections_with_7_3_fixed():
-    # 소절 7칸(S4b). 7.3(추가 관찰)은 AI 가 쓰기 전(S5 이전)에는 늘 고정 문구 15 '해당 없음'이다.
-    assert jobs.section_sources("llm") == {
-        "7.1": "llm", "7.2": "llm", "7.3": "fixed", "8.1": "llm", "8.2": "llm", "8.3": "llm", "9": "llm",
-    }
-    assert jobs.section_sources("fallback") == {
-        "7.1": "fallback", "7.2": "fallback", "7.3": "fixed",
-        "8.1": "fallback", "8.2": "fallback", "8.3": "fallback", "9": "fallback",
-    }
-    assert jobs.section_sources("llm", template_recommendations=True)["9"] == "fallback"
-    assert list(jobs.section_sources("llm")) == ["7.1", "7.2", "7.3", "8.1", "8.2", "8.3", "9"]
+def test_section_source_tables_cover_the_seven_sections():
+    for table in (FALLBACK_NO_PROBLEMS, LLM_NO_PROBLEMS, FALLBACK_WITH_PROBLEMS, LLM_WITH_PROBLEMS):
+        assert tuple(table) == jobs.SECTION_IDS == ("7.1", "7.2", "7.3", "8.1", "8.2", "8.3", "9")
+
+
+def test_http_calls_skips_calls_that_never_left():
+    calls = [{"http": True, "cost_usd": 0.01}, {"http": False}, {"cost_usd": 0.02}]
+    assert jobs.http_calls(calls) == [calls[0], calls[2]]
+    assert jobs.total_cost(jobs.http_calls(calls)) == pytest.approx(0.03)
 
 
 def test_total_cost_refuses_to_guess():
@@ -280,7 +289,7 @@ async def test_no_key_job_finishes_with_rule_sentences(factory):
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
     assert (view.status, view.stage, view.failure) == ("done", "done", None)
-    assert view.result.section_sources == jobs.section_sources("fallback")  # 7.3 만 고정 문구
+    assert view.result.section_sources == FALLBACK_NO_PROBLEMS
     assert _stages(factory, job_id) == ["queued", "done"]
     assert _row(factory, job_id).finished_at is not None
     internal = _internal(factory, job_id)
@@ -288,41 +297,44 @@ async def test_no_key_job_finishes_with_rule_sentences(factory):
     assert internal["http_attempts"] == 0 and internal["calls"] == []
 
 
-async def test_llm_job_goes_through_all_stages_and_records_internally(factory, make_fake_anthropic_client):
-    fake = make_fake_anthropic_client(_CLEAN, usage=(1000, 500))
+async def test_llm_job_goes_through_all_stages_and_records_internally(factory, make_section_client):
+    fake = make_section_client({"section_7_1": "정확도 0.94로 양호하다."}, usage=(1000, 500))
     job_id, tasks = await _create(factory, client=fake, req=_request(client_inputs={"memo": _SECRET}))
     await _run_pending(tasks)
-    assert _stages(factory, job_id) == ["queued", "generating", "checking", "done"]
+    # 장 호출 둘(7·8장 — 문제가 없어 9장은 부르지 않는다)이 슬롯을 얻을 때마다 generating.
+    assert _stages(factory, job_id) == ["queued", "generating", "generating", "checking", "done"]
     view = await jobs.read_job(job_id, session_factory=factory)
     assert view.status == "done"
-    assert view.result.section_sources == jobs.section_sources("llm")
-    assert view.result.interpretation.confusion_analysis == "정확도 0.94로 양호."
+    assert view.result.section_sources == LLM_NO_PROBLEMS
+    assert view.result.interpretation.confusion_analysis == "정확도 0.94로 양호하다."
     internal = _internal(factory, job_id)
     assert (internal["source"], internal["reason"], internal["budget"]) == ("llm", None, "reserved")
-    assert internal["http_attempts"] == 1
+    assert internal["http_attempts"] == 2
+    assert sorted(tuple(c["sections"]) for c in internal["calls"]) == [("7.1", "7.2", "7.3"), ("8.1", "8.2", "8.3")]
     call = internal["calls"][0]
-    assert call["response_model"] == "claude-sonnet-5-5"
+    assert call["response_model"] == "claude-sonnet-5-5" and call["purpose"] == "chapter"
     assert (call["input_tokens"], call["output_tokens"]) == (1000, 500)
-    assert internal["cost_usd"] == pytest.approx(0.007)
-    assert internal["slot_wait_seconds"] is not None and internal["prompt_chars"] > 0
-    assert internal["failure"] is None
+    assert call["slot_wait_seconds"] is not None and call["prompt_chars"] > 0
+    assert internal["cost_usd"] == pytest.approx(0.014)
+    assert internal["failure"] is None and internal["effort"] == "high"
     assert internal["seconds_total"] > 0 and internal["task_type"] == "binary"
-    assert internal["recommendations_from_template"] == []
+    assert internal["chapter_9_skipped"] is True
+    assert internal["sections"]["7.1"]["outcome"] == "first" and internal["sections"]["7.1"]["http_calls"] == 1
     # 입력은 서버에 남기지 않는다
     row = _row(factory, job_id)
     assert _SECRET not in row.internal_json and _SECRET not in (row.result_json or "")
 
 
-async def test_job_client_has_no_retries_and_its_own_timeout(factory, make_fake_anthropic_client):
-    fake = make_fake_anthropic_client(_CLEAN)
+async def test_job_client_has_no_retries_and_its_own_timeout(factory, make_section_client):
+    fake = make_section_client()
     _, tasks = await _create(factory, client=fake)
     await _run_pending(tasks)
     fake.with_options.assert_called_once_with(timeout=jobs.JOB_CALL_TIMEOUT_SECONDS, max_retries=0)
-    assert fake.beta.messages.create.call_count == 1
+    assert fake.beta.messages.create.call_count == 2
 
 
-async def test_stage_is_generating_while_the_call_is_in_flight(factory, make_fake_anthropic_client):
-    fake = make_fake_anthropic_client(_CLEAN)
+async def test_stage_is_generating_while_the_call_is_in_flight(factory, make_section_client):
+    fake = make_section_client()
     entered, gate = asyncio.Event(), asyncio.Event()
     original = fake.beta.messages.create.side_effect
 
@@ -346,39 +358,46 @@ async def test_stage_is_generating_while_the_call_is_in_flight(factory, make_fak
     assert (await jobs.read_job(job_id, session_factory=factory)).stage == "done"
 
 
-async def test_refusal_finishes_with_rule_sentences_and_records_the_category(factory, make_fake_anthropic_client):
-    fake = make_fake_anthropic_client(
-        None, stop_reason="refusal", model="claude-sonnet-5-5",
-        stop_details={"type": "refusal", "category": "bio"},
+async def test_refusal_finishes_with_rule_sentences_and_records_the_category(factory, make_section_client):
+    fake = make_section_client(
+        stop_reason="refusal", model="claude-sonnet-5-5", stop_details={"type": "refusal", "category": "bio"},
     )
     job_id, tasks = await _create(factory, client=fake)
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
-    assert view.status == "done" and view.result.section_sources == jobs.section_sources("fallback")
+    assert view.status == "done" and view.result.section_sources == FALLBACK_NO_PROBLEMS
     internal = _internal(factory, job_id)
     assert internal["reason"] == "refusal"
-    assert internal["calls"][0]["refusal_category"] == "bio"
-    assert _stages(factory, job_id) == ["queued", "generating", "checking", "done"]
+    assert {c["refusal_category"] for c in internal["calls"]} == {"bio"}
+    assert fake.beta.messages.create.call_count == 2  # 거절된 요청은 다시 부르지 않는다(대체 모델 고정 라우팅)
+    assert _stages(factory, job_id) == ["queued", "generating", "generating", "checking", "done"]
     # 고객 응답에는 사유가 없다
     assert "refusal" not in json.dumps(view.model_dump(mode="json"))
 
 
-async def test_grounding_violation_is_internal_only(factory, make_fake_anthropic_client):
-    bad = {**_CLEAN, "interpretation": {"confusion_analysis": "정확도 0.12345 이다.", "distribution_analysis": ""}}
-    fake = make_fake_anthropic_client(bad)
+async def test_grounding_violation_is_internal_only(factory, make_section_client):
+    fake = make_section_client({"section_7_1": "정확도 0.12345 이다."})
     job_id, tasks = await _create(factory, client=fake)
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
-    assert view.result.section_sources == jobs.section_sources("fallback")
+    # 7.1 만 다시 만들고(또 같은 숫자) 그 칸만 규칙 문장 — 나머지 칸은 AI 그대로.
+    assert view.result.section_sources == {**LLM_NO_PROBLEMS, "7.1": "fallback"}
     internal = _internal(factory, job_id)
-    assert internal["reason"] == "grounding_failed"
-    assert "0.12345" in internal["grounding"]["violations"]
+    sec = internal["sections"]["7.1"]
+    assert (sec["outcome"], sec["http_calls"], sec["reason"]) == ("template", 2, "check:numbers")
+    assert [c["numbers"] for c in sec["checks"]] == [["0.12345"], ["0.12345"]]
+    assert "0.12345" in internal_violations(internal)
     assert "0.12345" not in json.dumps(view.model_dump(mode="json"))
+    assert [c["purpose"] for c in internal["calls"]].count("regenerate") == 1
 
 
-async def test_whole_job_deadline_fails_as_timeout(factory, monkeypatch, make_fake_anthropic_client):
+def internal_violations(internal: dict) -> set[str]:
+    return {v for sec in internal["sections"].values() for c in sec["checks"] for v in c.get("numbers", [])}
+
+
+async def test_whole_job_deadline_fails_as_timeout(factory, monkeypatch, make_section_client):
     monkeypatch.setattr(jobs, "JOB_DEADLINE_SECONDS", 0.05)
-    fake = make_fake_anthropic_client(_CLEAN, delay=2.0)
+    fake = make_section_client(delay=2.0)
     job_id, tasks = await _create(factory, client=fake)
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
@@ -386,16 +405,17 @@ async def test_whole_job_deadline_fails_as_timeout(factory, monkeypatch, make_fa
     assert len(view.benchmark_refs) > 0  # 8.1 표는 서술 실패와 무관하게 남는다
     internal = _internal(factory, job_id)
     assert internal["failure"] == "timeout"
-    # 호출 도중에 끊겨 호출 기록은 없지만 요청은 나갔다 — 시도 1, 비용은 모름(0 이 아니다)
-    assert (internal["calls"], internal["http_attempts"], internal["cost_usd"]) == ([], 1, None)
+    # 호출 도중에 끊겨 응답은 없지만 요청은 나갔다 — 시도 2(7·8장), 비용은 모름(0 이 아니다)
+    assert (internal["http_attempts"], internal["cost_usd"]) == (2, None)
+    assert all(c["http"] and "response_model" not in c for c in internal["calls"])
 
 
-async def test_job_path_is_not_bound_by_the_old_route_deadline(factory, monkeypatch, make_fake_anthropic_client):
+async def test_job_path_is_not_bound_by_the_old_route_deadline(factory, monkeypatch, make_section_client):
     """옛 경로의 서버 마감(120초)은 작업 경로에 걸리지 않는다 — 작업은 전체 10분 제한만 받는다."""
     from app.narrative import legacy as service
 
     monkeypatch.setattr(service, "NARRATIVE_DEADLINE_SECONDS", 0.05)
-    fake = make_fake_anthropic_client(_CLEAN, delay=0.3)
+    fake = make_section_client(delay=0.3)
     job_id, tasks = await _create(factory, client=fake)
     await _run_pending(tasks)
     assert _internal(factory, job_id)["source"] == "llm"
@@ -405,7 +425,7 @@ async def test_unexpected_error_fails_as_error(factory, monkeypatch):
     async def boom(*_a, **_k):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(jobs, "generate_narrative", boom)
+    monkeypatch.setattr(jobs, "generate_sections", boom)
     job_id, tasks = await _create(factory)
     await _run_pending(tasks)  # 밖으로 던지지 않는다
     view = await jobs.read_job(job_id, session_factory=factory)
@@ -426,9 +446,9 @@ async def test_slot_wait_limit_finishes_as_busy_without_calling(factory, monkeyp
     assert (await jobs.read_job(job_id, session_factory=factory)).status == "done"
 
 
-async def test_mapping_slots_do_not_block_narrative(factory, make_fake_anthropic_client):
+async def test_mapping_slots_do_not_block_narrative(factory, make_section_client):
     """매핑 칸이 다 차도 서술은 제 칸으로 돈다(칸 분리)."""
-    fake = make_fake_anthropic_client(_CLEAN)
+    fake = make_section_client()
     job_id, tasks = await _create(factory, client=fake)
     async with contextlib.AsyncExitStack() as stack:
         for _ in range(concurrency.MAX_CONCURRENT_MAPPING_CALLS):
@@ -491,7 +511,7 @@ async def test_job_row_limit_completes_immediately_without_a_row(factory, make_f
     tasks = BackgroundTasks()
     created = await jobs.create_job(_body(_request()), client=fake, session_factory=factory, background_tasks=tasks)
     assert (created.job_id, created.status, created.stage) == (None, "done", "done")
-    assert created.result.section_sources == jobs.section_sources("fallback")
+    assert created.result.section_sources == FALLBACK_NO_PROBLEMS
     assert [r.model_dump() for r in created.benchmark_refs] == [
         r.model_dump() for r in (await generate_narrative(None, _request())).benchmark_refs]
     assert tasks.tasks == [] and llm_budget.narrative.remaining() == before
@@ -580,7 +600,7 @@ def test_post_then_get_round_trip_without_key(api):
     assert (view["status"], view["stage"], view["failure"]) == ("done", "done", None)
     assert set(view["result"]) == {
         "interpretation", "conclusion", "recommendation_narrative", "recommendations", "section_sources"}
-    assert view["result"]["section_sources"] == jobs.section_sources("fallback")
+    assert view["result"]["section_sources"] == FALLBACK_NO_PROBLEMS
     assert view["benchmark_refs"] == body["benchmark_refs"]
     assert view["created_at"].endswith("Z") and view["updated_at"].endswith("Z")
 
@@ -592,7 +612,7 @@ def test_job_benchmark_refs_match_the_old_route(api):
 
 
 def test_job_narrative_matches_the_old_route_fallback(api):
-    """S3a 의 생성은 S1 한 번 호출을 감쌀 뿐이다 — 같은 요청의 규칙 문장이 옛 경로와 같다."""
+    """키가 없으면 작업 경로도 일곱 칸 템플릿이다 — 같은 요청의 규칙 문장이 옛 경로와 같다(S6 에서 템플릿을 고치기 전)."""
     old = TestClient(app).post("/api/generate-narrative", json=_body()).json()
     job_id = api.post("/api/narrative/jobs", json=_body()).json()["job_id"]
     result = api.get(f"/api/narrative/jobs/{job_id}").json()["result"]
@@ -600,13 +620,13 @@ def test_job_narrative_matches_the_old_route_fallback(api):
         assert result[key] == old[key], key
 
 
-def test_router_passes_the_anthropic_client(api, make_fake_anthropic_client):
-    fake = make_fake_anthropic_client(_CLEAN)
+def test_router_passes_the_anthropic_client(api, make_section_client):
+    fake = make_section_client()
     app.state.anthropic_client = fake
     job_id = api.post("/api/narrative/jobs", json=_body()).json()["job_id"]
     result = api.get(f"/api/narrative/jobs/{job_id}").json()["result"]
-    assert result["section_sources"] == jobs.section_sources("llm")
-    assert fake.beta.messages.create.call_count == 1
+    assert result["section_sources"] == LLM_NO_PROBLEMS  # _sample_request 는 문제가 없다 — 9장을 부르지 않는다
+    assert fake.beta.messages.create.call_count == 2
 
 
 def test_oversized_input_completes_with_rule_sentences_not_422(api):
@@ -614,7 +634,7 @@ def test_oversized_input_completes_with_rule_sentences_not_422(api):
     created = api.post("/api/narrative/jobs", json=big)
     assert created.status_code == 200, created.text
     view = api.get(f"/api/narrative/jobs/{created.json()['job_id']}").json()
-    assert view["status"] == "done" and view["result"]["section_sources"] == jobs.section_sources("fallback")
+    assert view["status"] == "done" and view["result"]["section_sources"]["8.2"] == "fallback"
 
 
 def test_malformed_request_is_still_422(api):
@@ -635,7 +655,7 @@ def test_row_limit_over_http_is_200_with_result(api):
     assert r.status_code == 200
     body = r.json()
     assert (body["job_id"], body["status"]) == (None, "done")
-    assert body["result"]["section_sources"] == jobs.section_sources("fallback") and body["benchmark_refs"]
+    assert set(body["result"]["section_sources"].values()) <= {"fallback", "fixed"} and body["benchmark_refs"]
 
 
 def test_unknown_job_is_404(api):
@@ -685,17 +705,20 @@ def _problems_request(**kw) -> NarrativeRequest:
     return req.model_copy(update={"fact_sheet": fs})
 
 
-async def test_template_filled_recommendations_mark_section_9_as_fallback(factory, make_fake_anthropic_client):
-    """AI 가 문제 하나에만 권고를 쓰면 다른 문제의 권고 줄은 규칙 템플릿이다 — 9칸을 AI 로 적지 않는다."""
-    content = {**_CLEAN, "recommendations": [
-        {"problem_id": "P1", "priority": "HIGH", "category": "데이터", "action": "라벨을 다시 확인한다", "expected_impact": "오류 감소"}]}
-    fake = make_fake_anthropic_client(content)
+async def test_template_filled_recommendations_mark_section_9_as_fallback(factory, make_section_client):
+    """AI 가 문제 하나에만 권고를 쓰면 9칸만 다시 만들고, 또 빠지면 그 문제의 권고 줄을 규칙 템플릿으로 채운다(D22) —
+    9칸을 AI 로 적지 않는다."""
+    only_p1 = [{"problem_id": "P1", "category": "데이터", "action": "라벨을 다시 확인한다", "expected_impact": "오류가 줄어든다"}]
+    fake = make_section_client({"recommendations": only_p1})
     job_id, tasks = await _create(factory, client=fake, req=_problems_request())
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
-    assert view.result.section_sources == {**jobs.section_sources("llm"), "9": "fallback"}
+    assert view.result.section_sources == {**LLM_WITH_PROBLEMS, "9": "fallback"}
     assert [r.problem_id for r in view.result.recommendations] == ["P1", "P2"]
-    assert _internal(factory, job_id)["recommendations_from_template"] == ["P2"]
+    internal = _internal(factory, job_id)
+    assert internal["recommendations_from_template"] == ["P2"]
+    assert internal["sections"]["9"]["outcome"] == "filled" and internal["sections"]["9"]["http_calls"] == 2
+    assert fake.beta.messages.create.call_count == 4  # 7·8·9장 + 9칸 다시 만들기
 
 
 def test_job_recommendations_match_the_old_route_with_problems(api):
@@ -706,32 +729,33 @@ def test_job_recommendations_match_the_old_route_with_problems(api):
     assert result["recommendations"] == old["recommendations"] and len(result["recommendations"]) == 2
 
 
-async def test_job_passes_no_inner_deadline(factory, monkeypatch):
-    """작업 경로는 _narrate 에 마감 None(작업 전체 제한만)을 넘긴다 — 옛 경로 120초가 끼어들지 않게."""
+async def test_job_passes_its_time_limits_to_the_generator(factory, monkeypatch):
+    """작업 경로는 생성기에 작업 전체 시간·슬롯 대기·호출 1회 제한을 넘긴다 — 옛 경로 120초는 끼어들지 않는다."""
     seen = {}
-    original = jobs.generate_narrative
+    original = jobs.generate_sections
 
     async def spy(client, req, **kw):
         seen.update(kw)
         return await original(client, req, **kw)
 
-    monkeypatch.setattr(jobs, "generate_narrative", spy)
+    monkeypatch.setattr(jobs, "generate_sections", spy)
     _, tasks = await _create(factory)
     await _run_pending(tasks)
-    assert seen["deadline"] is None and seen["slot_wait"] == jobs.JOB_SLOT_WAIT_SECONDS
+    assert seen["deadline_seconds"] == jobs.JOB_GENERATION_SECONDS < jobs.JOB_DEADLINE_SECONDS
+    assert seen["slot_wait"] == jobs.JOB_SLOT_WAIT_SECONDS and seen["call_timeout"] == jobs.JOB_CALL_TIMEOUT_SECONDS
 
 
-async def test_stage_write_failure_does_not_stop_the_job(factory, monkeypatch, make_fake_anthropic_client):
+async def test_stage_write_failure_does_not_stop_the_job(factory, monkeypatch, make_section_client):
     def broken(*_a, **_k):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(jobs, "_db_set_stage", broken)
-    fake = make_fake_anthropic_client(_CLEAN)
+    fake = make_section_client()
     job_id, tasks = await _create(factory, client=fake)
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
     assert view.status == "done" and _internal(factory, job_id)["source"] == "llm"
-    assert fake.beta.messages.create.call_count == 1
+    assert fake.beta.messages.create.call_count == 2
 
 
 async def test_finish_write_failure_is_swallowed(factory, monkeypatch):
@@ -844,11 +868,11 @@ def test_non_facts_format_error_is_still_422():
         jobs.parse_request(body)
 
 
-async def test_job_with_invalid_facts_still_calls_the_model(factory, make_fake_anthropic_client):
-    fake = make_fake_anthropic_client(_CLEAN)
+async def test_job_with_invalid_facts_still_calls_the_model(factory, make_section_client):
+    fake = make_section_client()
     job_id, tasks = await _create(factory, client=fake, raw=_with_facts({"declarations": {"risk_direction": "x"}}))
     await _run_pending(tasks)
-    fake.beta.messages.create.assert_called_once()
+    assert fake.beta.messages.create.call_count == 2  # 7·8장(문제가 없어 9장은 부르지 않는다)
     internal = _internal(factory, job_id)
     assert (internal["budget"], internal["trimmed"]) == ("reserved", [jobs.FACTS_DROPPED])
     assert internal["reason"] is None

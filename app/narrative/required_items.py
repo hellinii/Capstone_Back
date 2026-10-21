@@ -32,6 +32,7 @@ from typing import Any, Callable, Literal
 
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.derived import compute_derived
+from app.narrative.fallback import _VERDICT_LABEL
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTION_IDS
 
@@ -93,7 +94,9 @@ class RequiredItem:
 
 
 def _n(v) -> str:
-    return f"{v:g}" if isinstance(v, float) else str(v)
+    """판정과 무관한 실수는 소수 넷째 자리까지(허용 목록이 받는 표기 — grounding._add). 판정과 비교되는 값은 표시
+    문자열(*_text·display)을 쓴다 — 이 함수로 줄이지 않는다."""
+    return f"{round(v, 4):g}" if isinstance(v, float) else str(v)
 
 
 def _pct(ratio: float) -> str:
@@ -256,7 +259,7 @@ def _imbalance_ratio(ctx: Ctx) -> str | None:
         return None
     if ctx.task_type == "multilabel":
         # AI·템플릿이 쓰는 결론에는 절·문구 번호를 넣지 않는다(숫자 검문 대상이다). 정의 문장은 성적서가 찍는다.
-        text += " 멀티레이블 불균형 비율의 정의는 성적서가 고정 문구로 찍는다."
+        text += " 멀티레이블 불균형 비율의 정의 문장은 성적서가 따로 찍는다."
     return text
 
 
@@ -280,7 +283,7 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
     else:
         gaps, gaps_all = "정확도 − 매크로 F1 과 다수 − 소수 F1 차이 중 하나가", "정확도 − 매크로 F1 과 다수 − 소수 F1 차이가 모두"
     rule = _IMBALANCE_LEVEL[ie.level].format(gaps=gaps, gaps_all=gaps_all)
-    text = f"엔진 판단: {rule}. 다수({ie.majority_class})−소수({ie.minority_class}) F1 차이는 {gap}"
+    text = f"불균형 판단: {rule}. 다수({ie.majority_class})−소수({ie.minority_class}) F1 차이는 {gap}"
     if ie.accuracy_minus_macro_f1 is not None:
         acc = shown.accuracy_minus_macro_f1 if shown and shown.accuracy_minus_macro_f1 else _n(ie.accuracy_minus_macro_f1)
         text += f", 정확도 − 매크로 F1 은 {acc}"
@@ -346,7 +349,8 @@ def _no_benchmark(ctx: Ctx) -> str | None:
 
 # ── 8.2 종합 총평 ─────────────────────────────────────────────────────────────
 
-_VERDICT = {"PASS": "최종 합격", "CONDITIONAL_PASS": "조건부 합격", "FAIL": "최종 불합격", "INCONCLUSIVE": "판정 불가"}
+# 판정 이름 — 성적서 8.2 판정 상자와 같은 이름 한 벌(fallback 한 곳).
+_VERDICT = _VERDICT_LABEL
 _CAUSE = {
     "core_not_computed": "핵심 지표 산출 실패",
     "no_target": "핵심 지표 목표값 없음",

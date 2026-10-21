@@ -30,12 +30,13 @@
 - 서술 지갑: 작업을 만들 때 보고서 1건을 예약한다(AI 를 부를 작업만). 소진이면 규칙 문장으로 완료.
 - 작업 행 지갑(narrative_jobs): 시간당 작업 행 수 — AI 비용이 아니라 DB 행 수를 막는다. 넘으면 행 없이 규칙 문장
   결과를 작업 생성 응답에 바로 담는다(429 로 막지 않는다).
-- 호출 1회: 작업 경로의 클라이언트는 재시도 0(`max_retries=0`)·호출 시간 제한 JOB_CALL_TIMEOUT_SECONDS 로
-  부른다 — 작업 하나의 HTTP 시도는 이번 단계(S3a, S1 한 번 호출을 감쌈)에서 1회다.
+- 호출: 작업 경로의 클라이언트는 재시도 0(`max_retries=0`)·호출 시간 제한 JOB_CALL_TIMEOUT_SECONDS 로 부른다. 생성은
+  장별 호출 + 칸별 검문 사다리다(app.narrative.generator, S5) — 한 칸의 HTTP 호출은 최대 2회, 작업 하나는 많아야
+  장 3회 + 칸 다시 만들기 6회다. 작업 전체 제한 안에서 호출마다 남은 시간으로 제한을 줄인다.
 - 서술 슬롯 대기 상한: 넘으면 규칙 문장(busy).
 
 상호작용
-- 의존(import): app.narrative.service(generate_narrative), app.narrative.baselines, app.narrative.models,
+- 의존(import): app.narrative.generator(generate_sections), app.narrative.baselines, app.narrative.models,
   app.narrative.schemas, app.core.database(SessionLocal), app.core.llm_budget, app.core.concurrency
 - 사용처: app.narrative.router, tests
 """
@@ -67,7 +68,7 @@ from app.narrative.schemas import (
     NarrativeRequest,
     NarrativeResponse,
 )
-from app.narrative.legacy import generate_narrative
+from app.narrative.generator import GenerationResult, generate_sections
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,11 @@ logger = logging.getLogger(__name__)
 JOB_DEADLINE_SECONDS = 600.0
 # 작업 경로 AI 호출 1회의 시간 제한(재시도 0). 넘으면 그 호출은 실패로 끝나고 규칙 문장(사유 timeout)으로 완료한다.
 JOB_CALL_TIMEOUT_SECONDS = 300.0
-# 서술 슬롯 대기 상한. 넘으면 규칙 문장(사유 busy).
+# 서술 슬롯 대기 상한. 넘으면 그 호출의 칸은 규칙 문장(사유 busy).
 JOB_SLOT_WAIT_SECONDS = 120.0
+# 생성기에 주는 시간 — 전체 제한에서 끝 상태를 DB 에 쓸 여유를 뺀 만큼. 남은 시간이 모자라면 생성기가 호출하지 않고
+# 그 칸을 규칙 문장으로 끝낸다(작업 전체가 timeout 실패로 끝나지 않게).
+JOB_GENERATION_SECONDS = JOB_DEADLINE_SECONDS - 20.0
 # 유실 판정. 진행 중인 작업은 단계가 바뀔 때마다 updated_at 을 고친다. 가장 긴 무변화 구간은 호출 1회
 # (슬롯 대기 상한보다 길다)이므로, 그보다 여유만큼 더 오래 바뀌지 않았으면 작업이 멈춘 것이다.
 LOST_IDLE_SECONDS = JOB_CALL_TIMEOUT_SECONDS + 60.0
@@ -117,7 +121,7 @@ def record_retention() -> timedelta:
     return timedelta(days=_env_number("NARRATIVE_JOB_RETENTION_DAYS", 90.0, maximum=3650.0))
 
 
-# 칸(소절 번호) — 등록표 한 곳(app.narrative.sections). 7.3 은 AI 가 쓰기 전(S5 이전)에는 늘 고정 문구 15다.
+# 칸(소절 번호) — 등록표 한 곳(app.narrative.sections).
 SECTION_IDS = sections.SECTION_IDS
 
 
@@ -149,30 +153,15 @@ def is_expired(*, finished_at: datetime | None, now: datetime) -> bool:
     return finished_at is not None and now - finished_at > result_ttl()
 
 
-def section_sources(source: str, *, template_recommendations: bool = False) -> dict[str, str]:
-    """칸별 출처. 이번 단계(S3a)의 생성은 S1 한 번 호출이라 칸이 대개 같은 출처다 — S5 에서 칸마다 갈린다.
-
-    예외 하나: AI 가 쓴 응답이어도 권고가 없는 문제의 권고 줄은 규칙 템플릿으로 채운다(service._align_recommendations).
-    그때 9칸을 AI 로 적으면 규칙 문장을 AI 가 쓴 것처럼 표시하게 되므로 9칸은 fallback 으로 적는다.
-    """
-    value = "llm" if source == "llm" else "fallback"
-    out = {
-        s.id: "fixed" if s.fixed_until_generated else value
-        for s in sections.SECTIONS
-    }
-    if template_recommendations:
-        out["9"] = "fallback"
-    return out
-
-
-def customer_result(resp: NarrativeResponse, *, template_recommendations: bool = False) -> dict:
-    """옛 응답에서 고객용만 남긴다 — meta(모델·사유·숫자 검문 위반)를 칸별 출처로 바꾼다."""
+def customer_result(gen: GenerationResult) -> dict:
+    """생성 결과에서 고객용만 남긴다 — 서술 본문과 칸별 출처(생성기가 칸마다 정한 llm·fallback·fixed)."""
+    resp = gen.response
     result = NarrativeJobResult(
         interpretation=resp.interpretation,
         conclusion=resp.conclusion,
         recommendation_narrative=resp.recommendation_narrative,
         recommendations=resp.recommendations,
-        section_sources=section_sources(resp.meta.source, template_recommendations=template_recommendations),
+        section_sources=gen.section_sources,
     )
     return result.model_dump(mode="json")
 
@@ -182,6 +171,11 @@ def total_cost(calls: list[dict]) -> float | None:
     if any(c.get("cost_usd") is None for c in calls):
         return None
     return round(sum(c["cost_usd"] for c in calls), 6)
+
+
+def http_calls(calls: list[dict]) -> list[dict]:
+    """요청이 실제로 나간 호출(슬롯을 못 얻었거나 남은 시간이 없어 부르지 않은 것은 뺀다)."""
+    return [c for c in calls if c.get("http", True)]
 
 
 # ── 입력 상한 초과 → 줄이기 ─────────────────────────────────────────────────────
@@ -473,10 +467,10 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
             "서술 작업 행 시간당 상한(%d건) 초과 → 행 없이 규칙 문장으로 바로 완료(job_limit)",
             llm_budget.narrative_jobs.limit,
         )
-        resp = await generate_narrative(None, request, forced_reason="job_limit")
+        gen = await generate_sections(None, request, forced_reason="job_limit")
         return NarrativeJobCreated(
             job_id=None, status="done", stage="done", benchmark_refs=benchmark_refs,
-            result=NarrativeJobResult(**customer_result(resp)),
+            result=NarrativeJobResult(**customer_result(gen)),
         )
 
     # AI 를 부를 작업만 서술 지갑에서 보고서 1건을 예약한다. 사유가 이미 정해진 작업은 AI 를 부르지 않는다.
@@ -533,14 +527,17 @@ async def run_job(
     테스트는 이 함수를 직접 await 해 단계와 기록을 본다.
     """
     started = time.perf_counter()
-    trace: dict = {"calls": []}
     stages: list[dict] = []
+    gen_trace: dict = {}
+    # 장별 호출이 동시에 단계를 쓴다 — 한 번에 하나씩(SQLite 는 연결 하나를 스레드끼리 같이 쓰면 쓰기가 깨진다).
+    stage_lock = asyncio.Lock()
 
     async def on_stage(stage: str) -> None:
         moment = _utcnow()
         stages.append({"stage": stage, "at": iso_utc(moment)})
         try:
-            await run_in_threadpool(_db_set_stage, session_factory, job_id, stage, moment)
+            async with stage_lock:
+                await run_in_threadpool(_db_set_stage, session_factory, job_id, stage, moment)
         except Exception:
             # 단계 표시는 진행 안내일 뿐이다 — 쓰기에 실패해도 서술은 계속 만든다(못 쓰면 유실 판정이 앞당겨질 뿐).
             logger.exception("서술 작업 %s 단계(%s) 기록 실패", job_id, stage)
@@ -553,15 +550,14 @@ async def run_job(
             job_client = (
                 client.with_options(timeout=JOB_CALL_TIMEOUT_SECONDS, max_retries=0) if client is not None else None
             )
-            resp = await generate_narrative(
+            gen = await generate_sections(
                 job_client, request,
-                budget_reserved=budget_reserved, forced_reason=forced_reason,
-                deadline=None, slot_wait=JOB_SLOT_WAIT_SECONDS,
-                on_stage=on_stage, trace=trace,
+                forced_reason=forced_reason,
+                deadline_seconds=JOB_GENERATION_SECONDS, slot_wait=JOB_SLOT_WAIT_SECONDS,
+                call_timeout=JOB_CALL_TIMEOUT_SECONDS, on_stage=on_stage,
+                trace_into=gen_trace,
             )
-            narrative = customer_result(
-                resp, template_recommendations=bool(trace.get("recommendations_from_template")),
-            )
+            narrative = customer_result(gen)
     except TimeoutError:
         failure = "timeout"
         logger.warning("서술 작업 %s 전체 제한(%.0f초) 초과 → 실패(timeout)", job_id, JOB_DEADLINE_SECONDS)
@@ -572,20 +568,15 @@ async def run_job(
     moment = _utcnow()
     status = "done" if failure is None else "failed"
     stages.append({"stage": status, "at": iso_utc(moment)})
-    calls = trace.get("calls", [])
-    # 호출 도중에 전체 제한이 끊으면 호출 기록이 남지 않는다 — 시작한 시도 수로 세고, 비용은 모름(None)으로 둔다.
-    attempts = max(len(calls), trace.get("attempts_started", 0))
+    calls = gen_trace.get("calls", [])
+    sent = http_calls(calls)
     internal = {
         "failure": failure,
-        "source": trace.get("source"),
-        "reason": trace.get("reason"),
-        "grounding": trace.get("grounding"),
+        **{k: v for k, v in gen_trace.items() if k != "calls"},
         "calls": calls,
-        "http_attempts": attempts,
-        "cost_usd": total_cost(calls) if attempts == len(calls) else None,
-        "recommendations_from_template": trace.get("recommendations_from_template", []),
-        "slot_wait_seconds": trace.get("slot_wait_seconds"),
-        "prompt_chars": trace.get("prompt_chars"),
+        "http_attempts": len(sent),
+        # 응답을 받지 못한 호출(끊김)이 있으면 비용을 모른다(None) — 추정하지 않는다.
+        "cost_usd": total_cost(sent),
         "seconds_total": round(time.perf_counter() - started, 3),
         "stages": stages,
     }

@@ -18,7 +18,7 @@
 
 상호작용
 - 의존(import): anthropic(예외 타입), json, logging, os, time
-- 사용처: app.narrative.service
+- 사용처: app.narrative.generator(작업 경로), app.narrative.legacy(옛 경로)
 """
 import json
 import logging
@@ -156,7 +156,7 @@ async def call_narrative_llm(client, *, system: str, user: str, schema: dict, ef
     """서술 JSON 을 한 번 요청한다. 예외를 던지지 않고 실패는 LLMResult.failure 로 돌려준다.
 
     failure: refusal(대체도 거절·대체 없음·대체가 한도에 걸림 — 세 경우 모두) · max_tokens(잘림) ·
-    model_unavailable(모델 없음) · timeout · api_error · invalid_json.
+    model_unavailable(모델 없음) · rate_limited(429) · timeout · api_error · invalid_json.
     """
     model = narrative_model()
     record = CallRecord(requested_model=model, effort=effort or narrative_effort())
@@ -178,6 +178,9 @@ async def call_narrative_llm(client, *, system: str, user: str, schema: dict, ef
         return _finish(record, started, "timeout", error=repr(exc))
     except anthropic.NotFoundError as exc:
         return _finish(record, started, "model_unavailable", error=repr(exc))
+    except anthropic.RateLimitError as exc:
+        # 사용 한도(429). 작업 경로는 장별 동시 호출을 차례 호출로 바꿔 한 번 더 부른다(app.narrative.generator).
+        return _finish(record, started, "rate_limited", error=repr(exc))
     except anthropic.APIError as exc:
         return _finish(record, started, "api_error", error=repr(exc))
 
