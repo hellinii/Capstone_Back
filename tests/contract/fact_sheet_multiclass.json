@@ -194,10 +194,18 @@
       "majority_minus_minority_f1": 0.1177,
       "majority_class": "dog",
       "minority_class": "cat",
+      "accuracy": 0.335,
+      "macro_f1": 0.3314,
+      "majority_f1": 0.3919,
+      "minority_f1": 0.2742,
       "display": {
         "imbalance_ratio": "1.2982",
         "accuracy_minus_macro_f1": "0.0036",
-        "majority_minus_minority_f1": "0.1177"
+        "majority_minus_minority_f1": "0.1177",
+        "accuracy": "0.335",
+        "macro_f1": "0.3314",
+        "majority_f1": "0.3919",
+        "minority_f1": "0.2742"
       }
     },
     "problems": [

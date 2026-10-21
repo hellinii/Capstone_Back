@@ -196,10 +196,18 @@
       "majority_minus_minority_f1": -0.0149,
       "majority_class": "0",
       "minority_class": "1",
+      "accuracy": 0.505,
+      "macro_f1": 0.5049,
+      "majority_f1": 0.4975,
+      "minority_f1": 0.5123,
       "display": {
         "imbalance_ratio": "1.1053",
         "accuracy_minus_macro_f1": "0.0001",
-        "majority_minus_minority_f1": "-0.0149"
+        "majority_minus_minority_f1": "-0.0149",
+        "accuracy": "0.505",
+        "macro_f1": "0.5049",
+        "majority_f1": "0.4975",
+        "minority_f1": "0.5123"
       }
     },
     "problems": [
