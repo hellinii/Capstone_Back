@@ -1,4 +1,4 @@
-"""test_section_models.py — 칸별 모델 이름(section_models, 서술 설계 결정 4 — 성적서 화면의 '작성 기록').
+"""test_section_models.py — 칸별 모델 이름(section_models, 사용자 결정 2026-10-22 — 성적서 화면의 '작성 기록').
 
 규칙: 키는 늘 일곱 칸(SECTION_IDS). 출처 llm 칸만 그 글을 낸 호출의 응답 모델, fallback·fixed 는 None.
 '그 글을 낸 호출' — 다시 만든 글이면 다시 만든 호출, 첫 글을 둬 뒀다 실으면(kept_first) 첫 호출의 모델.

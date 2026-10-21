@@ -3,7 +3,7 @@
 흐름(계획 설계 요지 2·5)
 1. 첫 생성은 장마다 한 번 — 7장(7.1·7.2·7.3)·8장(8.1·8.2·8.3)·9장(9.1·9.2·권고표)을 동시에 부른다. 문제가 0개면 9장은
    부르지 않는다(9칸 = 코드가 정한 문장, 출처 fixed). 서술 지표 전부가 기준표에 없고 성적서가 고정 문구 16 을 찍으면
-   8장 호출에서 8.1 을 뺀다(8.1 = 빈 글, 출처 fixed — required_items.benchmark_printed_only, 서술 설계 결정 5).
+   8장 호출에서 8.1 을 뺀다(8.1 = 빈 글, 출처 fixed — required_items.benchmark_printed_only, 사용자 결정 2026-10-22).
 2. 호출이 실패하면: 429(사용 한도)는 차례로 한 번 더, 호출 오류·시간 초과·JSON 오류는 한 번 더(SDK 재시도 0 — 앱에서 1회).
    거절(refusal 세 경우)·잘림(max_tokens)·모델 없음은 같은 요청으로 다시 부르지 않고 그 장의 칸을 규칙 템플릿으로.
    거절된 요청은 약 1시간 대체 모델로 고정 라우팅되므로 같은 요청을 되풀이하지 않는다.
@@ -14,7 +14,7 @@
    한 칸의 HTTP 호출은 최대 2회(첫 장 호출이 재시도됐으면 그 칸은 다시 만들지 않는다).
 5. 칸을 섞은 최종본에 판정 모순 검사를 한 번 더 — 걸린 AI 칸은 템플릿으로.
 6. 기록: 고객용은 칸별 출처(section_sources)와 칸별 모델(section_models — AI 칸만 그 글을 낸 호출의 응답 모델, 규칙
-   문장·고정 문구 칸은 None, 서술 설계 결정 4). 내부용(trace)은 호출마다 응답 모델·거절 종류·토큰·비용·슬롯 대기·
+   문장·고정 문구 칸은 None, 사용자 결정 2026-10-22). 내부용(trace)은 호출마다 응답 모델·거절 종류·토큰·비용·슬롯 대기·
    칸마다 검사 결과·시도 수·모델·7.3 원문(추가 관찰 승격 자료). 입력(사실 시트·고객 입력)은 남기지 않는다.
 
 시간: 작업 전체 제한(jobs.JOB_DEADLINE_SECONDS) 안에서 호출마다 남은 시간으로 제한을 줄인다. 남은 시간이 MIN_CALL_SECONDS
@@ -448,7 +448,7 @@ def _result(fs, states: dict, trace: dict, reason: str | None, started: float, *
     for sid in SECTION_IDS:
         parts.update(states[sid].parts)
     sources = {sid: states[sid].source for sid in SECTION_IDS}
-    # 칸 모델 — 출처가 llm 인 칸만(규칙 문장·고정 문구로 바뀐 칸은 모델이 없다. 서술 설계 결정 4).
+    # 칸 모델 — 출처가 llm 인 칸만(규칙 문장·고정 문구로 바뀐 칸은 모델이 없다. 사용자 결정 2026-10-22).
     models = {sid: states[sid].model if sources[sid] == "llm" else None for sid in SECTION_IDS}
     non_fixed = [v for v in sources.values() if v != "fixed"]
     overall = "llm" if non_fixed and all(v == "llm" for v in non_fixed) else "fallback"

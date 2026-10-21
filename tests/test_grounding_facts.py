@@ -128,7 +128,7 @@ def test_display_texts_of_engine_values_are_allowed():
 
 
 def test_imbalance_effect_four_values_are_allowed_only_when_sent():
-    """엔진이 새로 주는 네 값(정확도·매크로 F1·다수/소수 F1, 사용자 결정 6)은 사실 시트에 실리면 허용 — 옛 응답(키 없음)은 아님."""
+    """엔진이 새로 주는 네 값(정확도·매크로 F1·다수/소수 F1, 사용자 결정 2026-10-22)은 사실 시트에 실리면 허용 — 옛 응답(키 없음)은 아님."""
     from app.narrative.schemas import ImbalanceEffectFact
 
     base = dict(

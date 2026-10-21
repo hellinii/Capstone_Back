@@ -100,7 +100,7 @@ def code_prints(fs: FactSheet, sentence_id: str) -> bool:
 
 
 def benchmark_printed_only(fs: FactSheet, benchmark_refs: list[dict], conclusions: list) -> bool:
-    """8.1 칸이 성적서 고정 문구 16('선택한 지표에 내부 참조 기준치가 없어 …')뿐인가(서술 설계 결정 5).
+    """8.1 칸이 성적서 고정 문구 16('선택한 지표에 내부 참조 기준치가 없어 …')뿐인가(사용자 결정 2026-10-22).
 
     서술 지표가 있는데(비교 기준 없음 항목 8.1-03 이 결론에 있다) 기준표에 있는 지표가 하나도 없고(참조 표가 빈다),
     성적서가 문장 16 을 찍을 때(code_prints — facts 상한으로 문장 목록을 비웠어도 화면은 찍는다). 그러면 AI 도 규칙

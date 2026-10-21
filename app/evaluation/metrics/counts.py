@@ -136,7 +136,7 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     멀티레이블(자체 설정): 레이블 등장 빈도로 IR 을 내고, 다수·소수 레이블의 F1 차만 본다.
     한 표본에 레이블이 여럿이라 "정확도 − 매크로 F1" 은 뜻이 서지 않아 null 로 둔다.
 
-    차이를 만든 네 값도 싣는다(3절 불균형 진단 문장, 사용자 결정 6): accuracy·macro_f1(판정에 쓴 것과 같은 정의 —
+    차이를 만든 네 값도 싣는다(3절 불균형 진단 문장, 사용자 결정 2026-10-22): accuracy·macro_f1(판정에 쓴 것과 같은 정의 —
     정확도와 클래스별 F1 의 단순 평균; 멀티레이블은 판정에 쓰지 않아 둘 다 null)·majority_f1·minority_f1. 판정과 무관한
     값이라 display 의 같은 이름 칸은 엔진의 평소 표기(plain_text — 넷째 자리)다.
 
