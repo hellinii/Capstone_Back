@@ -558,3 +558,29 @@ def test_copied_requests_are_not_mutated_by_templates():
     before = copy.deepcopy(req.model_dump())
     _sections(req)
     assert req.model_dump() == before
+
+
+# ── 변이 보강(세션 A) ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("other, expected", [(0.3363, "가중 평균 F1 이 매크로 F1 보다 0.0049 높다"),
+                                              (0.3265, "가중 평균 F1 이 매크로 F1 보다 0.0049 낮다")])
+def test_average_gap_direction_follows_the_sign(other, expected):
+    """8.2 macro vs weighted — difference = 다른 평균 − 매크로(프론트 averageGap). 방향 낱말이 부호를 따른다."""
+    diff = round(other - 0.3314, 4)
+    facts = {"selected_metrics": ["M1", "M22"], "average_gap": {
+        "kind": "macro_vs_weighted", "macro_f1": 0.3314, "other_f1": other, "difference": diff,
+        "difference_text": f"{diff:g}", "reference_class": {"label": "dog", "support": 74, "f1": 0.41}}}
+    fs = FactSheet(verdict="FAIL", score=0.0, facts=facts)
+    text = next(c.template_text for c in select_items(fs, {"class_label_descriptions": {"dog": "개"}}, "multiclass")
+                if c.item_id == "8.2-07")
+    assert expected in text and "표본이 가장 많은 클래스는 dog(개)이며 표본 74건, F1 0.41이다." in text
+    assert verify_grounding([text], build_number_whitelist(fs, [], compute_derived(fs, task_type="multiclass"))).passed
+
+
+@pytest.mark.parametrize("word, pair, expected", [
+    ("0.1", "은/는", "은"), ("21", "이/가", "이"), ("0.7", "과/와", "과"), ("0.8", "을/를", "을"), ("0.2", "은/는", "는"),
+])
+def test_josa_after_digits_with_rieul_final(word, pair, expected):
+    """1(일)·7(칠)·8(팔)은 받침이 있다 — '으로/로' 만 보면 ㄹ 받침과 받침 없음이 같은 답이라 다른 조사로도 본다."""
+    assert josa(word, pair) == expected
