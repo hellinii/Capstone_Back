@@ -25,7 +25,7 @@ from app.evaluation.labels import normalize_label
 from app.evaluation.preprocessor import class_distribution_of
 
 from . import binary, common
-from .display import judged_text
+from .display import judged_text, plain_text
 
 
 def calculate_confusion_counts(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
@@ -136,6 +136,10 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     멀티레이블(자체 설정): 레이블 등장 빈도로 IR 을 내고, 다수·소수 레이블의 F1 차만 본다.
     한 표본에 레이블이 여럿이라 "정확도 − 매크로 F1" 은 뜻이 서지 않아 null 로 둔다.
 
+    차이를 만든 네 값도 싣는다(3절 불균형 진단 문장, 사용자 결정 6): accuracy·macro_f1(판정에 쓴 것과 같은 정의 —
+    정확도와 클래스별 F1 의 단순 평균; 멀티레이블은 판정에 쓰지 않아 둘 다 null)·majority_f1·minority_f1. 판정과 무관한
+    값이라 display 의 같은 이름 칸은 엔진의 평소 표기(plain_text — 넷째 자리)다.
+
     정답이나 예측이 없거나 정답 클래스가 하나뿐이면 예외 — 엔진이 키를 두지 않는다.
     """
     task_type = mapping_dict.get("_task_type")
@@ -151,12 +155,13 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
         labels = [normalize_label(l) for l in mapping_dict.get("_mlb_classes", [])]
         per_label = f1_score(y_true, y_pred, average=None, zero_division=0)
         f1_by = dict(zip(labels, (float(v) for v in per_label)))
-        accuracy_gap = None
+        accuracy = macro_f1 = accuracy_gap = None
     else:
         kwargs = common._label_kwargs(df, mapping_dict, y_true)
         per_class = f1_score(y_true, y_pred, average=None, zero_division=0, **kwargs)
         f1_by = dict(zip((normalize_label(l) for l in kwargs["labels"]), (float(v) for v in per_class)))
-        accuracy_gap = float(accuracy_score(y_true, y_pred)) - float(np.mean(per_class))
+        accuracy, macro_f1 = float(accuracy_score(y_true, y_pred)), float(np.mean(per_class))
+        accuracy_gap = accuracy - macro_f1
     class_gap = f1_by[majority] - f1_by[minority]
 
     if _clean(ratio) < IMBALANCE_MILD_BELOW:
@@ -177,10 +182,18 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
             "accuracy_minus_macro_f1": None if accuracy_gap is None
             else judged_text(accuracy_gap, IMBALANCE_F1_GAP, over_gap(accuracy_gap)),
             "majority_minus_minority_f1": judged_text(class_gap, IMBALANCE_F1_GAP, over_gap(class_gap)),
+            "accuracy": None if accuracy is None else plain_text(accuracy),
+            "macro_f1": None if macro_f1 is None else plain_text(macro_f1),
+            "majority_f1": plain_text(f1_by[majority]),
+            "minority_f1": plain_text(f1_by[minority]),
         },
         "imbalance_ratio": round(ratio, 4),
         "accuracy_minus_macro_f1": None if accuracy_gap is None else round(accuracy_gap, 4),
         "majority_minus_minority_f1": round(class_gap, 4),
+        "accuracy": None if accuracy is None else round(accuracy, 4),
+        "macro_f1": None if macro_f1 is None else round(macro_f1, 4),
+        "majority_f1": round(f1_by[majority], 4),
+        "minority_f1": round(f1_by[minority], 4),
         "majority_class": majority,
         "minority_class": minority,
     }

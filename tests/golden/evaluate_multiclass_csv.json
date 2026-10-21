@@ -282,17 +282,25 @@
         "unit": "sample"
       },
       "imbalance_effect": {
+        "accuracy": 0.335,
         "accuracy_minus_macro_f1": 0.0036,
         "display": {
+          "accuracy": "0.335",
           "accuracy_minus_macro_f1": "0.0036",
           "imbalance_ratio": "1.2982",
-          "majority_minus_minority_f1": "0.1177"
+          "macro_f1": "0.3314",
+          "majority_f1": "0.3919",
+          "majority_minus_minority_f1": "0.1177",
+          "minority_f1": "0.2742"
         },
         "imbalance_ratio": 1.2982,
         "level": "mild",
+        "macro_f1": 0.3314,
         "majority_class": "dog",
+        "majority_f1": 0.3919,
         "majority_minus_minority_f1": 0.1177,
-        "minority_class": "cat"
+        "minority_class": "cat",
+        "minority_f1": 0.2742
       }
     }
   },

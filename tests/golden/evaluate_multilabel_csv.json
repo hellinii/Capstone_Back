@@ -347,17 +347,25 @@
         "unit": "label_cell"
       },
       "imbalance_effect": {
+        "accuracy": null,
         "accuracy_minus_macro_f1": null,
         "display": {
+          "accuracy": null,
           "accuracy_minus_macro_f1": null,
           "imbalance_ratio": "1.1031",
-          "majority_minus_minority_f1": "0.0134"
+          "macro_f1": null,
+          "majority_f1": "0.4455",
+          "majority_minus_minority_f1": "0.0134",
+          "minority_f1": "0.4322"
         },
         "imbalance_ratio": 1.1031,
         "level": "mild",
+        "macro_f1": null,
         "majority_class": "finance",
+        "majority_f1": 0.4455,
         "majority_minus_minority_f1": 0.0134,
-        "minority_class": "sports"
+        "minority_class": "sports",
+        "minority_f1": 0.4322
       }
     }
   },

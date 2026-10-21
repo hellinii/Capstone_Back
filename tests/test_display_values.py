@@ -48,7 +48,11 @@ def test_imbalance_effect_carries_display_strings():
     rows = [(1, 1, 0.9)] * 3 + [(1, 0, 0.4)] * 2 + [(0, 0, 0.1)] * 10 + [(0, 1, 0.6)] * 1
     ie = _binary(rows)["imbalance_effect"]
     d = ie["display"]
-    assert set(d) == {"imbalance_ratio", "accuracy_minus_macro_f1", "majority_minus_minority_f1"}
+    assert set(d) == {"imbalance_ratio", "accuracy_minus_macro_f1", "majority_minus_minority_f1",
+                      "accuracy", "macro_f1", "majority_f1", "minority_f1"}
+    # 판정과 무관한 네 값은 엔진의 평소 표기(넷째 자리) — 숫자 칸과 같은 값.
+    for key in ("accuracy", "macro_f1", "majority_f1", "minority_f1"):
+        assert float(d[key]) == ie[key], key
     assert float(d["imbalance_ratio"]) == pytest.approx(ie["imbalance_ratio"])
     assert float(d["majority_minus_minority_f1"]) == pytest.approx(ie["majority_minus_minority_f1"])
 
@@ -58,6 +62,19 @@ def test_multilabel_imbalance_display_has_no_accuracy_gap():
     maps = [{"role": "true_labels", "column": "t"}, {"role": "pred_labels", "column": "p"}]
     ie = evaluate(df, maps, "multilabel", ["M15"])["imbalance_effect"]
     assert ie["display"]["accuracy_minus_macro_f1"] is None
+    # 멀티레이블은 정확도·매크로 F1 을 판정에 쓰지 않는다 — 둘 다 null, 다수·소수 F1 은 있다.
+    assert ie["accuracy"] is ie["macro_f1"] is ie["display"]["accuracy"] is ie["display"]["macro_f1"] is None
+    assert ie["majority_f1"] is not None and ie["display"]["minority_f1"] is not None
+
+
+def test_plain_text_is_the_usual_four_digits():
+    """판정과 무관한 값 — 넷째 자리 반올림, 끝의 0 은 뺀다. 기준 근처라도 자릿수를 늘리지 않는다(judged_text 와 다름)."""
+    from app.evaluation.metrics.display import plain_text
+
+    assert plain_text(5 / 9) == "0.5556"
+    assert plain_text(0.49996) == "0.5"
+    assert plain_text(1.0) == "1"
+    assert plain_text(-0.00001) == "0"
 
 
 def test_threshold_gain_carries_notable_and_text():

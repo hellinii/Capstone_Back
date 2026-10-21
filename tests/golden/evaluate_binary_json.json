@@ -240,17 +240,25 @@
         "notable": true
       },
       "imbalance_effect": {
+        "accuracy": 0.505,
         "accuracy_minus_macro_f1": 0.0001,
         "display": {
+          "accuracy": "0.505",
           "accuracy_minus_macro_f1": "0.0001",
           "imbalance_ratio": "1.1053",
-          "majority_minus_minority_f1": "-0.0149"
+          "macro_f1": "0.5049",
+          "majority_f1": "0.4975",
+          "majority_minus_minority_f1": "-0.0149",
+          "minority_f1": "0.5123"
         },
         "imbalance_ratio": 1.1053,
         "level": "mild",
+        "macro_f1": 0.5049,
         "majority_class": "0",
+        "majority_f1": 0.4975,
         "majority_minus_minority_f1": -0.0149,
-        "minority_class": "1"
+        "minority_class": "1",
+        "minority_f1": 0.5123
       },
       "pr_curve": {
         "precision": [

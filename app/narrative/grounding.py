@@ -315,6 +315,15 @@ def build_number_whitelist(
                 continue
             _add_judged(wl, val, text, 4)
             _add_judged(wl, abs(val), text.lstrip("-") if text else None, 4)
+        # 차이를 만든 네 값(정확도·매크로 F1·다수/소수 F1) — 사실 시트에 실리면 인용할 수 있다. 판정과 무관한 평소 표기.
+        for val, text in (
+            (ie.accuracy, shown.accuracy if shown else None),
+            (ie.macro_f1, shown.macro_f1 if shown else None),
+            (ie.majority_f1, shown.majority_f1 if shown else None),
+            (ie.minority_f1, shown.minority_f1 if shown else None),
+        ):
+            if val is not None:
+                _add_judged(wl, val, text, 4)
         _add_client_numbers(wl, ie.majority_class)
         _add_client_numbers(wl, ie.minority_class)
         _add(wl, IMBALANCE_MILD_BELOW)

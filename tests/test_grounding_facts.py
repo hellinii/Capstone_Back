@@ -125,3 +125,26 @@ def test_display_texts_of_engine_values_are_allowed():
     )
     fs = _fs(f1_threshold_gain=gain, imbalance_effect=ie)
     assert _passes(fs, "향상 여지는 0.09996 이고 불균형 비율은 1.49996, 소수 클래스 F1 이 0.0149 높다.")
+
+
+def test_imbalance_effect_four_values_are_allowed_only_when_sent():
+    """엔진이 새로 주는 네 값(정확도·매크로 F1·다수/소수 F1, 사용자 결정 6)은 사실 시트에 실리면 허용 — 옛 응답(키 없음)은 아님."""
+    from app.narrative.schemas import ImbalanceEffectFact
+
+    base = dict(
+        level="affected", imbalance_ratio=3.5, accuracy_minus_macro_f1=0.0056, majority_minus_minority_f1=0.1,
+        majority_class="neg", minority_class="pos",
+    )
+    text = "정확도 0.5677, 매크로 F1 0.5621, 다수 F1 0.6123, 소수 F1 0.5123 이다."
+    old = ImbalanceEffectFact(**base, display={
+        "imbalance_ratio": "3.5", "accuracy_minus_macro_f1": "0.0056", "majority_minus_minority_f1": "0.1"})
+    assert not _passes(_fs(imbalance_effect=old), text)
+    new = ImbalanceEffectFact(
+        **base, accuracy=0.5677, macro_f1=0.5621, majority_f1=0.6123, minority_f1=0.5123,
+        display={"imbalance_ratio": "3.5", "accuracy_minus_macro_f1": "0.0056", "majority_minus_minority_f1": "0.1",
+                 "accuracy": "0.5677", "macro_f1": "0.5621", "majority_f1": "0.6123", "minority_f1": "0.5123"},
+    )
+    assert _passes(_fs(imbalance_effect=new), text)
+    # display 없이 숫자 칸만 있어도(표시 문자열이 없는 경우) 값으로 허용한다.
+    bare = ImbalanceEffectFact(**base, accuracy=0.5677, macro_f1=0.5621, majority_f1=0.6123, minority_f1=0.5123)
+    assert _passes(_fs(imbalance_effect=bare), text)

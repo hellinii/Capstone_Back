@@ -10,6 +10,9 @@
 상호작용
 - 의존(import): math
 - 사용처: metrics.counts(imbalance_effect.display), metrics.binary(f1_threshold_gain.gain_text)
+
+판정과 무관한 값(기준과 비교하지 않는 값 — 불균형 영향의 정확도·매크로 F1·다수/소수 F1)은 `plain_text` 로 엔진의
+평소 자릿수(넷째 자리, round(x, 4) 와 같은 값)만 찍는다.
 """
 import math
 
@@ -22,6 +25,11 @@ MAX_DIGITS = 9
 def _text(value: float, digits: int) -> str:
     text = f"{round(float(value), digits):.{digits}f}".rstrip("0").rstrip(".")
     return "0" if text in ("-0", "") else text
+
+
+def plain_text(value: float, digits: int = DEFAULT_DIGITS) -> str:
+    """판정과 무관한 값의 표시 문자열 — 엔진이 싣는 값(round(x, 4))과 같은 자릿수, 끝의 0 은 뺀다(judged_text 와 같은 모양)."""
+    return _text(value, digits)
 
 
 def judged_text(value: float, threshold: float, meets: bool, digits: int = DEFAULT_DIGITS) -> str:

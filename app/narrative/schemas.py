@@ -246,8 +246,14 @@ class ImbalanceEffectFact(BaseModel):
     majority_minus_minority_f1: float        = Field(description="다수 F1 − 소수 F1 (음수일 수 있다)")
     majority_class:             str
     minority_class:             str
+    # 차이를 만든 네 값(엔진이 새로 준다 — 3절 불균형 진단 문장, 사용자 결정 6). 옛 응답에는 없다(선택).
+    accuracy:                   float | None = Field(default=None, description="정확도. 멀티레이블은 None")
+    macro_f1:                   float | None = Field(default=None, description="매크로 F1(클래스별 F1 평균). 멀티레이블은 None")
+    majority_f1:                float | None = Field(default=None, description="다수 클래스·레이블의 F1")
+    minority_f1:                float | None = Field(default=None, description="소수 클래스·레이블의 F1")
     display:                    "ImbalanceDisplayFact | None" = Field(
-        default=None, description="세 값의 표시 문자열 — 판정과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2)",
+        default=None,
+        description="표시 문자열 — 세 판정 값은 판정과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2), 네 값은 평소 넷째 자리",
     )
 
 
@@ -256,6 +262,11 @@ class ImbalanceDisplayFact(BaseModel):
     imbalance_ratio:            NumText
     accuracy_minus_macro_f1:    NumText | None = None
     majority_minus_minority_f1: NumText
+    # 판정과 무관한 네 값(엔진 plain_text — 넷째 자리). 옛 응답에는 없다.
+    accuracy:                   NumText | None = None
+    macro_f1:                   NumText | None = None
+    majority_f1:                NumText | None = None
+    minority_f1:                NumText | None = None
 
 
 ImbalanceEffectFact.model_rebuild()
