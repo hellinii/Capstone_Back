@@ -204,7 +204,9 @@ async def generate_sections(
 
     def template(sid: str, reason: str) -> None:
         st = states[sid]
-        st.parts = fallback.section_template(sid, fs, refs, derived)
+        st.parts = fallback.section_template(
+            sid, fs, refs, derived, task_type=req.task_type.value, client_inputs=req.client_inputs, conclusions=conclusions,
+        )
         if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems):
             st.source, st.outcome = "fixed", "fixed"  # 7.3 을 검문으로 뺐으면 호출부가 dropped 로 덮는다
         else:

@@ -289,9 +289,14 @@ def test_trimmed_fixed_sentences_are_named_in_korean_and_interpret_only_falls_ba
     assert "fixed_sentences" not in msg and "mystery_key" not in msg
     assert "성적서 고정 문장(3개 뺌)" in msg and "그 밖의 표(2개 뺌)" in msg
     assert "아래 문장" not in msg
-    assert "'오분류의 성격' 값 그대로 쓰고" in msg
+    # S6: 덜어 낸 것은 AI 에게 보내는 목록뿐이고 화면은 17 을 그대로 찍는다(프론트 assembleEvaluatedReport 의 errorRatioSentence
+    # 는 facts 자르기와 무관) — AI 가 숫자를 직접 쓰면 두 번 찍힌다. 그래서 '해석만'을 '따로 숫자로 찍는다'로 알린다.
+    assert "성적서가 따로 숫자로 찍는다" in msg
+    assert "'오분류의 성격' 값 그대로 쓰고" not in msg
     legacy = _ctx(_contract("legacy_main"))[0]
-    assert "아래 문장" not in prompt.build_user_message(legacy, CHAPTERS["7"])
+    legacy_msg = prompt.build_user_message(legacy, CHAPTERS["7"])
+    assert "아래 문장" not in legacy_msg
+    assert "'오분류의 성격' 값 그대로 쓰고" in legacy_msg  # 옛 요청(facts 없음)은 성적서가 찍지 않는다
 
 
 def test_regenerating_one_section_does_not_forbid_its_own_chapters_numbers():

@@ -615,8 +615,9 @@ def test_fallback_states_target_level_and_passes_grounding():
     resp = build_fallback_narrative(fs, refs, derived, reason="no_key")
 
     benchmark = resp.conclusion.benchmark
-    assert "목표값 수준은 Accuracy 0.0(참조 범위보다 낮음), Recall -0.1(참조 범위보다 낮음)이다." in benchmark
-    assert "AUROC 0.88(" not in benchmark  # 목표 없는 지표는 목표값 수준에 넣지 않는다
+    # S6: 8.1 은 개조식(';' 나열)이 아니라 같은 위치끼리 묶은 서술체 한 문장이다(작성 규칙 D37).
+    assert "목표값이 참조 범위보다 낮은 지표는 Accuracy(목표 0), Recall(목표 -0.1)이다." in benchmark
+    assert "AUROC(목표" not in benchmark  # 목표 없는 지표는 목표값 수준에 넣지 않는다
     assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, refs, derived)).passed
 
 
@@ -732,7 +733,7 @@ def test_fallback_error_sentence_for_label_cells_and_zero_errors():
     cells = _error_ratios(unit="label_cell", threshold={"score_a": 0.5})
     fs = _sample_fact_sheet().model_copy(update={"error_ratios": cells})
     text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.confusion_analysis
-    assert "틀린 레이블 칸 12건 중" in text
+    assert "틀린 레이블 칸 12칸 중" in text  # S6: 레이블 칸 단위는 '칸'(종전 '12건'은 7.1 의 '800칸'과 단위가 달랐다)
 
     zero = _error_ratios(misclassified=0, boundary={"count": 0, "ratio": None}, confident={"count": 0, "ratio": None})
     fs0 = _sample_fact_sheet().model_copy(update={"error_ratios": zero})
@@ -870,10 +871,11 @@ def test_fallback_states_metrics_whose_interval_contains_target():
 def test_fallback_without_contained_targets_has_no_interval_sentence():
     fs = _sample_fact_sheet()
     assert "신뢰구간" not in build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.narrative
+    # S6: 구간이 모두 목표값과 떨어진 두 번째 갈래도 쓴다(필수 서술 항목 8.2 신뢰구간 해석 — 종전에는 아무 말이 없었다).
     outside = fs.model_copy(update={"metrics": [_ci_metric(threshold=0.9)]})
-    assert "신뢰구간" not in build_fallback_narrative(
-        outside, [], compute_derived(outside), "no_key"
-    ).conclusion.narrative
+    narrative = build_fallback_narrative(outside, [], compute_derived(outside), "no_key").conclusion.narrative
+    assert "95% 신뢰구간이 모두 목표값과 떨어져 있어" in narrative
+    assert "포함하는 지표" not in narrative
 
 
 def test_rule_12_follows_intervals():
@@ -1084,12 +1086,17 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
     derived = compute_derived(fs)
     resp = build_fallback_narrative(fs, [], derived, reason="no_key")
     risks = resp.conclusion.risks
-    assert "결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있어" in risks
-    assert "'이 데이터에서 오를 수 있는 최대폭'이므로 별도 데이터에서 확인해야 한다." in risks
+    # S6: 숫자(임계값·F1·향상폭)는 결론 목록대로 8.2(임계값 조정 여지)에, 8.3 은 숫자 없이 위험만 — 두 칸에 같은 숫자를
+    # 되풀이하지 않는다. 0.37 은 받침 ㄹ(칠)이라 '로'.
+    narrative = resp.conclusion.narrative
+    assert "결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있다." in narrative
+    assert "이 데이터의 최대폭이므로 별도 데이터에서 확인해야 한다." in narrative
+    assert "현재 결정 임계값이 최적이 아닐 수 있어" in risks and "0.37" not in risks
     assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
 
     small = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain(gain=0.0999)})
-    assert "최대폭" not in build_fallback_narrative(small, [], compute_derived(small), "no_key").conclusion.risks
+    small_resp = build_fallback_narrative(small, [], compute_derived(small), "no_key")
+    assert "최대폭" not in small_resp.conclusion.narrative and "최적이 아닐" not in small_resp.conclusion.risks
 
 
 # 서술 라운드 S1: 문장을 기준 이상인 차이만 근거로 쓰게 고쳤다(점검 BE-02). 엔진이 낼 수 없는 조합

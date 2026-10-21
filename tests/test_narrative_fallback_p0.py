@@ -218,7 +218,8 @@ def _multilabel_fs() -> FactSheet:
 def test_multilabel_confusion_is_written_in_label_cells_not_samples():
     resp, _ = _run(_multilabel_fs(), task_type="multilabel")
     c71, c72 = resp.interpretation.confusion_analysis, resp.interpretation.distribution_analysis
-    assert "레이블 칸 800칸 중 96칸이 틀렸다(맞은 칸 704칸)." in c71
+    # S6: 결론 목록 문장(오분류 총건수·비율). '맞은 칸'은 빼고 비율을 붙였다 — 단위는 그대로 레이블 칸.
+    assert "레이블 칸 800칸 중 96칸(12%)이 틀렸다." in c71
     assert "FN)은 56칸" in c71 and "FP)은 40칸" in c71
     assert "800건" not in c71 and "전체 800" not in c71
     # 7.1 이 '건'으로 쓰는 수는 표본 단위뿐이어야 한다 — 7.2 의 표본 수와 어긋나지 않게.
@@ -231,7 +232,7 @@ def test_binary_and_old_callers_keep_sample_wording():
     resp, _ = _run(fs)  # task_type 없음(옛 호출) — 종전 그대로
     assert "전체 800건" in resp.interpretation.confusion_analysis
     resp, _ = _run(_fs(), task_type="binary")
-    assert "혼동 행렬 기준 전체 200건 중 25건이 오분류되었다" in resp.interpretation.confusion_analysis
+    assert "혼동행렬 기준 전체 200건 중 25건(12.5%)이 오분류되었다" in resp.interpretation.confusion_analysis
 
 
 async def test_service_passes_task_type_so_multilabel_fallback_uses_label_cells():

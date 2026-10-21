@@ -54,6 +54,31 @@ def _find_pos_idx(labels: list, positive_class) -> int:
     return 1
 
 
+def _confusion_from_counts(rows, task_type: str | None) -> dict | None:
+    """엔진 클래스별 건수로 만든 혼동행렬 합계(행렬이 없는 옛 요청). 작업 유형을 모르면 줄이 하나일 때만(이진) 센다 —
+    다중과 멀티레이블은 분모가 달라(표본 / 레이블 칸) 짐작하지 않는다."""
+    kind = task_type or ("binary" if len(rows) == 1 else None)
+    if kind == "binary" and len(rows) == 1:
+        r = rows[0]
+        total, misclassified = r.tp + r.fp + r.fn + r.tn, r.fp + r.fn
+        conf = {"total": total, "correct": total - misclassified, "misclassified": misclassified,
+                "tn": r.tn, "fp": r.fp, "fn": r.fn, "tp": r.tp}
+    elif kind == "multiclass":
+        total = sum(r.tp + r.fn for r in rows)
+        misclassified = sum(r.fn for r in rows)
+        conf = {"total": total, "correct": total - misclassified, "misclassified": misclassified}
+    elif kind == "multilabel":
+        total = sum(r.tp + r.fp + r.fn + r.tn for r in rows)
+        misclassified = sum(r.fp + r.fn for r in rows)
+        conf = {"total": total, "correct": total - misclassified, "misclassified": misclassified, "unit": "label_cell"}
+    else:
+        return None
+    if total > 0:
+        conf["correct_pct"] = round(conf["correct"] / total * 100, 1)
+        conf["misclassified_pct"] = round(misclassified / total * 100, 1)
+    return conf
+
+
 def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
     """LLM·폴백이 공통으로 인용할 파생 사실(서버 계산). 환각 방지를 위해 덧셈은 여기서만.
 
@@ -114,6 +139,13 @@ def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
             conf["correct_pct"] = round(conf["correct"] / totals.total * 100, 1)
             conf["misclassified_pct"] = round(totals.misclassified / totals.total * 100, 1)
         derived["confusion"] = conf
+    elif fs.confusion_counts:
+        # 옛 요청(운영 main 프론트)에서 혼동행렬(M21)을 고르지 않았으면 행렬이 없다 — 엔진 클래스별 건수(confusion_counts,
+        # M21 선택과 무관하게 실림)로 오분류 총건수를 센다(계약 error_totals 와 같은 규칙: 이진 fp+fn / 전체, 다중 Σfn / Σ(tp+fn),
+        # 멀티 Σ(fp+fn) / Σ(tp+fp+fn+tn) 레이블 칸). 옛 요청만의 서버 셈이다(새 요청은 facts.error_totals 를 옮긴다).
+        conf = _confusion_from_counts(fs.confusion_counts, task_type)
+        if conf is not None:
+            derived["confusion"] = conf
 
     if fs.distribution and fs.distribution.class_distribution:
         dist = fs.distribution.class_distribution

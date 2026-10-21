@@ -171,7 +171,8 @@ def test_precision_recall_needs_m2_and_m3():
     gap = {"precision": 0.9, "recall": 0.7, "difference": 0.2, "difference_text": "0.2", "flagged": True}
     assert "8.2-05" not in _select(_fs(facts=NarrativeFactsFact(selected_metrics=["M2"], precision_recall_gap=gap)))
     picked = _select(_fs(facts=NarrativeFactsFact(selected_metrics=["M2", "M3"], precision_recall_gap=gap)))
-    assert "Precision 이 높다" in picked["8.2-05"] and "치우침이 있다" in picked["8.2-05"]
+    # S6: 서술체 — 'Precision 쪽이 … 높고, … 치우쳐 있다'(종전 'Precision 이 높다, … 치우침이 있다' 는 쉼표로 끊긴 개조식).
+    assert "Precision 쪽이 0.2 높고" in picked["8.2-05"] and "한쪽으로 치우쳐 있다" in picked["8.2-05"]
 
 
 def test_ci_has_two_branches_and_a_skipped_reason():
@@ -183,7 +184,7 @@ def test_ci_has_two_branches_and_a_skipped_reason():
         metrics=[_m()],
         facts=NarrativeFactsFact(ci_skipped=[{"metric_id": "M1", "display_name": "Accuracy", "reason": "점추정 불일치"}]),
     )
-    assert "산출하지 않았다: Accuracy(점추정 불일치)" in _select(skipped)["8.2-03"]
+    assert "신뢰구간은 산출하지 않았다(생략한 지표와 사유: Accuracy(점추정 불일치))" in _select(skipped)["8.2-03"]
     assert "8.2-03" not in _select(_fs(metrics=[_m(threshold=None, margin=None)]))
 
 

@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass, field
 
 from app.narrative import fact_view
-from app.narrative.required_items import Conclusion
+from app.narrative.required_items import Conclusion, code_prints
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTIONS_BY_ID
 
@@ -164,11 +164,11 @@ _FIXED_SENTENCE_FOR_ITEM = {"7.1-11": "17", "8.3-02": "18", "7.1-12": "9", "7.2-
 
 _INTERPRET_ONLY = {
     "7.1-11": (
-        "오분류의 성격(경계 오류·확신 오류 비율)은 성적서가 아래 문장으로 찍는다. 그 숫자를 되풀이하지 말고, 결정 경계 근처의 "
+        "오분류의 성격(경계 오류·확신 오류 비율)은 성적서가 {where} 찍는다. 그 숫자를 되풀이하지 말고, 결정 경계 근처의 "
         "오류와 높은 확신으로 틀린 오류가 각각 무엇을 뜻하는지만 해석한다."
     ),
     "8.3-02": (
-        "목표값과의 차이가 목표값의 3% 미만인 지표는 성적서가 아래 문장으로 찍는다. 그 숫자를 되풀이하지 말고, 표본이 달라지면 "
+        "목표값과의 차이가 목표값의 3% 미만인 지표는 성적서가 {where} 찍는다. 그 숫자를 되풀이하지 말고, 표본이 달라지면 "
         "판정이 뒤집힐 수 있다는 위험만 해석한다. 충족한 지표를 미달했다고 쓰지 않는다."
     ),
 }
@@ -265,12 +265,19 @@ def section_briefs(fs: FactSheet, derived: dict, conclusions: list[Conclusion], 
         if c.author in ("ai", "ai_fact"):
             brief.must.append(c.text)
         elif c.author == "fixed_interpret":
+            # 결론 문장은 숫자 없는 해석 재료다(우세한 오류·근소 지표가 충족했는지 — S6). 성적서가 그 고정 문장을 찍는지는
+            # 규칙 템플릿과 같은 함수(required_items.code_prints)로 본다 — facts 상한으로 문장 목록을 비웠어도 화면은 찍는다.
             sentences = _fixed_texts(fs, c.item_id)
-            if sentences:
-                brief.interpret.append(_INTERPRET_ONLY[c.item_id] + "".join(f' — "{t}"' for t in sentences))
+            if code_prints(fs, _FIXED_SENTENCE_FOR_ITEM[c.item_id]):
+                # 문장을 덜어 냈으면 인용할 문장이 없다 — '아래 문장' 이라고 하지 않는다(S5 검토 prompt-3).
+                where = "아래 문장으로" if sentences else "따로 숫자로"
+                brief.interpret.append(
+                    _INTERPRET_ONLY[c.item_id].format(where=where) + f" 해석 재료: {c.text}"
+                    + "".join(f' — "{t}"' for t in sentences)
+                )
             else:
-                # 옛 요청(facts 없음)·덜어 낸 고정 문장 — 성적서가 그 문장을 찍지 않으니 AI 가 숫자와 함께 쓴다(S5 검토 prompt-3).
-                brief.must.append(_WRITE_IT_YOURSELF[c.item_id])
+                # 옛 요청(facts 없음) — 성적서가 그 문장을 찍지 않으니 AI 가 숫자와 함께 쓴다(S5 검토 prompt-3).
+                brief.must.append(_WRITE_IT_YOURSELF[c.item_id] + f" 해석 재료: {c.text}")
         else:  # fixed · form
             sentences = _fixed_texts(fs, c.item_id)
             if sentences:

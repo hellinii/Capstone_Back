@@ -136,7 +136,8 @@ def test_failed_and_near_target_metrics_use_value_and_margin_texts():
 def test_threshold_sentence_uses_gain_text():
     gain = F1ThresholdGainFact(max_f1=0.65, current_f1=0.5123, gain=0.1377, best_threshold=0.03, notable=True, gain_text="0.1377")
     out = _fallback(_fs(f1_threshold_gain=gain))
-    assert "이 0.1377는" in out.conclusion.risks
+    # S6: 임계값 숫자는 8.2(결론 목록 8.2-06)에. 종전 '이 0.1377는' 은 조사도 틀렸다(칠 → '은').
+    assert "이 향상폭(0.1377)은" in out.conclusion.narrative
 
 
 def test_trimmed_distribution_is_not_listed_as_complete():

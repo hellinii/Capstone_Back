@@ -532,6 +532,14 @@ async def _narrate(
     return resp
 
 
+def _rule_text(req, fs, benchmark_refs, derived, *, reason: str) -> NarrativeResponse:
+    """규칙 문장(app.narrative.fallback) — 요청의 작업 유형·고객 입력을 넘긴다(S6: 결론 목록·클래스 설명 D37).
+    옛 경로 흐름은 얼렸고, 규칙 문장만 작업 경로와 같은 템플릿을 쓴다(옛 경로 골든 — tests/test_s6_templates.py)."""
+    return build_fallback_narrative(
+        fs, benchmark_refs, derived, reason, task_type=req.task_type.value, client_inputs=req.client_inputs,
+    )
+
+
 async def _narrate_body(
     client, req, fs, derived, benchmark_refs, whitelist, record: dict, *,
     budget_reserved: bool, forced_reason: str | None, deadline: float | None, slot_wait: float | None,
@@ -539,11 +547,11 @@ async def _narrate_body(
 ) -> NarrativeResponse:
     # 0. 호출 전에 사유가 정해진 경우(작업 번호 경로) → 폴백
     if forced_reason is not None:
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason=forced_reason)
+        return _rule_text(req, fs, benchmark_refs, derived, reason=forced_reason)
 
     # 1. 무키 → 폴백
     if client is None:
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason="no_key")
+        return _rule_text(req, fs, benchmark_refs, derived, reason="no_key")
 
     # 1-1. 요청 조립 + 크기 상한 — 지갑을 쓰기 전에 본다(너무 큰 요청이 예산을 먹지 않게).
     try:
@@ -554,7 +562,7 @@ async def _narrate_body(
     except Exception:
         # 종전처럼 500 이 아니라 규칙 폴백 — 요청 조립 실패도 서술 실패의 하나다.
         logger.exception("서술 요청 조립 실패 → 규칙 폴백(assembly_error)")
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")
+        return _rule_text(req, fs, benchmark_refs, derived, reason="assembly_error")
     record["prompt_chars"] = len(system) + len(user)
     if prompt_trimmed:
         record["prompt_trimmed"] = prompt_trimmed
@@ -564,7 +572,7 @@ async def _narrate_body(
             "서술 요청이 너무 큼(%d자 > %d자) → 규칙 폴백(input_too_large)",
             len(system) + len(user), MAX_NARRATIVE_PROMPT_CHARS,
         )
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason="input_too_large")
+        return _rule_text(req, fs, benchmark_refs, derived, reason="input_too_large")
 
     # 1-2. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
     #      **429 가 아니라 200 + 폴백이다** — 프론트는 비 200 을 폴백이 아니라 오류로
@@ -576,7 +584,7 @@ async def _narrate_body(
             "서술 시간당 예산 소진(보고서 %d건) → 규칙 폴백으로 강등합니다.",
             llm_budget.narrative.limit,
         )
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason="budget_exceeded")
+        return _rule_text(req, fs, benchmark_refs, derived, reason="budget_exceeded")
 
     # 2. LLM 호출 — 슬롯 대기까지 서버 마감 안에서. 슬롯 대기에 따로 상한이 있으면 그것도 본다.
     slot = {"acquired": False}
@@ -599,19 +607,19 @@ async def _narrate_body(
     except TimeoutError:
         reason = "timeout" if slot["acquired"] else "busy"
         logger.warning("서술 마감(마감 %s초·슬롯 대기 %s초) 초과 → 규칙 폴백(%s)", deadline, slot_wait, reason)
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason=reason)
+        return _rule_text(req, fs, benchmark_refs, derived, reason=reason)
     except Exception:
         # call_narrative_llm 은 SDK 오류를 failure 로 돌려준다. 그 밖의 예외(조용한 품질 강등 지점, G-06)도
         # 500 이 아니라 규칙 폴백으로.
         logger.exception("LLM 서술 호출 중 예기치 않은 오류 → 규칙 폴백(api_error)")
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason="api_error")
+        return _rule_text(req, fs, benchmark_refs, derived, reason="api_error")
     record["calls"].append(asdict(result.record))
     await on_stage("checking")
     if result.failure is not None:
         # 거절(세 경우 모두)·잘림·모델 없음·시간 초과·API 오류·JSON 오류 — 사유는 그대로 싣고, 자세한 것은
         # llm 의 호출 기록 로그에 있다(거절 종류·응답 모델·토큰).
         logger.warning("LLM 서술 호출 실패 → 규칙 폴백(%s)", result.failure)
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason=result.failure)
+        return _rule_text(req, fs, benchmark_refs, derived, reason=result.failure)
     data = result.data
     model = result.record.response_model or result.record.requested_model
 
@@ -633,7 +641,7 @@ async def _narrate_body(
                 "서술 grounding 위반 → 규칙 폴백(grounding_failed). 검사 %d건, 위반 토큰 %s",
                 grounding.checked, grounding.violations,
             )
-            fb = build_fallback_narrative(fs, benchmark_refs, derived, reason="grounding_failed")
+            fb = _rule_text(req, fs, benchmark_refs, derived, reason="grounding_failed")
             fb.meta.grounding = grounding  # 어떤 환각이 잡혔는지 추적성 보존
             return fb
 
@@ -646,9 +654,7 @@ async def _narrate_body(
                 "서술이 판정(%s)과 모순 → 규칙 폴백(verdict_contradiction): %s",
                 fs.verdict, contradictions,
             )
-            return build_fallback_narrative(
-                fs, benchmark_refs, derived, reason="verdict_contradiction"
-            )
+            return _rule_text(req, fs, benchmark_refs, derived, reason="verdict_contradiction")
 
         # 권고를 문제 목록에 묶는다(D22). 기대 효과에 숫자가 있으면 전체 폴백 — 권고 하나만 바꿔 끼우면
         # 같은 LLM 이 쓴 9절 서술(recommendation_narrative)과 어긋날 수 있다.
@@ -659,7 +665,7 @@ async def _narrate_body(
             aligned = _align_recommendations(recs, fs.problems)
         except _ImpactNumber as exc:
             logger.warning("권고 기대 효과에 숫자 → 규칙 폴백(impact_number): 문제 %s", exc)
-            return build_fallback_narrative(fs, benchmark_refs, derived, reason="impact_number")
+            return _rule_text(req, fs, benchmark_refs, derived, reason="impact_number")
 
         # 정상 — verdict 는 서버값으로 강제
         return NarrativeResponse(
@@ -676,4 +682,4 @@ async def _narrate_body(
         )
     except Exception:
         logger.exception("narrative 조립/검증 실패 → 규칙 폴백(assembly_error)")
-        return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")
+        return _rule_text(req, fs, benchmark_refs, derived, reason="assembly_error")

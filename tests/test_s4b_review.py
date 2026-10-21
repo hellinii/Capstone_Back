@@ -189,7 +189,8 @@ def test_near_target_tiny_margin_uses_margin_text():
 
 def test_threshold_sentence_uses_gain_text_not_four_digit_gain():
     gain = F1ThresholdGainFact(max_f1=0.6, current_f1=0.5, gain=0.1, best_threshold=0.3, notable=True, gain_text="0.10004")
-    assert "이 0.10004는" in _fallback(_fs(f1_threshold_gain=gain)).conclusion.risks
+    # S6: 8.2 로 옮김(결론 목록 8.2-06).
+    assert "이 향상폭(0.10004)은" in _fallback(_fs(f1_threshold_gain=gain)).conclusion.narrative
 
 
 def test_trimmed_multilabel_distribution_says_labels():
@@ -269,7 +270,8 @@ def test_per_class_errors_listed_by_size():
 
     rows = [ConfusionCountFact(label=l, tp=1, fp=fp, fn=0, tn=1) for l, fp in (("a", 1), ("b", 9), ("c", 5), ("d", 0))]
     text = _ids_texts(_fs(confusion_counts=rows), "multiclass")["7.1-04"]
-    assert text.index("b(") < text.index("c(") < text.index("a(") and "d(" not in text
+    # S6: '이름 FP n건·FN n건' 꼴(클래스 설명이 붙으면 '이름(설명)' 이라 괄호를 겹치지 않게). 많은 순 상위 셋만.
+    assert text.index("b FP") < text.index("c FP") < text.index("a FP") and "d FP" not in text
 
 
 def test_legacy_table_metrics_are_not_listed_as_missing_benchmarks():
@@ -282,7 +284,7 @@ def test_weakest_risk_says_label_for_multilabel():
     weak = {"label": "sports", "f1": 0.4, "support": 97, "share": 0.2, "share_text": "0.2", "macro_f1": 0.5,
             "gap_from_macro": 0.1, "gap_text": "0.1", "low_support": False, "far_below_macro": True}
     text = _ids_texts(_fs(facts=NarrativeFactsFact(weakest_class=weak)), "multilabel")["8.3-01"]
-    assert text.startswith("가장 약한 레이블은 sports")
+    assert text.startswith("가장 약한 레이블은 F1 0.4인 sports")
 
 
 # ── 지시문 덜어내기 표시 ────────────────────────────────────────────────────────────

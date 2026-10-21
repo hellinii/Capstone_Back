@@ -25,7 +25,7 @@ import copy
 import re
 from typing import Any
 
-from app.narrative.fallback import _VERDICT_LABEL as VERDICT_KO  # 성적서 8.2 판정 상자와 같은 이름 한 벌
+from app.narrative.wording import VERDICT_LABEL as VERDICT_KO  # 성적서 8.2 판정 상자와 같은 이름 한 벌
 from app.narrative.required_items import _CAUSE as CAUSE_KO
 from app.narrative.schemas import FactSheet
 
