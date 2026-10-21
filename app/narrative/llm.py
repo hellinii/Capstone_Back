@@ -42,7 +42,7 @@ FALLBACKS = "default"
 MAX_TOKENS = 16000
 
 # 클라이언트 설정(app.main 이 쓴다). 옛 경로는 `호출 시간 제한 × (재시도 + 1)` 이 서버 마감 안에 들어야 한다
-# — 서버 마감은 service.NARRATIVE_DEADLINE_SECONDS, 테스트가 이 부등식을 고정한다.
+# — 서버 마감은 legacy.NARRATIVE_DEADLINE_SECONDS, 테스트가 이 부등식을 고정한다.
 CALL_TIMEOUT_SECONDS = 55.0
 MAX_RETRIES = 1
 

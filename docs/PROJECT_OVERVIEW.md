@@ -59,7 +59,7 @@ Capstone_Front
 ### Capstone_Back — "라우터(얇은 HTTP) → 서비스(오케스트레이션) → 순수 로직" 계층
 ```
 Capstone_Back
-├── README.md                   # 2줄 stub (온보딩·구조는 docs/ARCHITECTURE.md 참조)
+├── README.md                   # 스택·구조 요약·주요 API·로컬 실행·배포 (자세한 구조는 docs/ARCHITECTURE.md)
 ├── docs/                       # ARCHITECTURE · DEPLOYMENT_PLAN · ISSUANCE_DB_DESIGN · REPORT_NARRATIVE_DESIGN
 ├── render.yaml · requirements.txt · pytest.ini · tests/
 └── app/
@@ -130,7 +130,7 @@ Capstone_Back
 | 문서 | 언제 읽나 |
 |---|---|
 | `Capstone_Front/SPEC.md` ⭐ | **지표 요구사항·컬럼 역할·검증 규칙·task_type별 허용 지표를 다루는 모든 작업의 최우선 기준.** 변경 전 프론트/백 양쪽을 이 문서에 맞춘다. |
-| `Capstone_Back/docs/ARCHITECTURE.md` | 백엔드 온보딩·구조 기준 — `app/` 도메인 구조, router→service→순수로직 패턴, 새 지표/API/테이블 추가 위치. (`Capstone_Back/README.md`는 2줄 stub) |
+| `Capstone_Back/docs/ARCHITECTURE.md` | 백엔드 온보딩·구조 기준 — `app/` 도메인 구조, router→service→순수로직 패턴, 새 지표/API/테이블 추가 위치. (`Capstone_Back/README.md`는 스택·주요 API·로컬 실행 요약) |
 | `Capstone_Back/docs/DEPLOYMENT_PLAN.md` | **배포 작업 시** — Render+Neon+Vercel, `DATABASE_URL`/`VITE_API_BASE_URL`, 콜드스타트. |
 | `Capstone_Back/docs/ISSUANCE_DB_DESIGN.md` | **발급/채번/재발급** 로직 수정 시 — 3테이블(organization·report·issuance)·연도별 채번. |
 | `Capstone_Back/docs/REPORT_NARRATIVE_DESIGN.md` | **성적서 서술(7·8·9절)** 설계 이력 — LLM grounding·verdict/score 규칙·fallback·benchmark. 현행(작업 번호·칸별 검문 사다리·규칙 템플릿·결정 번호 색인)은 `docs/ARCHITECTURE.md` §10. |
@@ -149,7 +149,7 @@ Capstone_Back
 pip install -r requirements-dev.txt        # requirements.txt 포함
 cp .env.example .env                        # ANTHROPIC_API_KEY(서술) / OPENAI_API_KEY(매핑) — 없으면 규칙 기반 / DATABASE_URL(없으면 SQLite data/app.db)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 또는 python -m app.main
-pytest                                       # 테스트 (asyncio_mode=auto, pythonpath=.)
+venv/bin/python -m pytest                    # 테스트 (asyncio_mode=auto, pythonpath=.) — 맨 pytest 는 다른 파이썬을 잡을 수 있다
 ```
 첫 부팅 시 `init_db()`+`seed_organization()` 자동(발급 표·서술 작업 표). 키 없이도 기동됨.
 

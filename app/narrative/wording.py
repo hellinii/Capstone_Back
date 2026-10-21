@@ -106,8 +106,11 @@ def num(value) -> str:
     if isinstance(value, bool):
         return str(value)
     if isinstance(value, float):
-        text = f"{round(value, 4):g}"
-        return "0" if text == "-0" else text
+        # 고정 소수(지수 표기 없음) — ':g' 는 유효 숫자 6개라 1234567.5 를 '1.23457e+06' 으로 찍고 숫자 검문에 걸렸다(세션 A 검토).
+        text = f"{round(value, 4):.4f}".rstrip("0").rstrip(".")
+        if text in ("0", "-0") and value != 0:
+            text = f"{value:.10f}".rstrip("0").rstrip(".")  # 0.00001 을 '0' 으로 찍지 않는다
+        return "0" if text in ("-0", "") else text
     return str(value)
 
 

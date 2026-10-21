@@ -21,7 +21,7 @@
 상호작용
 - 의존(import): asyncio, os, weakref, fastapi.concurrency(run_in_threadpool)
 - 사용처: app.analysis.router / app.analysis.validation_router / app.evaluation.router /
-  app.narrative.service
+  app.narrative.legacy(옛 경로)·app.narrative.generator(작업 경로)
 """
 import asyncio
 import os

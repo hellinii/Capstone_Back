@@ -222,6 +222,12 @@ def _declared_risk_values(ctx: Ctx) -> tuple[float, ...]:
     return (float(dr.count),) + ((dr.share,) if dr.share is not None else ())
 
 
+def _trimmed(ctx: Ctx, *keys: str) -> bool:
+    """프론트가 클래스 상한으로 그 표를 잘랐는가(facts.omitted). 잘린 표에서는 '가장 많은'·'전부'를 단정하지 않는다."""
+    omitted = ctx.facts.omitted if ctx.facts is not None else {}
+    return any(omitted.get(k) for k in keys)
+
+
 def _per_class_errors(ctx: Ctx) -> str | None:
     rows = ctx.fs.confusion_counts
     if not rows:
@@ -230,6 +236,12 @@ def _per_class_errors(ctx: Ctx) -> str | None:
     unit = "칸" if ctx.task_type == "multilabel" else "건"  # 멀티레이블은 레이블 칸 단위(7.1 의 합계·17 과 같은 단위)
     items = join_and([f"{ctx.name(r.label)} FP {r.fp}{unit}·FN {r.fn}{unit}" for r in top])
     noun = _noun(ctx)
+    if _trimmed(ctx, "confusion_counts"):
+        # 클래스가 많아 프론트가 표본 수 순으로 줄을 잘랐다 — 빠진 클래스의 오류가 더 많을 수 있다(세션 A 검토 P1).
+        return (
+            f"{noun}가 많아 표에는 일부 {noun}만 실렸으며, 실린 {noun} 가운데 오류(FP+FN)가 많은 "
+            f"{with_josa(noun, '은/는')} {items}이다."
+        )
     if len(rows) > len(top):
         # '상위 3개'처럼 숫자로 쓰면 허용 목록 밖 숫자다 — 우리말 수(세)로 쓴다.
         return f"오류(FP+FN)가 가장 많은 {KOREAN_COUNT[len(top)]} {with_josa(noun, '은/는')} {items}이다."
@@ -301,7 +313,8 @@ def _weakest(ctx: Ctx) -> str | None:
     small = [r for r in ctx.facts.low_support_classes if r.label != w.label]
     if small:
         listed = join_and([f"{ctx.name(r.label)} {r.support}건" for r in small[:5]])
-        text += f" 그 밖에 표본이 작은 {with_josa(noun, '은/는')} {listed}{' 등' if len(small) > 5 else ''}이다."
+        more = len(small) > 5 or _trimmed(ctx, "low_support_classes", "facts_class_lists")
+        text += f" 그 밖에 표본이 작은 {with_josa(noun, '은/는')} {listed}{' 등' if more else ''}이다."
     return text
 
 
@@ -326,26 +339,32 @@ def _error_nature(ctx: Ctx) -> str | None:
 
 
 def _error_interpretation(er) -> str | None:
-    """오류 성격의 해석 한 문장 — 숫자를 쓰지 않는다(17 이 찍는 숫자를 되풀이하지 않게)."""
+    """오류 성격의 해석 한 문장 — 숫자를 쓰지 않는다(17 이 찍는 숫자를 되풀이하지 않게).
+
+    어느 쪽이 많은지와 그 오류의 뜻만 쓴다. 비중이 크다·결과가 달라지기 쉽다 같은 정도의 주장은 하지 않는다 — 두 오류가
+    오분류의 아주 작은 일부일 수도 있다(세션 A 검토). 다중 클래스는 결정 임계값이 없으므로 임계값을 말하지 않는다 —
+    경계 오류는 '결정 경계 가까이에서 갈린 오류'로만 부른다.
+    """
     if er.misclassified == 0:
         return None
     if er.boundary is None:
+        # 경계 오류를 계산하지 못한 것은 이진·멀티레이블에서 임계값을 모를 때뿐이다.
         if er.confident.count:
             return (
-                "확신 오류는 모델이 틀린 쪽에 높은 확률을 준 경우라 결정 임계값을 조정해도 잘 줄지 않으므로, "
+                "확신 오류는 모델이 틀린 쪽에 높은 확률을 준 오류라 결정 임계값을 조정해도 잘 줄지 않으므로, "
                 "해당 사례의 입력과 정답 라벨을 함께 점검할 필요가 있다."
             )
         return "확신 오류는 없어, 모델이 높은 확률로 틀린 사례는 관찰되지 않았다."
     b, c = er.boundary.count, er.confident.count
     if b > c:
         return (
-            "오분류는 결정 경계 가까이에서 일어난 경계 오류가 확신 오류보다 많아, "
-            "결정 임계값이나 경계에 가까운 사례에 따라 결과가 달라지기 쉽다."
+            "확률이 있는 오분류 가운데 경계 오류가 확신 오류보다 많다. 경계 오류는 결정 경계 가까이에서 갈린 오류로, "
+            "경계에 가까운 사례의 판단에 따라 결과가 달라질 수 있는 오류다."
         )
     if c > b:
         return (
-            "오분류는 높은 확률로 틀린 확신 오류가 경계 오류보다 많아, "
-            "임계값 조정보다 해당 사례의 입력과 정답 라벨을 점검해야 하는 오류의 비중이 크다."
+            "확률이 있는 오분류 가운데 확신 오류가 경계 오류보다 많다. 확신 오류는 모델이 틀린 쪽에 높은 확률을 준 오류로, "
+            "해당 사례의 입력과 정답 라벨을 점검할 필요가 있다."
         )
     if b == 0:
         return "경계 오류와 확신 오류가 모두 없어, 오분류는 결정 경계에서 떨어져 있으면서 높은 확신은 아닌 사례에서 일어났다."
@@ -777,6 +796,9 @@ def _ci(ctx: Ctx) -> str | None:
         elif missing:
             # 구간이 없는 판정 대상이 있다 — '모두'라고 보증하지 않는다(S4b 검토 RI-02).
             sentences.append(f"신뢰구간을 산출한 지표({_names(with_ci)})는 95% 신뢰구간이 목표값과 떨어져 있다.")
+        elif any(m.near_target for m in judged):
+            # 근소 차이 지표(8.3·고정 문구 18)는 표본에 따라 바뀔 수 있다고 쓴다 — 여기서 '가능성은 낮다'고 하면 부딪친다.
+            sentences.append("판정 대상 지표의 95% 신뢰구간은 모두 목표값과 떨어져 있다.")
         else:
             sentences.append(
                 "판정 대상 지표의 95% 신뢰구간이 모두 목표값과 떨어져 있어, 표본 변동에 따라 판정이 달라질 가능성은 낮다."
@@ -797,11 +819,20 @@ def _generalization(ctx: Ctx) -> str | None:
     return sentence.text if sentence else None
 
 
+def _metric_value(ctx: Ctx, metric_id: str, value: float) -> str:
+    """파생값에 실린 값이 판정 대상 지표의 값이면 성적서 표기(value_text)로 — 넷째 자리로 줄이면 미달 값 0.69996 이 목표 0.7
+    처럼 찍힌다(세션 A 검토). 그 밖에는 넷째 자리."""
+    m = next((m for m in ctx.fs.metrics if m.metric_id == metric_id), None)
+    if m is not None and m.threshold is not None and abs(float(m.value) - float(value)) < 1e-9:
+        return shown_value(m)
+    return num(float(value))
+
+
 def _pr_gap(ctx: Ctx) -> str | None:
     g = ctx.facts.precision_recall_gap if ctx.facts else None
     if g is None or not {"M2", "M3"} <= ctx.selected:
         return None
-    p, r = num(g.precision), num(g.recall)
+    p, r = _metric_value(ctx, "M2", g.precision), _metric_value(ctx, "M3", g.recall)
     if g.difference == 0:
         return f"양성 클래스의 Precision 과 Recall 은 {with_josa(p, '으로/로')} 같다."
     higher = "Precision" if g.difference > 0 else "Recall"
@@ -837,7 +868,9 @@ def _average_gap(ctx: Ctx, kind: str) -> str | None:
         relation = f"{other} F1 이 매크로 F1 보다 {size} 낮다"
     else:
         relation = "두 값이 같다"
-    text = f"매크로 F1 은 {num(g.macro_f1)}, {other} F1 은 {with_josa(num(g.other_f1), '으로/로')} {relation}."
+    text = (
+        f"매크로 F1 은 {_metric_value(ctx, 'M4', g.macro_f1)}, {other} F1 은 {with_josa(num(g.other_f1), '으로/로')} {relation}."
+    )
     ref = g.reference_class
     f1 = f"F1 {num(ref.f1)}" if ref.f1 is not None else None
     if kind == "macro_vs_weighted":

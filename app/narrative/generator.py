@@ -111,7 +111,8 @@ def _prepare(req: NarrativeRequest):
     for count in (ctx.view.get("덜어 낸 표(일부만 실림)") or {}).values():
         _add(whitelist, count)
     exempt = checks.name_exemptions(fs, req.client_inputs)
-    return derived, refs, whitelist, conclusions, ctx, exempt
+    masks = checks.verdict_masks(fs, req.client_inputs)
+    return derived, refs, whitelist, conclusions, ctx, exempt, masks
 
 
 def _extract(section_id: str, data: dict) -> dict | None:
@@ -185,7 +186,7 @@ async def generate_sections(
     started = time.perf_counter()
     deadline_at = started + deadline_seconds if deadline_seconds is not None else None
     fs = req.fact_sheet
-    derived, refs, whitelist, conclusions, ctx, exempt = await run_cpu_bound(_prepare, req)
+    derived, refs, whitelist, conclusions, ctx, exempt, masks = await run_cpu_bound(_prepare, req)
     effort = effort or job_effort()
     problem_ids = [p.id for p in fs.problems]
     states = {sid: SectionState(sid) for sid in SECTION_IDS}
@@ -301,7 +302,7 @@ async def generate_sections(
         aligned = _align(parts, fs.problems, fill_missing=False)[0] if sid == "9" else parts
         result = checks.check_section(
             sid, _rec_dicts(aligned), whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
-            problem_ids=problem_ids, exempt=exempt,
+            problem_ids=problem_ids, exempt=exempt, masks=masks,
         )
         st.checks.append(result.as_record())
         hard = result.hard_failures
@@ -415,7 +416,7 @@ async def generate_sections(
     for sid, st in states.items():
         if st.parts is None or not (st.source == "llm" or st.outcome == "filled"):
             continue
-        if find_verdict_contradictions(checks.section_texts(sid, _rec_dicts(st.parts)), fs.verdict):
+        if find_verdict_contradictions(checks.mask_names(checks.section_texts(sid, _rec_dicts(st.parts)), masks), fs.verdict):
             final_flags.append(sid)
             template(sid, "final_verdict_contradiction")
     trace["final_recheck"] = final_flags

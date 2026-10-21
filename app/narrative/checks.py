@@ -171,12 +171,65 @@ def name_exemptions(fs: FactSheet, client_inputs: dict | None) -> set[str]:
     scan([p.title for p in fs.problems])
     if fs.imbalance_effect:
         scan([fs.imbalance_effect.majority_class, fs.imbalance_effect.minority_class])
-    if fs.facts is not None:
-        scan([r.label for r in fs.facts.distribution_shift])
-        if fs.facts.weakest_class:
-            scan(fs.facts.weakest_class.label)
+    scan(_fact_labels(fs))
     scan(client_inputs or {})
     return names
+
+
+def _fact_labels(fs: FactSheet) -> list[str]:
+    """facts 안의 클래스 이름 — 프론트가 표를 잘라도 facts 의 목록(편향·헷갈린 쌍·작은 표본·평균 비교 기준)에는 남아
+    템플릿·AI 가 부를 수 있다(세션 A 검토 — 잘린 표 밖 'tiger_shark' 가 영어 코드로 걸렸다)."""
+    facts = fs.facts
+    if facts is None:
+        return []
+    labels = [r.label for r in facts.distribution_shift] + [r.label for r in facts.low_support_classes]
+    if facts.weakest_class:
+        labels.append(facts.weakest_class.label)
+    if facts.prediction_bias:
+        labels += [r.label for r in facts.prediction_bias.rows if r.label]
+    for p in facts.top_confusion_pairs:
+        labels += [p.actual, p.predicted]
+    if facts.average_gap:
+        labels.append(facts.average_gap.reference_class.label)
+    return labels
+
+
+# 판정 모순 검사 전에 가리는 이름 — 클래스 이름·고객이 준 클래스 설명에 판정 낱말이 들면('불합격품(기준 미달)') 이름을
+# 부른 맞는 문장이 '미달했다'는 주장으로 읽힌다(세션 A 검토). 판정 낱말이 든 이름만 가린다.
+_VERDICT_WORDS = re.compile(r"미달|불합격|미충족|합격|충족|판정|적합|FAIL|PASS|INCONCLUSIVE", re.IGNORECASE)
+
+
+def verdict_masks(fs: FactSheet, client_inputs: dict | None) -> tuple[str, ...]:
+    labels: list[str] = [p.label for p in fs.per_class] + [r.label for r in fs.confusion_counts]
+    if fs.confusion:
+        labels += list(fs.confusion.labels)
+    if fs.distribution:
+        labels += list(fs.distribution.class_distribution)
+    if fs.imbalance_effect:
+        labels += [fs.imbalance_effect.majority_class, fs.imbalance_effect.minority_class]
+    labels += _fact_labels(fs)
+    raw = (client_inputs or {}).get("class_label_descriptions") if isinstance(client_inputs, dict) else None
+    descriptions = {str(k).strip(): str(v).strip() for k, v in raw.items() if v is not None} if isinstance(raw, dict) else {}
+    found: set[str] = set()
+    for label in labels:
+        desc = descriptions.get(str(label).strip())
+        if desc:
+            found.add(f"{label}({desc})")
+    found.update(t for t in descriptions.values() if t)
+    found.update(str(x) for x in labels)
+    return tuple(sorted((t for t in found if t and _VERDICT_WORDS.search(t)), key=len, reverse=True))
+
+
+def mask_names(texts: list[str], masks: tuple[str, ...]) -> list[str]:
+    if not masks:
+        return texts
+    out = []
+    for text in texts:
+        if isinstance(text, str):
+            for name in masks:
+                text = text.replace(name, "□")
+        out.append(text)
+    return out
 
 
 def code_words(texts: list[str], exempt: set[str]) -> list[str]:
@@ -206,6 +259,7 @@ def check_section(
     conclusions: list[Conclusion],
     problem_ids: list[str],
     exempt: set[str],
+    masks: tuple[str, ...] = (),
 ) -> SectionCheck:
     """AI 가 쓴 칸 하나를 검사한다. parts 는 그 칸의 응답 필드(점 표기) → 값(9칸의 권고는 dict 목록)."""
     result = SectionCheck(section=section_id)
@@ -221,7 +275,7 @@ def check_section(
         return result  # 7.3 빈 글 — 통과(고정 문구 15)
 
     result.numbers = verify_grounding(texts, whitelist).violations
-    result.contradiction = bool(find_verdict_contradictions(texts, verdict))
+    result.contradiction = bool(find_verdict_contradictions(mask_names(texts, masks), verdict))
     result.code_words = code_words(texts, exempt)
     if result.code_words:
         result.format.append("code_words")

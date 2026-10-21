@@ -419,8 +419,8 @@ def _er(boundary, confident, misclassified=40):
 
 
 @pytest.mark.parametrize("boundary, confident, material, sentence", [
-    (17, 5, "경계 오류가 확신 오류보다 많다", "경계 오류가 확신 오류보다 많아"),
-    (3, 11, "확신 오류가 경계 오류보다 많다", "확신 오류가 경계 오류보다 많아"),
+    (17, 5, "경계 오류가 확신 오류보다 많다", "경계 오류가 확신 오류보다 많다. 경계 오류는 결정 경계 가까이에서 갈린 오류로"),
+    (3, 11, "확신 오류가 경계 오류보다 많다", "확신 오류가 경계 오류보다 많다. 확신 오류는 모델이 틀린 쪽에"),
     (6, 6, "같은 수다", "어느 한쪽 성격의 오류가 우세하지 않다"),
     (0, 0, "모두 없다", "모두 없어"),
     (None, 9, "확신 오류가 있다", "임계값을 조정해도 잘 줄지 않으므로"),
@@ -584,3 +584,152 @@ def test_average_gap_direction_follows_the_sign(other, expected):
 def test_josa_after_digits_with_rieul_final(word, pair, expected):
     """1(일)·7(칠)·8(팔)은 받침이 있다 — '으로/로' 만 보면 ㄹ 받침과 받침 없음이 같은 답이라 다른 조사로도 본다."""
     assert josa(word, pair) == expected
+
+
+# ── 독립 검토 반영(세션 A, wf_48ea9448-db9) ─────────────────────────────────────
+
+
+def test_trimmed_class_table_does_not_claim_a_ranking_over_all_classes():
+    """P1 — 클래스가 많아 프론트가 표를 표본 수 순으로 잘랐으면 '오류가 가장 많은'·'클래스별 오류는'을 단정하지 않는다."""
+    raw = _raw("multiclass")
+    raw["fact_sheet"]["facts"]["omitted"] = {"confusion_counts": 744, "per_class": 744, "class_distribution": 744}
+    text = _sections(NarrativeRequest.model_validate(raw))["7.1"]["interpretation.confusion_analysis"]
+    assert "클래스가 많아 표에는 일부 클래스만 실렸으며, 실린 클래스 가운데 오류(FP+FN)가 많은 클래스는" in text
+    assert "가장 많은 세 클래스" not in text and "클래스별 오류(FP+FN)는" not in text
+
+
+def test_judged_metric_values_keep_the_report_spelling_in_gap_sentences():
+    """미달 값 0.69996 을 넷째 자리 '0.7' 로 찍으면 목표 0.7 과 같아 보인다 — 판정 대상이면 value_text."""
+    f1 = MetricFact(metric_id="M4", display_name="F1 Score", value=0.69996, threshold=0.7, status="fail",
+                    value_text="0.69996", is_core=True)
+    p = MetricFact(metric_id="M2", display_name="Precision", value=0.79996, threshold=0.8, status="fail", value_text="0.79996")
+    facts = {"selected_metrics": ["M2", "M3", "M4", "M22"],
+             "average_gap": {"kind": "macro_vs_weighted", "macro_f1": 0.69996, "other_f1": 0.7123, "difference": 0.01234,
+                             "difference_text": "0.0123", "reference_class": {"label": "a", "support": 9, "f1": 0.5}},
+             "precision_recall_gap": {"precision": 0.79996, "recall": 0.6, "difference": 0.19996, "difference_text": "0.2",
+                                      "flagged": True}}
+    multi = {c.item_id: c.template_text for c in select_items(FactSheet(verdict="FAIL", score=0.0, metrics=[f1], facts=facts), None, "multiclass")}
+    assert multi["8.2-07"].startswith("매크로 F1 은 0.69996,")
+    binary = {c.item_id: c.template_text for c in select_items(FactSheet(verdict="FAIL", score=0.0, metrics=[p], facts=facts), None, "binary")}
+    assert binary["8.2-05"].startswith("양성 클래스의 Precision 은 0.79996,")
+
+
+@pytest.mark.parametrize("boundary, confident", [(1, 0), (0, 1)])
+def test_error_nature_does_not_overstate_a_tiny_share(boundary, confident):
+    fs = FactSheet(verdict="PASS", score=100.0, error_ratios=_er(boundary, confident, misclassified=200),
+                   facts={"fixed_sentences": [{"id": "17", "section": "7.1", "text": "17"}]})
+    text = next(c.template_text for c in select_items(fs, None, "binary") if c.item_id == "7.1-11")
+    assert "비중이 크다" not in text and "달라지기 쉽다" not in text
+
+
+def test_multiclass_error_nature_does_not_mention_a_decision_threshold():
+    c71 = _sections(_request("multiclass", "FAIL"))["7.1"]["interpretation.confusion_analysis"]
+    assert "경계 오류가 확신 오류보다 많다" in c71 and "임계값" not in c71
+
+
+def test_ci_all_apart_does_not_say_stable_when_a_metric_is_near_target():
+    m = MetricFact(metric_id="M4", display_name="F1 Score", value=0.512, threshold=0.5, status="pass", near_target=True,
+                   ci_low=0.5051, ci_high=0.519, ci_contains_target=False, value_text="0.512", margin=0.012, margin_text="0.012")
+    text = _ci_text(FactSheet(verdict="PASS", score=100.0, metrics=[m], facts={}))
+    assert text == "판정 대상 지표의 95% 신뢰구간은 모두 목표값과 떨어져 있다."
+
+
+def test_large_latency_values_are_plain_decimals_that_pass_the_number_check():
+    req = _request("binary", "PASS")
+    raw = json.loads(req.model_dump_json())
+    raw["fact_sheet"]["latency"] = {"available": True, "mean": 1234.56789, "p50": 123456.75, "p95": 1234567.5,
+                                    "p99": 0.00001, "unit": "ms"}
+    req = NarrativeRequest.model_validate(raw)
+    fs, task, ci, derived, refs = _materials(req)
+    risks = _sections(req)["8.3"]["conclusion.risks"]
+    assert "1234567.5ms" in risks and "e+" not in risks and "0.00001ms" in risks
+    assert verify_grounding([risks], build_number_whitelist(fs, refs, derived, ci)).passed
+
+
+def test_labels_only_in_facts_lists_are_names_not_code_words():
+    raw = _raw("multiclass")
+    raw["fact_sheet"]["facts"]["prediction_bias"]["rows"][0]["label"] = "tiger_shark"
+    req = NarrativeRequest.model_validate(raw)
+    fs, task, ci, derived, refs = _materials(req)
+    parts = _sections(req)["7.1"]
+    assert "tiger_shark" in parts["interpretation.confusion_analysis"]
+    result = checks.check_section("7.1", parts, whitelist=build_number_whitelist(fs, refs, derived, ci), verdict=fs.verdict,
+                                  conclusions=select_items(fs, ci, task), problem_ids=[], exempt=checks.name_exemptions(fs, ci))
+    assert result.code_words == []
+
+
+QC = {"class_label_descriptions": {"0": "합격품", "1": "불합격품(기준 미달)"}}
+
+
+def test_class_descriptions_with_verdict_words_are_masked_for_the_contradiction_check():
+    raw = json.loads(_request("binary", "PASS").model_dump_json())
+    raw["client_inputs"] = QC
+    req = NarrativeRequest.model_validate(raw)
+    fs = req.fact_sheet
+    masks = checks.verdict_masks(fs, req.client_inputs)
+    assert "1(불합격품(기준 미달))" in masks
+    text = _sections(req)["7.1"]["interpretation.confusion_analysis"]
+    assert "양성 클래스 1(불합격품(기준 미달)) 기준으로" in text
+    assert find_verdict_contradictions([text], "PASS")  # 가리지 않으면 판정 모순으로 읽힌다
+    assert find_verdict_contradictions(checks.mask_names([text], masks), "PASS") == []
+    # 이빨 — 가려도 진짜 미달 주장은 그대로 잡힌다.
+    assert find_verdict_contradictions(checks.mask_names(["Accuracy 는 목표에 미달했다."], masks), "PASS")
+
+
+async def test_generator_masks_class_descriptions_before_the_contradiction_check(make_section_client):
+    raw = json.loads(_request("binary", "PASS").model_dump_json())
+    raw["client_inputs"] = QC
+    req = NarrativeRequest.model_validate(raw)
+    named = "양성 클래스 1(불합격품(기준 미달))은 43건을 놓쳤다."  # FN 43 — D24(7.1)도 지킨다
+    fake = make_section_client({"section_7_1": named})
+    result = await generator.generate_sections(fake, req)
+    assert result.section_sources["7.1"] == "llm"
+    assert result.response.interpretation.confusion_analysis == named
+
+
+def test_every_legacy_fallback_goes_through_the_wired_helper():
+    """옛 경로의 규칙 문장 11곳이 모두 작업 유형·고객 입력을 넘기는 _rule_text 를 거친다(키 없음 경로만 보던 배선 테스트 보강)."""
+    import inspect
+
+    from app.narrative import legacy
+
+    body = inspect.getsource(legacy._narrate_body)
+    assert body.count("_rule_text(req, fs, benchmark_refs, derived, reason=") >= 11
+    assert "build_fallback_narrative(" not in body
+    assert inspect.getsource(legacy).count("build_fallback_narrative(") == 1  # _rule_text 안의 한 곳
+
+
+@pytest.mark.parametrize("task", TASKS)
+def test_fact_less_requests_follow_writing_rules_for_every_task_type(task):
+    """facts·불균형 판단이 없는 옛 요청 — 멀티레이블 7.2 에 AI 용 설명('성적서가 따로 찍는다')이 새지 않는다."""
+    raw = _raw(task)
+    raw["fact_sheet"]["facts"] = None
+    raw["fact_sheet"]["imbalance_effect"] = None
+    req = NarrativeRequest.model_validate(raw)
+    texts = _all_texts(_sections(req))
+    for text in texts:
+        for word in _AI_ONLY:
+            assert word not in text, (word, text)
+    if task == "multilabel":
+        c72 = _sections(req)["7.2"]["interpretation.distribution_analysis"]
+        assert c72.endswith("불균형 비율은 1.1031이다.")
+
+
+def test_description_alone_is_masked_too():
+    """AI 가 이름 없이 설명만 부를 수도 있다('불합격품(기준 미달)으로 분류된 표본') — 설명 글도 가린다."""
+    raw = json.loads(_request("binary", "PASS").model_dump_json())
+    raw["client_inputs"] = QC
+    req = NarrativeRequest.model_validate(raw)
+    masks = checks.verdict_masks(req.fact_sheet, req.client_inputs)
+    text = "불합격품(기준 미달)으로 분류된 표본은 95건이다."
+    assert find_verdict_contradictions([text], "PASS")
+    assert find_verdict_contradictions(checks.mask_names([text], masks), "PASS") == []
+
+
+def test_trimmed_small_class_list_ends_with_etc():
+    raw = _raw("multiclass")
+    facts = raw["fact_sheet"]["facts"]
+    facts["low_support_classes"] = [{"label": "dog", "support": 12, "share": 0.06, "share_text": "0.06"}]
+    facts["omitted"] = {"low_support_classes": 40}
+    text = _sections(NarrativeRequest.model_validate(raw))["7.1"]["interpretation.confusion_analysis"]
+    assert "그 밖에 표본이 작은 클래스는 dog 12건 등이다." in text

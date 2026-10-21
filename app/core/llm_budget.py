@@ -48,7 +48,7 @@ Start Command 에 있고 저장소에서 확인할 수 없다(`render.yaml` 이 
 
 상호작용
 - 의존(import): time, threading
-- 사용처: app.analysis.analysis_service(mapping), app.narrative.service(narrative), app.narrative.jobs(narrative·narrative_jobs)
+- 사용처: app.analysis.analysis_service(mapping), app.narrative.legacy(narrative — 옛 경로), app.narrative.jobs(narrative·narrative_jobs)
 """
 import os
 import threading

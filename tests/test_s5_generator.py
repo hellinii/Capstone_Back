@@ -559,7 +559,7 @@ async def test_trimmed_counts_are_allowed_numbers(monkeypatch):
 
     monkeypatch.setattr(prompt, "MAX_PROMPT_CHARS", 10)  # 늘 넘친다 — 모든 단계가 돈다
     monkeypatch.setattr(fact_view, "TRIM_STEPS", (("fake", fake_step),))
-    *_, whitelist, _conclusions, ctx, _exempt = generator._prepare(_binary())
+    *_, whitelist, _conclusions, ctx, _exempt, _masks = generator._prepare(_binary())
     assert ctx.view["덜어 낸 표(일부만 실림)"]["가짜 표"] == 7777
     assert "7777" in whitelist
 

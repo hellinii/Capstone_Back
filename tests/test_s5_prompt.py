@@ -26,7 +26,7 @@ def _contract(name: str, **changes) -> NarrativeRequest:
 
 
 def _ctx(req: NarrativeRequest):
-    derived, refs, whitelist, conclusions, ctx, exempt = generator._prepare(req)
+    derived, refs, whitelist, conclusions, ctx, exempt, _masks = generator._prepare(req)
     return ctx, whitelist, conclusions
 
 

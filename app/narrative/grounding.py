@@ -6,7 +6,7 @@ LLM 출력의 모든 숫자가 fact_sheet/파생값 화이트리스트 안에 �
 상호작용
 - 의존(import): re, typing.Any, app.narrative.schemas(FactSheet, GroundingInfo),
   app.narrative.derived(THRESHOLD_GAIN_NOTABLE), app.evaluation.metrics.counts(불균형 기준값)
-- 사용처: app.narrative.service(generate_narrative 의 화이트리스트/검증), tests
+- 사용처: app.narrative.legacy·generator·checks(허용 목록·판정 모순 검사), tests
 """
 import re
 from typing import Any
