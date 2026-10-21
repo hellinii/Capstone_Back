@@ -155,12 +155,16 @@ def response_schema(section_ids: tuple[str, ...] | list[str], problem_ids: list[
 # 작성 주체(required_items.Author)마다 다르게 싣는다.
 # - ai·ai_fact: 결론 문장을 '반드시 다룰 결론'으로.
 # - fixed_interpret(17·18): 코드가 찍는 문장을 보여 주고 '해석만'.
-# - fixed·form: 성적서가 따로 찍는 것 — 지시문 전용 설명(번호 없이)으로 '되풀이하지 않는다'.
+# - fixed·form: 성적서가 따로 찍는 것 — 받은 고정 문장(facts.fixed_sentences — 9·12·11a·11b·16)이 있으면 그 원문을, 없으면
+#   지시문 전용 설명(번호 없이)을 '되풀이하지 않는다'로. 8.1 의 16 은 일부 지표만 기준이 없을 때만 여기 실린다 — 전부 없으면
+#   8.1 칸을 부르지 않는다(required_items.benchmark_printed_only).
 # - 7.3(open_ended): 칸 하는 일(SECTION_TASKS)이 대신한다.
 # 결론 문자열 가운데 AI 용 설명이 섞인 항목(fixed·form·fixed_interpret)은 그대로 싣지 않는다 — '고정 문구 17' 같은 번호를
 # AI 가 베끼면 숫자 검문에 걸린다.
 
-_FIXED_SENTENCE_FOR_ITEM = {"7.1-11": "17", "8.3-02": "18", "7.1-12": "9", "7.2-04": "12", "8.2-04": ("11a", "11b")}
+_FIXED_SENTENCE_FOR_ITEM = {
+    "7.1-11": "17", "8.3-02": "18", "7.1-12": "9", "7.2-04": "12", "8.2-04": ("11a", "11b"), "8.1-03": "16",
+}
 
 _INTERPRET_ONLY = {
     "7.1-11": (

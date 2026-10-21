@@ -2,7 +2,8 @@
 
 흐름(계획 설계 요지 2·5)
 1. 첫 생성은 장마다 한 번 — 7장(7.1·7.2·7.3)·8장(8.1·8.2·8.3)·9장(9.1·9.2·권고표)을 동시에 부른다. 문제가 0개면 9장은
-   부르지 않는다(9칸 = 코드가 정한 문장, 출처 fixed).
+   부르지 않는다(9칸 = 코드가 정한 문장, 출처 fixed). 서술 지표 전부가 기준표에 없고 성적서가 고정 문구 16 을 찍으면
+   8장 호출에서 8.1 을 뺀다(8.1 = 빈 글, 출처 fixed — required_items.benchmark_printed_only, 서술 설계 결정 5).
 2. 호출이 실패하면: 429(사용 한도)는 차례로 한 번 더, 호출 오류·시간 초과·JSON 오류는 한 번 더(SDK 재시도 0 — 앱에서 1회).
    거절(refusal 세 경우)·잘림(max_tokens)·모델 없음은 같은 요청으로 다시 부르지 않고 그 장의 칸을 규칙 템플릿으로.
    거절된 요청은 약 1시간 대체 모델로 고정 라우팅되므로 같은 요청을 되풀이하지 않는다.
@@ -38,7 +39,7 @@ from app.narrative.baselines import build_benchmark_refs
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import _add, build_number_whitelist, find_verdict_contradictions
 from app.narrative.llm import EFFORT_LEVELS, call_narrative_llm
-from app.narrative.required_items import select_items
+from app.narrative.required_items import benchmark_printed_only, select_items
 from app.narrative.schemas import (
     GroundingInfo,
     NarrativeMeta,
@@ -189,6 +190,8 @@ async def generate_sections(
     derived, refs, whitelist, conclusions, ctx, exempt, masks = await run_cpu_bound(_prepare, req)
     effort = effort or job_effort()
     problem_ids = [p.id for p in fs.problems]
+    # 8.1 이 성적서 고정 문구 16 뿐이면 AI 에 맡기지 않는다 — 쓸 것이 16 의 되풀이뿐이라 빈 글이 맞다.
+    benchmark_fixed = benchmark_printed_only(fs, refs, conclusions)
     states = {sid: SectionState(sid) for sid in SECTION_IDS}
     trace: dict = trace_into if trace_into is not None else {}
     trace.update({
@@ -208,7 +211,7 @@ async def generate_sections(
         st.parts = fallback.section_template(
             sid, fs, refs, derived, task_type=req.task_type.value, client_inputs=req.client_inputs, conclusions=conclusions,
         )
-        if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems):
+        if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems) or (sid == "8.1" and benchmark_fixed):
             st.source, st.outcome = "fixed", "fixed"  # 7.3 을 검문으로 뺐으면 호출부가 dropped 로 덮는다
         else:
             st.source, st.outcome = "fallback", "template"
@@ -219,6 +222,11 @@ async def generate_sections(
         template("9", "no_problems")
         states["9"].outcome = "fixed"
         trace["chapter_9_skipped"] = True
+    # 8.1 이 고정 문구 16 뿐이면 8장 호출에서 8.1 을 뺀다(8.2·8.3 은 늘 있다 — 8장 호출은 남는다).
+    if benchmark_fixed:
+        template("8.1", "no_benchmark")
+        states["8.1"].outcome = "fixed"
+        trace["section_8_1_fixed"] = True
 
     def finish(reason: str | None) -> GenerationResult:
         for sid, st in states.items():
@@ -358,7 +366,8 @@ async def generate_sections(
         return list(zip(jobs, results))
 
     # 1. 첫 생성 — 장별 동시.
-    chapters = [CHAPTERS["7"], CHAPTERS["8"]] + ([CHAPTERS["9"]] if fs.problems else [])
+    chapter_8 = tuple(sid for sid in CHAPTERS["8"] if not (sid == "8.1" and benchmark_fixed))
+    chapters = [CHAPTERS["7"], chapter_8] + ([CHAPTERS["9"]] if fs.problems else [])
     first = await run_batch([(ids, "chapter") for ids in chapters])
     await stage("checking")
 

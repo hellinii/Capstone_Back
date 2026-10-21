@@ -15,7 +15,8 @@
 - fixed_interpret: 코드가 고정 문구(17·18)로 숫자를 찍고, AI·템플릿은 그 숫자를 되풀이하지 않고 해석만. text 는 숫자 없는
   해석 재료(우세한 오류·근소 지표의 판정), 템플릿은 해석 한 문장. 성적서가 그 문장을 찍지 않는 옛 요청(운영 main 프론트 —
   facts 가 없다)이면 템플릿이 숫자 문장을 쓴다(code_prints).
-- fixed: 코드가 고정 문구로 찍는다(서술 칸에 쓰지 않는다 — 템플릿도 찍지 않는다).
+- fixed: 코드가 고정 문구로 찍는다(서술 칸에 쓰지 않는다 — 템플릿도 찍지 않는다). 8.1 의 비교 기준 없음(고정 문구 16)은
+  서술 지표 전부가 기준표에 없고 성적서가 그 문장을 찍으면 8.1 칸 자체가 고정 문구다(benchmark_printed_only — 빈 글, 출처 fixed).
 - form: 양식이 의뢰자 선언·선택으로 조립한다(5절·6.1 — 서술 칸에 쓰지 않는다).
 text 가운데 fixed·form·7.3(open_ended) 항목은 AI 용 설명이라 템플릿이 찍지 않는다(template_text = None).
 
@@ -84,7 +85,7 @@ class Conclusion:
 
 
 def code_prints(fs: FactSheet, sentence_id: str) -> bool:
-    """성적서가 그 고정 문장(17·18 등)을 칸 옆에 따로 찍는가 — 그러면 AI·템플릿은 그 숫자를 되풀이하지 않는다.
+    """성적서가 그 고정 문장(17·18·16 등)을 칸 옆에 따로 찍는가 — 그러면 AI·템플릿은 그 숫자를 되풀이하지 않는다.
 
     새 프론트(facts 를 보냄)는 찍을 문장을 facts.fixed_sentences 에 싣고 같은 문장을 화면에 찍는다. facts 가 상한을 넘어
     문장 목록을 비웠어도(omitted.fixed_sentences) 화면은 찍는다. 옛 요청(운영 main 프론트 — facts 가 없음)은 찍지 않는다.
@@ -96,6 +97,22 @@ def code_prints(fs: FactSheet, sentence_id: str) -> bool:
     if any(s.id == sentence_id for s in facts.fixed_sentences):
         return True
     return bool(facts.omitted.get("fixed_sentences"))
+
+
+def benchmark_printed_only(fs: FactSheet, benchmark_refs: list[dict], conclusions: list) -> bool:
+    """8.1 칸이 성적서 고정 문구 16('선택한 지표에 내부 참조 기준치가 없어 …')뿐인가(서술 설계 결정 5).
+
+    서술 지표가 있는데(비교 기준 없음 항목 8.1-03 이 결론에 있다) 기준표에 있는 지표가 하나도 없고(참조 표가 빈다),
+    성적서가 문장 16 을 찍을 때(code_prints — facts 상한으로 문장 목록을 비웠어도 화면은 찍는다). 그러면 AI 도 규칙
+    템플릿도 같은 말을 되풀이하지 않는다 — 8.1 은 빈 글·출처 fixed(문제 0개의 9칸과 같은 꼴). 8.1-03 을 함께 보는 까닭:
+    문장 목록을 비운 요청은 code_prints 가 어떤 번호든 참이라, 서술 지표가 없어 성적서가 16 을 찍지 않은 경우를 가른다.
+    facts 가 없는 옛 요청은 거짓 — 지금 문장("비교 가능한 … 생략한다") 그대로.
+    """
+    if benchmark_refs:
+        return False
+    if not any(c.item_id == "8.1-03" for c in conclusions):
+        return False
+    return code_prints(fs, "16")
 
 
 @dataclass

@@ -12,11 +12,14 @@ app/narrative/fallback.py — 규칙 기반 문장(규칙 템플릿).
 결론의 템플릿 문장(Conclusion.template_text)을 잇는다(서술 라운드 S6). 결론 목록에 없는 문장은 칸의 앞뒤 사실 문장뿐이다:
 7.1 혼동행렬이 없다는 말, 7.2 클래스 분포 나열, 8.1 기준의 출처, 8.3 목표 미달 위험, 9절 9.1·9.2 문장과 권고표.
 - 고정 문구 17·18 을 성적서가 따로 찍으면(새 프론트) 그 숫자를 되풀이하지 않고 해석 한 문장만(required_items.code_prints).
+- 서술 지표 전부가 기준표에 없고 성적서가 고정 문구 16 을 찍으면 작업 경로의 8.1 칸은 빈 글(출처 fixed —
+  required_items.benchmark_printed_only). 옛 경로(build_fallback_narrative)는 지금 문장 그대로.
 - 해석형 항목(모델 용도·최약 클래스의 용도상 위험)은 사실 문장만.
 - 작성 규칙(D37): 클래스는 '이름(설명)', 영어 코드값·필드명 없음, 서술체.
 """
 from app.narrative.required_items import (
     Conclusion,
+    benchmark_printed_only,
     failed_metrics,
     infer_task_type,
     select_items,
@@ -151,8 +154,13 @@ def _recommendations(fs: FactSheet):
 class _Input:
     """칸 함수 한 번의 재료 — 사실 시트·기준표·파생값·결론 목록·클래스 설명."""
 
-    def __init__(self, fs: FactSheet, refs: list[dict], derived: dict, conclusions: list[Conclusion], descriptions: dict):
+    def __init__(
+        self, fs: FactSheet, refs: list[dict], derived: dict, conclusions: list[Conclusion], descriptions: dict,
+        *, benchmark_fixed: bool = False,
+    ):
         self.fs, self.refs, self.derived, self.conclusions, self.descriptions = fs, refs, derived, conclusions, descriptions
+        # 8.1 이 성적서 고정 문구 16 뿐(작업 경로만 — required_items.benchmark_printed_only).
+        self.benchmark_fixed = benchmark_fixed
 
     def lines(self, section_id: str) -> list[str]:
         return [c.template_text for c in self.conclusions if c.section == section_id and c.template_text]
@@ -210,6 +218,8 @@ def _section_7_2(inp: _Input) -> dict:
 
 def _section_8_1(inp: _Input) -> dict:
     """8.1 벤치마크 — 참조 범위 대비 위치와 목표값 수준, 기준의 출처."""
+    if inp.benchmark_fixed:
+        return {"conclusion.benchmark": ""}  # 성적서가 8.1 표 아래에 고정 문구 16 을 찍는다 — 되풀이하지 않는다
     if not inp.refs:
         return {"conclusion.benchmark": "비교 가능한 내부 참조 기준치가 없어 벤치마크 비교를 생략한다."}
     lines = inp.lines("8.1")
@@ -280,12 +290,15 @@ SECTION_TEMPLATES = {
 }
 
 
-def _input(fs, benchmark_refs, derived, *, task_type, client_inputs, conclusions) -> _Input:
+def _input(fs, benchmark_refs, derived, *, task_type, client_inputs, conclusions, job: bool = False) -> _Input:
     if conclusions is None:
         conclusions = select_items(
             fs, client_inputs, task_type or infer_task_type(fs, derived), derived=derived, benchmark_refs=benchmark_refs,
         )
-    return _Input(fs, benchmark_refs, derived, conclusions, class_descriptions(client_inputs))
+    return _Input(
+        fs, benchmark_refs, derived, conclusions, class_descriptions(client_inputs),
+        benchmark_fixed=job and benchmark_printed_only(fs, benchmark_refs, conclusions),
+    )
 
 
 def section_template(
@@ -301,8 +314,11 @@ def section_template(
     """칸 하나의 규칙 문장 — {응답 필드(점 표기): 값}.
 
     conclusions 를 주면(작업 경로 — 지시문과 같은 목록) 그것을 읽고, 없으면 select_items 로 만든다. task_type 이 없는 옛
-    호출은 사실 시트로 짐작한다(required_items.infer_task_type). client_inputs 의 클래스 설명으로 클래스를 부른다(D37)."""
-    inp = _input(fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=conclusions)
+    호출은 사실 시트로 짐작한다(required_items.infer_task_type). client_inputs 의 클래스 설명으로 클래스를 부른다(D37).
+    작업 경로 전용이다 — 8.1 이 고정 문구 16 뿐이면 빈 글(옛 경로 build_fallback_narrative 는 지금 문장)."""
+    inp = _input(
+        fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=conclusions, job=True,
+    )
     return SECTION_TEMPLATES[section_id](inp)
 
 
