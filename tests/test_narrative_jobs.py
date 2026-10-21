@@ -147,9 +147,17 @@ def test_retention_env_falls_back_to_default(monkeypatch, value):
     assert jobs.result_ttl() == timedelta(hours=24)
 
 
-def test_section_sources_are_the_six_current_sections():
-    assert jobs.section_sources("llm") == {s: "llm" for s in ("7.1", "7.2", "8.1", "8.2", "8.3", "9")}
-    assert jobs.section_sources("fallback") == {s: "fallback" for s in ("7.1", "7.2", "8.1", "8.2", "8.3", "9")}
+def test_section_sources_are_the_seven_sections_with_7_3_fixed():
+    # 소절 7칸(S4b). 7.3(추가 관찰)은 AI 가 쓰기 전(S5 이전)에는 늘 고정 문구 15 '해당 없음'이다.
+    assert jobs.section_sources("llm") == {
+        "7.1": "llm", "7.2": "llm", "7.3": "fixed", "8.1": "llm", "8.2": "llm", "8.3": "llm", "9": "llm",
+    }
+    assert jobs.section_sources("fallback") == {
+        "7.1": "fallback", "7.2": "fallback", "7.3": "fixed",
+        "8.1": "fallback", "8.2": "fallback", "8.3": "fallback", "9": "fallback",
+    }
+    assert jobs.section_sources("llm", template_recommendations=True)["9"] == "fallback"
+    assert list(jobs.section_sources("llm")) == ["7.1", "7.2", "7.3", "8.1", "8.2", "8.3", "9"]
 
 
 def test_total_cost_refuses_to_guess():
@@ -272,7 +280,7 @@ async def test_no_key_job_finishes_with_rule_sentences(factory):
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
     assert (view.status, view.stage, view.failure) == ("done", "done", None)
-    assert set(view.result.section_sources.values()) == {"fallback"}
+    assert view.result.section_sources == jobs.section_sources("fallback")  # 7.3 만 고정 문구
     assert _stages(factory, job_id) == ["queued", "done"]
     assert _row(factory, job_id).finished_at is not None
     internal = _internal(factory, job_id)
@@ -346,7 +354,7 @@ async def test_refusal_finishes_with_rule_sentences_and_records_the_category(fac
     job_id, tasks = await _create(factory, client=fake)
     await _run_pending(tasks)
     view = await jobs.read_job(job_id, session_factory=factory)
-    assert view.status == "done" and set(view.result.section_sources.values()) == {"fallback"}
+    assert view.status == "done" and view.result.section_sources == jobs.section_sources("fallback")
     internal = _internal(factory, job_id)
     assert internal["reason"] == "refusal"
     assert internal["calls"][0]["refusal_category"] == "bio"
@@ -768,3 +776,93 @@ def test_env_values_are_wired_into_the_modules(tmp_path):
            "NARRATIVE_REPORTS_PER_HOUR": "0", "LLM_CALLS_PER_HOUR": "45"}
     out = subprocess.run([sys.executable, "-c", code], env=env, cwd=root, capture_output=True, text=True, check=True)
     assert out.stdout.split() == ["3", "7", "200", "30", "45"]
+
+
+# ── 서술용 파생값(facts, S4b) — 상한·형식 오류는 422 막다른 길이 아니라 줄이거나 버린다 ──────────────
+
+def _with_facts(facts: dict) -> dict:
+    body = _body()
+    body["fact_sheet"]["facts"] = facts
+    return body
+
+
+def _low(n: int) -> list[dict]:
+    return [{"label": f"c{i}", "support": 1, "share": 0.001, "share_text": "0.001"} for i in range(n)]
+
+
+def test_facts_class_list_over_limit_is_emptied():
+    req, trimmed = jobs.parse_request(_with_facts({"low_support_classes": _low(N)}))
+    assert trimmed == ["fact_sheet.facts.low_support_classes"]
+    assert req.fact_sheet.facts is not None and req.fact_sheet.facts.low_support_classes == []
+
+
+def test_facts_bias_rows_over_limit_are_emptied_but_unit_stays():
+    rows = [{"label": f"c{i}", "predicted": 1, "actual": 0, "difference": 1} for i in range(N)]
+    req, trimmed = jobs.parse_request(_with_facts({"prediction_bias": {"unit": "per_class", "rows": rows}}))
+    assert trimmed == ["fact_sheet.facts.prediction_bias.rows"]
+    assert req.fact_sheet.facts.prediction_bias.unit == "per_class"
+    assert req.fact_sheet.facts.prediction_bias.rows == []
+
+
+def test_facts_total_over_limit_empties_lists_first_then_drops_facts():
+    # 목록만 길면 목록을 비우고 facts 는 남긴다(판정 근거 등은 그대로).
+    long_label = "가" * 200
+    lists = {
+        "low_support_classes": [{**r, "label": long_label + r["label"]} for r in _low(200)],
+        "verdict_detail": {"verdict": "PASS", "judged_count": 1, "passed_count": 1},
+    }
+    req, trimmed = jobs.parse_request(_with_facts(lists))
+    assert trimmed == ["fact_sheet.facts(lists)"]
+    assert req.fact_sheet.facts.low_support_classes == []
+    assert req.fact_sheet.facts.verdict_detail.verdict == "PASS"
+    # 목록 밖 칸(생략 사유 64개 × 300자 + 이름)만으로 넘으면 facts 를 버린다.
+    skipped = [{"metric_id": f"M{i}", "display_name": "지" * 200, "reason": "사" * 300} for i in range(64)]
+    req, trimmed = jobs.parse_request(_with_facts({"ci_skipped": skipped}))
+    assert trimmed == ["fact_sheet.facts"]
+    assert req.fact_sheet.facts is None
+
+
+def test_facts_format_error_drops_facts_without_forcing_rule_sentences():
+    req, trimmed = jobs.parse_request(_with_facts({"declarations": {"risk_direction": "maybe"}}))
+    assert trimmed == [jobs.FACTS_DROPPED]
+    assert req.fact_sheet.facts is None
+    assert req.fact_sheet == _sample_request().fact_sheet  # 나머지는 그대로
+
+
+def test_facts_format_error_and_limit_error_together():
+    body = _with_facts({"declarations": {"usage_mode": "sometimes"}})
+    body["fact_sheet"]["per_class"] = [{"label": str(i)} for i in range(N)]
+    req, trimmed = jobs.parse_request(body)
+    assert trimmed[0] == jobs.FACTS_DROPPED and "fact_sheet.per_class" in trimmed
+    assert req.fact_sheet.facts is None and req.fact_sheet.per_class == []
+
+
+def test_non_facts_format_error_is_still_422():
+    body = _with_facts({"declarations": {"risk_direction": "maybe"}})
+    body["fact_sheet"]["verdict"] = None  # facts 밖의 형식 오류
+    with pytest.raises(ValidationError):
+        jobs.parse_request(body)
+
+
+async def test_job_with_invalid_facts_still_calls_the_model(factory, make_fake_anthropic_client):
+    fake = make_fake_anthropic_client(_CLEAN)
+    job_id, tasks = await _create(factory, client=fake, raw=_with_facts({"declarations": {"risk_direction": "x"}}))
+    await _run_pending(tasks)
+    fake.beta.messages.create.assert_called_once()
+    internal = _internal(factory, job_id)
+    assert (internal["budget"], internal["trimmed"]) == ("reserved", [jobs.FACTS_DROPPED])
+    assert internal["reason"] is None
+
+
+async def test_job_with_facts_over_limit_finishes_with_rule_sentences(factory, make_fake_anthropic_client):
+    fake = make_fake_anthropic_client(_CLEAN)
+    job_id, tasks = await _create(factory, client=fake, raw=_with_facts({"low_support_classes": _low(N)}))
+    await _run_pending(tasks)
+    fake.beta.messages.create.assert_not_called()
+    internal = _internal(factory, job_id)
+    assert (internal["reason"], internal["trimmed"]) == ("input_too_large", ["fact_sheet.facts.low_support_classes"])
+
+
+def test_legacy_route_rejects_facts_over_limit():
+    with pytest.raises(ValidationError):
+        schemas.NarrativeRequest.model_validate(_with_facts({"low_support_classes": _low(N)}))

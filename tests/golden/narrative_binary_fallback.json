@@ -44,6 +44,7 @@
     "verdict": "CONDITIONAL_PASS"
   },
   "interpretation": {
+    "additional_observations": "",
     "confusion_analysis": "혼동 행렬 기준 전체 200건 중 25건이 오분류되었다(정분류 175건). 거짓 음성(FN)은 15건, 거짓 양성(FP)은 10건이다.",
     "distribution_analysis": "평가 데이터셋은 총 200건이며, 클래스 분포는 0 130건(65.0%), 1 70건(35.0%)이다. 불균형 비율은 1.857이다."
   },

@@ -55,6 +55,7 @@ from sqlalchemy import delete, update
 
 from app.core import database, llm_budget
 from app.core.concurrency import run_cpu_bound
+from app.narrative import sections
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.models import NarrativeJob, _utcnow
 from app.narrative.schemas import (
@@ -116,8 +117,8 @@ def record_retention() -> timedelta:
     return timedelta(days=_env_number("NARRATIVE_JOB_RETENTION_DAYS", 90.0, maximum=3650.0))
 
 
-# 지금 응답이 가진 칸(소절 번호). 7.3(추가 관찰)은 S4b·S5 에서 응답에 생길 때 더한다.
-SECTION_IDS = ("7.1", "7.2", "8.1", "8.2", "8.3", "9")
+# 칸(소절 번호) — 등록표 한 곳(app.narrative.sections). 7.3 은 AI 가 쓰기 전(S5 이전)에는 늘 고정 문구 15다.
+SECTION_IDS = sections.SECTION_IDS
 
 
 def get_session_factory():
@@ -155,7 +156,10 @@ def section_sources(source: str, *, template_recommendations: bool = False) -> d
     그때 9칸을 AI 로 적으면 규칙 문장을 AI 가 쓴 것처럼 표시하게 되므로 9칸은 fallback 으로 적는다.
     """
     value = "llm" if source == "llm" else "fallback"
-    out = {sid: value for sid in SECTION_IDS}
+    out = {
+        s.id: "fixed" if s.fixed_until_generated else value
+        for s in sections.SECTIONS
+    }
     if template_recommendations:
         out["9"] = "fallback"
     return out
@@ -183,13 +187,20 @@ def total_cost(calls: list[dict]) -> float | None:
 # ── 입력 상한 초과 → 줄이기 ─────────────────────────────────────────────────────
 # 클래스 단위 칸은 잘라 내면 남은 값으로 쓴 문장이 틀린다(예: 앞 256개 클래스 중에서 고른 "가장 약한 클래스").
 # 그래서 클래스 단위 칸은 통째로 비우고, 클래스와 무관한 목록(지표·문제)과 글자는 상한까지 자른다.
+# 서술용 파생값(facts)의 클래스 목록도 같다 — 최약 클래스 같은 결론은 프론트가 자르기 전 값으로 이미 정했다.
 _CLASS_LEVEL_KEYS = {
     ("fact_sheet", "confusion"): None,
     ("fact_sheet", "distribution"): None,
     ("fact_sheet", "per_class"): [],
     ("fact_sheet", "class_averages"): [],
     ("fact_sheet", "confusion_counts"): [],
+    ("fact_sheet", "facts", "low_support_classes"): [],
+    ("fact_sheet", "facts", "prediction_bias", "rows"): [],
+    ("fact_sheet", "facts", "distribution_shift"): [],
 }
+_FACTS = ("fact_sheet", "facts")
+# facts 전체 길이 초과 때 1차로 비우는 목록(계약 size_rules — 프론트 fitFacts 의 마지막 두 단계와 같은 칸).
+_FACTS_LISTS = ("low_support_classes", "distribution_shift", "fixed_sentences")
 
 
 # 줄이기를 되풀이하는 최대 횟수. 겹친 목록은 바깥 → 안쪽 순으로 한 겹씩 드러난다(가장 깊은 것: 문제 목록 → 문제
@@ -203,16 +214,43 @@ def _is_limit_error(err: dict) -> bool:
     return isinstance((err.get("ctx") or {}).get("error"), LimitExceeded)
 
 
+def _set_path(raw: dict, path: tuple, value) -> None:
+    parent = raw
+    for key in path[:-1]:
+        parent = parent[key]
+    parent[path[-1]] = value
+
+
+def _clear_facts(raw: dict) -> str:
+    """facts 전체 길이 초과 — 1차로 클래스 목록·고정 문장을 비우고, 이미 비어 있으면 facts 를 없앤다."""
+    facts = raw["fact_sheet"]["facts"]
+    bias = facts.get("prediction_bias") if isinstance(facts, dict) else None
+    has_lists = isinstance(facts, dict) and (
+        any(facts.get(key) for key in _FACTS_LISTS) or (isinstance(bias, dict) and bias.get("rows"))
+    )
+    if has_lists:
+        for key in _FACTS_LISTS:
+            facts[key] = []
+        if isinstance(bias, dict):
+            bias["rows"] = []
+        return "fact_sheet.facts(lists)"
+    raw["fact_sheet"]["facts"] = None
+    return "fact_sheet.facts"
+
+
 def _clear_or_trim(raw: dict, err: dict) -> str:
     """오류 하나를 고친다. 고친 자리(점 표기)를 돌려준다. 고칠 수 없는 모양이면 LookupError·TypeError."""
     loc = tuple(err["loc"])
     if loc[:1] == ("client_inputs",):
         raw["client_inputs"] = None  # 규칙 문장은 고객 입력을 쓰지 않는다
         return "client_inputs"
-    for prefix, empty in _CLASS_LEVEL_KEYS.items():
+    # 가장 긴(구체적인) 자리부터 — facts 안의 목록이 facts 전체보다 먼저 맞는다.
+    for prefix, empty in sorted(_CLASS_LEVEL_KEYS.items(), key=lambda kv: -len(kv[0])):
         if loc[: len(prefix)] == prefix:
-            raw[prefix[0]][prefix[1]] = copy.copy(empty)
+            _set_path(raw, prefix, copy.copy(empty))
             return ".".join(prefix)
+    if loc == _FACTS:
+        return _clear_facts(raw)
     parent = raw
     for key in loc[:-1]:
         parent = parent[key]
@@ -228,16 +266,43 @@ def _clear_or_trim(raw: dict, err: dict) -> str:
     return ".".join(str(k) for k in loc)
 
 
+# facts 안의 형식 오류(모르는 선언 코드 등)로 facts 를 버렸다는 표시 — 상한 초과가 아니라 AI 는 그대로 부른다.
+FACTS_DROPPED = "fact_sheet.facts(invalid)"
+
+
+def _drop_invalid_facts(raw, exc: ValidationError):
+    """facts 안의 형식 오류만 있으면 facts 를 버린 사본을 돌려준다(아니면 None).
+
+    facts 는 서술을 돕는 파생값이다 — 계약이 어긋나도(프론트가 새 코드값을 먼저 보냄 등) 422 막다른 길로 서술을
+    통째로 잃지 않게, 버리고 지금까지의 서버 셈으로 쓴다(계약 size_rules). 상한 초과 오류는 여기서 다루지 않는다.
+    """
+    def facts_format(e: dict) -> bool:
+        return tuple(e["loc"][:2]) == _FACTS and not _is_limit_error(e)
+
+    errors = exc.errors()
+    # facts 형식 오류가 있고, 나머지가 모두 상한 초과(줄이기로 고칠 수 있음)일 때만 — facts 밖의 형식 오류는 422.
+    if not any(facts_format(e) for e in errors) or not all(facts_format(e) or _is_limit_error(e) for e in errors):
+        return None
+    dropped = copy.deepcopy(raw)
+    dropped["fact_sheet"]["facts"] = None
+    return dropped
+
+
 def parse_request(raw) -> tuple[NarrativeRequest, list[str]]:
     """요청 본문을 검증한다. 입력 상한만 넘었으면 상한 안으로 줄여 (요청, 고친 자리 목록)을 돌려준다.
 
-    상한이 아닌 오류(필수 칸 없음·형식 틀림)가 하나라도 있으면 원래 ValidationError 를 그대로 던진다 —
-    라우터가 422 로 돌려준다(프론트의 조립 버그라 다시 만들어도 같다는 점은 같지만, 고칠 근거가 없다).
+    facts 안의 형식 오류만 있으면 facts 를 버리고 고친 자리에 FACTS_DROPPED 를 적는다(상한 초과가 아니므로
+    호출부는 AI 를 그대로 부른다). 그 밖의 상한이 아닌 오류(필수 칸 없음·형식 틀림)가 하나라도 있으면 원래
+    ValidationError 를 그대로 던진다 — 라우터가 422 로 돌려준다.
     """
     try:
         return NarrativeRequest.model_validate(raw), []
     except ValidationError as exc:
         first = exc
+    dropped = _drop_invalid_facts(raw, first)
+    if dropped is not None:
+        request, trimmed = parse_request(dropped)
+        return request, [FACTS_DROPPED, *trimmed]
     # 고친 뒤 다시 검증하면 새 오류가 드러날 수 있다 — pydantic 은 목록 길이가 넘으면 그 목록의 항목 오류를
     # 함께 알리지 않는다(문제 18개 중 하나의 제목이 길면, 16개로 자른 뒤에야 제목 오류가 나온다). 그래서
     # 상한 오류만 남는 동안 몇 번 되풀이한다. 고치는 자리는 매번 줄기만 하므로 몇 번이면 끝난다.
@@ -376,7 +441,9 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
 
     # AI 를 부를 작업만 서술 지갑에서 보고서 1건을 예약한다. 사유가 이미 정해진 작업은 AI 를 부르지 않는다.
     forced_reason = None
-    if trimmed:
+    if FACTS_DROPPED in trimmed:
+        logger.warning("서술 작업 facts 형식 오류 → facts 를 버리고 진행(계약 어긋남)")
+    if [t for t in trimmed if t != FACTS_DROPPED]:
         forced_reason, budget = "input_too_large", "not_needed"
         logger.warning("서술 작업 입력이 상한을 넘어 줄임 → 규칙 문장으로 완료(input_too_large): %s", trimmed)
     elif client is None:

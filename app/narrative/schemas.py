@@ -3,7 +3,7 @@
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from app.core.schemas import ReportPurpose, TaskType
 
 
@@ -41,6 +41,16 @@ MAX_PROBLEMS = 16
 MAX_PROBLEM_EVIDENCE_CHARS = 20_000
 MAX_PROBLEM_TEXT_CHARS = 1_000
 
+# 서술용 파생값(fact_sheet.facts, 계약 facts-1 — NARRATIVE_ROUND/사실시트_계약.json, 사본 tests/contract/). 프론트
+# (Capstone_Front/src/lib/report/factSheetLimits.ts)가 같은 상수로 미리 자른다 — 두 쪽 계약 테스트가 값을 대조한다.
+# facts 전체 길이는 client_inputs 와 같은 잣대(공백 없는 JSON, 한글 그대로)로 잰다.
+MAX_FIXED_SENTENCES = 16
+MAX_FIXED_SENTENCE_CHARS = 1_000
+MAX_CI_SKIP_REASON_CHARS = 300
+MAX_FACTS_CHARS = 30_000
+# 표시 문자열(value_text·margin_text·*_text·display·gain_text)의 길이 — 숫자 하나라 수십 자를 넘지 않는다.
+MAX_DISPLAY_TEXT_CHARS = 40
+
 # 문제 종류 9종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
 ProblemKind = Literal[
     "core_fail",
@@ -73,6 +83,22 @@ class MetricFact(BaseModel):
     # 아슬아슬 — |margin| < |threshold| × 3%(엄격 미만). 판정은 프론트 computeVerdict 한 곳에서 하고
     # 서버는 받은 값을 읽기만 한다. 판정 대상이 아니거나 옛 요청이면 False.
     near_target:  bool         = Field(default=False, description="목표값과의 차이가 목표값의 3% 미만")
+    # ── S4a 프론트가 싣는 칸(계약 facts-1). 옛 요청에는 없다 — 모두 선택이고 기본값은 '모름'이다.
+    value_text:   str | None   = Field(
+        default=None, max_length=MAX_DISPLAY_TEXT_CHARS,
+        description="판정 대상 지표 값의 인쇄 표기(성적서 6.1 과 같음 — 판정과 어긋나 보이면 자릿수를 늘림)",
+    )
+    higher_is_better: bool | None = Field(
+        default=None, description="높을수록 좋은 지표인가 — margin 부호의 뜻. None 이면 모름(옛 요청)",
+    )
+    beta:         float | None = Field(default=None, description="F-beta 의 β(이름에는 넣지 않는다)")
+    margin_text:  str | None   = Field(
+        default=None, max_length=MAX_DISPLAY_TEXT_CHARS,
+        description="margin 의 서술용 표기 — 0 과 비교한 판정과 같은 쪽으로 읽히게 자릿수를 늘림",
+    )
+    ci_contains_target: bool | None = Field(
+        default=None, description="구간이 목표값을 포함하는가(프론트가 반올림 전 값으로 판정). None 이면 해당 없음·모름",
+    )
 
 
 class PerClassFact(BaseModel):
@@ -198,6 +224,10 @@ class F1ThresholdGainFact(BaseModel):
         default=None,
         description="엔진이 반올림 전 gain 으로 정한 '임계값 부적합'(≥ 0.10, S2). 없으면(옛 요청) gain 으로 판정",
     )
+    gain_text:      str | None = Field(
+        default=None, max_length=MAX_DISPLAY_TEXT_CHARS,
+        description="gain 의 표시 문자열 — 판정(notable)과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2)",
+    )
 
 
 class ImbalanceEffectFact(BaseModel):
@@ -213,6 +243,19 @@ class ImbalanceEffectFact(BaseModel):
     majority_minus_minority_f1: float        = Field(description="다수 F1 − 소수 F1 (음수일 수 있다)")
     majority_class:             str
     minority_class:             str
+    display:                    "ImbalanceDisplayFact | None" = Field(
+        default=None, description="세 값의 표시 문자열 — 판정과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2)",
+    )
+
+
+class ImbalanceDisplayFact(BaseModel):
+    """불균형 영향 세 값의 표시 문자열(엔진 metrics/display.judged_text). 1.49996 이 '1.5' 로 찍히지 않게."""
+    imbalance_ratio:            str        = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    accuracy_minus_macro_f1:    str | None = Field(default=None, max_length=MAX_DISPLAY_TEXT_CHARS)
+    majority_minus_minority_f1: str        = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+
+
+ImbalanceEffectFact.model_rebuild()
 
 
 class ProblemFact(BaseModel):
@@ -236,6 +279,179 @@ class ProblemFact(BaseModel):
         if len(json.dumps(v, ensure_ascii=False)) > MAX_PROBLEM_EVIDENCE_CHARS:
             raise LimitExceeded(f"문제 근거 수치가 상한({MAX_PROBLEM_EVIDENCE_CHARS}자)을 넘습니다.")
         return v
+
+
+# ── 서술용 파생값(fact_sheet.facts, 계약 facts-1) ─────────────────────────────────
+# 계산은 프론트 narrativeFacts.ts 한 곳이다(계획 설계 요지 4). 서버는 받은 값을 다시 계산하지 않는다.
+# 모든 칸은 선택이다 — 옛 요청(운영 main 프론트, 저장된 다시 만들기 요청)에는 facts 자체가 없다.
+# 클래스 단위 목록(작은 표본·편향·분포 차)은 상한을 넘으면 작업 경로가 통째로 비운다(app.narrative.jobs).
+
+
+class MetricRefFact(BaseModel):
+    metric_id:    str
+    display_name: str
+
+
+class DeclarationsFact(BaseModel):
+    """고객 선언의 코드값(화면 글자가 아니라 선택지 값에서). 모름·미제공·이 유형에 없는 선언은 None."""
+    risk_direction: Literal["fn", "fp", "similar"] | None = None
+    class_priority: Literal["all_equal", "larger_first", "samples_first"] | None = None
+    usage_mode:     Literal["realtime", "batch"] | None = None
+
+
+class VerdictDetailFact(BaseModel):
+    """판정 근거(D19) — 프론트 computeVerdict 한 곳의 결과. 통과 수는 참고 수치다."""
+    verdict:              Literal["PASS", "CONDITIONAL_PASS", "FAIL", "INCONCLUSIVE"]
+    judged_count:         int = Field(ge=0)
+    passed_count:         int = Field(ge=0)
+    failed_core:          list[MetricRefFact] = Field(default=[], max_length=MAX_METRIC_FACTS)
+    failed_noncore:       list[MetricRefFact] = Field(default=[], max_length=MAX_METRIC_FACTS)
+    unavailable_core:     list[MetricRefFact] = Field(default=[], max_length=MAX_METRIC_FACTS)
+    inconclusive_cause:   Literal["core_not_computed", "no_target", "no_judged"] | None = None
+    inconclusive_metrics: list[MetricRefFact] = Field(default=[], max_length=MAX_METRIC_FACTS)
+
+
+class ErrorTotalsFact(BaseModel):
+    """오분류 총건수 — 자르기 전 엔진 건수로(혼동행렬이 잘려도 남는다)."""
+    unit:          Literal["sample", "label_cell"]
+    total:         int = Field(ge=0)
+    misclassified: int = Field(ge=0)
+
+
+class WeakestClassFact(BaseModel):
+    label:            str
+    f1:               float
+    support:          int
+    share:            float
+    share_text:       str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    macro_f1:         float | None = None
+    gap_from_macro:   float | None = None
+    gap_text:         str | None = Field(default=None, max_length=MAX_DISPLAY_TEXT_CHARS)
+    low_support:      bool
+    far_below_macro:  bool
+
+
+class LowSupportClassFact(BaseModel):
+    label:      str
+    support:    int
+    share:      float
+    share_text: str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+
+
+class ConfusionPairFact(BaseModel):
+    actual:          str
+    predicted:       str
+    count:           int = Field(ge=0)
+    share_of_errors: float
+
+
+class PredictionBiasRowFact(BaseModel):
+    label:      str | None = None
+    predicted:  int
+    actual:     int
+    difference: int
+
+
+class PredictionBiasFact(BaseModel):
+    unit: Literal["positive_class", "per_class", "label_total"]
+    rows: list[PredictionBiasRowFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES)
+
+
+class DeclaredRiskErrorsFact(BaseModel):
+    side:         Literal["fn", "fp"]
+    count:        int = Field(ge=0)
+    total_errors: int = Field(ge=0)
+    share:        float | None = None
+    share_text:   str | None = Field(default=None, max_length=MAX_DISPLAY_TEXT_CHARS)
+
+
+class PrecisionRecallGapFact(BaseModel):
+    precision:       float
+    recall:          float
+    difference:      float
+    difference_text: str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    flagged:         bool
+
+
+class ReferenceClassFact(BaseModel):
+    label:   str
+    support: int | None = None
+    f1:      float | None = None
+
+
+class AverageGapFact(BaseModel):
+    kind:            Literal["macro_vs_weighted", "macro_vs_micro"]
+    macro_f1:        float
+    other_f1:        float
+    difference:      float
+    difference_text: str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    reference_class: ReferenceClassFact
+
+
+class DeclaredAverageFact(BaseModel):
+    class_priority: Literal["larger_first", "samples_first"]
+    average:        Literal["weighted", "micro"]
+    precision:      float | None = None
+    recall:         float | None = None
+    f1:             float | None = None
+
+
+class DistributionShiftRowFact(BaseModel):
+    label:            str
+    training_ratio:   float
+    evaluation_ratio: float
+    difference:       float
+    difference_text:  str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    flagged:          bool
+
+
+class CiSkippedFact(BaseModel):
+    metric_id:    str
+    display_name: str
+    reason:       str | None = Field(default=None, max_length=MAX_CI_SKIP_REASON_CHARS)
+
+
+class FixedSentenceFact(BaseModel):
+    """7~9절에 코드가 찍을 고정 문장(성적서 고정 문구 번호·소절·글). AI·템플릿은 같은 숫자를 되풀이하지 않는다."""
+    id:      str = Field(max_length=8)
+    section: str = Field(max_length=8)
+    text:    str = Field(max_length=MAX_FIXED_SENTENCE_CHARS)
+
+
+class NarrativeFactsFact(BaseModel):
+    """fact_sheet.facts — 서술용 파생값(서술 설계 6절의 프론트 값). 계약: tests/contract/fact_sheet_contract.json."""
+    contract:              str = Field(default="facts-1", max_length=32)
+    positive_class:        str | None = None
+    n_classes:             int | None = Field(default=None, ge=0)
+    class_share_basis:     Literal["samples", "label_occurrences"] = "samples"
+    report_purpose_label:  str | None = Field(default=None, max_length=32)
+    core_metrics_source:   Literal["default", "client"] | None = None
+    selected_metrics:      list[str] = Field(default=[], max_length=MAX_METRIC_FACTS)
+    declarations:          DeclarationsFact = Field(default_factory=DeclarationsFact)
+    verdict_detail:        VerdictDetailFact | None = None
+    error_totals:          ErrorTotalsFact | None = None
+    weakest_class:         WeakestClassFact | None = None
+    low_support_classes:   list[LowSupportClassFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES)
+    top_confusion_pairs:   list[ConfusionPairFact] = Field(default=[], max_length=3)
+    prediction_bias:       PredictionBiasFact | None = None
+    declared_risk_errors:  DeclaredRiskErrorsFact | None = None
+    precision_recall_gap:  PrecisionRecallGapFact | None = None
+    average_gap:           AverageGapFact | None = None
+    declared_average:      DeclaredAverageFact | None = None
+    distribution_shift_status: Literal["compared", "not_provided", "uncovered"] = "not_provided"
+    distribution_shift:    list[DistributionShiftRowFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES)
+    ci_available:          bool = False
+    ci_skipped:            list[CiSkippedFact] = Field(default=[], max_length=MAX_METRIC_FACTS)
+    fixed_sentences:       list[FixedSentenceFact] = Field(default=[], max_length=MAX_FIXED_SENTENCES)
+    omitted:               dict[str, int] = Field(default={}, max_length=32, description="자르기로 뺀 개수(외 k개)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _within_total_limit(cls, data):
+        # 칸별 상한만으로는 합이 커질 수 있다 — 지시문에 그대로 실리므로 전체 길이도 막는다(무인증 과금 경로).
+        if isinstance(data, dict) and client_inputs_length(data) > MAX_FACTS_CHARS:
+            raise LimitExceeded(f"서술용 파생값(facts)이 상한({MAX_FACTS_CHARS}자)을 넘습니다.")
+        return data
 
 
 class FactSheet(BaseModel):
@@ -288,6 +504,10 @@ class FactSheet(BaseModel):
         max_length=MAX_PROBLEMS,
         description="9절 권고가 대응할 문제 목록(D22). 비어 있으면 권고도 없다",
     )
+    facts: NarrativeFactsFact | None = Field(
+        default=None,
+        description="서술용 파생값(S4a, 계약 facts-1). 옛 요청에는 없다 — 그때는 지금까지의 서버 셈을 쓴다",
+    )
 
     @field_validator("problems")
     @classmethod
@@ -325,6 +545,9 @@ class NarrativeRequest(BaseModel):
 class InterpretationOut(BaseModel):
     confusion_analysis:    str = ""
     distribution_analysis: str = ""
+    # 7.3 추가 관찰(D38) — 결론 목록 밖에서 AI 가 사실 시트로 찾은 것. 비어 있으면 성적서는 고정 문구 15
+    # '해당 없음'을 찍는다. AI 가 이 칸을 쓰는 것은 S5 부터다(그 전에는 늘 빈 글).
+    additional_observations: str = ""
 
 
 class ConclusionOut(BaseModel):
