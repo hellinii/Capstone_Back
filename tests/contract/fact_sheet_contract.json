@@ -120,7 +120,7 @@
     "칸별 상한: 클래스 목록(per_class·confusion·confusion_counts·class_distribution·low_support_classes·prediction_bias.rows·distribution_shift) = MAX_CLASS_ENTRIES, 지표 목록(metrics·verdict_detail 목록·ci_skipped) = MAX_METRIC_FACTS, fixed_sentences = MAX_FIXED_SENTENCES × MAX_FIXED_SENTENCE_CHARS.",
     "facts 전체가 MAX_FACTS_CHARS 를 넘으면 프론트가 차례로 줄인다: distribution_shift(flagged 만) → prediction_bias(|difference| 상위 20) → low_support_classes(상위 20) → 세 칸 비움(omitted.facts_class_lists). 그래도 넘으면 fixed_sentences 를 비운다.",
     "요청 본문이 NARRATIVE_BODY_BUDGET_BYTES 를 넘으면 클래스 단위 칸을 모두 비운다(백엔드 jobs._CLASS_LEVEL_KEYS 와 같은 칸 + facts 의 세 목록).",
-    "백엔드 작업 경로: facts 의 상한 초과는 클래스 목록 넷을 비우고, 그래도 넘거나 facts 안의 다른 검증 오류(모르는 값 등)는 facts = null 로 두고 규칙 문장으로 완료한다(422 막다른 길 금지). 옛 경로는 422 그대로.",
+    "백엔드 작업 경로: facts 의 상한 초과는 클래스 목록·고정 문장을 비우고, 그래도 넘으면 facts = null — 상한 초과는 규칙 문장으로 완료(input_too_large). facts 안의 형식 오류(모르는 코드값 등)는 facts 를 버리되 omitted 는 남기고, 표시 문자열(value_text·margin_text·gain_text·display·*_text — 숫자 꼴만)이 틀리면 그 칸만 버린다 — 둘 다 AI 는 그대로 부른다(422 막다른 길 금지, 상한 오류 뒤에 숨은 형식 오류도 같다). 옛 경로는 422 그대로.",
     "AI 를 실제로 부를 수 있는 크기는 지시문 상한 80,000자가 정한다(클래스 약 70~90개). 넘을 때 지시문에서만 줄이는 순서(혼동행렬 → 표 하위 줄)는 S5 몫 — 허용 목록은 원본으로 만든다."
   ],
   "d24_checks": {

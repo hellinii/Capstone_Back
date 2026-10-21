@@ -100,6 +100,21 @@ def _pct(ratio: float) -> str:
     return f"{round(ratio * 100, 1):g}%"
 
 
+def _pct_text(fraction_text: str) -> str:
+    """판정 쪽으로 자릿수를 늘린 비율 표기(0~1, 예 '0.04996')를 같은 정밀도의 백분율로('4.996%').
+
+    _pct(소수 첫째 자리)로 바꾸면 0.04996 이 '5%' 가 되어 '5% 미만' 판정과 어긋난다(S4b 검토 RI-01).
+    """
+    digits = max(len(fraction_text.split(".", 1)[1]) - 2, 1) if "." in fraction_text else 1
+    return f"{round(float(fraction_text) * 100, digits):g}%"
+
+
+def _ro(number_text: str) -> str:
+    """숫자 뒤 조사 '로/으로' — 끝자리 0·3·6 은 받침(ㅇ·ㅁ·ㄱ)이라 '으로', 1·7·8 은 ㄹ받침이라 '로', 나머지 '로'."""
+    last = number_text.rstrip("%")[-1:] if number_text else ""
+    return "으로" if last in "036" and last else "로"
+
+
 def _model_purpose(ctx: Ctx) -> str | None:
     model = ctx.client_inputs.get("model") if isinstance(ctx.client_inputs, dict) else None
     purpose = model.get("모델 용도") if isinstance(model, dict) else None
@@ -195,16 +210,19 @@ def _weakest(ctx: Ctx) -> str | None:
     noun = "레이블" if ctx.task_type == "multilabel" else "클래스"
     subject = "레이블은" if noun == "레이블" else "클래스는"
     base = "레이블 등장" if ctx.facts.class_share_basis == "label_occurrences" else "전체 표본"
-    text = f"F1 이 가장 낮은 {subject} {w.label}(F1 {_n(w.f1)}, {w.support}건, {base}의 {_pct(w.share)})이다."
+    text = f"F1 이 가장 낮은 {subject} {w.label}(F1 {_n(w.f1)}, {w.support}건, {base}의 {_pct_text(w.share_text)})이다."
     if w.gap_text is not None:
         text += f" 매크로 F1 과의 차이는 {w.gap_text}이다."
     flags = []
-    if w.low_support:
-        flags.append("표본이 작다(30건 미만 또는 5% 미만)")
+    # 사유별로 따로 쓴다 — 'A 또는 B' 로 쓰면 걸리지 않은 쪽까지 주장하게 된다.
+    if w.support < 30:
+        flags.append("표본이 30건 미만이다")
+    if float(w.share_text) < 0.05:  # share_text 는 프론트 판정과 같은 쪽으로 읽히게 만든 표기다
+        flags.append(f"{base}의 5% 미만이다")
     if w.far_below_macro:
         flags.append("매크로 F1 보다 0.1 이상 낮다")
     if flags:
-        text += " " + ", ".join(flags) + "."
+        text += " " + " ".join(flags[:1]) + "".join(f" 또한 {f}" for f in flags[1:]) + "."
     small = [r for r in ctx.facts.low_support_classes if r.label != w.label]
     if small:
         text += f" 그 밖에 표본이 작은 {noun}: {', '.join(f'{r.label}({r.support}건)' for r in small[:5])}."
@@ -242,9 +260,11 @@ def _imbalance_ratio(ctx: Ctx) -> str | None:
     return text
 
 
+# 엔진 판정 규칙(D20)의 설명 — 이진·다중은 '정확도 − 매크로 F1' 과 '다수 − 소수 F1' 둘을, 멀티레이블은 다수·소수
+# 레이블 F1 차 하나만 본다(S4b 검토 RI-08).
 _IMBALANCE_LEVEL = {
-    "affected": "불균형이 성능 수치에 영향을 주었다(비율 1.5 이상이고 두 F1 차이 중 하나가 0.1 이상)",
-    "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다(비율 1.5 이상, 두 F1 차이 모두 0.1 미만)",
+    "affected": "불균형이 성능 수치에 영향을 주었다(비율 1.5 이상이고 {gaps} 0.1 이상)",
+    "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다(비율 1.5 이상이고 {gaps_all} 0.1 미만)",
     "mild": "불균형이 경미하다(비율 1.5 미만)",
 }
 
@@ -255,7 +275,12 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
         return None
     shown = ie.display
     gap = shown.majority_minus_minority_f1 if shown else _n(ie.majority_minus_minority_f1)
-    text = f"엔진 판단: {_IMBALANCE_LEVEL[ie.level]}. 다수({ie.majority_class})−소수({ie.minority_class}) F1 차이는 {gap}"
+    if ie.accuracy_minus_macro_f1 is None:
+        gaps = gaps_all = "다수·소수 레이블 F1 차이가"
+    else:
+        gaps, gaps_all = "정확도 − 매크로 F1 과 다수 − 소수 F1 차이 중 하나가", "정확도 − 매크로 F1 과 다수 − 소수 F1 차이가 모두"
+    rule = _IMBALANCE_LEVEL[ie.level].format(gaps=gaps, gaps_all=gaps_all)
+    text = f"엔진 판단: {rule}. 다수({ie.majority_class})−소수({ie.minority_class}) F1 차이는 {gap}"
     if ie.accuracy_minus_macro_f1 is not None:
         acc = shown.accuracy_minus_macro_f1 if shown and shown.accuracy_minus_macro_f1 else _n(ie.accuracy_minus_macro_f1)
         text += f", 정확도 − 매크로 F1 은 {acc}"
@@ -357,15 +382,24 @@ def _ci(ctx: Ctx) -> str | None:
     judged = [m for m in _narrative_metrics(ctx.fs) if m.threshold is not None]
     with_ci = [m for m in judged if m.ci_low is not None and m.ci_high is not None]
     skipped = ctx.facts.ci_skipped if ctx.facts else []
+    reasons = ", ".join(f"{s.display_name}({s.reason})" if s.reason else s.display_name for s in skipped)
     if with_ci:
         contains = set(ctx.derived.get("ci_contains_target") or [])
         inside = [m for m in with_ci if m.display_name in contains]
+        partial = len(with_ci) < len(judged)  # 구간이 없는 판정 대상이 있다 — '모두'라고 보증하지 않는다(RI-02)
         if inside:
             items = ", ".join(f"{m.display_name}(구간 {_n(m.ci_low)}~{_n(m.ci_high)}, 목표 {_n(m.threshold)})" for m in inside)
-            return f"95% 신뢰구간이 목표값을 포함하는 지표: {items} — 표본이 달라지면 판정이 바뀔 수 있다."
-        return "판정 대상 지표의 95% 신뢰구간이 모두 목표값과 떨어져 있어 표본 변동으로 판정이 흔들리지 않는다."
+            text = f"95% 신뢰구간이 목표값을 포함하는 지표: {items} — 표본이 달라지면 판정이 바뀔 수 있다."
+        elif partial:
+            names = ", ".join(m.display_name for m in with_ci)
+            text = f"신뢰구간을 산출한 지표({names})는 구간이 목표값과 떨어져 있다."
+        else:
+            text = "판정 대상 지표의 95% 신뢰구간이 모두 목표값과 떨어져 있어 표본 변동으로 판정이 흔들리지 않는다."
+        if partial:
+            missing = [m.display_name for m in judged if m not in with_ci]
+            text += f" 신뢰구간을 산출하지 않은 지표: {reasons or ', '.join(missing)}."
+        return text
     if judged and skipped:
-        reasons = ", ".join(f"{s.display_name}({s.reason})" if s.reason else s.display_name for s in skipped)
         return f"판정 대상 지표의 신뢰구간을 산출하지 않았다: {reasons}."
     return None
 
@@ -381,7 +415,7 @@ def _pr_gap(ctx: Ctx) -> str | None:
         return None
     lean = "Precision 이 높다" if g.difference > 0 else "Recall 이 높다" if g.difference < 0 else "둘이 같다"
     flag = "치우침이 있다(|차이| 0.1 이상)" if g.flagged else "치우침은 크지 않다(|차이| 0.1 미만)"
-    return f"양성 클래스의 Precision {_n(g.precision)}, Recall {_n(g.recall)} — {lean}, 차이 {g.difference_text}로 {flag}."
+    return f"양성 클래스의 Precision {_n(g.precision)}, Recall {_n(g.recall)} — {lean}, 차이 {g.difference_text}{_ro(g.difference_text)} {flag}."
 
 
 def _threshold_gain(ctx: Ctx) -> str | None:
@@ -389,7 +423,7 @@ def _threshold_gain(ctx: Ctx) -> str | None:
     if g is None or not ctx.derived.get("threshold_tuning"):
         return None
     return (
-        f"결정 임계값을 {_n(g.best_threshold)}로 바꾸면 F1 이 {_n(g.current_f1)}에서 {_n(g.max_f1)}까지 오를 수 있다"
+        f"결정 임계값을 {_n(g.best_threshold)}{_ro(_n(g.best_threshold))} 바꾸면 F1 이 {_n(g.current_f1)}에서 {_n(g.max_f1)}까지 오를 수 있다"
         f"(향상폭 {g.gain_text or _n(g.gain)} — 같은 평가 데이터로 고른 값이라 별도 데이터로 확인해야 한다)."
     )
 
@@ -428,7 +462,7 @@ def _declared_average(ctx: Ctx) -> str | None:
         return None
     name = "가중 평균" if d.average == "weighted" else "마이크로 평균"
     why = "'다수 클래스 우선'으로" if d.class_priority == "larger_first" else "'샘플 단위로 중요'로"
-    return f"의뢰자가 클래스 중요도를 {why} 밝혀 {name} F1 {_n(d.f1)}로 본 결과를 쓴다."
+    return f"의뢰자가 클래스 중요도를 {why} 밝혀 {name} F1 {_n(d.f1)}{_ro(_n(d.f1))} 본 결과를 쓴다."
 
 
 def _declared_average_values(ctx: Ctx) -> tuple[float, ...]:
@@ -436,8 +470,13 @@ def _declared_average_values(ctx: Ctx) -> tuple[float, ...]:
     return (d.f1,) if d is not None and d.f1 is not None else ()
 
 
+# 프론트 reportMaterials.NOT_PROVIDED — 답이 없을 때 client_inputs 에 싣는 말(재료 선택 점검 4.2).
+NOT_PROVIDED = "제공되지 않음"
+
+
 def _metric_rationale(ctx: Ctx) -> str | None:
-    if not ctx.client_inputs.get("metric_rationale"):
+    rationale = ctx.client_inputs.get("metric_rationale")
+    if not isinstance(rationale, str) or not rationale.strip() or rationale.strip() == NOT_PROVIDED:
         return None
     return "지표 선택 기준은 의뢰자가 고른 이유로 5절에 찍힌다."
 
@@ -455,8 +494,10 @@ def _weakest_risk(ctx: Ctx) -> str | None:
     if w is None:
         return None
     purpose = _model_purpose(ctx)
-    tail = f" 모델 용도('{purpose}')에서 그 클래스가 가지는 위험을 쓴다." if purpose else ""
-    return f"가장 약한 클래스는 {w.label}(F1 {_n(w.f1)})이다.{tail}"
+    noun = "레이블" if ctx.task_type == "multilabel" else "클래스"
+    tail = f" 모델 용도('{purpose}')에서 그 {noun}가 가지는 위험을 쓴다." if purpose else ""
+    subject = "레이블은" if noun == "레이블" else "클래스는"
+    return f"가장 약한 {subject} {w.label}(F1 {_n(w.f1)})이다.{tail}"
 
 
 def _near_target(ctx: Ctx) -> str | None:

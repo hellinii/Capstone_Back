@@ -11,6 +11,7 @@ fact_sheet 로부터 파생값·기준치·숫자 화이트리스트를 준비�
 """
 import asyncio
 import contextlib
+import copy
 import logging
 import time
 from dataclasses import asdict
@@ -48,24 +49,50 @@ MAX_NARRATIVE_PROMPT_CHARS = 80_000
 # 지시문이 상한을 넘을 때 지시문에서만 덜어 내는 차례(S4b). 혼동행렬·클래스별 표는 M21·M22 선택과 무관하게 늘
 # 실리므로(S4a) 클래스가 많으면 지시문이 커진다 — 서술 결론(최약 클래스·최다 오분류 쌍 등)은 facts 에 이미 있어
 # 큰 표부터 뺀다. 숫자 허용 목록은 원본 사실 시트로 만든다(뺀 표의 숫자를 인용해도 사실이다).
-def _drop_matrix(d: dict) -> None:
+# 덜어 낸 수는 프론트 미리 자르기와 같은 자리(facts.omitted)에 적는다 — 빈 목록을 '해당 없음'으로 읽지 않게
+# (S4b 검토 SV-01). facts 가 없는 옛 요청은 시트에 trimmed_for_prompt 로 적는다.
+def _note(d: dict, key: str, n: int) -> None:
+    if n <= 0:
+        return
+    facts = d.get("facts")
+    if isinstance(facts, dict):
+        omitted = facts.setdefault("omitted", {})
+        omitted[key] = omitted.get(key, 0) + n
+    else:
+        d.setdefault("trimmed_for_prompt", {})[key] = n
+
+
+def _drop_matrix(d: dict, derived: dict) -> None:
     if d.get("confusion"):
+        _note(d, "confusion", len(d["confusion"].get("labels") or []))
         d["confusion"] = {**d["confusion"], "matrix": []}
 
 
 def _drop_key(key: str, empty):
-    def drop(d: dict) -> None:
+    def drop(d: dict, derived: dict) -> None:
+        value = d.get(key)
+        if key == "distribution":
+            _note(d, "class_distribution", len((value or {}).get("class_distribution") or {}))
+            # 서버 파생 분포 백분율도 클래스 수만큼이라 함께 뺀다(총건수는 남긴다).
+            if isinstance(derived.get("distribution"), dict):
+                derived["distribution"] = {k: v for k, v in derived["distribution"].items() if k != "percentages"}
+        else:
+            _note(d, key, len(value or []))
         d[key] = empty
     return drop
 
 
-def _drop_fact_lists(d: dict) -> None:
+def _drop_fact_lists(d: dict, derived: dict) -> None:
     facts = d.get("facts")
     if isinstance(facts, dict):
+        bias = facts.get("prediction_bias")
+        n = len(facts.get("low_support_classes") or []) + len(facts.get("distribution_shift") or [])
+        n += len(bias.get("rows") or []) if isinstance(bias, dict) else 0
         facts["low_support_classes"] = []
         facts["distribution_shift"] = []
-        if isinstance(facts.get("prediction_bias"), dict):
-            facts["prediction_bias"]["rows"] = []
+        if isinstance(bias, dict):
+            bias["rows"] = []
+        _note(d, "facts_class_lists", n)
 
 
 _PROMPT_TRIM_STEPS = (
@@ -84,14 +111,15 @@ def build_prompts_within_limit(req, fs, derived, benchmark_refs) -> tuple[str, s
     """
     system = build_system_prompt(req.report_purpose.value, req.task_type.value, fs, derived)
     sheet = fs.model_dump()
-    user = build_user_prompt(sheet, benchmark_refs, derived, req.client_inputs)
+    view = copy.deepcopy(derived)  # 지시문용 파생값 사본 — 허용 목록·폴백은 원본을 쓴다
+    user = build_user_prompt(sheet, benchmark_refs, view, req.client_inputs)
     dropped: list[str] = []
     for name, step in _PROMPT_TRIM_STEPS:
         if len(system) + len(user) <= MAX_NARRATIVE_PROMPT_CHARS:
             break
-        step(sheet)
+        step(sheet, view)
         dropped.append(name)
-        user = build_user_prompt(sheet, benchmark_refs, derived, req.client_inputs)
+        user = build_user_prompt(sheet, benchmark_refs, view, req.client_inputs)
     return system, user, dropped
 
 

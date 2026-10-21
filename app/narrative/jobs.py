@@ -197,6 +197,7 @@ _CLASS_LEVEL_KEYS = {
     ("fact_sheet", "facts", "low_support_classes"): [],
     ("fact_sheet", "facts", "prediction_bias", "rows"): [],
     ("fact_sheet", "facts", "distribution_shift"): [],
+    ("fact_sheet", "facts", "omitted"): {},  # 키가 계약(칸 이름 몇 개)보다 많으면 — 버려도 서술은 된다
 }
 _FACTS = ("fact_sheet", "facts")
 # facts 전체 길이 초과 때 1차로 비우는 목록(계약 size_rules — 프론트 fitFacts 의 마지막 두 단계와 같은 칸).
@@ -244,8 +245,7 @@ def _clear_or_trim(raw: dict, err: dict) -> str:
     if loc[:1] == ("client_inputs",):
         raw["client_inputs"] = None  # 규칙 문장은 고객 입력을 쓰지 않는다
         return "client_inputs"
-    # 가장 긴(구체적인) 자리부터 — facts 안의 목록이 facts 전체보다 먼저 맞는다.
-    for prefix, empty in sorted(_CLASS_LEVEL_KEYS.items(), key=lambda kv: -len(kv[0])):
+    for prefix, empty in _CLASS_LEVEL_KEYS.items():
         if loc[: len(prefix)] == prefix:
             _set_path(raw, prefix, copy.copy(empty))
             return ".".join(prefix)
@@ -266,60 +266,100 @@ def _clear_or_trim(raw: dict, err: dict) -> str:
     return ".".join(str(k) for k in loc)
 
 
-# facts 안의 형식 오류(모르는 선언 코드 등)로 facts 를 버렸다는 표시 — 상한 초과가 아니라 AI 는 그대로 부른다.
+# 부드러운 오류 — 서술을 돕는 칸의 형식이 계약과 어긋남. 422 막다른 길 대신 그 칸만 버리고 AI 는 그대로 부른다.
+# facts 안의 형식 오류(모르는 선언 코드 등) → facts 를 버린다(프론트가 자른 수 omitted 는 남긴다).
 FACTS_DROPPED = "fact_sheet.facts(invalid)"
+# 표시 문자열(value_text·margin_text·gain_text·imbalance_effect.display)이 숫자 꼴이 아님 → 그 칸만 버린다.
+DISPLAY_DROPPED = "display_text(invalid)"
+SOFT_REPAIRS = (FACTS_DROPPED, DISPLAY_DROPPED)
+_DISPLAY_FIELDS = ("value_text", "margin_text", "gain_text")
 
 
-def _drop_invalid_facts(raw, exc: ValidationError):
-    """facts 안의 형식 오류만 있으면 facts 를 버린 사본을 돌려준다(아니면 None).
-
-    facts 는 서술을 돕는 파생값이다 — 계약이 어긋나도(프론트가 새 코드값을 먼저 보냄 등) 422 막다른 길로 서술을
-    통째로 잃지 않게, 버리고 지금까지의 서버 셈으로 쓴다(계약 size_rules). 상한 초과 오류는 여기서 다루지 않는다.
-    """
-    def facts_format(e: dict) -> bool:
-        return tuple(e["loc"][:2]) == _FACTS and not _is_limit_error(e)
-
-    errors = exc.errors()
-    # facts 형식 오류가 있고, 나머지가 모두 상한 초과(줄이기로 고칠 수 있음)일 때만 — facts 밖의 형식 오류는 422.
-    if not any(facts_format(e) for e in errors) or not all(facts_format(e) or _is_limit_error(e) for e in errors):
+def _soft_kind(err: dict) -> str | None:
+    if _is_limit_error(err):
         return None
-    dropped = copy.deepcopy(raw)
-    dropped["fact_sheet"]["facts"] = None
-    return dropped
+    loc = tuple(err["loc"])
+    if loc[:2] == _FACTS:
+        return FACTS_DROPPED
+    if loc and (loc[-1] in _DISPLAY_FIELDS or "display" in loc):
+        return DISPLAY_DROPPED
+    return None
+
+
+def _drop_facts_keep_omitted(raw: dict) -> None:
+    """facts 를 버리되, 프론트가 표를 자른 수(omitted)는 남긴다 — 잘린 표를 전체 표로 읽지 않게(S4b 검토 BE-04)."""
+    facts = raw["fact_sheet"].get("facts")
+    omitted = facts.get("omitted") if isinstance(facts, dict) else None
+    keep = (
+        isinstance(omitted, dict)
+        and set(facts) != {"omitted"}  # 이미 omitted 만 남겼는데 또 틀리면 omitted 가 틀린 것
+        and all(isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool) for k, v in omitted.items())
+    )
+    raw["fact_sheet"]["facts"] = {"omitted": omitted} if keep else None
+
+
+def _repair_soft(raw, exc: ValidationError):
+    """부드러운 오류를 고친 사본과 고친 자리 이름을 돌려준다. 고칠 수 없는 오류(부드럽지도 상한도 아님)가 있거나
+    부드러운 오류가 없으면 None — 상한 오류는 호출부의 줄이기가 맡는다."""
+    errors = exc.errors()
+    kinds = [_soft_kind(e) for e in errors]
+    if not any(kinds) or not all(k or _is_limit_error(e) for k, e in zip(kinds, errors)):
+        return None
+    fixed = copy.deepcopy(raw)
+    labels: list[str] = []
+    for kind, err in zip(kinds, errors):
+        if kind == FACTS_DROPPED:
+            if fixed["fact_sheet"].get("facts") is not None and (FACTS_DROPPED not in labels):
+                _drop_facts_keep_omitted(fixed)
+        elif kind == DISPLAY_DROPPED:
+            loc = tuple(err["loc"])
+            # display 의 세 칸 중 하나라도 틀리면 display 통째로(엔진 표시값은 셋이 한 묶음이다).
+            target = loc[: loc.index("display") + 1] if "display" in loc else loc
+            _set_path(fixed, target, None)
+        else:
+            continue
+        if kind not in labels:
+            labels.append(kind)
+    return fixed, labels
 
 
 def parse_request(raw) -> tuple[NarrativeRequest, list[str]]:
-    """요청 본문을 검증한다. 입력 상한만 넘었으면 상한 안으로 줄여 (요청, 고친 자리 목록)을 돌려준다.
+    """요청 본문을 검증한다. 고칠 수 있는 오류만 있으면 고쳐 (요청, 고친 자리 목록)을 돌려준다.
 
-    facts 안의 형식 오류만 있으면 facts 를 버리고 고친 자리에 FACTS_DROPPED 를 적는다(상한 초과가 아니므로
-    호출부는 AI 를 그대로 부른다). 그 밖의 상한이 아닌 오류(필수 칸 없음·형식 틀림)가 하나라도 있으면 원래
-    ValidationError 를 그대로 던진다 — 라우터가 422 로 돌려준다.
+    - 부드러운 오류(facts 형식·표시 문자열 형식): 그 칸만 버린다. 고친 자리에 FACTS_DROPPED·DISPLAY_DROPPED 를
+      적는다(상한 초과가 아니므로 호출부는 AI 를 그대로 부른다).
+    - 상한 초과: 상한 안으로 줄인다(호출부는 규칙 문장으로 끝낸다 — input_too_large).
+    그 밖의 오류(필수 칸 없음·형식 틀림)가 하나라도 있으면 원래 ValidationError 를 그대로 던진다 — 라우터가 422.
+
+    고친 뒤 다시 검증하면 새 오류가 드러날 수 있다 — pydantic 은 목록 길이·facts 전체 길이가 넘으면 그 안쪽을
+    검증하지 않는다(상한 오류 뒤에 형식 오류가 숨는다 — S4b 검토 BE-01). 그래서 고칠 수 있는 오류만 남는 동안
+    몇 번 되풀이한다. 고치는 자리는 매번 줄거나 비기만 하므로 몇 번이면 끝난다.
     """
     try:
         return NarrativeRequest.model_validate(raw), []
     except ValidationError as exc:
         first = exc
-    dropped = _drop_invalid_facts(raw, first)
-    if dropped is not None:
-        request, trimmed = parse_request(dropped)
-        return request, [FACTS_DROPPED, *trimmed]
-    # 고친 뒤 다시 검증하면 새 오류가 드러날 수 있다 — pydantic 은 목록 길이가 넘으면 그 목록의 항목 오류를
-    # 함께 알리지 않는다(문제 18개 중 하나의 제목이 길면, 16개로 자른 뒤에야 제목 오류가 나온다). 그래서
-    # 상한 오류만 남는 동안 몇 번 되풀이한다. 고치는 자리는 매번 줄기만 하므로 몇 번이면 끝난다.
-    trimmed = copy.deepcopy(raw)
-    changed: set[str] = set()
-    errors = first.errors()
-    for _ in range(_MAX_TRIM_ROUNDS):
-        if not errors or not all(_is_limit_error(e) for e in errors):
-            raise first
+    current = copy.deepcopy(raw)
+    soft: list[str] = []
+    trims: set[str] = set()
+    last = first
+    for _ in range(_MAX_TRIM_ROUNDS * 2):
+        repaired = _repair_soft(current, last)
+        if repaired is not None:
+            current, labels = repaired
+            soft.extend(l for l in labels if l not in soft)
+        else:
+            errors = last.errors()
+            if not errors or not all(_is_limit_error(e) for e in errors):
+                raise first
+            try:
+                trims.update(_clear_or_trim(current, e) for e in errors)
+            except (LookupError, TypeError, KeyError):
+                raise first from None
         try:
-            changed.update(_clear_or_trim(trimmed, e) for e in errors)
-        except (LookupError, TypeError, KeyError):
-            raise first from None
-        try:
-            return NarrativeRequest.model_validate(trimmed), sorted(changed)
+            return NarrativeRequest.model_validate(current), [*soft, *sorted(trims)]
         except ValidationError as again:
-            errors = again.errors()
+            last = again
     raise first
 
 
@@ -441,9 +481,9 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
 
     # AI 를 부를 작업만 서술 지갑에서 보고서 1건을 예약한다. 사유가 이미 정해진 작업은 AI 를 부르지 않는다.
     forced_reason = None
-    if FACTS_DROPPED in trimmed:
-        logger.warning("서술 작업 facts 형식 오류 → facts 를 버리고 진행(계약 어긋남)")
-    if [t for t in trimmed if t != FACTS_DROPPED]:
+    if any(t in SOFT_REPAIRS for t in trimmed):
+        logger.warning("서술 작업 입력의 형식이 계약과 어긋나 그 칸을 버리고 진행: %s", [t for t in trimmed if t in SOFT_REPAIRS])
+    if [t for t in trimmed if t not in SOFT_REPAIRS]:
         forced_reason, budget = "input_too_large", "not_needed"
         logger.warning("서술 작업 입력이 상한을 넘어 줄임 → 규칙 문장으로 완료(input_too_large): %s", trimmed)
     elif client is None:

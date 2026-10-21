@@ -1,9 +1,9 @@
 """app/narrative/schemas.py — 서술 도메인 스키마(FactSheet·서술 요청/응답·출력 모델)."""
 
 import json
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 from app.core.schemas import ReportPurpose, TaskType
 
 
@@ -50,6 +50,9 @@ MAX_CI_SKIP_REASON_CHARS = 300
 MAX_FACTS_CHARS = 30_000
 # 표시 문자열(value_text·margin_text·*_text·display·gain_text)의 길이 — 숫자 하나라 수십 자를 넘지 않는다.
 MAX_DISPLAY_TEXT_CHARS = 40
+# 표시 문자열은 숫자 하나의 표기다(엔진 judged_text·프론트 judgedText) — 숫자가 아닌 글이 서술에 그대로 찍히거나
+# 폴백이 float 로 읽다 멈추지 않게 숫자 꼴만 받는다(S4b 검토 BE-03). 작업 경로는 이 칸이 틀리면 그 칸만 버린다.
+NumText = Annotated[str, StringConstraints(pattern=r"^-?\d+(\.\d+)?$", max_length=MAX_DISPLAY_TEXT_CHARS)]
 
 # 문제 종류 9종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
 ProblemKind = Literal[
@@ -84,16 +87,16 @@ class MetricFact(BaseModel):
     # 서버는 받은 값을 읽기만 한다. 판정 대상이 아니거나 옛 요청이면 False.
     near_target:  bool         = Field(default=False, description="목표값과의 차이가 목표값의 3% 미만")
     # ── S4a 프론트가 싣는 칸(계약 facts-1). 옛 요청에는 없다 — 모두 선택이고 기본값은 '모름'이다.
-    value_text:   str | None   = Field(
-        default=None, max_length=MAX_DISPLAY_TEXT_CHARS,
+    value_text:   NumText | None = Field(
+        default=None,
         description="판정 대상 지표 값의 인쇄 표기(성적서 6.1 과 같음 — 판정과 어긋나 보이면 자릿수를 늘림)",
     )
     higher_is_better: bool | None = Field(
         default=None, description="높을수록 좋은 지표인가 — margin 부호의 뜻. None 이면 모름(옛 요청)",
     )
     beta:         float | None = Field(default=None, description="F-beta 의 β(이름에는 넣지 않는다)")
-    margin_text:  str | None   = Field(
-        default=None, max_length=MAX_DISPLAY_TEXT_CHARS,
+    margin_text:  NumText | None = Field(
+        default=None,
         description="margin 의 서술용 표기 — 0 과 비교한 판정과 같은 쪽으로 읽히게 자릿수를 늘림",
     )
     ci_contains_target: bool | None = Field(
@@ -224,8 +227,8 @@ class F1ThresholdGainFact(BaseModel):
         default=None,
         description="엔진이 반올림 전 gain 으로 정한 '임계값 부적합'(≥ 0.10, S2). 없으면(옛 요청) gain 으로 판정",
     )
-    gain_text:      str | None = Field(
-        default=None, max_length=MAX_DISPLAY_TEXT_CHARS,
+    gain_text:      NumText | None = Field(
+        default=None,
         description="gain 의 표시 문자열 — 판정(notable)과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2)",
     )
 
@@ -250,9 +253,9 @@ class ImbalanceEffectFact(BaseModel):
 
 class ImbalanceDisplayFact(BaseModel):
     """불균형 영향 세 값의 표시 문자열(엔진 metrics/display.judged_text). 1.49996 이 '1.5' 로 찍히지 않게."""
-    imbalance_ratio:            str        = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
-    accuracy_minus_macro_f1:    str | None = Field(default=None, max_length=MAX_DISPLAY_TEXT_CHARS)
-    majority_minus_minority_f1: str        = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    imbalance_ratio:            NumText
+    accuracy_minus_macro_f1:    NumText | None = None
+    majority_minus_minority_f1: NumText
 
 
 ImbalanceEffectFact.model_rebuild()
@@ -323,10 +326,10 @@ class WeakestClassFact(BaseModel):
     f1:               float
     support:          int
     share:            float
-    share_text:       str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    share_text:       NumText
     macro_f1:         float | None = None
     gap_from_macro:   float | None = None
-    gap_text:         str | None = Field(default=None, max_length=MAX_DISPLAY_TEXT_CHARS)
+    gap_text:         NumText | None = None
     low_support:      bool
     far_below_macro:  bool
 
@@ -335,7 +338,7 @@ class LowSupportClassFact(BaseModel):
     label:      str
     support:    int
     share:      float
-    share_text: str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    share_text: NumText
 
 
 class ConfusionPairFact(BaseModel):
@@ -362,14 +365,14 @@ class DeclaredRiskErrorsFact(BaseModel):
     count:        int = Field(ge=0)
     total_errors: int = Field(ge=0)
     share:        float | None = None
-    share_text:   str | None = Field(default=None, max_length=MAX_DISPLAY_TEXT_CHARS)
+    share_text:   NumText | None = None
 
 
 class PrecisionRecallGapFact(BaseModel):
     precision:       float
     recall:          float
     difference:      float
-    difference_text: str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    difference_text: NumText
     flagged:         bool
 
 
@@ -384,7 +387,7 @@ class AverageGapFact(BaseModel):
     macro_f1:        float
     other_f1:        float
     difference:      float
-    difference_text: str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    difference_text: NumText
     reference_class: ReferenceClassFact
 
 
@@ -401,7 +404,7 @@ class DistributionShiftRowFact(BaseModel):
     training_ratio:   float
     evaluation_ratio: float
     difference:       float
-    difference_text:  str = Field(max_length=MAX_DISPLAY_TEXT_CHARS)
+    difference_text:  NumText
     flagged:          bool
 
 

@@ -137,8 +137,20 @@ def _add_judged(wl: set, value: Any, text: str | None, default_digits: int) -> N
             wl.add(f"{round(f * 100, k):g}")
 
 
+# facts 안에서 숫자를 뽑지 않는 칸 — 계약 이름("facts-1")·지표 번호·소절·고정 문구 번호 같은 구조용 글자다.
+# 이것을 훑으면 '1'·'17'·'7.1' 같은 숫자가 언제나 허용돼 숫자 검문에 구멍이 난다(S4b 검토 G-1). 고정 문장
+# (fixed_sentences)은 코드가 찍는 글이라 그 숫자는 재료 칸에 이미 있다(계약 decisions — 따로 넣지 않는다).
+_FACT_SKIP_KEYS = frozenset({
+    "contract", "fixed_sentences", "selected_metrics", "metric_id", "report_purpose_label",
+    "core_metrics_source", "class_share_basis", "distribution_shift_status", "inconclusive_cause",
+    "unit", "kind", "side", "class_priority", "average", "risk_direction", "usage_mode",
+})
+# 값과 그 서술용 표기의 짝(판정과 같은 쪽으로 읽히게 자릿수를 늘린 표기) — 표기가 길면 짧은 반올림은 넣지 않는다.
+_FACT_TEXT_PAIRS = {"share": "share_text", "gap_from_macro": "gap_text", "difference": "difference_text"}
+
+
 def _add_fact_numbers(wl: set, obj: Any) -> None:
-    """서술용 파생값(facts) 안의 모든 숫자 — 값, 음수면 크기, 글(이름·표기·사유) 속 숫자. bool 은 건너뛴다."""
+    """서술용 파생값(facts) 안의 숫자 — 값(음수면 크기도), 이름·사유 글 속 숫자. bool·구조용 칸은 건너뛴다."""
     if isinstance(obj, bool) or obj is None:
         return
     if isinstance(obj, (int, float)):
@@ -149,8 +161,18 @@ def _add_fact_numbers(wl: set, obj: Any) -> None:
             if c is not None:
                 _add_signed(wl, c)
     elif isinstance(obj, dict):
-        for v in obj.values():
-            _add_fact_numbers(wl, v)
+        paired_texts = {t for k, t in _FACT_TEXT_PAIRS.items() if k in obj and isinstance(obj.get(t), str)}
+        for key, value in obj.items():
+            # 짝으로 넣은 표기 칸은 다시 훑지 않는다 — 글로 훑으면 짧은 반올림('−0.1')이 다시 들어간다.
+            if key in _FACT_SKIP_KEYS or key in paired_texts:
+                continue
+            text_key = _FACT_TEXT_PAIRS.get(key)
+            text = obj.get(text_key) if text_key else None
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and isinstance(text, str):
+                _add_judged(wl, value, text, 4)
+                _add_judged(wl, abs(value), text.lstrip("-"), 4)
+                continue
+            _add_fact_numbers(wl, value)
     elif isinstance(obj, list):
         for item in obj:
             _add_fact_numbers(wl, item)
@@ -198,17 +220,16 @@ def build_number_whitelist(
         _add_judged(wl, m.value, m.value_text, 3)
         _add(wl, m.beta)  # F-beta 의 β — 서술이 "β=2" 라고 쓸 수 있다(None 이면 건너뛴다)
         _add_client_numbers(wl, m.display_name)  # 이름 속 숫자(F1·"Top-5" 등 — 식별자 뒤 숫자는 원래 안 뽑힌다)
-        if m.margin_text:
-            _add_signed(wl, _canon(m.margin_text))
         if m.threshold is not None:
             _add(wl, m.threshold)
         # 95% 신뢰구간(D29) — None 이면 _add 가 건너뛴다.
         _add(wl, m.ci_low)
         _add(wl, m.ci_high)
-        _add(wl, m.margin)  # 목표값과의 차이(D12) — None 이면 _add 가 건너뛴다
+        # 목표값과의 차이(D12). "목표값보다 0.0288 낮다"처럼 부호 없이 크기만 적는 것도 같은 사실이다. 판정과 같은
+        # 쪽으로 읽히는 표기(margin_text)가 있으면 그 규칙으로 — 미달 −0.00004 가 '0' 으로 통과하지 않게(S4b 검토 G-3).
         if m.margin is not None:
-            # "목표값보다 0.0288 낮다"처럼 부호 없이 크기만 적는 것도 같은 사실이다.
-            _add(wl, abs(m.margin))
+            _add_judged(wl, m.margin, m.margin_text, 4)
+            _add_judged(wl, abs(m.margin), m.margin_text.lstrip("-") if m.margin_text else None, 4)
     # 구간이 실렸을 때만 신뢰수준(95%)을 허용한다 — 평가 응답의 level 과 같은 값이다.
     if any(m.ci_low is not None and m.ci_high is not None for m in fs.metrics):
         _add(wl, CI_LEVEL)

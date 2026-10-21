@@ -57,13 +57,20 @@ def _value_target(value: float, threshold: float) -> tuple[str, str]:
     return "", t
 
 
+def _target(threshold: float) -> str:
+    """목표값 — 반올림하지 않는다(소수 넷째 자리 목표 0.8125 를 0.813 으로 찍으면 값 0.812 와 같아 보여 미달이 충족처럼
+    읽힌다 — S4b 검토 FB-01). 끝의 0 은 뺀다. 목표값 그대로라 허용 목록 안이다."""
+    text = f"{float(threshold):.9f}".rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "") else text
+
+
 def _metric_vs_target(m) -> str:
     """'지표명(값, 목표 t)' — 값은 프론트가 판정과 같은 쪽으로 읽히게 만든 인쇄 표기(value_text, 성적서 6.1 과 같음).
 
     value_text 가 없는 옛 요청만 여기서 자릿수를 늘리거나 '목표 t에 근소하게 못 미침'으로 쓴다.
     """
     if m.value_text:
-        return f"{m.display_name}({m.value_text}, 목표 {_num(m.threshold)})"
+        return f"{m.display_name}({m.value_text}, 목표 {_target(m.threshold)})"
     v, t = _value_target(m.value, m.threshold)
     if not v:
         return f"{m.display_name}(목표 {t}에 근소하게 못 미침)"
@@ -138,8 +145,11 @@ def _imbalance_sentence(ie) -> str:
         return texts.get(name, f"{value}")
     def at_least(name: str, value: float) -> bool:
         # 엔진 표시값은 판정과 같은 쪽으로 읽히게 자릿수를 늘린 값이라 그것으로 본다 — 4자리 값 0.1 이 실제로는
-        # 0.09996(기준 미만)일 수 있다. 옛 요청(표시값 없음)만 4자리 값으로 본다.
-        return float(texts[name]) >= 0.1 if name in texts else value >= 0.1
+        # 0.09996(기준 미만)일 수 있다. 옛 요청(표시값 없음)만 4자리 값으로 본다. 표시값은 스키마가 숫자 꼴만 받는다.
+        try:
+            return float(texts[name]) >= 0.1 if name in texts else value >= 0.1
+        except ValueError:
+            return value >= 0.1
 
     over = [(n, v) for n, v in gaps if ie.level == "affected" and at_least(n, v)]
     under = [(n, v) for n, v in gaps if (n, v) not in over]
@@ -201,7 +211,7 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         # 프론트가 클래스 상한(256)에 맞춰 분포를 잘랐으면 잘린 목록을 전체처럼 쓰지 않는다(S4a 미리 자르기).
         cut = (fs.facts.omitted.get("class_distribution", 0) if fs.facts is not None else 0)
         if cut:
-            items += f" 외 {cut}개 클래스"
+            items += f" 외 {cut}개 {'레이블' if dist.get('unit') == 'label' else '클래스'}"
         if dist.get("unit") == "label":
             s = (
                 f"평가 데이터셋은 총 {dist['total']}건이며, 레이블별 등장 분포는 {items}이다"
@@ -218,6 +228,12 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         elif ir is not None:
             s += f" 불균형 비율은 {ir}이다."
         distribution_analysis = s
+    elif fs.imbalance_effect is not None:
+        # 클래스가 많아 프론트가 분포 표를 비웠어도(본문 예산) 엔진의 불균형 결론은 남는다 — 9절에 불균형 문제가 있는데
+        # 7.2 가 분포를 모른다고 쓰지 않게(S4b 검토 FB-02).
+        cut = fs.facts.omitted.get("class_distribution", 0) if fs.facts is not None else 0
+        head = f"클래스가 많아 클래스별 건수({cut}개)는 생략했다." if cut else "클래스별 건수는 싣지 않았다."
+        distribution_analysis = f"평가 데이터셋은 총 {fs.n_samples}건이며, {head} " + _imbalance_sentence(fs.imbalance_effect)
     else:
         distribution_analysis = "클래스 분포 데이터가 제공되지 않아 분포 분석을 생략한다."
 
@@ -339,13 +355,14 @@ def _risks(fs: FactSheet) -> str:
         # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
         # 값·차이는 판정과 같은 쪽으로 읽히는 표기(value_text·margin_text)가 있으면 그것을 쓴다 — 셋째 자리
         # 반올림은 근소 차이를 '차이 0' 으로 만들었다.
-        items = ", ".join(
-            f"{m.display_name}({m.value_text or _num(m.value)}, 목표 {_num(m.threshold)}, "
-            f"차이 {m.margin_text or _num(m.margin)})"
-            if m.margin is not None
-            else f"{m.display_name}({m.value_text or _num(m.value)}, 목표 {_num(m.threshold)})"
-            for m in near
-        )
+        def near_item(m) -> str:
+            value = m.value_text or _num(m.value)
+            target = _target(m.threshold) if m.value_text else _num(m.threshold)
+            if m.margin is None:
+                return f"{m.display_name}({value}, 목표 {target})"
+            return f"{m.display_name}({value}, 목표 {target}, 차이 {m.margin_text or _num(m.margin)})"
+
+        items = ", ".join(near_item(m) for m in near)
         risks += (
             f" 목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 {items}로, "
             "표본이 달라지면 목표에 미달할 위험이 있다."
