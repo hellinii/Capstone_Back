@@ -1150,11 +1150,17 @@ def test_rules_13_to_15_follow_facts():
         "internal", "binary", _bare_fact_sheet(metrics=[_near_metric(status="fail", margin=-0.01)]))
     assert "13. " not in near_fail
 
-    gain = build_system_prompt("internal", "binary", _bare_fact_sheet(f1_threshold_gain=_gain()))
+    # 규칙 14 는 compute_derived 가 한 번 정한 threshold_tuning 을 읽는다(S4b — 따로 판정하지 않음).
+    gain_fs = _bare_fact_sheet(f1_threshold_gain=_gain())
+    gain = build_system_prompt("internal", "binary", gain_fs, compute_derived(gain_fs))
     assert "14. " in gain and "이 데이터에서 오를 수 있는 최대폭" in gain and "별도 데이터에서 확인" in gain
     assert "conclusion.narrative(8.2)" in gain and "conclusion.risks(8.3)" in gain
-    small = build_system_prompt("internal", "binary", _bare_fact_sheet(f1_threshold_gain=_gain(gain=0.0999)))
-    assert "14. " not in small
+    small_fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=0.0999))
+    assert "14. " not in build_system_prompt("internal", "binary", small_fs, compute_derived(small_fs))
+    # 엔진 notable 이 판정이다 — 4자리로 0.1 이어도 notable=False 면 규칙이 없다(0.09996).
+    edge_fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=0.1, notable=False))
+    assert "14. " not in build_system_prompt("internal", "binary", edge_fs, compute_derived(edge_fs))
+    assert "14. " not in build_system_prompt("internal", "binary", gain_fs)  # derived 없이 부르면 붙지 않는다
 
     for level, phrase in (("affected", "성능 수치에 영향을 주었다고"),
                           ("no_distortion", "성능 왜곡은 관찰되지 않았다"),

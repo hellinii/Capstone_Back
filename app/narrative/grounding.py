@@ -47,6 +47,13 @@ _CTX_TOKEN_RE = re.compile(
 # 신뢰구간의 신뢰수준(서술 설계 D29). 평가 응답 confidence_intervals 의 level 과 같다.
 CI_LEVEL = 0.95
 
+# 서술용 파생값 판정 기준(계약 constants — 프론트 narrativeFacts.ts 가 판정에 쓴 값). 켜진 판정이 있을 때만 허용한다.
+LOW_SUPPORT_MIN = 30
+LOW_SHARE_MIN = 0.05
+WEAKEST_F1_GAP = 0.1
+PR_GAP_MIN = 0.1
+DISTRIBUTION_SHIFT_MIN = 0.1
+
 # 아슬아슬 기준(서술 설계 D12) — 목표값과의 차이가 목표값의 3% 미만. 판정은 프론트가 하고(near_target),
 # 서술이 "3%"라고 쓸 수 있게 near_target 지표가 있을 때만 허용한다.
 NEAR_TARGET_SHARE = 0.03
@@ -54,6 +61,15 @@ NEAR_TARGET_SHARE = 0.03
 # 숫자 토큰: 앞 글자가 영숫자면(F1·P99 등 식별자) 숫자로 보지 않는다(선행 lookbehind).
 # 부호(음수 정답값 -0.1 등)·천단위 콤마·백분율(%)을 함께 포착한다(D7[2]).
 _NUMBER_RE = re.compile(r"(?<![A-Za-z0-9])[+-]?\d+(?:[.,]\d+)?%?")
+
+
+# 유니코드 마이너스(U+2212)와 대시는 숫자 앞에서 빼기 부호다 — 검증 전에 ASCII '-' 로 맞춘다. 맞추지 않으면
+# 정규식이 부호를 놓쳐 "−0.05" 를 "0.05" 로 읽는다(점검 D-V4).
+_MINUS_RE = re.compile(r"[\u2212\u2013\u2012](?=\d)")
+
+
+def _normalize_minus(text: str) -> str:
+    return _MINUS_RE.sub("-", text)
 
 
 def _canon(num_str: str):
@@ -80,6 +96,66 @@ def _add(wl: set, v: Any) -> None:
             wl.add(f"{round(f * 100, k):g}")
 
 
+def _add_signed(wl: set, v: Any) -> None:
+    """부호 있는 차이 — 값과 크기(절댓값)를 함께. "목표보다 0.0288 낮다"처럼 부호 없이 크기만 적어도 같은 사실이다."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return
+    _add(wl, f)
+    _add(wl, abs(f))
+
+
+def _decimals(text: str) -> int:
+    return len(text.split(".", 1)[1]) if "." in text else 0
+
+
+def _add_judged(wl: set, value: Any, text: str | None, default_digits: int) -> None:
+    """기준과 비교되는 값 — 판정과 같은 쪽으로 읽히게 자릿수를 늘린 표시 문자열(text)이 있으면 그 표기를 넣고,
+    text 가 평소보다 길면(반올림하면 판정과 반대로 읽혀 늘린 값) 그보다 짧은 반올림 표기는 넣지 않는다(계획 S4b —
+    '판정과 어긋나 보이는 짧은 반올림 표기는 뺀다'). 기준값 자체는 따로 허용되므로 이것으로 모든 모순을 막지는 못한다.
+    """
+    if not text:
+        _add(wl, value)
+        return
+    c = _canon(text)
+    if c is not None:
+        wl.add(c)
+    d = _decimals(text)
+    if d <= default_digits:
+        _add(wl, value)
+        return
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return
+    wl.add(f"{f:g}")
+    for k in range(d, 10):
+        wl.add(f"{round(f, k):g}")
+    if 0.0 <= f <= 1.0:
+        for k in range(max(d - 2, 0), 8):
+            wl.add(f"{round(f * 100, k):g}")
+
+
+def _add_fact_numbers(wl: set, obj: Any) -> None:
+    """서술용 파생값(facts) 안의 모든 숫자 — 값, 음수면 크기, 글(이름·표기·사유) 속 숫자. bool 은 건너뛴다."""
+    if isinstance(obj, bool) or obj is None:
+        return
+    if isinstance(obj, (int, float)):
+        _add_signed(wl, obj)
+    elif isinstance(obj, str):
+        for tok in _NUMBER_RE.findall(_CTX_TOKEN_RE.sub(" ", _normalize_minus(obj))):
+            c = _canon(tok)
+            if c is not None:
+                _add_signed(wl, c)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _add_fact_numbers(wl, v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _add_fact_numbers(wl, item)
+
+
 def _add_client_numbers(wl: set, obj: Any) -> None:
     """고객 입력 안의 숫자(학습 표본 수, 라벨러 수, 일치도, 수집 기간 등)를 허용 목록에 넣는다.
 
@@ -91,7 +167,7 @@ def _add_client_numbers(wl: set, obj: Any) -> None:
     if isinstance(obj, (int, float)):
         _add(wl, obj)
     elif isinstance(obj, str):
-        for tok in _NUMBER_RE.findall(_CTX_TOKEN_RE.sub(" ", obj)):
+        for tok in _NUMBER_RE.findall(_CTX_TOKEN_RE.sub(" ", _normalize_minus(obj))):
             c = _canon(tok)
             if c is not None:
                 _add(wl, c)
@@ -118,7 +194,12 @@ def build_number_whitelist(
     _add(wl, fs.score)
 
     for m in fs.metrics:
-        _add(wl, m.value)
+        # 값은 판정과 같은 쪽으로 읽히는 인쇄 표기(value_text, 평소 셋째 자리)가 있으면 그것을 따른다.
+        _add_judged(wl, m.value, m.value_text, 3)
+        _add(wl, m.beta)  # F-beta 의 β — 서술이 "β=2" 라고 쓸 수 있다(None 이면 건너뛴다)
+        _add_client_numbers(wl, m.display_name)  # 이름 속 숫자(F1·"Top-5" 등 — 식별자 뒤 숫자는 원래 안 뽑힌다)
+        if m.margin_text:
+            _add_signed(wl, _canon(m.margin_text))
         if m.threshold is not None:
             _add(wl, m.threshold)
         # 95% 신뢰구간(D29) — None 이면 _add 가 건너뛴다.
@@ -137,15 +218,18 @@ def build_number_whitelist(
     # 프론트가 만든 고정 문안이라 고객 입력과 같이 글 속 숫자를 뽑는다(None 이면 건너뛴다).
     _add_client_numbers(wl, fs.ci_method_note)
 
+    # 클래스 이름 속 숫자("2"·"class_3"·"v2 결함")도 허용한다 — 이름을 옮겨 적는 것은 수치 주장이 아니다.
     for pc in fs.per_class:
         for val in (pc.precision, pc.recall, pc.f1, pc.support):
             _add(wl, val)
-        if pc.label and pc.label.replace(".", "").isdigit():
-            _add(wl, pc.label)
+        _add_client_numbers(wl, pc.label)
 
+    # 건수와, 서술이 흔히 더해 쓰는 합(클래스마다 오류 fp+fn·예측 수 tp+fp·실제 수 tp+fn). S1 실호출에서 모델이
+    # 직접 더한 "합계 57건"이 허용 목록 밖이라 서술 전체가 규칙 문장이 됐다 — 자주 쓰는 합은 미리 넣는다.
     for row in fs.confusion_counts:
-        for val in (row.tp, row.fp, row.fn, row.tn):
+        for val in (row.tp, row.fp, row.fn, row.tn, row.fp + row.fn, row.tp + row.fp, row.tp + row.fn):
             _add(wl, val)
+        _add_client_numbers(wl, row.label)
 
     for avg in fs.class_averages:
         for val in (avg.precision, avg.recall, avg.f1, avg.support):
@@ -155,15 +239,17 @@ def build_number_whitelist(
         for row in fs.confusion.matrix:
             for cell in row:
                 _add(wl, cell)
+            _add(wl, sum(row))  # 그 클래스의 실제 수
+        width = max((len(row) for row in fs.confusion.matrix), default=0)
+        for j in range(width):  # 그 클래스로 예측한 수
+            _add(wl, sum(row[j] for row in fs.confusion.matrix if j < len(row)))
         for label in fs.confusion.labels:
-            if label and label.replace(".", "").isdigit():
-                _add(wl, label)
+            _add_client_numbers(wl, label)
 
     if fs.distribution:
         for k, v in fs.distribution.class_distribution.items():
             _add(wl, v)
-            if k and k.replace(".", "").isdigit():
-                _add(wl, k)
+            _add_client_numbers(wl, k)
         if fs.distribution.imbalance_ratio is not None:
             _add(wl, fs.distribution.imbalance_ratio)
 
@@ -189,15 +275,24 @@ def build_number_whitelist(
     # 임계값 조정 여지(D40) — 네 값과 판정 기준 0.10. 키가 없으면 0.1 은 다른 사실에서만 나온다.
     gain = fs.f1_threshold_gain
     if gain:
-        for val in (gain.max_f1, gain.current_f1, gain.gain, gain.best_threshold):
+        for val in (gain.max_f1, gain.current_f1, gain.best_threshold):
             _add(wl, val)
+        _add_judged(wl, gain.gain, gain.gain_text, 4)
         _add(wl, THRESHOLD_GAIN_NOTABLE)
 
     # 불균형 영향(D20) — 비율·두 차이(음수일 수 있다)와 기준 1.5·0.10. 숫자 꼴 클래스 이름("2")도 허용한다.
     ie = fs.imbalance_effect
     if ie:
-        for val in (ie.imbalance_ratio, ie.accuracy_minus_macro_f1, ie.majority_minus_minority_f1):
-            _add(wl, val)
+        shown = ie.display
+        _add_judged(wl, ie.imbalance_ratio, shown.imbalance_ratio if shown else None, 4)
+        for val, text in (
+            (ie.accuracy_minus_macro_f1, shown.accuracy_minus_macro_f1 if shown else None),
+            (ie.majority_minus_minority_f1, shown.majority_minus_minority_f1 if shown else None),
+        ):
+            if val is None:
+                continue
+            _add_judged(wl, val, text, 4)
+            _add_judged(wl, abs(val), text.lstrip("-") if text else None, 4)
         _add_client_numbers(wl, ie.majority_class)
         _add_client_numbers(wl, ie.minority_class)
         _add(wl, IMBALANCE_MILD_BELOW)
@@ -213,6 +308,23 @@ def build_number_whitelist(
     if fs.latency and fs.latency.available:
         for val in (fs.latency.mean, fs.latency.p50, fs.latency.p95, fs.latency.p99):
             _add(wl, val)
+        # 백분위 이름("95번째 백분위수"·"상위 99%") — 지연시간이 있을 때만.
+        for pct in (50, 95, 99):
+            _add(wl, pct)
+
+    # 서술용 파생값(S4a facts) — 모든 숫자(음수는 크기도)와, 켜진 판정의 기준값만(계획 S4b).
+    facts = fs.facts
+    if facts is not None:
+        _add_fact_numbers(wl, facts.model_dump(mode="json"))
+        if facts.weakest_class is not None or facts.low_support_classes:
+            _add(wl, LOW_SUPPORT_MIN)
+            _add(wl, LOW_SHARE_MIN)
+        if facts.weakest_class is not None and facts.weakest_class.gap_from_macro is not None:
+            _add(wl, WEAKEST_F1_GAP)
+        if facts.precision_recall_gap is not None:
+            _add(wl, PR_GAP_MIN)
+        if facts.distribution_shift:
+            _add(wl, DISTRIBUTION_SHIFT_MIN)
 
     for ref in benchmark_refs:
         _add(wl, ref.get("model_value"))
@@ -245,8 +357,8 @@ def verify_grounding(texts: list[str], whitelist: set) -> GroundingInfo:
     for t in texts:
         if not t:
             continue
-        # 표준 표기·절/서수 등 문맥 토큰을 먼저 제거한 뒤 숫자만 검증(오탐 방지, D3a).
-        stripped = _CTX_TOKEN_RE.sub(" ", t)
+        # 표준 표기·절/서수 등 문맥 토큰을 먼저 제거한 뒤 숫자만 검증(오탐 방지, D3a). 유니코드 마이너스는 '-' 로.
+        stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(t))
         for tok in _NUMBER_RE.findall(stripped):
             c = _canon(tok)
             if c is None:

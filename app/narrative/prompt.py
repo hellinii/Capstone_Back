@@ -9,7 +9,6 @@ analyzer.py 의 프롬프트/스키마 패턴을 따른다. 핵심 제약:
 """
 import json
 
-from app.narrative.derived import threshold_tuning_needed
 
 
 # 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예"). 한국어 이름은 이 셋으로 통일한다(W9,
@@ -93,9 +92,9 @@ def _near_target_rule(fs) -> str | None:
     )
 
 
-def _threshold_gain_rule(fs) -> str | None:
-    """규칙 14 — 임계값 조정 여지(서술 설계 D40). gain 이 기준(0.10) 이상일 때만 붙인다."""
-    if fs is None or getattr(fs, "f1_threshold_gain", None) is None or not threshold_tuning_needed(fs):
+def _threshold_gain_rule(fs, derived: dict | None) -> str | None:
+    """규칙 14 — 임계값 조정 여지(서술 설계 D40). 엔진이 부적합으로 본 때(derived.threshold_tuning)만 붙인다."""
+    if fs is None or getattr(fs, "f1_threshold_gain", None) is None or not (derived or {}).get("threshold_tuning"):
         return None
     return (
         "fact_sheet.f1_threshold_gain 의 gain 이 0.1 이상이다. conclusion.narrative(8.2)와 "
@@ -133,14 +132,14 @@ def _imbalance_rule(fs) -> str | None:
     )
 
 
-def build_system_prompt(report_purpose: str, task_type: str = "", fs=None) -> str:
-    """`fs`(FactSheet)는 사실에 따라 달라지는 규칙(규칙 10~15)을 고르는 데만 쓴다."""
+def build_system_prompt(report_purpose: str, task_type: str = "", fs=None, derived: dict | None = None) -> str:
+    """`fs`(FactSheet)·`derived`(compute_derived)는 사실에 따라 달라지는 규칙(규칙 10~15)을 고르는 데만 쓴다."""
     task_label = TASK_TYPE_LABELS.get(task_type, task_type)
     derivation_rule = _derivation_rule(fs)
     error_ratio_rule = _error_ratio_rule(fs)
     ci_rule = _confidence_interval_rule(fs)
     near_rule = _near_target_rule(fs)
-    gain_rule = _threshold_gain_rule(fs)
+    gain_rule = _threshold_gain_rule(fs, derived)
     imbalance_rule = _imbalance_rule(fs)
     return (
         "너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술 작성 전문가다.\n"

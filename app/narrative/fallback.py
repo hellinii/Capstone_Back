@@ -58,7 +58,12 @@ def _value_target(value: float, threshold: float) -> tuple[str, str]:
 
 
 def _metric_vs_target(m) -> str:
-    """'지표명(값, 목표 t)' — 값이 목표와 같아 보이면 자릿수를 늘리거나 '목표 t에 근소하게 못 미침'."""
+    """'지표명(값, 목표 t)' — 값은 프론트가 판정과 같은 쪽으로 읽히게 만든 인쇄 표기(value_text, 성적서 6.1 과 같음).
+
+    value_text 가 없는 옛 요청만 여기서 자릿수를 늘리거나 '목표 t에 근소하게 못 미침'으로 쓴다.
+    """
+    if m.value_text:
+        return f"{m.display_name}({m.value_text}, 목표 {_num(m.threshold)})"
     v, t = _value_target(m.value, m.threshold)
     if not v:
         return f"{m.display_name}(목표 {t}에 근소하게 못 미침)"
@@ -107,10 +112,13 @@ def _imbalance_sentence(ie) -> str:
     받침에 맞출 일이 없게 한다. 정확도 − 매크로 F1 이 없으면(멀티레이블) 다수·소수 '레이블'의 F1 차이만 쓴다.
     """
     ir = ie.imbalance_ratio
+    shown = ie.display  # 엔진이 판정과 같은 쪽으로 읽히게 자릿수를 늘린 표기(S2). 없으면(옛 요청) 4자리 값.
+    ir_text = shown.imbalance_ratio if shown else f"{ir}"
     unit = "레이블" if ie.accuracy_minus_macro_f1 is None else "클래스"
     if ie.level == "mild":
-        # 1.49996 은 넷째 자리로 1.5 가 된다 — 엔진은 1.5 미만(경미)으로 봤다.
-        ratio = "불균형 비율이" if ir >= 1.5 else f"불균형 비율({ir})이"
+        # 1.49996 은 넷째 자리로 1.5 가 된다 — 엔진은 1.5 미만(경미)으로 봤다. 표시값(1.49996)이 있으면 그대로 쓰고,
+        # 없으면 숫자를 빼서 '1.5 로 1.5 미만' 모순을 피한다.
+        ratio = "불균형 비율이" if ir >= 1.5 and not shown else f"불균형 비율({ir_text})이"
         return f"{ratio} 1.5 미만이어서 불균형은 경미하다."
 
     gaps = []  # (이름, 값)
@@ -120,7 +128,20 @@ def _imbalance_sentence(ie) -> str:
         f"다수 {unit}({ie.majority_class}){'과' if unit == '레이블' else '와'} 소수 {unit}({ie.minority_class})의 F1 차이",
         ie.majority_minus_minority_f1,
     ))
-    over = [(n, v) for n, v in gaps if ie.level == "affected" and v >= 0.1]
+    texts = {}
+    if shown:
+        if ie.accuracy_minus_macro_f1 is not None and shown.accuracy_minus_macro_f1:
+            texts[gaps[0][0]] = shown.accuracy_minus_macro_f1
+        texts[gaps[-1][0]] = shown.majority_minus_minority_f1
+
+    def val(name: str, value: float) -> str:
+        return texts.get(name, f"{value}")
+    def at_least(name: str, value: float) -> bool:
+        # 엔진 표시값은 판정과 같은 쪽으로 읽히게 자릿수를 늘린 값이라 그것으로 본다 — 4자리 값 0.1 이 실제로는
+        # 0.09996(기준 미만)일 수 있다. 옛 요청(표시값 없음)만 4자리 값으로 본다.
+        return float(texts[name]) >= 0.1 if name in texts else value >= 0.1
+
+    over = [(n, v) for n, v in gaps if ie.level == "affected" and at_least(n, v)]
     under = [(n, v) for n, v in gaps if (n, v) not in over]
 
     class_gap_name = gaps[-1][0]
@@ -129,14 +150,14 @@ def _imbalance_sentence(ie) -> str:
         # '소수 쪽 F1 이 더 높다'는 다수 F1 − 소수 F1 이 음수일 때만 맞다. 정확도 − 매크로 F1 이 음수인 것은
         # 평균 F1 이 정확도보다 높다는 뜻일 뿐이다(독립 검토 S1-4-FB-01).
         if value < 0 and name == class_gap_name:
-            return f"{name}({value})는 음수로 소수 {unit}의 F1 이 더 높다"
-        if value >= 0.1:  # 반올림해 기준과 같아 보이지만 엔진은 기준 미만으로 봤다
+            return f"{name}({val(name, value)})는 음수로 소수 {unit}의 F1 이 더 높다"
+        if value >= 0.1 and name not in texts:  # 반올림해 기준과 같아 보이지만 엔진은 기준 미만으로 봤다
             return f"{name}는 기준(0.1) 미만이다"
-        return f"{name}({value})는 기준(0.1) 미만이다"
+        return f"{name}({val(name, value)})는 기준(0.1) 미만이다"
 
-    head = f"불균형 비율({ir})이 1.5 이상이어서 불균형이 있"
+    head = f"불균형 비율({ir_text})이 1.5 이상이어서 불균형이 있"
     if over:
-        named = "와 ".join(f"{n}({v})" for n, v in over)
+        named = "와 ".join(f"{n}({val(n, v)})" for n, v in over)
         text = f"{head}고, {named}가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다."
         if under:
             text += " " + " ".join(under_text(n, v) + "." for n, v in under)
@@ -177,6 +198,10 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         cd = fs.distribution.class_distribution
         pct = dist["percentages"]
         items = ", ".join(f"{k} {v}건({pct.get(k, 0)}%)" for k, v in cd.items())
+        # 프론트가 클래스 상한(256)에 맞춰 분포를 잘랐으면 잘린 목록을 전체처럼 쓰지 않는다(S4a 미리 자르기).
+        cut = (fs.facts.omitted.get("class_distribution", 0) if fs.facts is not None else 0)
+        if cut:
+            items += f" 외 {cut}개 클래스"
         if dist.get("unit") == "label":
             s = (
                 f"평가 데이터셋은 총 {dist['total']}건이며, 레이블별 등장 분포는 {items}이다"
@@ -312,10 +337,13 @@ def _risks(fs: FactSheet) -> str:
         risks = "목표값이 설정된 모든 시험항목이 목표를 충족하여 식별된 목표 미달 위험은 없다."
     if near:
         # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
+        # 값·차이는 판정과 같은 쪽으로 읽히는 표기(value_text·margin_text)가 있으면 그것을 쓴다 — 셋째 자리
+        # 반올림은 근소 차이를 '차이 0' 으로 만들었다.
         items = ", ".join(
-            f"{m.display_name}({_num(m.value)}, 목표 {_num(m.threshold)}, 차이 {_num(m.margin)})"
+            f"{m.display_name}({m.value_text or _num(m.value)}, 목표 {_num(m.threshold)}, "
+            f"차이 {m.margin_text or _num(m.margin)})"
             if m.margin is not None
-            else f"{m.display_name}({_num(m.value)}, 목표 {_num(m.threshold)})"
+            else f"{m.display_name}({m.value_text or _num(m.value)}, 목표 {_num(m.threshold)})"
             for m in near
         )
         risks += (
@@ -367,7 +395,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
         g = fs.f1_threshold_gain
         risks += (
             f" 결정 임계값을 {g.best_threshold}로 바꾸면 F1 이 {g.current_f1}에서 {g.max_f1}까지 오를 수 있어 "
-            f"현재 임계값이 최적이 아닐 수 있다. 다만 이 {g.gain}는 같은 평가 데이터로 고른 임계값에서 나온 "
+            f"현재 임계값이 최적이 아닐 수 있다. 다만 이 {g.gain_text or g.gain}는 같은 평가 데이터로 고른 임계값에서 나온 "
             "'이 데이터에서 오를 수 있는 최대폭'이므로 별도 데이터에서 확인해야 한다."
         )
 

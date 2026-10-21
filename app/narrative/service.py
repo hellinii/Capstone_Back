@@ -45,6 +45,56 @@ NARRATIVE_DEADLINE_SECONDS = 120.0
 MAX_NARRATIVE_PROMPT_CHARS = 80_000
 
 
+# 지시문이 상한을 넘을 때 지시문에서만 덜어 내는 차례(S4b). 혼동행렬·클래스별 표는 M21·M22 선택과 무관하게 늘
+# 실리므로(S4a) 클래스가 많으면 지시문이 커진다 — 서술 결론(최약 클래스·최다 오분류 쌍 등)은 facts 에 이미 있어
+# 큰 표부터 뺀다. 숫자 허용 목록은 원본 사실 시트로 만든다(뺀 표의 숫자를 인용해도 사실이다).
+def _drop_matrix(d: dict) -> None:
+    if d.get("confusion"):
+        d["confusion"] = {**d["confusion"], "matrix": []}
+
+
+def _drop_key(key: str, empty):
+    def drop(d: dict) -> None:
+        d[key] = empty
+    return drop
+
+
+def _drop_fact_lists(d: dict) -> None:
+    facts = d.get("facts")
+    if isinstance(facts, dict):
+        facts["low_support_classes"] = []
+        facts["distribution_shift"] = []
+        if isinstance(facts.get("prediction_bias"), dict):
+            facts["prediction_bias"]["rows"] = []
+
+
+_PROMPT_TRIM_STEPS = (
+    ("confusion.matrix", _drop_matrix),
+    ("per_class", _drop_key("per_class", [])),
+    ("confusion_counts", _drop_key("confusion_counts", [])),
+    ("distribution", _drop_key("distribution", None)),
+    ("facts.class_lists", _drop_fact_lists),
+)
+
+
+def build_prompts_within_limit(req, fs, derived, benchmark_refs) -> tuple[str, str, list[str]]:
+    """system·user 지시문을 만들고, 합이 MAX_NARRATIVE_PROMPT_CHARS 를 넘으면 _PROMPT_TRIM_STEPS 차례로 덜어 낸다.
+
+    돌려주는 세 번째 값은 덜어 낸 자리(내부 기록). 다 덜어도 넘으면 호출부가 input_too_large 로 끝낸다.
+    """
+    system = build_system_prompt(req.report_purpose.value, req.task_type.value, fs, derived)
+    sheet = fs.model_dump()
+    user = build_user_prompt(sheet, benchmark_refs, derived, req.client_inputs)
+    dropped: list[str] = []
+    for name, step in _PROMPT_TRIM_STEPS:
+        if len(system) + len(user) <= MAX_NARRATIVE_PROMPT_CHARS:
+            break
+        step(sheet)
+        dropped.append(name)
+        user = build_user_prompt(sheet, benchmark_refs, derived, req.client_inputs)
+    return system, user, dropped
+
+
 def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
     """파생값·기준치·숫자 화이트리스트 준비 — 순수 CPU 구간(스레드풀로 오프로드된다).
 
@@ -182,14 +232,18 @@ async def _narrate_body(
 
     # 1-1. 요청 조립 + 크기 상한 — 지갑을 쓰기 전에 본다(너무 큰 요청이 예산을 먹지 않게).
     try:
-        system = build_system_prompt(req.report_purpose.value, req.task_type.value, fs)
-        user = build_user_prompt(fs.model_dump(), benchmark_refs, derived, req.client_inputs)
+        system, user, prompt_trimmed = await run_cpu_bound(
+            build_prompts_within_limit, req, fs, derived, benchmark_refs
+        )
         schema = build_response_schema(fs.problems)
     except Exception:
         # 종전처럼 500 이 아니라 규칙 폴백 — 요청 조립 실패도 서술 실패의 하나다.
         logger.exception("서술 요청 조립 실패 → 규칙 폴백(assembly_error)")
         return build_fallback_narrative(fs, benchmark_refs, derived, reason="assembly_error")
     record["prompt_chars"] = len(system) + len(user)
+    if prompt_trimmed:
+        record["prompt_trimmed"] = prompt_trimmed
+        logger.info("서술 지시문이 상한을 넘어 지시문에서만 덜어 냄: %s", prompt_trimmed)
     if len(system) + len(user) > MAX_NARRATIVE_PROMPT_CHARS:
         logger.warning(
             "서술 요청이 너무 큼(%d자 > %d자) → 규칙 폴백(input_too_large)",
