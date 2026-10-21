@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.core.schemas import TaskType
-from app.narrative import service
+from app.narrative import legacy as service
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.derived import compute_derived
 from app.narrative.fallback import build_fallback_narrative
@@ -32,7 +32,7 @@ from app.narrative.schemas import (
     NarrativeRequest,
     PerClassFact,
 )
-from app.narrative.service import build_prompts_within_limit, generate_narrative
+from app.narrative.legacy import build_prompts_within_limit, generate_narrative
 from tests.conftest import fake_beta_message
 
 CONTRACT = Path(__file__).parent / "contract"

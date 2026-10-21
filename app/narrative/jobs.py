@@ -67,7 +67,7 @@ from app.narrative.schemas import (
     NarrativeRequest,
     NarrativeResponse,
 )
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 
 logger = logging.getLogger(__name__)
 

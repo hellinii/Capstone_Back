@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from app.narrative import jobs
 from app.narrative.schemas import NarrativeJobCreated, NarrativeJobOut, NarrativeRequest, NarrativeResponse
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 
 router = APIRouter(prefix="/api", tags=["Narrative"])
 

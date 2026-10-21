@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from app.core.schemas import TaskType
 from app.narrative.schemas import ConfusionFact, DistributionFact, FactSheet, MetricFact, NarrativeRequest
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import (
     build_number_whitelist, verify_grounding, _collect_grounding_texts,
@@ -371,7 +371,7 @@ def test_client_inputs_limit_boundary_is_exact():
 
 
 def test_client_inputs_reach_the_prompt():
-    from app.narrative.prompt import build_user_prompt
+    from app.narrative.legacy import build_user_prompt
 
     prompt = build_user_prompt({"verdict": "PASS"}, [], {}, {"declarations": {"사용 방식": "배치"}})
     assert '"client_inputs"' in prompt and "배치" in prompt
@@ -413,7 +413,7 @@ def test_class_averages_are_bounded():
 
 def test_system_prompt_names_the_task_type():
     """분류 유형 이름이 AI 에 직접 간다(재료 목록 2절 "작업 유형 — AI 예")."""
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     assert "이진 분류" in build_system_prompt("internal", "binary")
     assert "다중 클래스 분류" in build_system_prompt("internal", "multiclass")
@@ -426,7 +426,7 @@ def test_system_prompt_names_the_task_type():
 def test_system_prompt_core_metric_line_is_neutral():
     """W8: 핵심 지표는 의뢰자가 바꾸지 않으면 분류 유형의 기본값이다. AI 지시문이 '의뢰자가 지정'이라고
     단정하면 성적서 6.1(기본값 사용)과 서술이 갈린다. 세 유형 모두 중립 문장만 간다."""
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     for task_type in ("binary", "multiclass", "multilabel"):
         prompt = build_system_prompt("internal", task_type, _sample_fact_sheet())
@@ -530,7 +530,7 @@ def _with_derivation(method, threshold=None):
 
 def test_rule_10_follows_the_derivation_method():
     """규칙 10 은 파생 방법마다 다르다 — 다중 클래스(argmax)에는 임계값이 없다(DESIGN_GAPS R3)."""
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     threshold = build_system_prompt("internal", "binary", _with_derivation("threshold", 0.35))
     per_label = build_system_prompt("internal", "multilabel", _with_derivation("threshold_per_label", {"a": 0.4}))
@@ -637,7 +637,7 @@ def test_whitelist_contains_target_values_from_refs():
 
 
 def test_prompt_explains_target_position():
-    from app.narrative.prompt import build_user_prompt
+    from app.narrative.legacy import build_user_prompt
 
     prompt = build_user_prompt({"verdict": "PASS"}, [], {})
     assert "target_position" in prompt and "target_value" in prompt
@@ -747,7 +747,7 @@ def test_fallback_without_error_ratios_is_unchanged():
 
 
 def test_rule_11_follows_error_ratios():
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
     known = build_system_prompt(
@@ -877,7 +877,7 @@ def test_fallback_without_contained_targets_has_no_interval_sentence():
 
 
 def test_rule_12_follows_intervals():
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
     with_ci = build_system_prompt(
@@ -1137,7 +1137,7 @@ def test_fallback_distribution_without_imbalance_effect_is_neutral():
 
 
 def test_rules_13_to_15_follow_facts():
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
     for n in ("13. ", "14. ", "15. "):

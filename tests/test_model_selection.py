@@ -16,7 +16,7 @@ from app.analysis.llm_mapper import analyze_columns_with_llm
 from app.core.schemas import TaskType
 from app.narrative import llm
 from app.narrative.schemas import NarrativeRequest
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 from tests.test_narrator import _no_special_fact_sheet
 
 RETIRED_MODEL = "gpt-4.1-nano"

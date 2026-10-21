@@ -20,7 +20,7 @@ from app.narrative.grounding import (
     has_number_token,
     verify_grounding,
 )
-from app.narrative.prompt import build_response_schema, build_user_prompt
+from app.narrative.legacy import build_response_schema, build_user_prompt
 from app.narrative.schemas import (
     MAX_PROBLEM_EVIDENCE_CHARS,
     MAX_PROBLEMS,
@@ -29,7 +29,7 @@ from app.narrative.schemas import (
     NarrativeRequest,
     ProblemFact,
 )
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 
 _SECTIONS = {
     "core_fail": ("8.2", "9.2"),

@@ -4,6 +4,9 @@ narrative_fallback.py — 규칙 기반 폴백 서술 생성.
 무키 / LLM 호출 실패 / grounding 검증 실패 시 사용. 절대 가짜 MOCK 수치로 회귀하지 않고,
 fact_sheet 의 실제 계산값(+ compute_derived 파생값)만 템플릿에 삽입한다(환각 0 보장).
 출력의 모든 숫자는 build_number_whitelist 가 포함하는 값이므로 grounding 검증을 통과한다.
+
+문장은 소절 7칸 함수(SECTION_TEMPLATES, 서술 라운드 S5)로 나뉜다 — 작업 경로의 검문 사다리(app.narrative.generator)가
+걸린 칸만 그 칸 함수로 바꾸고, 옛 경로(app.narrative.legacy)·키 없음은 일곱 칸을 모은 build_fallback_narrative 를 쓴다.
 """
 from app.narrative.schemas import ConclusionOut, FactSheet, GroundingInfo, InterpretationOut, NarrativeMeta, NarrativeResponse, ProblemFact, RecommendationNarrativeOut, RecommendationOut
 
@@ -178,7 +181,8 @@ def _imbalance_sentence(ie) -> str:
     )
 
 
-def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
+def _confusion_analysis(fs: FactSheet, derived: dict) -> str:
+    """7.1 혼동행렬 해석."""
     conf = derived.get("confusion")
     if conf and conf.get("unit") == "label_cell":
         # 멀티레이블 — 합계는 표본이 아니라 레이블 칸(표본 수 × 레이블 수)이다. '전체 N건'이라 쓰면 7.2 의
@@ -202,7 +206,11 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         confusion_analysis = "혼동 행렬 데이터가 제공되지 않아 클래스 간 오분류 분석을 생략한다."
     if fs.error_ratios is not None:
         confusion_analysis += " " + _error_ratio_sentence(fs.error_ratios)
+    return confusion_analysis
 
+
+def _distribution_analysis(fs: FactSheet, derived: dict) -> str:
+    """7.2 분포·불균형."""
     dist = derived.get("distribution")
     if dist and fs.distribution:
         cd = fs.distribution.class_distribution
@@ -236,11 +244,7 @@ def _interpretation(fs: FactSheet, derived: dict) -> InterpretationOut:
         distribution_analysis = f"평가 데이터셋은 총 {fs.n_samples}건이며, {head} " + _imbalance_sentence(fs.imbalance_effect)
     else:
         distribution_analysis = "클래스 분포 데이터가 제공되지 않아 분포 분석을 생략한다."
-
-    return InterpretationOut(
-        confusion_analysis=confusion_analysis,
-        distribution_analysis=distribution_analysis,
-    )
+    return distribution_analysis
 
 
 def _judged(fs: FactSheet) -> list:
@@ -370,7 +374,8 @@ def _risks(fs: FactSheet) -> str:
     return risks
 
 
-def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> ConclusionOut:
+def _benchmark(benchmark_refs: list[dict]) -> str:
+    """8.1 벤치마크."""
     if benchmark_refs:
         segs = [
             f"{r['metric']} {r['model_value']}는 내부 참조 기준 {r['ref_low']}~{r['ref_high']} 대비 "
@@ -389,7 +394,11 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
             benchmark += f" 목표값 수준은 {', '.join(targets)}이다."
     else:
         benchmark = "비교 가능한 내부 참조 기준치가 없어 벤치마크 비교를 생략한다."
+    return benchmark
 
+
+def _overall(fs: FactSheet, derived: dict) -> str:
+    """8.2 종합 총평 — 판정 문장 + 신뢰구간."""
     narrative = _verdict_narrative(fs, derived)
     # 신뢰구간이 목표값을 포함하는 지표(D29) — 판정은 compute_derived 가 한 곳에서 한다.
     # 8.2(종합 총평)에 둔다: 판정을 얼마나 믿을 수 있는지는 판정을 설명하는 자리의 말이다.
@@ -405,7 +414,11 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
             f" 95% 신뢰구간이 목표값을 포함하는 지표는 {items}로, "
             "표본 변동에 따라 해당 지표의 판정이 달라질 수 있다."
         )
+    return narrative
 
+
+def _risk_section(fs: FactSheet, derived: dict) -> str:
+    """8.3 리스크 — 미달·판정 불가·아슬아슬 + 임계값 조정 여지."""
     risks = _risks(fs)
     # 임계값 조정 여지(D40) — 기준(0.10) 판정은 compute_derived 가 한 곳에서 한다.
     if derived.get("threshold_tuning"):
@@ -415,10 +428,7 @@ def _conclusion(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> Con
             f"현재 임계값이 최적이 아닐 수 있다. 다만 이 {g.gain_text or g.gain}는 같은 평가 데이터로 고른 임계값에서 나온 "
             "'이 데이터에서 오를 수 있는 최대폭'이므로 별도 데이터에서 확인해야 한다."
         )
-
-    return ConclusionOut(
-        verdict=fs.verdict, benchmark=benchmark, narrative=narrative, risks=risks
-    )
+    return risks
 
 
 # 문제 종류별 권고 템플릿(서술 설계 D22) — (분류, 권고, 기대 효과). 9절 권고표의 한 줄이 된다.
@@ -535,23 +545,71 @@ def _recommendations(fs: FactSheet):
     return RecommendationNarrativeOut(data_quality=data_quality, model_ops=model_ops), recs
 
 
+# ── 칸별 규칙 템플릿(소절 7칸, 서술 설계 D36) ────────────────────────────────────
+# 검문 사다리(app.narrative.generator)는 걸린 칸만 이 함수로 바꾼다. 칸 함수는 그 칸의 응답 필드(점 표기,
+# app.narrative.sections 의 response_paths)마다 값을 돌려준다. 문장은 S5 에서 쪼개기만 했다 — 다시 쓰기는 S6.
+# 7.3(추가 관찰)은 규칙 문장이 없다 — 빈 글이면 성적서가 고정 문구 15("해당 없음")를 찍는다(D38).
+
+
+def _section_9(fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> dict:
+    rec_narrative, recs = _recommendations(fs)
+    return {
+        "recommendation_narrative.data_quality": rec_narrative.data_quality,
+        "recommendation_narrative.model_ops": rec_narrative.model_ops,
+        "recommendations": recs,
+    }
+
+
+SECTION_TEMPLATES = {
+    "7.1": lambda fs, refs, derived: {"interpretation.confusion_analysis": _confusion_analysis(fs, derived)},
+    "7.2": lambda fs, refs, derived: {"interpretation.distribution_analysis": _distribution_analysis(fs, derived)},
+    "7.3": lambda fs, refs, derived: {"interpretation.additional_observations": ""},
+    "8.1": lambda fs, refs, derived: {"conclusion.benchmark": _benchmark(refs)},
+    "8.2": lambda fs, refs, derived: {"conclusion.narrative": _overall(fs, derived)},
+    "8.3": lambda fs, refs, derived: {"conclusion.risks": _risk_section(fs, derived)},
+    "9": _section_9,
+}
+
+
+def section_template(section_id: str, fs: FactSheet, benchmark_refs: list[dict], derived: dict) -> dict:
+    """칸 하나의 규칙 문장 — {응답 필드(점 표기): 값}."""
+    return SECTION_TEMPLATES[section_id](fs, benchmark_refs, derived)
+
+
+def assemble_response(parts: dict, fs: FactSheet, meta: NarrativeMeta) -> NarrativeResponse:
+    """칸별 값(응답 필드 → 값)을 응답 하나로 묶는다. 판정은 늘 사실 시트 값이다(AI echo 를 쓰지 않는다)."""
+    return NarrativeResponse(
+        interpretation=InterpretationOut(
+            confusion_analysis=parts.get("interpretation.confusion_analysis", ""),
+            distribution_analysis=parts.get("interpretation.distribution_analysis", ""),
+            additional_observations=parts.get("interpretation.additional_observations", ""),
+        ),
+        conclusion=ConclusionOut(
+            verdict=fs.verdict,
+            benchmark=parts.get("conclusion.benchmark", ""),
+            narrative=parts.get("conclusion.narrative", ""),
+            risks=parts.get("conclusion.risks", ""),
+        ),
+        recommendation_narrative=RecommendationNarrativeOut(
+            data_quality=parts.get("recommendation_narrative.data_quality", ""),
+            model_ops=parts.get("recommendation_narrative.model_ops", ""),
+        ),
+        recommendations=parts.get("recommendations", []),
+        meta=meta,
+    )
+
+
 def build_fallback_narrative(
     fs: FactSheet,
     benchmark_refs: list[dict],
     derived: dict,
     reason: str,
 ) -> NarrativeResponse:
-    """규칙 기반 폴백 서술. reason: no_key | api_error | grounding_failed"""
-    rec_narrative, recs = _recommendations(fs)
-    return NarrativeResponse(
-        interpretation=_interpretation(fs, derived),
-        conclusion=_conclusion(fs, benchmark_refs, derived),
-        recommendation_narrative=rec_narrative,
-        recommendations=recs,
-        meta=NarrativeMeta(
-            source="fallback",
-            model=None,
-            reason=reason,
-            grounding=GroundingInfo(passed=True),
-        ),
+    """규칙 기반 폴백 서술 — 일곱 칸의 템플릿을 모은다. reason: no_key | api_error | grounding_failed …"""
+    parts: dict = {}
+    for section_id in SECTION_TEMPLATES:
+        parts.update(section_template(section_id, fs, benchmark_refs, derived))
+    return assemble_response(
+        parts, fs,
+        NarrativeMeta(source="fallback", model=None, reason=reason, grounding=GroundingInfo(passed=True)),
     )

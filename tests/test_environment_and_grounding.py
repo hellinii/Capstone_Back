@@ -159,7 +159,7 @@ def test_pass_still_rejects_real_shortfall_claims(text):
 def test_narrative_falls_back_when_llm_contradicts_the_verdict(make_fake_anthropic_client):
     """모순이 발견되면 그 서술을 쓰지 않고 규칙 폴백으로 강등한다."""
     from app.core import llm_budget
-    from app.narrative.service import generate_narrative
+    from app.narrative.legacy import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
 
     llm_budget.reset()

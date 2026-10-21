@@ -236,7 +236,7 @@ def test_binary_and_old_callers_keep_sample_wording():
 
 async def test_service_passes_task_type_so_multilabel_fallback_uses_label_cells():
     """배선: 서비스가 compute_derived 에 작업 유형을 넘기는지(키 없음 → 폴백 경로)."""
-    from app.narrative.service import generate_narrative
+    from app.narrative.legacy import generate_narrative
 
     req = NarrativeRequest(task_type=TaskType.multilabel, report_purpose="internal", fact_sheet=_multilabel_fs())
     resp = await generate_narrative(None, req)

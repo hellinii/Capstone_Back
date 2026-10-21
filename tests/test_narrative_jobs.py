@@ -27,7 +27,7 @@ from app.main import app
 from app.narrative import jobs, schemas
 from app.narrative.models import NarrativeJob, _utcnow
 from app.narrative.schemas import NarrativeRequest
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 from tests.conftest import fake_beta_message
 from tests.test_narrative_router import _sample_request
 from tests.test_narrator import _no_special_fact_sheet
@@ -392,7 +392,7 @@ async def test_whole_job_deadline_fails_as_timeout(factory, monkeypatch, make_fa
 
 async def test_job_path_is_not_bound_by_the_old_route_deadline(factory, monkeypatch, make_fake_anthropic_client):
     """옛 경로의 서버 마감(120초)은 작업 경로에 걸리지 않는다 — 작업은 전체 10분 제한만 받는다."""
-    from app.narrative import service
+    from app.narrative import legacy as service
 
     monkeypatch.setattr(service, "NARRATIVE_DEADLINE_SECONDS", 0.05)
     fake = make_fake_anthropic_client(_CLEAN, delay=0.3)

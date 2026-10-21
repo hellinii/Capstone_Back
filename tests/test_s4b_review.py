@@ -289,7 +289,7 @@ def test_weakest_risk_says_label_for_multilabel():
 
 def test_prompt_trimming_marks_what_was_dropped():
     from app.narrative.baselines import build_benchmark_refs
-    from app.narrative.service import build_prompts_within_limit
+    from app.narrative.legacy import build_prompts_within_limit
     from tests.test_s4b_narrative import _many_classes
 
     req = _many_classes(150)
