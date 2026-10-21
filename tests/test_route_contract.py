@@ -142,7 +142,8 @@ def test_validation_check_item_fields():
 def test_narrative_job_response_fields():
     """서술 작업 번호 경로(서술 라운드 S3a). 프론트가 진행 표시·8.1 표·이어 조회·다시 만들기에 읽는 칸.
 
-    고객용 응답이라 강등 사유·모델·숫자 검문 위반(옛 응답의 meta)은 없어야 한다 — 내부 기록에만 둔다.
+    고객용 응답이라 강등 사유·숫자 검문 위반(옛 응답의 meta)은 없어야 한다 — 내부 기록에만 둔다. 모델은 칸별
+    모델 이름(section_models)만 싣는다(사용자 결정 — 성적서 화면의 '작성 기록', 서술 설계 결정 4).
     """
     assert _fields("NarrativeJobCreated") == {"job_id", "status", "stage", "benchmark_refs", "result"}
     assert _fields("NarrativeJobOut") == {
@@ -150,4 +151,5 @@ def test_narrative_job_response_fields():
     }
     assert _fields("NarrativeJobResult") == {
         "interpretation", "conclusion", "recommendation_narrative", "recommendations", "section_sources",
+        "section_models",
     }

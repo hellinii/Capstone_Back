@@ -177,6 +177,7 @@ async def test_generator_skips_8_1_when_printed_only(make_section_client):
     assert gen.response.conclusion.benchmark == ""
     assert gen.trace["section_8_1_fixed"] is True
     assert gen.trace["sections"]["8.1"]["http_calls"] == 0
+    assert gen.section_models["8.1"] is None and gen.section_models["8.2"] is not None  # 고정 문구 칸은 모델 없음
     # 다른 칸은 그대로 AI — 8.1 의 fixed 는 전체 출처를 규칙 문장으로 떨어뜨리지 않는다.
     assert gen.section_sources["8.2"] == gen.section_sources["8.3"] == "llm"
     assert gen.response.meta.source == "llm"

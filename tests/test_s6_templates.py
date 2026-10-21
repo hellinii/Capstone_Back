@@ -275,6 +275,7 @@ async def test_job_path_golden_with_contract_examples(task):
     assert_golden(f"narrative_job_fallback_{task}", {
         "response": result.response.model_dump(mode="json"),
         "section_sources": result.section_sources,
+        "section_models": result.section_models,  # 키 없음 — 칸마다 None(서술 설계 결정 4)
     })
 
 

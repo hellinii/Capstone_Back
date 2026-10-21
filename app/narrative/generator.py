@@ -13,8 +13,9 @@
    7.3(추가 관찰)은 걸리면 다시 만들지 않고 뺀다(성적서는 고정 문구 15 "해당 없음" — D38).
    한 칸의 HTTP 호출은 최대 2회(첫 장 호출이 재시도됐으면 그 칸은 다시 만들지 않는다).
 5. 칸을 섞은 최종본에 판정 모순 검사를 한 번 더 — 걸린 AI 칸은 템플릿으로.
-6. 기록: 고객용은 칸별 출처(section_sources)만, 내부용(trace)은 호출마다 응답 모델·거절 종류·토큰·비용·슬롯 대기·
-   칸마다 검사 결과·시도 수·7.3 원문(추가 관찰 승격 자료). 입력(사실 시트·고객 입력)은 남기지 않는다.
+6. 기록: 고객용은 칸별 출처(section_sources)와 칸별 모델(section_models — AI 칸만 그 글을 낸 호출의 응답 모델, 규칙
+   문장·고정 문구 칸은 None, 서술 설계 결정 4). 내부용(trace)은 호출마다 응답 모델·거절 종류·토큰·비용·슬롯 대기·
+   칸마다 검사 결과·시도 수·모델·7.3 원문(추가 관찰 승격 자료). 입력(사실 시트·고객 입력)은 남기지 않는다.
 
 시간: 작업 전체 제한(jobs.JOB_DEADLINE_SECONDS) 안에서 호출마다 남은 시간으로 제한을 줄인다. 남은 시간이 MIN_CALL_SECONDS
 보다 적으면 부르지 않고 그 칸을 템플릿으로(사유 deadline) — 다시 만들기 하나가 길어져 작업 전체가 실패로 끝나지 않게.
@@ -83,7 +84,10 @@ class SectionState:
     d24_missing: bool = False
     # 첫 시도가 막는 사유 없이 D24 만 빠졌거나(("d24", 값)) 9칸이 권고 하나만 빠졌을 때(("missing_rec", 값)) 그 글을 둔다.
     # 다시 만들기가 실패하거나 또 걸리면 이 글을 싣는다 — D24 빠짐은 템플릿으로 바꾸는 사유가 아니다(S5 검토 ladder-2).
-    kept: tuple[str, dict] | None = None
+    kept: tuple[str, dict, str | None] | None = None
+    # AI 글을 실을 때 그 글을 낸 호출의 응답 모델. 출처 llm 일 때만 뜻이 있다 — 템플릿으로 바뀌어도 지우지 않고,
+    # _result 가 출처로 가른다(한 곳에서만 정한다).
+    model: str | None = None
 
 
 @dataclass
@@ -91,6 +95,8 @@ class GenerationResult:
     response: NarrativeResponse
     section_sources: dict[str, str]
     trace: dict
+    # 칸마다 그 글을 낸 호출의 응답 모델 — 출처 llm 칸만 값, fallback·fixed 는 None. 키는 늘 SECTION_IDS 전부.
+    section_models: dict[str, str | None] = field(default_factory=lambda: dict.fromkeys(SECTION_IDS))
 
 
 async def _no_stage(_stage: str) -> None:
@@ -304,8 +310,10 @@ async def generate_sections(
                 trace["rate_limited"] += 1
         return result, result.failure
 
-    def accept(sid: str, parts: dict, *, last_chance: bool) -> bool:
-        """검사해서 받으면 True. 걸리면 False(호출부가 다시 만들기·템플릿을 정한다). last_chance 면 늘 끝을 낸다."""
+    def accept(sid: str, parts: dict, *, last_chance: bool, model: str | None) -> bool:
+        """검사해서 받으면 True. 걸리면 False(호출부가 다시 만들기·템플릿을 정한다). last_chance 면 늘 끝을 낸다.
+
+        model 은 이 글을 낸 호출의 응답 모델 — 글을 실으면 칸 모델로 남긴다(section_models)."""
         st = states[sid]
         aligned = _align(parts, fs.problems, fill_missing=False)[0] if sid == "9" else parts
         result = checks.check_section(
@@ -321,14 +329,14 @@ async def generate_sections(
                 template(sid, "check:" + ",".join(hard))
                 st.outcome = "dropped"  # 다시 만들지 않는다 — 성적서는 고정 문구 15(D38)
             elif raw:
-                st.parts, st.source, st.outcome = parts, "llm", "first"
+                st.parts, st.source, st.outcome, st.model = parts, "llm", "first", model
             else:
                 template(sid, "no_observation")
             return True
         if not last_chance and not hard and result.d24_missing:
-            st.kept = ("d24", aligned)
+            st.kept = ("d24", aligned, model)
         if not last_chance and sid == "9" and hard == ["missing_recommendation"]:
-            st.kept = ("missing_rec", parts)
+            st.kept = ("missing_rec", parts, model)
         if sid == "9" and last_chance and hard == ["missing_recommendation"]:
             # 다시 부른 뒤에도 권고가 빠진 문제만 남았다 — D22 대로 종류별 폴백 템플릿으로 채운다(9칸은 규칙 문장이 섞임).
             filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
@@ -336,7 +344,7 @@ async def generate_sections(
             trace["recommendations_from_template"] = filled
             return True
         if not hard and (not result.d24_missing or last_chance):
-            st.parts, st.source = aligned, "llm"
+            st.parts, st.source, st.model = aligned, "llm", model
             st.outcome = "first" if st.http_calls <= 1 else "second"
             st.d24_missing = result.d24_missing
             return True
@@ -351,10 +359,12 @@ async def generate_sections(
         if st.kept is None:
             template(sid, reason)
             return
-        kind, parts = st.kept
+        kind, parts, model = st.kept
         st.checks.append({"kept_first": reason})
         if kind == "d24":
+            # 첫 글을 싣는다 — 칸 모델도 첫 호출의 것(다시 만든 호출의 모델이 아니다).
             st.parts, st.source, st.outcome, st.d24_missing, st.reason = parts, "llm", "kept_first", True, None
+            st.model = model
         else:
             filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
             st.parts, st.source, st.outcome, st.reason = filled_parts, "fallback", "filled", "missing_recommendation"
@@ -384,7 +394,7 @@ async def generate_sections(
                         template(sid, "missing_field")
                     else:
                         regenerate.append(sid)
-                elif not accept(sid, parts, last_chance=False):
+                elif not accept(sid, parts, last_chance=False, model=result.record.response_model):
                     regenerate.append(sid)
         elif failure == "rate_limited":
             sequential.append(ids)
@@ -414,7 +424,7 @@ async def generate_sections(
             if parts is None:
                 rescue(sid, "missing_field")
             else:
-                accept(sid, parts, last_chance=True)
+                accept(sid, parts, last_chance=True, model=result.record.response_model)
     if second:
         await stage("checking")
 
@@ -438,6 +448,8 @@ def _result(fs, states: dict, trace: dict, reason: str | None, started: float, *
     for sid in SECTION_IDS:
         parts.update(states[sid].parts)
     sources = {sid: states[sid].source for sid in SECTION_IDS}
+    # 칸 모델 — 출처가 llm 인 칸만(규칙 문장·고정 문구로 바뀐 칸은 모델이 없다. 서술 설계 결정 4).
+    models = {sid: states[sid].model if sources[sid] == "llm" else None for sid in SECTION_IDS}
     non_fixed = [v for v in sources.values() if v != "fixed"]
     overall = "llm" if non_fixed and all(v == "llm" for v in non_fixed) else "fallback"
     llm_models = [c.get("response_model") for c in trace.get("calls", []) if c.get("response_model")]
@@ -454,11 +466,11 @@ def _result(fs, states: dict, trace: dict, reason: str | None, started: float, *
     trace["sections"] = {
         sid: {
             "source": st.source, "outcome": st.outcome, "reason": st.reason, "http_calls": st.http_calls,
-            "d24_missing": st.d24_missing, "checks": st.checks,
+            "d24_missing": st.d24_missing, "checks": st.checks, "model": models[sid],
         }
         for sid, st in states.items()
     }
     trace["source"] = overall
     trace["reason"] = None if overall == "llm" else reason
     trace["seconds"] = round(time.perf_counter() - started, 3)
-    return GenerationResult(response=response, section_sources=sources, trace=trace)
+    return GenerationResult(response=response, section_sources=sources, trace=trace, section_models=models)

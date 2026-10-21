@@ -21,8 +21,9 @@
 
 ## 기록 둘 (계획 원칙 6)
 
-- 고객용(result_json → 조회 응답): 8.1 표, 서술 본문, 칸별 출처. 번호만 알면 열리므로 이것만 싣는다.
-- 내부용(internal_json): 실패 종류·강등 사유·호출 기록(응답 모델·거절 종류·토큰·비용)·단계별 시각·슬롯 대기.
+- 고객용(result_json → 조회 응답): 8.1 표, 서술 본문, 칸별 출처, 칸별 모델 이름(AI 칸만 — 성적서 화면의 '작성 기록',
+  서술 설계 결정 4로 원칙 6 을 바꿈). 번호만 알면 열리므로 이것만 싣는다.
+- 내부용(internal_json): 실패 종류·강등 사유·호출 기록(호출마다 응답 모델·거절 종류·토큰·비용)·단계별 시각·슬롯 대기.
   입력(사실 시트·고객 입력)은 서버에 남기지 않는다 — 작업은 메모리의 요청으로 돌고, 재시작되면 유실이 된다.
 
 ## 남용 방어 (계획 10)
@@ -154,7 +155,7 @@ def is_expired(*, finished_at: datetime | None, now: datetime) -> bool:
 
 
 def customer_result(gen: GenerationResult) -> dict:
-    """생성 결과에서 고객용만 남긴다 — 서술 본문과 칸별 출처(생성기가 칸마다 정한 llm·fallback·fixed)."""
+    """생성 결과에서 고객용만 남긴다 — 서술 본문, 칸별 출처(생성기가 칸마다 정한 llm·fallback·fixed), 칸별 모델(llm 칸만)."""
     resp = gen.response
     result = NarrativeJobResult(
         interpretation=resp.interpretation,
@@ -162,6 +163,7 @@ def customer_result(gen: GenerationResult) -> dict:
         recommendation_narrative=resp.recommendation_narrative,
         recommendations=resp.recommendations,
         section_sources=gen.section_sources,
+        section_models=gen.section_models,
     )
     return result.model_dump(mode="json")
 

@@ -515,6 +515,8 @@ async def test_job_row_limit_completes_immediately_without_a_row(factory, make_f
     created = await jobs.create_job(_body(_request()), client=fake, session_factory=factory, background_tasks=tasks)
     assert (created.job_id, created.status, created.stage) == (None, "done", "done")
     assert created.result.section_sources == FALLBACK_NO_PROBLEMS
+    # 행 없이 바로 규칙 문장 — 칸 모델도 전부 None(키는 일곱 칸 그대로).
+    assert created.result.section_models == dict.fromkeys(FALLBACK_NO_PROBLEMS)
     assert [r.model_dump() for r in created.benchmark_refs] == [
         r.model_dump() for r in (await generate_narrative(None, _request())).benchmark_refs]
     assert tasks.tasks == [] and llm_budget.narrative.remaining() == before
@@ -602,8 +604,10 @@ def test_post_then_get_round_trip_without_key(api):
     assert set(view) == {"job_id", "status", "stage", "failure", "benchmark_refs", "result", "created_at", "updated_at"}
     assert (view["status"], view["stage"], view["failure"]) == ("done", "done", None)
     assert set(view["result"]) == {
-        "interpretation", "conclusion", "recommendation_narrative", "recommendations", "section_sources"}
+        "interpretation", "conclusion", "recommendation_narrative", "recommendations", "section_sources",
+        "section_models"}
     assert view["result"]["section_sources"] == FALLBACK_NO_PROBLEMS
+    assert view["result"]["section_models"] == dict.fromkeys(FALLBACK_NO_PROBLEMS)  # 키 없음 — 칸마다 null
     assert view["benchmark_refs"] == body["benchmark_refs"]
     assert view["created_at"].endswith("Z") and view["updated_at"].endswith("Z")
 
@@ -629,6 +633,10 @@ def test_router_passes_the_anthropic_client(api, make_section_client):
     job_id = api.post("/api/narrative/jobs", json=_body()).json()["job_id"]
     result = api.get(f"/api/narrative/jobs/{job_id}").json()["result"]
     assert result["section_sources"] == LLM_NO_PROBLEMS  # _sample_request 는 문제가 없다 — 9장을 부르지 않는다
+    # 칸 모델은 HTTP 조회에도 실린다 — AI 칸만 가짜 응답의 모델 이름, 고정 문구 칸(7.3·9)은 null.
+    assert result["section_models"] == {
+        sid: ("claude-sonnet-5-5" if src == "llm" else None) for sid, src in LLM_NO_PROBLEMS.items()
+    }
     assert fake.beta.messages.create.call_count == 2
 
 

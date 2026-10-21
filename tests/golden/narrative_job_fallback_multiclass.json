@@ -43,6 +43,15 @@
       }
     ]
   },
+  "section_models": {
+    "7.1": null,
+    "7.2": null,
+    "7.3": null,
+    "8.1": null,
+    "8.2": null,
+    "8.3": null,
+    "9": null
+  },
   "section_sources": {
     "7.1": "fallback",
     "7.2": "fallback",

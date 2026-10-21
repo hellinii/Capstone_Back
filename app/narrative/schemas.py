@@ -621,8 +621,9 @@ class NarrativeResponse(BaseModel):
 
 
 # ── 작업 번호(job) 경로 (서술 라운드 S3a) ─────────────────────────────────────
-# 고객용과 내부용 기록을 나눈다(계획 원칙 6). 작업 응답에는 칸별 출처만 싣고, 강등 사유·호출 기록·토큰·비용은
-# narrative_jobs.internal_json 에만 둔다. 그래서 옛 응답의 meta(source·model·reason·grounding)가 여기엔 없다.
+# 고객용과 내부용 기록을 나눈다(계획 원칙 6). 작업 응답에는 칸별 출처와 칸별 모델 이름만 싣고(칸별 모델은 사용자
+# 결정 — 성적서 화면의 '작성 기록', 서술 설계 결정 4), 강등 사유·호출 기록·토큰·비용은 narrative_jobs.internal_json 에만
+# 둔다. 그래서 옛 응답의 meta(source·model·reason·grounding)가 여기엔 없다.
 
 JobStatus = Literal["running", "done", "failed"]
 JobStage = Literal["queued", "generating", "checking", "regenerating", "done", "failed"]
@@ -641,7 +642,14 @@ class NarrativeJobResult(BaseModel):
     recommendation_narrative: RecommendationNarrativeOut
     recommendations:          list[RecommendationOut] = []
     section_sources:          dict[str, SectionSource] = Field(
-        description="칸(소절 번호)마다 출처. 지금 칸: 7.1·7.2·8.1·8.2·8.3·9 (7.3 은 S4b·S5 에서 더함)",
+        description="칸(소절 번호)마다 출처. 키는 늘 일곱 칸: 7.1·7.2·7.3·8.1·8.2·8.3·9",
+    )
+    section_models:           dict[str, str | None] = Field(
+        default_factory=dict,
+        description=(
+            "칸(소절 번호)마다 그 글을 낸 AI 응답 모델 이름. 출처가 llm 인 칸만 값이 있고 fallback·fixed 는 null. "
+            "키는 section_sources 와 같은 일곱 칸(성적서 화면의 '작성 기록' — 서술 설계 결정 4)"
+        ),
     )
 
 
