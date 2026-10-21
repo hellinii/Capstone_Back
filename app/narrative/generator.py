@@ -80,6 +80,9 @@ class SectionState:
     outcome: str = ""  # first · regenerated · template · dropped · fixed
     reason: str | None = None
     d24_missing: bool = False
+    # 첫 시도가 막는 사유 없이 D24 만 빠졌거나(("d24", 값)) 9칸이 권고 하나만 빠졌을 때(("missing_rec", 값)) 그 글을 둔다.
+    # 다시 만들기가 실패하거나 또 걸리면 이 글을 싣는다 — D24 빠짐은 템플릿으로 바꾸는 사유가 아니다(S5 검토 ladder-2).
+    kept: tuple[str, dict] | None = None
 
 
 @dataclass
@@ -203,7 +206,7 @@ async def generate_sections(
         st = states[sid]
         st.parts = fallback.section_template(sid, fs, refs, derived)
         if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems):
-            st.source, st.outcome = "fixed", "fixed" if st.outcome in ("", "fixed") else st.outcome
+            st.source, st.outcome = "fixed", "fixed"  # 7.3 을 검문으로 뺐으면 호출부가 dropped 로 덮는다
         else:
             st.source, st.outcome = "fallback", "template"
         st.reason = reason
@@ -237,11 +240,18 @@ async def generate_sections(
         """한 번 부른다. (LLMResult 또는 None, 실패 사유) — 슬롯 대기·남은 시간·호출 제한을 여기서 본다."""
         entry: dict = {"purpose": purpose, "sections": list(section_ids), "http": False}
         trace["calls"].append(entry)
-        remaining = None if deadline_at is None else deadline_at - time.perf_counter()
+        def left() -> float | None:
+            return None if deadline_at is None else deadline_at - time.perf_counter()
+
+        remaining = left()
         if remaining is not None and remaining < MIN_CALL_SECONDS:
             entry["failure"] = "deadline"
             return None, "deadline"
-        limit = call_timeout if remaining is None else (remaining if call_timeout is None else min(call_timeout, remaining))
+        # 슬롯 대기도 남은 시간 안에서 — 호출할 시간(MIN_CALL_SECONDS)을 남긴다(S5 검토 ladder-1).
+        wait_cap = slot_wait
+        if remaining is not None:
+            room = remaining - MIN_CALL_SECONDS
+            wait_cap = room if slot_wait is None else min(slot_wait, room)
         user = prompt.build_user_message(ctx, section_ids, regenerate=purpose == "regenerate")
         schema = prompt.response_schema(section_ids, problem_ids)
         entry["prompt_chars"] = len(prompt.SYSTEM_PROMPT) + len(user)
@@ -249,11 +259,21 @@ async def generate_sections(
         slot = {"held": False}
         try:
             async with contextlib.AsyncExitStack() as stack:
-                async with asyncio.timeout(slot_wait):
+                async with asyncio.timeout(wait_cap):
                     await stack.enter_async_context(narrative_slot())
                 slot["held"] = True
                 entry["slot_wait_seconds"] = round(time.perf_counter() - waited_from, 3)
-                await stage("generating")
+                # 슬롯을 기다린 만큼 남은 시간이 줄었다 — 호출 제한을 지금 남은 시간으로 정한다. 모자라면 부르지 않는다
+                # (요청이 나가지 않아 과금 없음). 그러지 않으면 작업 전체 제한을 넘겨 다 만든 칸까지 잃는다.
+                remaining = left()
+                if remaining is not None and remaining < MIN_CALL_SECONDS:
+                    entry["failure"] = "deadline"
+                    return None, "deadline"
+                limit = call_timeout if remaining is None else (
+                    remaining if call_timeout is None else min(call_timeout, remaining)
+                )
+                # 첫 장 호출은 '생성 중', 장 재시도·칸 다시 만들기는 '다시 만드는 중'(S5 검토 jobs-3).
+                await stage("generating" if purpose == "chapter" else "regenerating")
                 for sid in section_ids:
                     states[sid].http_calls += 1
                 entry["http"] = True  # 요청이 나간다 — 끊겨도 과금됐을 수 있다(비용 모름)
@@ -294,6 +314,10 @@ async def generate_sections(
             else:
                 template(sid, "no_observation")
             return True
+        if not last_chance and not hard and result.d24_missing:
+            st.kept = ("d24", aligned)
+        if not last_chance and sid == "9" and hard == ["missing_recommendation"]:
+            st.kept = ("missing_rec", parts)
         if sid == "9" and last_chance and hard == ["missing_recommendation"]:
             # 다시 부른 뒤에도 권고가 빠진 문제만 남았다 — D22 대로 종류별 폴백 템플릿으로 채운다(9칸은 규칙 문장이 섞임).
             filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
@@ -306,9 +330,24 @@ async def generate_sections(
             st.d24_missing = result.d24_missing
             return True
         if last_chance:
-            template(sid, "check:" + ",".join(hard or ["d24_missing"]))
+            rescue(sid, "check:" + ",".join(hard or ["d24_missing"]))
             return True
         return False
+
+    def rescue(sid: str, reason: str) -> None:
+        """다시 만들기가 실패했거나 또 걸렸다. 첫 글을 둬 뒀으면 그것을, 아니면 그 칸의 규칙 템플릿을 싣는다."""
+        st = states[sid]
+        if st.kept is None:
+            template(sid, reason)
+            return
+        kind, parts = st.kept
+        st.checks.append({"kept_first": reason})
+        if kind == "d24":
+            st.parts, st.source, st.outcome, st.d24_missing, st.reason = parts, "llm", "kept_first", True, None
+        else:
+            filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
+            st.parts, st.source, st.outcome, st.reason = filled_parts, "fallback", "filled", "missing_recommendation"
+            trace["recommendations_from_template"] = filled
 
     async def run_batch(jobs: list[tuple[tuple[str, ...], str]]):
         """호출 묶음 — 동시에 부르고, 429 로 끝난 것은 차례로 한 번 더(나머지 재시도는 동시에)."""
@@ -356,21 +395,23 @@ async def generate_sections(
     for (ids, purpose), (result, failure) in second:
         if failure is not None:
             for sid in ids:
-                template(sid, failure)
+                rescue(sid, failure)
             continue
         for sid in ids:
             parts = _extract(sid, result.data)
             if parts is None:
-                template(sid, "missing_field")
+                rescue(sid, "missing_field")
             else:
                 accept(sid, parts, last_chance=True)
     if second:
         await stage("checking")
 
-    # 3. 최종본 판정 모순 재검사 — 걸린 AI 칸은 템플릿으로(다시 부르지 않는다).
+    # 3. 최종본 판정 모순 재검사 — 인쇄될 칸 글(AI 글, 권고를 템플릿으로 채운 9칸 포함)을 한 번 더 본다. 칸 검사와 같은 함수라
+    #    보통은 아무것도 잡지 않는다 — 조립·채우기 단계의 결함에 대한 마지막 방어다(칸 검사를 끈 테스트로 따로 시험한다).
+    #    걸린 칸은 템플릿으로(다시 부르지 않는다).
     final_flags = []
     for sid, st in states.items():
-        if st.source != "llm" or st.parts is None:
+        if st.parts is None or not (st.source == "llm" or st.outcome == "filled"):
             continue
         if find_verdict_contradictions(checks.section_texts(sid, _rec_dicts(st.parts)), fs.verdict):
             final_flags.append(sid)

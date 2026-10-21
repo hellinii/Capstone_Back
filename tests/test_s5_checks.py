@@ -125,9 +125,14 @@ from app.narrative.schemas import FactSheet, MetricFact, PerClassFact  # noqa: E
     ("1차 원인을 찾는다.", []),
     ("3개월 내 재평가한다.", []),
     ("2회 재평가로 확인한다.", []),
-    ("0.5회 줄어든다.", ["0.5"]),   # 소수는 단위가 붙어도 예측 수치다
-    ("5%차 개선", ["5%"]),            # 백분율도 마찬가지
+    ("0.5회 재평가한다.", ["0.5"]),   # 소수는 단위가 붙어도 예측 수치다
+    ("5%차 점검", ["5%"]),            # 백분율도 마찬가지
     ("P1 문제의 원인이 분명해진다.", []),
+    # S5 검토 checks-10
+    ("상위 3개 클래스의 오분류를 줄여 1차 원인을 제거한다.", []),
+    ("10분 내 응답을 회복한다.", []),
+    ("처리 시간을 3시간 단축한다.", ["3"]),
+    ("오분류 5회 감소", ["5"]),
 ])
 def test_predicted_numbers(text, expected):
     assert checks.predicted_numbers(text) == expected
@@ -155,3 +160,95 @@ def test_section_9_is_empty_when_either_text_is_blank():
     parts["recommendations"] = []
     r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set())
     assert r.format == ["empty"]
+
+
+
+# ── S5 독립 검토(wf_a65c97fb-fec)가 재현한 문장 ──────────────────────────────────
+
+REVIEW_CAUGHT = [
+    # checks-1: '판정' 낱말 없는 단정
+    ("FAIL", "본 모델은 최종 합격이다."),
+    ("FAIL", "종합 판정: 합격."),
+    ("FAIL", "종합 판정 결과 합격이다."),
+    ("FAIL", "따라서 이 모델은 합격으로 결정되었다."),
+    ("CONDITIONAL_PASS", "본 모델은 최종 불합격이다."),
+    ("INCONCLUSIVE", "본 모델은 조건부 합격이다."),
+    # checks-2: 지금 결과를 단정하는 '판정한다'
+    ("PASS", "Recall 은 기준 미달로 판정한다."),
+    ("PASS", "Recall 은 기준 미달로 판정합니다."),
+    # checks-3: 주어가 좁혀지지 않은 '모두 충족'
+    ("FAIL", "나머지 문제는 없으며 모든 지표가 기준을 충족했다."),
+    ("FAIL", "그 외에는 모든 지표가 기준을 충족하였다."),
+    ("CONDITIONAL_PASS", "핵심 지표를 포함한 모든 지표가 기준을 충족하였다."),
+    ("CONDITIONAL_PASS", "핵심 지표뿐 아니라 모든 지표가 기준을 충족하였다."),
+    ("INCONCLUSIVE", "모든 지표가 기준을 충족하여 판정 불가 사유가 없다."),
+    ("INCONCLUSIVE", "판정 불가가 아니라 모든 지표가 기준을 충족하였다."),
+    ("INCONCLUSIVE", "모든 지표가 기준을 충족하여 판정할 수 없는 사유가 없다."),
+    # checks-4: 다른 동사·주어
+    ("FAIL", "5개 지표 모두 목표값을 넘었다."),
+    ("CONDITIONAL_PASS", "선택한 지표는 모두 목표를 달성했다."),
+    ("FAIL", "모든 지표가 목표값을 상회했다."),
+    ("CONDITIONAL_PASS", "모든 지표가 목표값을 넘었다."),
+    ("FAIL", "전체 평가 항목이 기준을 충족하였다."),
+]
+
+REVIEW_ALLOWED = [
+    # checks-5: 합격의 부정문
+    ("PASS", "F1 Score 가 기준에 미달되지 않았다."),
+    ("PASS", "어떤 지표도 미달하지는 않았다."),
+    ("PASS", "F1 Score 는 목표값을 근소하게 넘어 미달은 아니다."),
+    ("PASS", "목표를 충족하지 못한 핵심 지표는 없다."),
+    ("PASS", "목표를 충족하지 못하는 지표는 없다."),
+    ("PASS", "불합격 사유는 없다."),
+    ("PASS", "미달한 지표가 0개이므로 종합 판정은 최종 합격이다."),
+    # checks-6: 조건문·신뢰구간 끝
+    ("PASS", "기준 미달 시 재학습을 권고한다."),
+    ("PASS", "재평가에서 Recall 이 기준에 미달할 경우 운영을 중단한다."),
+    ("PASS", "재평가에서 목표를 충족하지 못하는 경우 운영 투입을 보류한다."),
+    ("PASS", "Recall 이 기준 미달로 바뀌는 경우에 대비한다."),
+    ("PASS", "핵심 지표가 하나라도 미달할 경우 불합격으로 판정된다."),
+    ("PASS", "Recall 의 신뢰구간 하한 0.78 은 목표값 0.8 에 미달한다."),
+    # checks-7: 규칙 설명·나열·부정
+    ("CONDITIONAL_PASS", "핵심 지표가 하나라도 미달하면 판정은 최종 불합격이고, 보조 지표만 미달하면 조건부 합격이다."),
+    ("FAIL", "핵심 지표가 모두 충족되면 판정은 합격이다."),
+    ("FAIL", "종합 판정은 합격, 조건부 합격, 최종 불합격, 판정 불가의 네 가지로 나뉜다."),
+    ("CONDITIONAL_PASS", "보조 지표까지 모두 충족했다면 판정은 합격이었다."),
+    ("FAIL", "합격으로 판정되었다고 보기 어렵다."),
+    # checks-8: 하나를 뺀 나머지·관형절
+    ("CONDITIONAL_PASS", "Recall 을 제외한 모든 지표가 기준을 충족했다."),
+    ("CONDITIONAL_PASS", "보조 지표 Recall 만 제외하고 모든 지표가 기준을 충족하였다."),
+    ("FAIL", "F1 Score 를 제외한 모든 지표가 기준을 충족했다."),
+    ("FAIL", "목표 성능을 충족한 지표도 있으나 핵심 지표가 미달했다."),
+    ("FAIL", "목표 성능을 달성한 지표는 Accuracy 하나뿐이다."),
+]
+
+
+@pytest.mark.parametrize("verdict, text", REVIEW_CAUGHT)
+def test_review_contradictions_are_flagged(verdict, text):
+    assert find_verdict_contradictions([text], verdict) == [text]
+
+
+@pytest.mark.parametrize("verdict, text", REVIEW_ALLOWED)
+def test_review_consistent_sentences_are_allowed(verdict, text):
+    assert find_verdict_contradictions([text], verdict) == []
+
+
+
+def test_verdict_codes_that_are_names_are_exempt_outside_verdict_context():
+    """checks-9: 클래스 라벨 'PASS'·'FAIL', 모델명 'PASS-Net' 은 이름이다. '판정은 FAIL' 만 잡는다."""
+    fs = _fs(per_class=[PerClassFact(label="FAIL", f1=0.7, support=10), PerClassFact(label="PASS", f1=0.8, support=10)])
+    exempt = checks.name_exemptions(fs, {"model": {"모델명": "PASS-Net"}})
+    assert checks.code_words(["FAIL 클래스의 재현율은 낮다. PASS-Net 모델이다."], exempt) == []
+    assert checks.code_words(["종합 판정은 FAIL 이다."], exempt) == ["FAIL"]
+    assert checks.code_words(["판정은 PASS"], set()) == ["PASS"]
+
+
+
+def test_thousands_separator_numbers():
+    """checks-12: '1,234.5' 는 숫자 하나, 붙여 쓴 '43,52' 는 숫자 둘."""
+    from app.narrative.grounding import verify_grounding
+
+    assert checks.d24_present("p95 응답 시간은 1,234.5ms 이다", (1234.5,))
+    assert verify_grounding(["행렬은 43,52 이다"], {"43", "52"}).passed
+    assert not verify_grounding(["행렬은 43,52 이다"], {"4352"}).passed
+    assert verify_grounding(["재표집 2,000회"], {"2000"}).passed

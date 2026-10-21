@@ -173,6 +173,12 @@ _INTERPRET_ONLY = {
     ),
 }
 
+# 고정 문장(17·18)을 받지 못했을 때 — 성적서가 따로 찍지 않으므로 AI 가 그 사실을 쓴다.
+_WRITE_IT_YOURSELF = {
+    "7.1-11": "오분류의 성격(경계 오류·확신 오류)을 사실 시트의 '오분류의 성격' 값 그대로 쓰고, 각 오류가 무엇을 뜻하는지 해석한다.",
+    "8.3-02": "사실 시트에서 '근소 차이(목표값의 3% 미만)'가 '예'인 지표를 값·목표값과 함께 쓰고, 표본이 달라지면 판정이 뒤집힐 수 있는 위험을 해석한다.",
+}
+
 _PRINTED_ELSEWHERE = {
     "7.1-12": "예측을 확률에서 파생했다는 문장(결정 임계값 포함)을 성적서가 7.1절 앞에 찍는다.",
     "7.2-04": "정답 라벨에 대한 주의 문장을 성적서가 7.2절에 찍는다.",
@@ -191,8 +197,8 @@ def _fixed_texts(fs: FactSheet, item_id: str) -> list[str]:
     if ids is None or fs.facts is None:
         return []
     wanted = (ids,) if isinstance(ids, str) else ids
-    names = fact_view.metric_names(fs)
-    return [fact_view.name_metric_ids(s.text, names) for s in fs.facts.fixed_sentences if s.id in wanted]
+    names, protect = fact_view.metric_names(fs), fact_view.class_names(fs)
+    return [fact_view.name_metric_ids(s.text, names, protect) for s in fs.facts.fixed_sentences if s.id in wanted]
 
 
 @dataclass
@@ -260,7 +266,11 @@ def section_briefs(fs: FactSheet, derived: dict, conclusions: list[Conclusion], 
             brief.must.append(c.text)
         elif c.author == "fixed_interpret":
             sentences = _fixed_texts(fs, c.item_id)
-            brief.interpret.append(_INTERPRET_ONLY[c.item_id] + "".join(f' — "{t}"' for t in sentences))
+            if sentences:
+                brief.interpret.append(_INTERPRET_ONLY[c.item_id] + "".join(f' — "{t}"' for t in sentences))
+            else:
+                # 옛 요청(facts 없음)·덜어 낸 고정 문장 — 성적서가 그 문장을 찍지 않으니 AI 가 숫자와 함께 쓴다(S5 검토 prompt-3).
+                brief.must.append(_WRITE_IT_YOURSELF[c.item_id])
         else:  # fixed · form
             sentences = _fixed_texts(fs, c.item_id)
             if sentences:
@@ -379,10 +389,13 @@ def build_user_message(ctx: PromptContext, section_ids, *, regenerate: bool = Fa
 
     # 다른 칸 옆에 코드가 숫자로 찍는 문장(고정 문구 17·18) — 이번 칸에서도 그 숫자를 되풀이하지 않는다. S5 실측에서
     # 8.3·9.2 가 7.1 의 경계·확신 오류 건수를 다시 썼다(그 장 호출은 17 을 몰랐다).
+    # 같은 장의 칸만 다시 만들 때는 넣지 않는다 — 그 칸의 '반드시 다룰 결론'과 같은 숫자(목표값 등)를 쓰지 말라는 말이
+    # 되어 부딪친다(S5 검토 prompt-4). 실측 문제는 장이 다른 경우였다.
+    chapters_here = {SECTIONS_BY_ID[sid].chapter for sid in section_ids}
     printed_elsewhere = [
         f"{c.section}절: \"{t}\""
         for c in ctx.conclusions
-        if c.section not in section_ids and c.author == "fixed_interpret"
+        if SECTIONS_BY_ID[c.section].chapter not in chapters_here and c.author == "fixed_interpret"
         for t in _fixed_texts(ctx.fs, c.item_id)
     ]
     if printed_elsewhere:

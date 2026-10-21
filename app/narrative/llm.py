@@ -175,14 +175,17 @@ async def call_narrative_llm(client, *, system: str, user: str, schema: dict, ef
             },
         )
     except anthropic.APITimeoutError as exc:
-        return _finish(record, started, "timeout", error=repr(exc))
+        return _finish(record, started, "timeout", error=repr(exc))  # 끊김 — 과금됐는지 모른다(비용 None)
     except anthropic.NotFoundError as exc:
-        return _finish(record, started, "model_unavailable", error=repr(exc))
+        return _finish(record, started, "model_unavailable", error=repr(exc), billed_zero=True)
     except anthropic.RateLimitError as exc:
         # 사용 한도(429). 작업 경로는 장별 동시 호출을 차례 호출로 바꿔 한 번 더 부른다(app.narrative.generator).
-        return _finish(record, started, "rate_limited", error=repr(exc))
+        return _finish(record, started, "rate_limited", error=repr(exc), billed_zero=True)
+    except anthropic.APIStatusError as exc:
+        # 서버가 오류 응답을 돌려줬다 — 생성하지 않았으니 비용 0(S5 검토 jobs-2: 429 하나로 작업 비용이 '모름'이 되던 것).
+        return _finish(record, started, "api_error", error=repr(exc), billed_zero=True)
     except anthropic.APIError as exc:
-        return _finish(record, started, "api_error", error=repr(exc))
+        return _finish(record, started, "api_error", error=repr(exc))  # 연결 오류 — 비용 모름
 
     _fill_from_response(record, response)
     # 거절·잘림을 본문보다 먼저 본다 — 거절이면 content 가 비었거나(출력 전) 쓸 수 없다.
@@ -204,8 +207,12 @@ async def call_narrative_llm(client, *, system: str, user: str, schema: dict, ef
     return LLMResult(data=data, failure=None, record=record)
 
 
-def _finish(record: CallRecord, started: float, failure: str, *, error: str | None = None) -> LLMResult:
+def _finish(
+    record: CallRecord, started: float, failure: str, *, error: str | None = None, billed_zero: bool = False,
+) -> LLMResult:
     record.seconds = round(time.perf_counter() - started, 3)
     record.error = error
+    if billed_zero:
+        record.cost_usd = 0.0
     _log(record, failure)
     return LLMResult(data=None, failure=failure, record=record)

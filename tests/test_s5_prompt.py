@@ -197,7 +197,7 @@ def test_evidence_translation():
         "level": "affected", "imbalance_ratio": 2.9, "display": {"imbalance_ratio": "2.9"}, "low_support": True,
     })
     assert out == {"원인": "판정 대상 지표 없음", "지표": [], "판정 대상 지표 수": 0,
-                   "판단": fact_view.IMBALANCE_KO["affected"], "불균형 비율": 2.9, "표본이 작음": "예"}
+                   "판단": fact_view.IMBALANCE_KO["affected"], "불균형 비율": "2.9", "표본이 작음": "예"}
 
 
 def test_name_metric_ids():
@@ -253,3 +253,60 @@ def test_numbers_printed_in_other_sections_are_shown_with_a_do_not_repeat_note()
     msg7 = prompt.build_user_message(ctx, CHAPTERS["7"])
     assert "8.3절: " in msg7.split("[다른 칸에 성적서가 숫자로 찍는 문장")[1]
     assert f'7.1절: "{seventeen}"' not in msg7  # 자기 칸 문장은 '해석만 쓸 결론'에 있다
+
+
+
+# ── S5 독립 검토(wf_a65c97fb-fec) 반영 ─────────────────────────────────────────
+
+def test_evidence_uses_engine_display_texts():
+    """prompt-1: 근거의 숫자 칸을 판정과 같은 쪽 표기로 — 0.09996 이 0.1 로 보이지 않게."""
+    out = fact_view.translate_evidence({
+        "level": "affected", "imbalance_ratio": 2.0, "accuracy_minus_macro_f1": 0.1, "majority_minus_minority_f1": 0.25,
+        "display": {"imbalance_ratio": "2", "accuracy_minus_macro_f1": "0.09996", "majority_minus_minority_f1": "0.25"},
+    })
+    assert out["정확도 − 매크로 F1"] == "0.09996"
+    gain = fact_view.translate_evidence({"gain": 0.1, "gain_text": "0.09996", "notable": False})
+    assert gain == {"향상폭": "0.09996", "임계값 부적합": "아니오"}
+
+
+def test_imbalance_ratio_in_distribution_uses_the_display_text():
+    """prompt-2: 1.5 와 비교되는 값 — 1.49996 이 1.5 로 실리지 않는다."""
+    raw = json.loads((CONTRACT / "fact_sheet_multiclass.json").read_text())
+    raw["fact_sheet"]["distribution"]["imbalance_ratio"] = 1.49996
+    raw["fact_sheet"]["imbalance_effect"].update(level="mild", imbalance_ratio=1.5)
+    raw["fact_sheet"]["imbalance_effect"]["display"]["imbalance_ratio"] = "1.49996"
+    ctx, _, _ = _ctx(NarrativeRequest.model_validate(raw))
+    assert ctx.view["분포·불균형"]["불균형 비율"] == "1.49996"
+
+
+def test_trimmed_fixed_sentences_are_named_in_korean_and_interpret_only_falls_back():
+    """prompt-3: 프론트가 고정 문장을 덜어 냈으면 영어 키를 흘리지 않고, '아래 문장' 없는 해석만 지시도 하지 않는다."""
+    raw = json.loads((CONTRACT / "fact_sheet_binary.json").read_text())
+    raw["fact_sheet"]["facts"]["fixed_sentences"] = []
+    raw["fact_sheet"]["facts"]["omitted"] = {"fixed_sentences": 3, "mystery_key": 2}
+    ctx, _, _ = _ctx(NarrativeRequest.model_validate(raw))
+    msg = prompt.build_user_message(ctx, CHAPTERS["7"])
+    assert "fixed_sentences" not in msg and "mystery_key" not in msg
+    assert "성적서 고정 문장(3개 뺌)" in msg and "그 밖의 표(2개 뺌)" in msg
+    assert "아래 문장" not in msg
+    assert "'오분류의 성격' 값 그대로 쓰고" in msg
+    legacy = _ctx(_contract("legacy_main"))[0]
+    assert "아래 문장" not in prompt.build_user_message(legacy, CHAPTERS["7"])
+
+
+def test_regenerating_one_section_does_not_forbid_its_own_chapters_numbers():
+    """prompt-4: 8.1 만 다시 만들 때 같은 장의 문구 18 을 '되풀이 금지'로 싣지 않는다."""
+    ctx, _, _ = _ctx(_contract("binary"))
+    msg = prompt.build_user_message(ctx, ("8.1",), regenerate=True)
+    assert "8.3절: " not in msg
+    assert "7.1절: " in msg  # 다른 장(7장)의 문구 17 은 그대로 알린다
+
+
+def test_class_names_that_look_like_metric_ids_are_kept():
+    """prompt-5: 클래스가 M1·M2 꼴이면 지표 이름으로 바꾸지 않는다."""
+    names = {"M1": "Accuracy", "M2": "Precision"}
+    assert fact_view.name_metric_ids("구간(M1), 클래스 M2", names, {"M2"}) == "구간(Accuracy), 클래스 M2"
+    raw = json.loads((CONTRACT / "fact_sheet_multiclass.json").read_text())
+    raw["fact_sheet"]["problems"][-1]["title"] = "학습↔평가 분포 차이 (M1, M2, M3)"
+    ctx, _, _ = _ctx(NarrativeRequest.model_validate(raw))
+    assert ctx.view["문제 목록"][-1]["문제"] == "학습↔평가 분포 차이 (M1, M2, M3)"

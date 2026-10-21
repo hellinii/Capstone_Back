@@ -72,6 +72,7 @@ OMITTED_KO = {
     "prediction_bias": "예측 편향",
     "distribution_shift": "학습↔평가 분포 차이",
     "facts_class_lists": "서술용 클래스 목록(표본이 작은 클래스·예측 편향·분포 차이)",
+    "fixed_sentences": "성적서 고정 문장",
 }
 # 고객 입력의 묶음(프론트 reportMaterials.buildClientInputs 의 키). 안쪽 이름은 이미 한국어 줄 이름이다.
 CLIENT_GROUPS_KO = {
@@ -115,8 +116,10 @@ EVIDENCE_KEYS_KO = {
     "minority_class": "소수 클래스",
     "level": "판단",
 }
-# 근거에서 싣지 않는 키 — 같은 뜻의 한국어 칸이 따로 있거나(reason ↔ cause) 표시 문자열 묶음이다(값에 이미 반영).
-EVIDENCE_SKIP = frozenset({"reason", "display", "gain_text"})
+# 근거에서 싣지 않는 키 — 같은 뜻의 한국어 칸이 따로 있다(reason ↔ cause). 표시 문자열(display·gain_text)은 버리지 않고
+# 같은 이름의 숫자 칸 값을 그 표기로 바꾼 뒤 뺀다 — 엔진은 숫자 칸을 넷째 자리로 반올림하고 판정과 같은 쪽으로 읽히는 표기는
+# display 에 따로 두므로, 숫자 칸만 실으면 0.09996 이 0.1 로 보인다(S5 검토 prompt-1).
+EVIDENCE_SKIP = frozenset({"reason"})
 # 표 지표(혼동행렬·클래스별 표)는 값이 없어 지표 목록에 싣지 않는다(옛 요청은 값 0 줄로 온다).
 TABLE_METRICS = frozenset({"M21", "M22"})
 
@@ -126,11 +129,28 @@ _METRIC_ID = re.compile(r"(?<![A-Za-z0-9])M\d{1,2}(?![A-Za-z0-9])")
 _NAMED_ID = re.compile(r"\((M\d{1,2})\)")
 
 
-def name_metric_ids(text: str, names: dict[str, str]) -> str:
-    """지표 번호를 지표 이름으로. '이름(번호)' 꼴은 번호를 지운다. 모르는 번호는 그대로 둔다."""
+def name_metric_ids(text: str, names: dict[str, str], protect: set[str] | frozenset = frozenset()) -> str:
+    """지표 번호를 지표 이름으로. '이름(번호)' 꼴은 번호를 지운다. 모르는 번호·클래스 이름(protect)과 같은 글자는 그대로 둔다
+    (클래스가 'M1'·'M2' 꼴이면 문제 이름 속 클래스가 지표 이름으로 바뀌던 것 — S5 검토 prompt-5)."""
     for mid, name in names.items():
         text = text.replace(f"{name}({mid})", name)
-    return _METRIC_ID.sub(lambda m: names.get(m.group(0), m.group(0)), text)
+    return _METRIC_ID.sub(lambda m: m.group(0) if m.group(0) in protect else names.get(m.group(0), m.group(0)), text)
+
+
+def class_names(fs: FactSheet) -> set[str]:
+    """사실 시트에 나오는 클래스·레이블 이름."""
+    out = {p.label for p in fs.per_class} | {r.label for r in fs.confusion_counts}
+    if fs.confusion:
+        out |= set(fs.confusion.labels)
+    if fs.distribution:
+        out |= set(fs.distribution.class_distribution)
+    if fs.imbalance_effect:
+        out |= {fs.imbalance_effect.majority_class, fs.imbalance_effect.minority_class}
+    if fs.facts is not None:
+        out |= {r.label for r in fs.facts.distribution_shift}
+        if fs.facts.weakest_class:
+            out.add(fs.facts.weakest_class.label)
+    return out
 
 
 def strip_metric_ids(text: str) -> str:
@@ -291,7 +311,9 @@ def _distribution(fs: FactSheet, derived: dict, task_type: str) -> dict | None:
         if dist:
             out["백분율(%, 분모는 평가 표본 수)"] = dist.get("percentages")
     if fs.distribution and fs.distribution.imbalance_ratio is not None:
-        out["불균형 비율"] = _r(fs.distribution.imbalance_ratio)
+        # 1.5 와 비교되는 값이다 — 엔진 표시 문자열이 있으면 그것을, 없으면 원래 값(반올림하면 1.49996 이 1.5 가 된다).
+        ie_shown = fs.imbalance_effect.display if fs.imbalance_effect and fs.imbalance_effect.display else None
+        out["불균형 비율"] = ie_shown.imbalance_ratio if ie_shown else fs.distribution.imbalance_ratio
     if task_type == "multilabel" and out:
         out["유의"] = "레이블 등장 횟수이다. 한 표본에 레이블이 여럿일 수 있어 백분율을 모두 더하면 전체를 넘을 수 있다."
     ie = fs.imbalance_effect
@@ -444,7 +466,7 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
         ]
     if facts.ci_skipped:
         out["신뢰구간을 산출하지 않은 지표"] = [
-            {"지표": s.display_name, "사유": name_metric_ids(s.reason, metric_names(fs)) if s.reason else "제공되지 않음"}
+            {"지표": s.display_name, "사유": name_metric_ids(s.reason, metric_names(fs), class_names(fs)) if s.reason else "제공되지 않음"}
             for s in facts.ci_skipped
         ]
     decl = facts.declarations
@@ -481,6 +503,11 @@ def translate_evidence(obj: Any) -> Any:
     if isinstance(obj, bool):
         return "예" if obj else "아니오"
     if isinstance(obj, dict):
+        shown = obj.get("display") if isinstance(obj.get("display"), dict) else {}
+        if isinstance(obj.get("gain_text"), str):
+            shown = {**shown, "gain": obj["gain_text"]}
+        obj = {k: (shown[k] if k in shown and shown[k] is not None else v) for k, v in obj.items()
+               if k not in ("display", "gain_text")}
         out = {}
         for key, value in obj.items():
             if key in EVIDENCE_SKIP:
@@ -500,7 +527,7 @@ def _problems(fs: FactSheet) -> list[dict]:
         {
             "번호": p.id,
             "우선순위": PRIORITY_KO[p.priority],
-            "문제": name_metric_ids(p.title, metric_names(fs)),
+            "문제": p.title,  # 프론트 문제 목록은 지표 이름으로 쓴다 — 번호를 바꾸지 않는다(클래스 'M1' 보호)
             # '8.2절'처럼 '절'을 붙인다 — 서술이 옮겨 적어도 절 번호로 읽힌다(숫자 검문의 절 번호 규칙).
             "드러난 절": f"{p.source_section}절" if p.source_section else None,
             "권고 절": f"{p.recommend_section}절" if p.recommend_section else None,
@@ -515,7 +542,8 @@ def omitted_counts(fs: FactSheet) -> dict[str, int]:
     """프론트가 표를 자른 수(facts.omitted) — 한국어 이름으로."""
     if fs.facts is None:
         return {}
-    return {OMITTED_KO.get(k, k): v for k, v in fs.facts.omitted.items() if v}
+    # 모르는 키는 영어로 흘리지 않는다(S5 검토 prompt-3).
+    return {OMITTED_KO.get(k, "그 밖의 표"): v for k, v in fs.facts.omitted.items() if v}
 
 
 def build_fact_view(
@@ -533,7 +561,7 @@ def build_fact_view(
         "임계값 조정 여지": _threshold_gain(fs, derived),
         "예측 파생": _derivation(fs),
         "지연시간": _latency(fs),
-        "신뢰구간 방식": name_metric_ids(fs.ci_method_note, metric_names(fs)) if fs.ci_method_note else None,
+        "신뢰구간 방식": name_metric_ids(fs.ci_method_note, metric_names(fs), class_names(fs)) if fs.ci_method_note else None,
         "서술용 파생값": _facts(fs, task_type),
         "벤치마크(내부 참조 기준)": _benchmarks(benchmark_refs),
         "문제 목록": _problems(fs),

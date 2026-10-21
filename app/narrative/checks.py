@@ -101,7 +101,10 @@ def section_texts(section_id: str, parts: dict) -> list[str]:
 # ── ③ 기대 효과의 예측 수치 ─────────────────────────────────────────────────────
 # 숫자 뒤에 차례·기간·횟수 단위가 오면 예측 수치가 아니다('1차 원인', '3개월 내', '2회 재평가'). 문제 번호(P1)는 앞 글자가
 # 영문이라 숫자로 읽지 않는다. 소수·백분율·%p 는 단위와 무관하게 예측 수치다(지표값·향상폭).
-_NOT_PREDICTION_UNIT = re.compile(r"\s*(?:차|단계|번째|순위|순차|개월|주|일|년|분기|시간|회|번|건의\s*사례)")
+# 차례·기간·횟수·개수 단위. 단 단위 바로 뒤에 개선을 말하는 말이 붙으면("3시간 단축"·"5회 감소") 향상폭 예측이다
+# (S5 검토 checks-10: '개'·'분'이 빠져 "상위 3개 클래스"·"10분 내"가 막혔고, "3시간 단축"은 통과했다).
+_NOT_PREDICTION_UNIT = re.compile(r"\s*(?:차|단계|번째|순위|순차|개월|주|일|년|분기|시간|회|번|분|개|건의\s*사례)")
+_IMPROVEMENT_AFTER = re.compile(r"\s*(?:을|를|이|가|만큼|씩|정도)?\s*(?:단축|감소|줄|늘|향상|개선|증가|상승|낮아|높아|올라|내려)")
 
 
 def predicted_numbers(text: str) -> list[str]:
@@ -114,7 +117,8 @@ def predicted_numbers(text: str) -> list[str]:
         if _canon(token) is None:
             continue
         decimal_or_pct = "." in token or "%" in token or stripped[m.end():m.end() + 2].startswith("%p")
-        if not decimal_or_pct and _NOT_PREDICTION_UNIT.match(stripped, m.end()):
+        unit = None if decimal_or_pct else _NOT_PREDICTION_UNIT.match(stripped, m.end())
+        if unit and not _IMPROVEMENT_AFTER.match(stripped, unit.end()):
             continue
         found.append(token)
     return found
@@ -135,6 +139,7 @@ def d24_present(text: str, values: tuple[float, ...]) -> bool:
 
 # ── ⑤ 형식 ─────────────────────────────────────────────────────────────────────
 _VERDICT_CODE = re.compile(r"(?<![A-Za-z_])(?:CONDITIONAL_PASS|INCONCLUSIVE|PASS|FAIL)(?![A-Za-z_])")
+_VERDICT_CONTEXT_BEFORE = re.compile(r"판정\s*(?:은|이|결과는|결과|[:：])?\s*['\"‘’“”]?\s*$")
 _SNAKE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?![A-Za-z0-9_])")
 
 
@@ -145,6 +150,7 @@ def name_exemptions(fs: FactSheet, client_inputs: dict | None) -> set[str]:
     def scan(obj: Any) -> None:
         if isinstance(obj, str):
             names.update(_SNAKE.findall(obj))
+            names.update(_VERDICT_CODE.findall(obj))  # 클래스 라벨 'PASS'·모델명 'PASS-Net'(S5 검토 checks-9)
         elif isinstance(obj, dict):
             for k, v in obj.items():
                 scan(k)
@@ -178,7 +184,10 @@ def code_words(texts: list[str], exempt: set[str]) -> list[str]:
     for text in texts:
         if not isinstance(text, str):
             continue
-        found.extend(_VERDICT_CODE.findall(text))
+        for m in _VERDICT_CODE.finditer(text):
+            # 이름과 겹치는 판정 코드는 '판정' 문맥("판정은 FAIL")일 때만 잡는다 — 그 밖은 클래스·모델 이름이다.
+            if m.group(0) not in exempt or _VERDICT_CONTEXT_BEFORE.search(text[:m.start()]):
+                found.append(m.group(0))
         found.extend(w for w in _SNAKE.findall(text) if w not in exempt)
     return sorted(set(found))
 

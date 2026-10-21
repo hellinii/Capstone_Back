@@ -519,7 +519,8 @@ async def test_on_stage_order(make_section_client):
     fake = _client(make_section_client, {"section_8_2": "통과율 12.345% 이다."})
     await _gen(fake, _binary(), on_stage=on_stage)
     assert stages[:3] == ["generating"] * 3
-    assert stages[3:] == ["checking", "regenerating", "generating", "checking"]
+    # 다시 만드는 호출은 슬롯을 얻어도 '다시 만드는 중'이다(S5 검토 jobs-3 — 전에는 곧바로 generating 으로 덮였다).
+    assert stages[3:] == ["checking", "regenerating", "regenerating", "checking"]
 
 
 @pytest.mark.parametrize("name", ["binary", "multiclass", "multilabel", "legacy_main"])
@@ -544,7 +545,8 @@ async def test_each_sequential_retry_refreshes_the_job_stage(make_section_client
     fake = _client(make_section_client, replies=[err, err, err])
     await _gen(fake, _binary(), on_stage=on_stage)
     after_check = stages[stages.index("checking") + 1:]
-    assert after_check.count("regenerating") == 4  # 다시 부르기 시작 1 + 차례 호출 셋마다 1
+    # 다시 부르기 시작 1 + 차례 호출 셋마다(대기 전 1 + 슬롯을 얻고 1)
+    assert after_check.count("regenerating") == 7 and "generating" not in after_check
 
 
 async def test_trimmed_counts_are_allowed_numbers(monkeypatch):
@@ -560,3 +562,141 @@ async def test_trimmed_counts_are_allowed_numbers(monkeypatch):
     *_, whitelist, _conclusions, ctx, _exempt = generator._prepare(_binary())
     assert ctx.view["덜어 낸 표(일부만 실림)"]["가짜 표"] == 7777
     assert "7777" in whitelist
+
+
+
+# ── S5 독립 검토(wf_a65c97fb-fec) 반영 ─────────────────────────────────────────
+
+async def test_slot_wait_counts_against_the_deadline(make_section_client, monkeypatch):
+    """ladder-1(P1): 슬롯을 기다린 시간만큼 마감을 넘기지 않는다 — 다 기다린 뒤 남은 시간이 모자라면 부르지 않는다."""
+    import contextlib
+
+    from app.core import concurrency
+
+    monkeypatch.setattr(generator, "MIN_CALL_SECONDS", 0.05)
+    fake = _client(make_section_client, delay=0.45)
+
+    async def hog():
+        async with contextlib.AsyncExitStack() as stack:
+            for _ in range(concurrency.MAX_CONCURRENT_NARRATIVE_CALLS):
+                await stack.enter_async_context(concurrency.narrative_slot())
+            await asyncio.sleep(0.3)
+
+    holder = asyncio.create_task(hog())
+    await asyncio.sleep(0.01)
+    gen = await _gen(fake, _binary(), deadline_seconds=0.5, slot_wait=0.4)
+    await holder
+    assert gen.trace["seconds"] <= 0.5 + 0.1
+    timed = [c for c in gen.trace["calls"] if c.get("http")]
+    assert all(c["slot_wait_seconds"] >= 0.25 for c in timed)
+
+
+async def test_kept_first_draft_survives_a_failed_regeneration(make_section_client):
+    """ladder-2: D24 만 빠진 첫 글은 다시 만들기가 거절돼도 그대로 싣는다(D24 빠짐은 템플릿 사유가 아니다)."""
+    def reply(kwargs):
+        if requested_fields(kwargs) == ["section_7_1"]:
+            return fake_beta_message(None, stop_reason="refusal", stop_details={"type": "refusal", "category": "bio"})
+        return None
+
+    fake = make_section_client({"section_7_1": "오분류의 방향을 해석한 서술이다."}, replies=[reply] * 4)
+    gen = await _gen(fake, _binary())
+    sec = gen.trace["sections"]["7.1"]
+    assert gen.section_sources["7.1"] == "llm"
+    assert (sec["outcome"], sec["d24_missing"]) == ("kept_first", True)
+    assert gen.response.interpretation.confusion_analysis == "오분류의 방향을 해석한 서술이다."
+
+
+async def test_kept_first_draft_survives_a_regeneration_that_fails_checks(make_section_client):
+    def reply(kwargs):
+        if requested_fields(kwargs) == ["section_7_1"]:
+            return {"section_7_1": "오분류는 12.345% 이다."}
+        return None
+
+    fake = make_section_client({"section_7_1": "오분류의 방향을 해석한 서술이다."}, replies=[reply] * 4)
+    gen = await _gen(fake, _binary())
+    assert gen.section_sources["7.1"] == "llm" and gen.trace["sections"]["7.1"]["outcome"] == "kept_first"
+
+
+async def test_one_missing_recommendation_then_failed_regeneration_fills(make_section_client):
+    only_p1 = _recs("오류가 줄어든다.", ids=("P1",))
+
+    def reply(kwargs):
+        if requested_fields(kwargs)[0] == "section_9_1" and len(fake.beta.messages.create.call_args_list) > 3:
+            return anthropic.APIConnectionError(request=_REQ)
+        return None
+
+    fake = _client(make_section_client, {"recommendations": only_p1}, replies=[reply] * 4)
+    gen = await _gen(fake, _binary())
+    sec = gen.trace["sections"]["9"]
+    assert sec["outcome"] == "filled" and gen.trace["recommendations_from_template"] == ["P2", "P3"]
+    assert gen.response.recommendation_narrative.data_quality == "데이터 측면의 권고 서술이다."  # AI 글은 남는다
+
+
+async def test_dropped_7_3_after_final_recheck_is_recorded_as_fixed(make_section_client, monkeypatch):
+    """ladder-3: 최종 재검사로 7.3 이 빠지면 기록도 fixed 다(전에는 'first' 로 남았다)."""
+    from app.narrative import checks
+
+    monkeypatch.setattr(checks, "check_section", lambda *a, **k: checks.SectionCheck(section=a[0]))
+    fake = _client(make_section_client, {"section_7_3": "종합 판정은 합격이다. FN 은 43건이다."})
+    gen = await _gen(fake, _binary())
+    sec = gen.trace["sections"]["7.3"]
+    assert gen.trace["final_recheck"] == ["7.3"]
+    assert (sec["source"], sec["outcome"], sec["reason"]) == ("fixed", "fixed", "final_verdict_contradiction")
+
+
+async def test_rate_limited_call_costs_zero_not_unknown(make_section_client):
+    """jobs-2: 429 는 서버가 거절한 것이라 비용 0 이다 — 작업 비용이 '모름'이 되지 않는다."""
+    from app.narrative import jobs
+
+    err = anthropic.RateLimitError("slow", response=httpx2.Response(429, request=_REQ), body=None)
+    fake = _client(make_section_client, replies=[err])
+    gen = await _gen(fake, _binary())
+    limited = [c for c in gen.trace["calls"] if c.get("failure") == "rate_limited"]
+    assert limited and limited[0]["cost_usd"] == 0.0
+    assert jobs.total_cost(jobs.http_calls(gen.trace["calls"])) == pytest.approx(0.007 * 3)  # 성공 셋(장 둘 + 재시도), 429 는 0
+
+
+
+async def test_regenerated_section_9_missing_only_a_recommendation_is_filled(make_section_client):
+    """첫 9칸은 숫자 위반(보관할 글 없음), 다시 만든 글은 권고 하나만 빠짐 → 빠진 권고만 채운다(D22)."""
+    bad = {"section_9_1": "오분류가 12.345% 줄어든다.", "recommendations": _recs("오류가 줄어든다.")}
+
+    def reply(kwargs):
+        if requested_fields(kwargs)[0] == "section_9_1":
+            reply.n += 1
+            return bad if reply.n == 1 else {"recommendations": _recs("오류가 줄어든다.", ids=("P1", "P2"))}
+        return None
+    reply.n = 0
+
+    fake = _client(make_section_client, replies=[reply] * 4)
+    gen = await _gen(fake, _binary())
+    assert gen.trace["sections"]["9"]["outcome"] == "filled"
+    assert gen.trace["recommendations_from_template"] == ["P3"]
+
+
+async def test_slot_wait_is_capped_by_the_time_left(make_section_client, monkeypatch):
+    """슬롯이 오래 막혀도 남은 시간 안에서만 기다린다 — 슬롯 대기 상한(5초)이 길어도 마감 0.3초 안에 끝난다."""
+    import contextlib
+
+    from app.core import concurrency
+
+    monkeypatch.setattr(generator, "MIN_CALL_SECONDS", 0.05)
+    fake = _client(make_section_client)
+    release = asyncio.Event()
+
+    async def hog():
+        async with contextlib.AsyncExitStack() as stack:
+            for _ in range(concurrency.MAX_CONCURRENT_NARRATIVE_CALLS):
+                await stack.enter_async_context(concurrency.narrative_slot())
+            await release.wait()
+
+    holder = asyncio.create_task(hog())
+    await asyncio.sleep(0.01)
+    try:
+        gen = await asyncio.wait_for(_gen(fake, _binary(), deadline_seconds=0.3, slot_wait=5.0), 3)
+    finally:
+        release.set()
+        await holder
+    assert gen.trace["seconds"] < 0.5
+    assert gen.trace["sections"]["8.1"]["reason"] == "busy"
+    fake.beta.messages.create.assert_not_called()
