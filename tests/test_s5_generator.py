@@ -530,3 +530,33 @@ async def test_every_contract_example_goes_through(make_section_client, name):
     assert gen.response.conclusion.verdict == req.fact_sheet.verdict
     assert set(gen.section_sources) == {"7.1", "7.2", "7.3", "8.1", "8.2", "8.3", "9"}
     assert section_reply  # 가짜 응답 도우미 사용 확인
+
+
+
+async def test_each_sequential_retry_refreshes_the_job_stage(make_section_client):
+    """429 차례 호출이 길어져도 작업 행의 갱신 시각이 움직이게 — 차례 호출마다 regenerating 을 알린다."""
+    err = anthropic.RateLimitError("slow", response=httpx2.Response(429, request=_REQ), body=None)
+    stages = []
+
+    async def on_stage(name):
+        stages.append(name)
+
+    fake = _client(make_section_client, replies=[err, err, err])
+    await _gen(fake, _binary(), on_stage=on_stage)
+    after_check = stages[stages.index("checking") + 1:]
+    assert after_check.count("regenerating") == 4  # 다시 부르기 시작 1 + 차례 호출 셋마다 1
+
+
+async def test_trimmed_counts_are_allowed_numbers(monkeypatch):
+    """지시문에서 덜어 낸 표의 개수는 원본 사실 시트에 없는 수일 수 있다 — 허용 목록에 넣는다(바탕값과 겹치지 않는 7777 로)."""
+    from app.narrative import fact_view
+
+    def fake_step(view):
+        fact_view._note(view, "가짜 표", 7777)
+        return True
+
+    monkeypatch.setattr(prompt, "MAX_PROMPT_CHARS", 10)  # 늘 넘친다 — 모든 단계가 돈다
+    monkeypatch.setattr(fact_view, "TRIM_STEPS", (("fake", fake_step),))
+    *_, whitelist, _conclusions, ctx, _exempt = generator._prepare(_binary())
+    assert ctx.view["덜어 낸 표(일부만 실림)"]["가짜 표"] == 7777
+    assert "7777" in whitelist

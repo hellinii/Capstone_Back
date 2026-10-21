@@ -90,16 +90,68 @@ def test_naming_the_right_verdict_is_never_a_contradiction(verdict):
     ("PASS", "Recall 이 기준에 미달하였으며 다른 문제는 없다."),
     # 합격에서 규칙 조건문이 아닌 불합격 주장.
     ("PASS", "Recall 지표는 불합격이다."),
+    # '모두'가 주어 뒤에 오는 꼴(S5 변이 검사에서 찾은 누락).
+    ("FAIL", "판정 대상 지표는 모두 목표를 충족하였다."),
+    ("CONDITIONAL_PASS", "지표들은 모두 기준을 통과하였다."),
+    # 판정 불가 사유는 같은 문장에 있어야 한다 — 앞 문장의 사유가 뒤 문장의 '모두 충족'을 덮지 않는다.
+    ("INCONCLUSIVE", "핵심 지표가 산출되지 않았다. 모든 지표가 목표를 충족하였다."),
 ])
 def test_more_contradictions_are_flagged(verdict, text):
     assert find_verdict_contradictions([text], verdict) == [text]
 
 
 @pytest.mark.parametrize("verdict, text", [
+    ("INCONCLUSIVE", "목표값이 설정된 모든 지표는 목표를 충족했으나 핵심 지표가 산출되지 않아 판정할 수 없다."),
     ("INCONCLUSIVE", "목표값이 설정된 지표는 모두 충족했으나 핵심 지표가 산출되지 않아 판정할 수 없다."),
-    ("CONDITIONAL_PASS", "모든 지표가 충족된 것은 아니며 보조 지표 Recall 이 미달했다."),
+    ("CONDITIONAL_PASS", "모든 지표가 충족되지 않았으며 보조 지표 Recall 이 미달했다."),
+    ("CONDITIONAL_PASS", "모든 지표가 통과한 것은 아니며 보조 지표 Recall 이 미달했다."),
     ("PASS", "핵심 지표가 하나라도 목표에 미달하면 최종 불합격이지만, 이 성적서의 핵심 지표는 모두 충족했다."),
     ("FAIL", "보조 지표는 모두 기준을 충족했으나 핵심 지표 F1 Score 가 미달했다."),
 ])
 def test_narrowed_or_negated_sentences_are_allowed(verdict, text):
     assert find_verdict_contradictions([text], verdict) == []
+
+
+
+# ── 칸별 검사(app.narrative.checks) 단위 ─────────────────────────────────────────
+
+from app.narrative import checks  # noqa: E402
+from app.narrative.schemas import FactSheet, MetricFact, PerClassFact  # noqa: E402
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("F1 이 0.05 향상된다.", ["0.05"]),
+    ("오류가 10% 줄어든다.", ["10%"]),
+    ("1차 원인을 찾는다.", []),
+    ("3개월 내 재평가한다.", []),
+    ("2회 재평가로 확인한다.", []),
+    ("0.5회 줄어든다.", ["0.5"]),   # 소수는 단위가 붙어도 예측 수치다
+    ("5%차 개선", ["5%"]),            # 백분율도 마찬가지
+    ("P1 문제의 원인이 분명해진다.", []),
+])
+def test_predicted_numbers(text, expected):
+    assert checks.predicted_numbers(text) == expected
+
+
+def _fs(**kw):
+    base = dict(verdict="PASS", score=100.0, metrics=[MetricFact(metric_id="M1", display_name="Accuracy", value=0.9, status="info")])
+    return FactSheet(**{**base, **kw})
+
+
+def test_snake_case_class_names_are_exempt_but_field_names_are_not():
+    fs = _fs(per_class=[PerClassFact(label="late_payment", f1=0.5, support=10)])
+    exempt = checks.name_exemptions(fs, {"model": {"모델명": "risk_model_v2"}})
+    assert {"late_payment", "risk_model_v2"} <= exempt
+    words = checks.code_words(["late_payment 클래스와 risk_model_v2 모델의 macro_f1 은 낮다. 판정은 PASS 이다."], exempt)
+    assert words == ["PASS", "macro_f1"]
+
+
+def test_section_9_is_empty_when_either_text_is_blank():
+    parts = {"recommendation_narrative.data_quality": "데이터 권고다.", "recommendation_narrative.model_ops": " ",
+             "recommendations": [{"problem_id": "P1", "category": "c", "action": "a", "expected_impact": "e"}]}
+    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set())
+    assert r.format == ["empty"]
+    parts["recommendation_narrative.model_ops"] = "모델 권고다."
+    parts["recommendations"] = []
+    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set())
+    assert r.format == ["empty"]

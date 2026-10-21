@@ -442,7 +442,10 @@ async def test_slot_wait_limit_finishes_as_busy_without_calling(factory, monkeyp
         # 대기 상한이 배선돼 있지 않으면 칸이 비지 않아 영원히 기다린다 — 테스트가 멈추지 않게 바깥 제한을 둔다.
         await asyncio.wait_for(_run_pending(tasks), 5)
     fake.beta.messages.create.assert_not_called()
-    assert _internal(factory, job_id)["reason"] == "busy"
+    internal = _internal(factory, job_id)
+    assert internal["reason"] == "busy"
+    # 슬롯을 못 얻은 호출은 요청이 나가지 않았다 — 시도 0, 비용 0(모름이 아니다).
+    assert len(internal["calls"]) == 2 and (internal["http_attempts"], internal["cost_usd"]) == (0, 0)
     assert (await jobs.read_job(job_id, session_factory=factory)).status == "done"
 
 
