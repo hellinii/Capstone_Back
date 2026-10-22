@@ -311,14 +311,17 @@ def check_binary(df_clean: pd.DataFrame, mapping_dict: dict, role_columns: dict[
 
     # Binary 클래스 수 검사
     if y_true_col and y_true_col in df_clean.columns:
-        # 평가와 같은 표기로 센다 — ' cat'·'cat'·'dog' 는 두 클래스다. 예측에만 있는 클래스도 센다(평가는
-        # 이진에서 정답·예측 클래스가 둘을 넘으면 멈춘다 — preprocessor._check_binary_classes).
-        names = {normalize_label(v) for v in df_clean[y_true_col].dropna().unique()}
+        # 평가와 같은 표기로 센다 — ' cat'·'cat'·'dog' 는 두 클래스다. 두 가지를 따로 본다.
+        # - 정답∪예측 클래스가 둘을 넘으면 오류(평가가 멈춘다 — preprocessor._check_binary_classes).
+        # - 정답 클래스가 둘 미만이면 경고(평가는 계속된다, 종전 문구 'found 1'). 예측 클래스를 합쳐 세면
+        #   정답이 한 클래스뿐인 데이터가 통과로 보였다(라운드 C 검토).
+        true_names = {normalize_label(v) for v in df_clean[y_true_col].dropna().unique()}
+        names = set(true_names)
         y_pred_col = mapping_dict.get("y_pred")
         if y_pred_col and y_pred_col in df_clean.columns:
             names |= {normalize_label(v) for v in df_clean[y_pred_col].dropna().unique()}
-        n_classes = len(names)
-        if n_classes != 2:
+        if len(names) > 2 or len(true_names) < 2:
+            n_classes = len(names) if len(names) > 2 else len(true_names)
             items.append(ValidationCheckItem(
                 name="Binary class system error",
                 result=f"Expected 2 classes, found {n_classes}",

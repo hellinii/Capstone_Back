@@ -14,7 +14,7 @@ from app.analysis.schemas import ExecutionSummaryItem, ValidateDataResponse, Val
 from app.evaluation.schemas import EvaluateRequest
 from app.analysis import validation_checks as checks
 from app.evaluation.frame import build_evaluation_frame, required_columns
-from app.evaluation.preprocessor import class_distribution_of, collect_role_columns
+from app.evaluation.preprocessor import align_boolean_labels, class_distribution_of, collect_role_columns
 
 
 def _counts(details: list[ValidationCheckItem]) -> tuple[int, int]:
@@ -133,6 +133,8 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
     )
     valid_rows = len(df_clean)
     details += checks.check_missing_values(excluded_rows)
+    # 불리언 예측 ↔ 0/1 정답은 평가 전처리와 같은 함수로 맞춘 뒤 센다 — 그러지 않으면 검증만 클래스를 넷으로 본다.
+    df_clean = align_boolean_labels(df_clean, mapping_dict)
 
     # 3-3~3-5. 공통 검사
     details += checks.check_duplicate_id(df_clean, mapping_dict)

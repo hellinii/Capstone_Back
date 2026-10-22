@@ -256,6 +256,8 @@ Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/
   맞으면 항목을 내지 않는다. 이진은 확률 컬럼이 하나라 이름을 보지 않는다.
 - **지연시간 단위**(`Latency unit`, warning): 지연시간 역할은 ms 로 읽는다. 값이 모두 1 미만이면 초로 적은 것으로 보여
   경고한다. 1 ms 미만으로 도는 모델도 있어 막지 않는다 — 단위는 데이터만으로 확정할 수 없다.
+- **이진 클래스 수**(`Binary class system error`): 정답∪예측 클래스가 둘을 넘으면 error(평가도 400 으로 멈춘다 —
+  `preprocessor._check_binary_classes`). 정답 클래스가 하나뿐이면 예측에 두 클래스가 있어도 warning(`found 1`, 평가는 계속).
 
 ### 9.4 클래스 표기
 
@@ -274,6 +276,14 @@ Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/
   (정수 값 float → 정수 표기, 공백은 그대로)로 비교한다. 정답 1.0 과 예측 1 은 같은 클래스로 보고, 정답 `' cat'` 과
   예측 `'cat'` 처럼 공백이 다른 것은 계속 경고한다 — 평가는 둘을 다른 클래스로 세기 때문이다. `normalize_label` 은
   `label_text` 에 공백 제거를 더한 것이라 숫자 표기 규칙은 한 곳에 있다.
+- **평가 프레임의 라벨 값**(`preprocessor._normalize_hard_labels`): 정답·예측 하드 라벨을 한 표기로 맞춘 뒤 지표를 낸다.
+  둘 다 빈 값 없는 정수 값 숫자(int, 1.0 같은 정수 float)면 **int64** 로 두고, 그 밖은 `normalize_label` 문자열로 바꾼다
+  (`unify_hard_label_columns`). 숫자 라벨까지 문자열로 바꾸면 sklearn 이 지표마다 문자열 배열을 정렬해 80만 행(10MB)
+  평가가 2초대에서 40초 넘게 걸렸다. 응답의 클래스 이름(M21 `labels`·M22 키·분포 키)은 어느 쪽이든 표준 이름 문자열이고,
+  sklearn 에 넘기는 `labels` 는 `metrics.common.class_values` 로 이름 → 데이터 값을 찾아 쓴다.
+- **불리언 라벨**(`preprocessor.align_boolean_labels`, 평가 전처리·검증이 같이 씀): `proba > 0.5` 를 그대로 저장한 True/False
+  예측과 0/1 정답처럼 한쪽만 불리언이면 **예측이 정답 표기를 따른다** — 정답이 숫자(또는 표기가 0/1 뿐)면 예측을 1/0 으로,
+  정답이 불리언이고 예측 표기가 0/1 뿐이면 예측을 True/False 로. 둘 다 불리언이면 `'True'`/`'False'` 그대로다.
 
 ---
 

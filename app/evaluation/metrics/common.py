@@ -88,17 +88,30 @@ def _get_true_pred(df: pd.DataFrame, mapping_dict: dict):
     return y_true, y_pred
 
 
+def class_values(values, names: list) -> list:
+    """표준 이름 목록(names) → 데이터에 든 값 목록(같은 순서). 데이터에 없는 이름은 이름 그대로.
+
+    전처리(_normalize_hard_labels)가 정답·예측을 한 표기로 맞췄으므로 이름 하나에 값은 하나다 — 문자열 라벨은
+    이름이 곧 값이고, 정수 값 숫자 라벨은 int64 로 남아 이름 '1' 의 값이 1 이다(sklearn 이 숫자 배열을 빠르게
+    다루도록 문자열로 바꾸지 않는다). 종전에는 원래 값으로 되찾았는데, ' cat'·'cat' 처럼 같은 이름으로 모이는
+    값이 둘이면 하나만 남아 다른 쪽 클래스가 매크로 지표와 클래스별 표에서 통째로 빠졌다(점검 BE-13) — 이제는
+    표기가 먼저 합쳐져 그런 값이 없다.
+    """
+    by_name = {normalize_label(v): v for v in pd.Series(values).dropna().unique()}
+    return [by_name.get(n, n) for n in names]
+
+
 def _label_kwargs(df: pd.DataFrame, mapping_dict: dict, y_true) -> dict:
-    """클래스 집합을 y_true 로 고정하는 sklearn 인자(2-D 멀티레이블에는 넘기지 않는다)."""
+    """클래스 집합을 y_true 로 고정하는 sklearn 인자(2-D 멀티레이블에는 넘기지 않는다).
+
+    labels 는 데이터 값(class_values)이다 — 이름이 필요하면 normalize_label(값)으로 낸다.
+    """
     if isinstance(y_true, np.ndarray) and y_true.ndim > 1:
         return {}
     classes = evaluation_classes(df, mapping_dict)
     if not classes:
         return {}
-    # 전처리(_normalize_hard_labels)가 정답·예측을 normalize_label 표기로 맞췄으므로 표준 이름이 곧 데이터 값이다.
-    # 종전에는 원래 값으로 되찾았는데, ' cat'·'cat' 처럼 같은 이름으로 모이는 값이 둘이면 하나만 남아 다른 쪽
-    # 클래스가 매크로 지표와 클래스별 표에서 통째로 빠졌다(점검 BE-13).
-    return {"labels": classes}
+    return {"labels": class_values(y_true, classes)}
 
 def calculate_accuracy(df: pd.DataFrame, mapping_dict: dict) -> float:
     """M1: Accuracy"""
@@ -192,8 +205,13 @@ def calculate_confusion_matrix(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     # 는 문자열 숫자를 ['1','10','2'] 로 늘어놓아 한 성적서에 순서가 두 벌이었다(점검 BE-12). 예측에만 있는
     # 클래스(유령)도 줄·열로 남는다(줄은 모두 0) — 정답 행의 오분류가 어디로 갔는지 보여 준다. 클래스 수를 셀 때는
     # 정답 클래스(evaluation_classes)를 쓸 것 — confusion_counts 는 유령 줄을 뺀다.
-    labels = sort_labels(np.concatenate((np.asarray(y_true), np.asarray(y_pred))))
-    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    # 고유값만 이름으로 바꾼다 — 행마다 normalize_label 을 부르면 80만 행에서 160만 번이다.
+    t, p = np.asarray(y_true), np.asarray(y_pred)
+    if t.dtype != p.dtype:
+        t, p = t.astype(object), p.astype(object)
+    present = pd.unique(np.concatenate((t, p)))
+    labels = sort_labels(present)
+    cm = confusion_matrix(y_true, y_pred, labels=class_values(present, labels))
 
     return {
         "type": "multiclass_or_binary",
@@ -214,7 +232,7 @@ def calculate_class_metrics(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, A
         kwargs = _label_kwargs(df, mapping_dict, y_true)
         report = classification_report(
             y_true, y_pred, output_dict=True, zero_division=0,
-            target_names=[str(l) for l in kwargs["labels"]] if kwargs else None,
+            target_names=[normalize_label(l) for l in kwargs["labels"]] if kwargs else None,
             **kwargs,
         )
     return report

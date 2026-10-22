@@ -15,6 +15,7 @@ preprocess_data 는 단계별 헬퍼(_guard/_coerce/_validate/_check/_extract)�
 import ast
 from typing import Any, Dict, List, Tuple
 
+import numpy as np
 import pandas as pd
 
 from app.core.schemas import METRIC_REQUIREMENTS, PREDICTION_ROLES_BY_TASK, TaskType
@@ -43,7 +44,8 @@ def _coerce_label_types(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
     """3. 확률 컬럼을 예측으로 잘못 매핑했는지 막는다(정수 정답 · 소수 예측).
 
     종전에는 이어서 y_pred 를 y_true 의 dtype 으로 강제 캐스팅했다. 지금은 다음 단계(_normalize_hard_labels)가
-    둘을 같은 문자열 표기로 맞추므로 캐스팅하지 않는다.
+    둘을 같은 표기로 맞추므로 캐스팅하지 않는다. 그 캐스팅이 하던 일 중 불리언 예측 ↔ 0/1 정답 맞추기는
+    align_boolean_labels 가 이어받았다.
     """
     y_true_col = mapping_dict.get('y_true') or mapping_dict.get('true_class')
     y_pred_col = mapping_dict.get('y_pred') or mapping_dict.get('predicted_class')
@@ -97,20 +99,97 @@ def label_notation_changes(df: pd.DataFrame, mapping_dict: dict) -> List[str]:
     return changes
 
 
+def _hard_label_columns(df: pd.DataFrame, mapping_dict: dict) -> Tuple[str | None, str | None]:
+    """정답·예측 하드 라벨 컬럼(없거나 데이터에 없으면 None)."""
+    cols = []
+    for _role_name, role_keys in _HARD_LABEL_ROLES:
+        col = next((mapping_dict[k] for k in role_keys if mapping_dict.get(k)), None)
+        cols.append(col if col and col in df.columns else None)
+    return cols[0], cols[1]
+
+
+def _zero_one_only(series: pd.Series) -> bool:
+    return {normalize_label(v) for v in series.dropna().unique()} <= {"0", "1"}
+
+
+def align_boolean_labels(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
+    """불리언 하드 라벨을 다른 쪽 표기에 맞춘다 — `proba > 0.5` 를 그대로 저장한 True/False 예측과 0/1 정답.
+
+    normalize_label(True) 는 'True', normalize_label(1) 은 '1' 이라 그대로 두면 클래스가 넷이 되어 이진은 막히고
+    다중은 Accuracy 0.0 이 나온다. 종전(_coerce_label_types 의 캐스팅)처럼 **예측이 정답을 따른다**.
+    - 예측만 불리언이고 정답이 숫자형이거나 표기가 0/1 뿐 → 예측을 1/0 으로.
+    - 정답만 불리언이고 예측 표기가 0/1 뿐 → 예측을 True/False 로. 정답 표기('True'·'False')는 화면 metadata 의
+      클래스·양성과 같아야 하므로 정답 쪽을 바꾸지 않는다.
+    둘 다 불리언이면 'True'/'False' 그대로(보관본 표기). 그 밖의 조합('cat' 과 True)은 맞출 근거가 없어 그대로다.
+    평가 전처리와 검증(validation_service)이 이 함수 하나를 쓴다 — 검증이 미리 센 클래스와 평가의 클래스가 같게.
+    """
+    true_col, pred_col = _hard_label_columns(df, mapping_dict)
+    if not true_col or not pred_col:
+        return df
+    truth, pred = df[true_col], df[pred_col]
+    true_bool, pred_bool = pd.api.types.is_bool_dtype(truth), pd.api.types.is_bool_dtype(pred)
+    if pred_bool and not true_bool and (pd.api.types.is_numeric_dtype(truth) or _zero_one_only(truth)):
+        return df.assign(**{pred_col: pred.astype("int64")})
+    if true_bool and not pred_bool and _zero_one_only(pred):
+        return df.assign(**{pred_col: pred.map(lambda v: v if pd.isna(v) else normalize_label(v) == "1")})
+    return df
+
+
+# int64 로 옮겨도 값이 그대로인 정수 소수의 범위(그 밖은 표기 경로로 둔다).
+_INT64_SAFE = 2.0 ** 62
+
+
+def _integer_valued(series: pd.Series) -> bool:
+    """빈 값 없이 모두 정수 값인 숫자 컬럼인가(불리언 제외) — 그러면 표준 이름이 곧 str(int(값))이다."""
+    if pd.api.types.is_bool_dtype(series) or series.isna().any():
+        return False
+    if pd.api.types.is_integer_dtype(series):
+        return not (series.dtype.kind == "u" and len(series) and series.max() >= 2 ** 63)
+    if pd.api.types.is_float_dtype(series):
+        v = series.to_numpy(dtype=float)
+        return bool(np.isfinite(v).all() and (np.abs(v) < _INT64_SAFE).all() and (v % 1 == 0).all())
+    return False
+
+
+def _label_names(series: pd.Series) -> pd.Series:
+    """값마다 표준 표기(normalize_label) — 빈 값은 그대로."""
+    if series.dtype == object:
+        # object 컬럼은 True 와 1 처럼 같다고 해시되는 값이 섞일 수 있어 값마다 바꾼다(고유값 표를 쓰면 하나로 뭉친다).
+        return series.map(lambda v: v if pd.isna(v) else normalize_label(v))
+    table = {v: normalize_label(v) for v in series.dropna().unique()}
+    return series.map(table).astype(object)
+
+
+def unify_hard_label_columns(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+    """하드 라벨 컬럼들을 한 표기로 — 모두 정수 값 숫자면 int64, 아니면 표준 표기 문자열.
+
+    숫자 라벨을 문자열로 바꾸면 sklearn 이 지표마다 문자열 배열을 정렬해 10MB CSV(80만 행) 평가가 2초에서
+    40초 넘게 걸렸다(라운드 C 검토). 정수 값 숫자는 표준 이름이 str(int(값)) 하나로 정해지므로(1.0 과 1 은 같은
+    int 1) 값을 int64 로 두어도 클래스 구분이 표기 경로와 같다. 이름이 필요한 곳(클래스 목록·혼동행렬 줄·분포 키)은
+    normalize_label 로 이름을 내고, sklearn 에 넘기는 labels 는 metrics.common.class_values 로 데이터 값을 쓴다.
+    """
+    cols = [c for c in cols if c and c in df.columns]
+    if not cols:
+        return df
+    if all(_integer_valued(df[c]) for c in cols):
+        return df.assign(**{c: df[c].astype("int64") for c in cols if df[c].dtype != np.int64})
+    return df.assign(**{c: _label_names(df[c]) for c in cols})
+
+
 def _normalize_hard_labels(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, Any]) -> pd.DataFrame:
-    """3-1. 정답·예측 하드 라벨을 같은 표기(normalize_label)로 맞춘다.
+    """3-1. 정답·예측 하드 라벨을 같은 표기로 맞춘다(불리언 맞추기 → 표기 맞추기).
 
     화면·metadata·분포는 normalize_label 로 ' cat' 과 'cat', 1.0 과 1 을 같은 클래스로 보여 주는데, 종전에는
     지표 계산이 원래 값을 그대로 비교했다. 그래서 정답 ' cat'·예측 'cat' 이면 Accuracy 가 0.5(실제 1.0)였고,
     ', ' 로 구분한 CSV 는 예측 값이 ' cat' 이 되어 M1 이 0.0 이었으며, 정답 안에 'cat'·' cat' 이 섞이면 한쪽이
-    클래스별 표에서 빠졌다. 이 단계 뒤로는 모든 지표·건수·분포가 같은 문자열 클래스를 본다.
+    클래스별 표에서 빠졌다. 이 단계 뒤로는 모든 지표·건수·분포가 같은 클래스를 본다 — 정수 값 숫자 라벨은
+    int64, 그 밖은 normalize_label 문자열(unify_hard_label_columns).
     표기가 실제로 바뀐 값은 경고로 알린다(label_notation_changes).
     """
+    # 검증(validation_service)도 불리언을 맞춘 프레임에서 표기 변화를 센다 — 같은 순서로.
+    df = align_boolean_labels(df, mapping_dict)
     changes = label_notation_changes(df, mapping_dict)
-    for _role_name, role_keys in _HARD_LABEL_ROLES:
-        col = next((mapping_dict[k] for k in role_keys if mapping_dict.get(k)), None)
-        if col and col in df.columns:
-            df[col] = df[col].map(lambda v: v if pd.isna(v) else normalize_label(v))
+    df = unify_hard_label_columns(df, list(_hard_label_columns(df, mapping_dict)))
     if changes:
         logs["warnings"].append(NOTATION_WARNING_HEAD + "; ".join(changes) + ".")
     return df
@@ -552,6 +631,11 @@ def preprocess_data(
         df, role_columns, task_type, decision_threshold, metadata or {}, logs,
         selected_metric_ids,
     )
+    derived = logs.get("derived_prediction")
+    if derived and derived["target_role"] == "y_pred":
+        # 파생 예측은 정답 값으로 만든다. 확률 컬럼 이름에만 있는 클래스는 이름(문자열)으로 들어가 정수 정답과
+        # 섞일 수 있으므로 정답과 함께 다시 한 표기로 맞춘다(둘 다 정수면 그대로 int64).
+        df = unify_hard_label_columns(df, [mapping_dict.get('y_true'), derived["column"]])
     _check_binary_classes(df, {**mapping_dict, **(
         {logs["derived_prediction"]["target_role"]: logs["derived_prediction"]["column"]}
         if logs.get("derived_prediction") else {}
