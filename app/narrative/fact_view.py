@@ -27,7 +27,7 @@ from typing import Any
 
 from app.narrative.wording import VERDICT_LABEL as VERDICT_KO  # 성적서 8.2 판정 상자와 같은 이름 한 벌
 from app.narrative.required_items import _CAUSE as CAUSE_KO
-from app.narrative.required_items import weakest_ties
+from app.narrative.required_items import benchmark_value_text, weakest_ties
 from app.narrative.schemas import FactSheet
 
 # 성적서 용도 이름(프론트 reportConstants.REPORT_PURPOSE_LABEL) — facts.report_purpose_label 이 없는 옛 요청에만 쓴다.
@@ -500,7 +500,7 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
     return out
 
 
-def _benchmarks(benchmark_refs: list[dict]) -> dict | None:
+def _benchmarks(benchmark_refs: list[dict], fs: FactSheet) -> dict | None:
     if not benchmark_refs:
         return None
     return {
@@ -508,7 +508,8 @@ def _benchmarks(benchmark_refs: list[dict]) -> dict | None:
         "지표별": [
             {
                 "지표": r["metric"],
-                "모델 값": r["model_value"],
+                # 참조 범위 위치 판정과 같은 쪽으로 읽히는 표기(세션 C — 넷째 자리 0.8 이 '미흡'과 함께 가지 않게).
+                "모델 값": benchmark_value_text(fs.metrics, r),
                 "참조 범위": f"{r['ref_low']:g}~{r['ref_high']:g}",
                 "좋은 방향": "높을수록 좋음" if r.get("direction") == "higher" else "낮을수록 좋음",
                 "평가(방향 반영)": QUALITY_KO.get(r.get("quality"), r.get("quality")),
@@ -585,7 +586,7 @@ def build_fact_view(
         "지연시간": _latency(fs),
         "신뢰구간 방식": name_metric_ids(fs.ci_method_note, metric_names(fs), class_names(fs)) if fs.ci_method_note else None,
         "서술용 파생값": _facts(fs, task_type),
-        "벤치마크(내부 참조 기준)": _benchmarks(benchmark_refs),
+        "벤치마크(내부 참조 기준)": _benchmarks(benchmark_refs, fs),
         "문제 목록": _problems(fs),
         "덜어 낸 표(일부만 실림)": omitted_counts(fs),
     }

@@ -55,6 +55,7 @@ from app.narrative.wording import (
     num,
     pct,
     pct_text,
+    range_value_text,
     shown_value,
     target_text,
     unsigned,
@@ -718,10 +719,19 @@ _TARGET_GROUP = (
 )
 
 
+def benchmark_value_text(metrics: list, ref: dict) -> str:
+    """기준표 비교의 모델 값 — 판정 대상이면 성적서 6.1 과 같은 표기(value_text), 아니면 넷째 자리(날값을 찍지 않는다).
+    그 표기가 범위 끝과 같아 참조 범위 위치 판정과 반대로 읽히면 자릿수를 늘린다(wording.range_value_text, 세션 C).
+    규칙 문장·사실 시트 보기·숫자 허용 목록이 이 함수 하나를 쓴다."""
+    metric = next((m for m in metrics if m.display_name == ref["metric"]), None)
+    low, high = float(ref["ref_low"]), float(ref["ref_high"])
+    if metric is None:
+        return range_value_text(float(ref["model_value"]), low, high)
+    return range_value_text(float(metric.value), low, high, shown_value(metric))
+
+
 def _ref_value(ctx: Ctx, ref: dict) -> str:
-    """기준표 비교의 모델 값 — 판정 대상이면 성적서 6.1 과 같은 표기(value_text), 아니면 넷째 자리(날값을 찍지 않는다)."""
-    metric = next((m for m in ctx.fs.metrics if m.display_name == ref["metric"]), None)
-    return shown_value(metric) if metric is not None else num(float(ref["model_value"]))
+    return benchmark_value_text(ctx.fs.metrics, ref)
 
 
 def _grouped(groups, refs: list[dict], key: str, item) -> str:

@@ -553,3 +553,52 @@ def test_system_prompt_has_the_josa_rule_for_latin_names():
     # 실호출: 'benign(양성 종양)와'·'benign가'·'P3가' 가 나왔다.
     assert ("영문·숫자 이름 뒤 조사는 그 이름을 읽는 소리의 끝소리에 맞춘다. 영문 이름은 영어 발음의 끝소리로 고른다"
             "(benign과, cat과, dog와, P3이).") in prompt.SYSTEM_PROMPT
+
+
+# ── 5. 8.1 모델 값 표기가 참조 범위 위치 판정과 같은 쪽으로 읽힌다 ─────────────────────────────
+
+from app.narrative.baselines import build_benchmark_refs  # noqa: E402
+from app.narrative.derived import compute_derived  # noqa: E402
+from app.narrative.wording import range_value_text  # noqa: E402
+
+
+@pytest.mark.parametrize("value, low, high, base, expected", [
+    (0.79996, 0.8, 0.92, None, "0.79996"),      # 넷째 자리 '0.8' 은 범위 안으로 읽힌다 — 미흡 판정
+    (0.9500004, 0.85, 0.95, None, "0.9500004"),  # '0.95' 는 범위 끝 — 우수 판정
+    (0.8497, 0.85, 0.92, None, "0.8497"),
+    (0.92049, 0.85, 0.92, None, "0.9205"),
+    (0.9, 0.85, 0.92, None, "0.9"),
+    (0.85, 0.85, 0.92, None, "0.85"),            # 범위 끝과 같으면 범위 안
+    (0.84996, 0.85, 0.92, "0.85", "0.84996"),    # 판정 대상의 6.1 표기(셋째 자리)도 범위 위치와 어긋나면 늘린다
+    (0.861, 0.85, 0.92, "0.861", "0.861"),       # 어긋나지 않으면 6.1 표기 그대로
+    (0.7999999999999, 0.8, 0.92, None, "0.799999999"),  # 9자리로도 같아 보이면 판정 쪽으로 자른다
+])
+def test_range_value_text(value, low, high, base, expected):
+    assert range_value_text(value, low, high, base) == expected
+
+
+def _bench_fs():
+    return FactSheet(verdict="PASS", score=100.0, metrics=[
+        MetricFact(metric_id="M2", display_name="Precision", value=0.79996, status="info"),
+        MetricFact(metric_id="M7", display_name="AUROC", value=0.9500004, status="info"),
+        MetricFact(metric_id="M1", display_name="Accuracy", value=0.84996, threshold=0.8, status="pass", value_text="0.85",
+                   margin=0.04996, margin_text="0.05"),
+    ])
+
+
+def test_benchmark_rule_sentence_and_fact_view_use_position_consistent_values():
+    fs = _bench_fs()
+    refs = build_benchmark_refs("binary", fs.metrics)
+    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs) if c.item_id == "8.1-01")
+    assert "참조 범위보다 우수한 지표는 AUROC(0.9500004, 참조 범위 0.85~0.95)이고" in text
+    assert "Precision(0.79996, 참조 범위 0.8~0.92)" in text and "Accuracy(0.84996, 참조 범위 0.85~0.92)" in text
+    derived = compute_derived(fs, task_type="binary")
+    view = fact_view.build_fact_view(fs, derived, refs, task_type="binary", task_label="이진 분류", report_purpose="internal")
+    rows = {r["지표"]: r for r in view["벤치마크(내부 참조 기준)"]["지표별"]}
+    assert (rows["Precision"]["모델 값"], rows["Precision"]["평가(방향 반영)"]) == ("0.79996", "미흡")
+    assert (rows["AUROC"]["모델 값"], rows["AUROC"]["평가(방향 반영)"]) == ("0.9500004", "우수")
+    assert rows["Accuracy"]["모델 값"] == "0.84996"
+    # 규칙 문장이 자기 검문(숫자 허용 목록)을 통과한다.
+    assert verify_grounding([text], build_number_whitelist(fs, refs, derived)).passed, text
+    # 응답의 벤치마크 표(계약)는 그대로 — model_value 는 넷째 자리 숫자다.
+    assert [r["model_value"] for r in refs] == [0.8, 0.95, 0.85]
