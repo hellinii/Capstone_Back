@@ -544,3 +544,12 @@ def test_macro_note_in_sections_that_interpret_weak_classes():
     assert any(n.startswith("Precision, Recall, F1 Score 값은 클래스별 값의 매크로 평균(단순 평균)이다.") for n in ctx.briefs["8.3"].notes)
     _, _, _, _, ctx, _, _ = generator._prepare(NarrativeRequest.model_validate(_raw("binary")))
     assert not any("매크로 평균(단순 평균)" in n for sid in ("7.1", "8.2", "8.3") for n in ctx.briefs[sid].notes)
+
+
+# ── 4f. 영문·숫자 이름 뒤 조사 ─────────────────────────────────────────────────────
+
+
+def test_system_prompt_has_the_josa_rule_for_latin_names():
+    # 실호출: 'benign(양성 종양)와'·'benign가'·'P3가' 가 나왔다.
+    assert ("영문·숫자 이름 뒤 조사는 그 이름을 읽는 소리의 끝소리에 맞춘다. 영문 이름은 영어 발음의 끝소리로 고른다"
+            "(benign과, cat과, dog와, P3이).") in prompt.SYSTEM_PROMPT
