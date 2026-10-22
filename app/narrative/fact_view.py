@@ -27,6 +27,7 @@ from typing import Any
 
 from app.narrative.wording import VERDICT_LABEL as VERDICT_KO  # 성적서 8.2 판정 상자와 같은 이름 한 벌
 from app.narrative.required_items import _CAUSE as CAUSE_KO
+from app.narrative.required_items import weakest_ties
 from app.narrative.schemas import FactSheet
 
 # 성적서 용도 이름(프론트 reportConstants.REPORT_PURPOSE_LABEL) — facts.report_purpose_label 이 없는 옛 요청에만 쓴다.
@@ -396,6 +397,8 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
             "매크로 F1 과의 차이": w.gap_text,
             "표본이 작음(30건 미만 또는 5% 미만)": _yes(w.low_support),
             "매크로 F1 보다 0.1 이상 낮음": _yes(w.far_below_macro),
+            # F1 이 같은 최하위 클래스(세션 C — 하나만 단독 최약처럼 쓰지 않게). 표가 잘렸으면 실린 클래스 가운데.
+            f"F1 이 같은 {noun}": weakest_ties(fs)[0] or None,
         }
     if facts.low_support_classes:
         out[f"표본이 작은 {noun}"] = [

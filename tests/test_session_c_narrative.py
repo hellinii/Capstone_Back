@@ -430,3 +430,83 @@ def test_no_threshold_note_without_gain():
     req = NarrativeRequest.model_validate(_raw("multiclass"))
     _, _, _, _, ctx, _, _ = generator._prepare(req)
     assert all(F1_BASIS not in ctx.briefs[sid].notes for sid in ("7.3", "8.2", "8.3", "9"))
+
+
+# ── 4d. 최약 클래스 동점 — 하나만 단독 최약처럼 쓰지 않는다 ─────────────────────────────
+
+from app.narrative.required_items import weakest_ties  # noqa: E402
+
+
+def _tie_raw(task="multiclass", *, bird_f1=0.27421, trimmed=False, extra=0):
+    """계약 예시(최약 cat F1 0.2742)에서 bird 의 F1 을 넷째 자리로 같게 — 판정 자릿수 기준 동점."""
+    raw = _raw(task)
+    fs = raw["fact_sheet"]
+    for p in fs["per_class"]:
+        if p["label"] == "bird":
+            p["f1"] = bird_f1
+    for i in range(extra):  # 동점 클래스를 더 붙인다(숫자 꼴 이름 — Digits 처럼)
+        fs["per_class"].append({"label": str(i + 2), "precision": 0.0, "recall": 0.0, "f1": 0.27419, "support": 40 + i})
+    if trimmed:
+        fs["facts"]["omitted"] = {"per_class": 7}
+    return raw
+
+
+def test_weakest_ties_by_printed_digits():
+    req = NarrativeRequest.model_validate(_tie_raw())
+    assert weakest_ties(req.fact_sheet) == (["cat", "bird"], False)
+    req = NarrativeRequest.model_validate(_tie_raw(bird_f1=0.2743))
+    assert weakest_ties(req.fact_sheet) == ([], False)
+
+
+def test_tied_weakest_conclusion_names_all_of_them():
+    cons = _cons(_tie_raw(), {"class_label_descriptions": {"cat": "고양이", "bird": "새"}})
+    text = cons["7.1-10"].text
+    assert text.startswith(
+        "F1 이 가장 낮은 클래스는 F1 0.2742로 같은 두 클래스(cat(고양이), bird(새))이며, "
+        "그 가운데 cat(고양이)의 표본은 57건으로 전체 표본의 28.5%이다."
+    )
+    assert cons["7.1-10"].template_text == text
+    assert cons["8.3-01"].template_text == "F1 이 가장 낮은 클래스는 F1 0.2742로 같은 두 클래스(cat(고양이), bird(새))이다."
+
+
+def test_many_ties_list_a_few_names_and_trimmed_tables_limit_the_claim():
+    cons = _cons(_tie_raw(extra=9))
+    text = cons["7.1-10"].text
+    assert text.startswith("F1 이 가장 낮은 클래스는 F1 0.2742로 같은 여러 클래스(cat, bird, 2, 3, 4 등)이며,")
+    cons = _cons(_tie_raw(extra=4))
+    assert cons["7.1-10"].text.startswith("F1 이 가장 낮은 클래스는 F1 0.2742로 같은 여섯 클래스(cat, bird, 2, 3, 4 등)이며,")
+    cons = _cons(_tie_raw(trimmed=True))
+    assert cons["7.1-10"].text.startswith("표에 실린 클래스 가운데 F1 이 가장 낮은 클래스는 F1 0.2742로 같은 두 클래스(cat, bird)이며,")
+    assert cons["8.3-01"].template_text.startswith("표에 실린 클래스 가운데 F1 이 가장 낮은 클래스는")
+
+
+def test_tied_weakest_notes_and_self_check():
+    req = NarrativeRequest.model_validate(_tie_raw(extra=3))
+    _, _, whitelist, conclusions, ctx, exempt, _ = generator._prepare(req)
+    for sid in ("7.1", "8.3"):
+        notes = " ".join(ctx.briefs[sid].notes)
+        assert "F1 이 같은 최하위 클래스가 여럿이다(cat, bird, 2, 3, 4). 한 클래스만 가장 약한 클래스처럼 쓰지 말고 함께 밝힌다." in notes, sid
+    for c in conclusions:
+        if c.item_id in ("7.1-10", "8.3-01"):
+            assert verify_grounding([c.template_text], whitelist).passed, c.template_text
+            assert checks.code_words([c.template_text], exempt) == []
+
+
+def test_no_tie_keeps_the_single_weakest_sentence():
+    cons = _cons(_raw("multiclass"))
+    assert cons["7.1-10"].text.startswith("F1 이 가장 낮은 클래스는 F1 0.2742인 cat이며, 표본은 57건으로")
+    assert cons["8.3-01"].template_text == "F1 이 가장 낮은 클래스는 F1 0.2742인 cat이다."
+
+
+def test_tied_weakest_labels_in_multilabel_use_label_josa_and_view():
+    raw = _raw("multilabel")  # 최약 sports F1 0.4322
+    for p in raw["fact_sheet"]["per_class"]:
+        if p["label"] == "finance":
+            p["f1"] = 0.43218
+    req = NarrativeRequest.model_validate(raw)
+    _, _, _, conclusions, ctx, _, _ = generator._prepare(req)
+    notes = " ".join(ctx.briefs["7.1"].notes)
+    assert "F1 이 같은 최하위 레이블이 여럿이다(sports, finance). 한 레이블만 가장 약한 레이블처럼 쓰지 말고 함께 밝힌다." in notes
+    assert ctx.view["서술용 파생값"]["F1 이 가장 낮은 레이블"]["F1 이 같은 레이블"] == ["sports", "finance"]
+    risk = next(c for c in conclusions if c.item_id == "8.3-01")
+    assert risk.template_text == "F1 이 가장 낮은 레이블은 F1 0.4322로 같은 두 레이블(sports, finance)이다."

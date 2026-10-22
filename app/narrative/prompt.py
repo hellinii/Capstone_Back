@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass, field
 
 from app.narrative import fact_view
-from app.narrative.required_items import Conclusion, code_prints
+from app.narrative.required_items import Conclusion, code_prints, weakest_ties
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTIONS_BY_ID
 from app.narrative.wording import class_descriptions
@@ -300,6 +300,16 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
             notes.append("평가 엔진은 임계값 조정 여지가 크지 않다고 봤다. 결정 임계값을 위험으로 쓰지 않는다.")
     elif section_id == "8.1":
         pass
+    if section_id in ("7.1", "8.3"):
+        tied, trimmed = weakest_ties(fs)
+        if tied:
+            noun = "레이블" if task_type == "multilabel" else "클래스"
+            scope = f"표에 실린 {noun} 가운데 " if trimmed else ""
+            more = " 등" if len(tied) > 5 else ""
+            notes.append(
+                f"{scope}F1 이 같은 최하위 {noun}{'이' if noun == '레이블' else '가'} 여럿이다({', '.join(tied[:5])}{more}). "
+                f"한 {noun}만 가장 약한 {noun}처럼 쓰지 말고 함께 밝힌다."
+            )
     if fs.f1_threshold_gain is not None and section_id in _THRESHOLD_GAIN_SECTIONS:
         notes.append(_F1_ONLY_GAIN)
     return notes

@@ -306,16 +306,56 @@ def _bias(ctx: Ctx, unit: str) -> str | None:
     return f"예측 수와 실제 수의 차이가 큰 클래스는 {items}이다."
 
 
+# 최약 클래스 동점(세션 C 실호출 — Digits 는 2·8, yeast 는 아홉 레이블이 F1 0 인데 facts.weakest_class 하나만 단독 최약처럼
+# 썼다). 동점은 인쇄 자릿수(num — 넷째 자리)로 같은 F1 이다. 이름은 다섯까지만 싣는다.
+_TIE_NAMES_SHOWN = 5
+
+
+def weakest_ties(fs: FactSheet) -> tuple[list[str], bool]:
+    """(F1 이 최약 클래스와 같은 클래스 이름 — 최약 클래스가 맨 앞, 클래스별 표가 잘렸는가). 동점이 없으면 빈 목록.
+
+    클래스별 표(per_class)로 본다. 프론트가 표를 잘랐으면(facts.omitted.per_class) 실린 클래스 가운데의 동점이다."""
+    w = fs.facts.weakest_class if fs.facts is not None else None
+    if w is None or not fs.per_class:
+        return [], False
+    key = num(float(w.f1))
+    tied = [p.label for p in fs.per_class if p.f1 is not None and p.label != w.label and num(float(p.f1)) == key]
+    trimmed = bool(fs.facts.omitted.get("per_class"))
+    return ([w.label] + tied if tied else []), trimmed
+
+
+def _tied_phrase(ctx: Ctx, tied: list[str]) -> str:
+    """'같은 두 클래스(cat, bird)' — 개수는 우리말(열 개 넘으면 '여러'), 이름은 다섯까지."""
+    count = KOREAN_COUNT.get(len(tied), "여러")
+    names = join_and([ctx.name(t) for t in tied[:_TIE_NAMES_SHOWN]])
+    more = " 등" if len(tied) > _TIE_NAMES_SHOWN else ""
+    return f"같은 {count} {_noun(ctx)}({names}{more})"
+
+
+def _weakest_head(ctx: Ctx, w, tail: str) -> str:
+    """최약 클래스 첫머리 — 동점이면 함께 부른다. tail 은 동점이 없을 때 이름 뒤에 붙는 말('이며'·'이다')."""
+    tied, trimmed = weakest_ties(ctx.fs)
+    if not tied:
+        return f"F1 이 가장 낮은 {_topic(ctx)} F1 {num(w.f1)}인 {ctx.name(w.label)}{tail}"
+    scope = f"표에 실린 {_noun(ctx)} 가운데 " if trimmed else ""
+    return f"{scope}F1 이 가장 낮은 {_topic(ctx)} F1 {with_josa(num(w.f1), '으로/로')} {_tied_phrase(ctx, tied)}{tail}"
+
+
 def _weakest(ctx: Ctx) -> str | None:
     w = ctx.facts.weakest_class if ctx.facts else None
     if w is None:
         return None
     noun = _noun(ctx)
     base = "레이블 등장" if ctx.facts.class_share_basis == "label_occurrences" else "전체 표본"
-    text = (
-        f"F1 이 가장 낮은 {_topic(ctx)} F1 {num(w.f1)}인 {ctx.name(w.label)}이며, "
-        f"표본은 {w.support}건으로 {base}의 {pct_text(w.share_text)}이다."
-    )
+    tied, _ = weakest_ties(ctx.fs)
+    if tied:
+        # 표본·비율·매크로 F1 과의 차이는 facts 가 고른 한 클래스의 값이다 — 그 클래스를 이름으로 밝힌다.
+        text = (
+            _weakest_head(ctx, w, "이며, ")
+            + f"그 가운데 {ctx.name(w.label)}의 표본은 {w.support}건으로 {base}의 {pct_text(w.share_text)}이다."
+        )
+    else:
+        text = _weakest_head(ctx, w, "이며, ") + f"표본은 {w.support}건으로 {base}의 {pct_text(w.share_text)}이다."
     if w.gap_text is not None:
         text += f" 매크로 F1 과의 차이는 {w.gap_text}이다."
     # 사유별로 따로 쓴다 — 'A 또는 B' 로 쓰면 걸리지 않은 쪽까지 주장하게 된다.
@@ -327,7 +367,8 @@ def _weakest(ctx: Ctx) -> str | None:
     if w.far_below_macro:
         stems.append("매크로 F1 보다 0.1 이상 낮")
     if stems:
-        text += f" 이 {with_josa(noun, '은/는')} " + _clauses(stems)
+        subject = with_josa(ctx.name(w.label), "은/는") if tied else f"이 {with_josa(noun, '은/는')}"
+        text += f" {subject} " + _clauses(stems)
     small = [r for r in ctx.facts.low_support_classes if r.label != w.label]
     if small:
         listed = join_and([f"{ctx.name(r.label)} {r.support}건" for r in small[:5]])
@@ -1033,16 +1074,21 @@ def _weakest_risk(ctx: Ctx) -> str | None:
         return None
     purpose = _model_purpose(ctx)
     noun = _noun(ctx)
+    tied, trimmed = weakest_ties(ctx.fs)
+    if tied:
+        tail = f" 모델 용도('{purpose}')에서 이 {noun}들이 가지는 위험을 쓴다." if purpose else ""
+        scope = f"표에 실린 {noun} 가운데 " if trimmed else ""
+        return f"{scope}가장 약한 {_topic(ctx)} F1 {with_josa(num(w.f1), '으로/로')} {_tied_phrase(ctx, tied)}이다.{tail}"
     tail = f" 모델 용도('{purpose}')에서 그 {with_josa(noun, '이/가')} 가지는 위험을 쓴다." if purpose else ""
     return f"가장 약한 {_topic(ctx)} F1 {num(w.f1)}인 {ctx.name(w.label)}이다.{tail}"
 
 
 def _weakest_risk_fact(ctx: Ctx) -> str | None:
-    """해석형 항목의 템플릿 — 사실 문장만(용도상 위험의 해석은 AI 몫)."""
+    """해석형 항목의 템플릿 — 사실 문장만(용도상 위험의 해석은 AI 몫). 동점이면 함께 부른다."""
     w = ctx.facts.weakest_class if ctx.facts else None
     if w is None:
         return None
-    return f"F1 이 가장 낮은 {_topic(ctx)} F1 {num(w.f1)}인 {ctx.name(w.label)}이다."
+    return _weakest_head(ctx, w, "이다.")
 
 
 def _near(ctx: Ctx) -> list:
