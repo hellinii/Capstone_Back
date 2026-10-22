@@ -272,10 +272,11 @@ Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/
   `labels.find_label(값들, 표기)` 로 원래 값(1.0·`' cat'`)을 찾아 쓴다. 쓰는 곳: 이진 예측 파생(`preprocessor.py`),
   `binary._resolve_positive_value`(§9.2). 다중 예측 파생은 같은 규칙으로 만든 표기 → 원래 값 표를 쓴다. 표기를 만들어
   내보내는 쪽(metadata 의 이진 클래스 판단·알려진 정답 목록·확률 컬럼 클래스 확정)은 `normalize_label` 을 쓴다.
-- **검증의 클래스 불일치 검사는 숫자 표기만 맞춘다**: `validation_checks.check_class_mismatch` 는 `labels.label_text`
-  (정수 값 float → 정수 표기, 공백은 그대로)로 비교한다. 정답 1.0 과 예측 1 은 같은 클래스로 보고, 정답 `' cat'` 과
-  예측 `'cat'` 처럼 공백이 다른 것은 계속 경고한다 — 평가는 둘을 다른 클래스로 세기 때문이다. `normalize_label` 은
-  `label_text` 에 공백 제거를 더한 것이라 숫자 표기 규칙은 한 곳에 있다.
+- **검증의 클래스 불일치 검사는 평가와 같은 표기로 비교한다**: `validation_checks.check_class_mismatch` 는
+  `normalize_label`(정수 값 float → 정수 표기, 앞뒤 공백도 지움)로 비교한다 — 평가 전처리와 같은 표기라 정답 1.0 과
+  예측 1, 정답 `' cat'` 과 예측 `'cat'` 은 같은 클래스다. 표기가 실제로 바뀐 값은 `check_label_notation` 이 따로
+  알린다(평가 경고와 같은 `label_notation_changes`). `normalize_label` 은 `label_text` 에 공백 제거를 더한 것이라 숫자
+  표기 규칙은 한 곳에 있다.
 - **평가 프레임의 라벨 값**(`preprocessor._normalize_hard_labels`): 정답·예측 하드 라벨을 한 표기로 맞춘 뒤 지표를 낸다.
   둘 다 빈 값 없는 정수 값 숫자(int, 1.0 같은 정수 float)면 **int64** 로 두고, 그 밖은 `normalize_label` 문자열로 바꾼다
   (`unify_hard_label_columns`). 숫자 라벨까지 문자열로 바꾸면 sklearn 이 지표마다 문자열 배열을 정렬해 80만 행(10MB)
@@ -284,6 +285,7 @@ Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/
 - **불리언 라벨**(`preprocessor.align_boolean_labels`, 평가 전처리·검증이 같이 씀): `proba > 0.5` 를 그대로 저장한 True/False
   예측과 0/1 정답처럼 한쪽만 불리언이면 **예측이 정답 표기를 따른다** — 정답이 숫자(또는 표기가 0/1 뿐)면 예측을 1/0 으로,
   정답이 불리언이고 예측 표기가 0/1 뿐이면 예측을 True/False 로. 둘 다 불리언이면 `'True'`/`'False'` 그대로다.
+  불리언인지는 dtype 이 아니라 값으로 본다 — 빈 칸이 섞여 object 로 읽힌 True/False 컬럼도 불리언이다.
 
 ---
 

@@ -112,6 +112,20 @@ def _zero_one_only(series: pd.Series) -> bool:
     return {normalize_label(v) for v in series.dropna().unique()} <= {"0", "1"}
 
 
+def _boolean_labels(series: pd.Series) -> bool:
+    """빈 값을 뺀 값이 모두 불리언인가 — bool dtype 이거나, 빈 칸 때문에 object 로 읽힌 True/False/NaN 컬럼.
+
+    빈 칸이 하나라도 있으면 read_csv 가 object 로 읽고, 빈 행을 뺀 뒤에도 dtype 은 object 로 남는다.
+    """
+    if pd.api.types.is_bool_dtype(series):
+        return True
+    if series.dtype != object:
+        return False
+    values = series.dropna()
+    # 문자열 컬럼은 첫 값에서 멈춘다(all 은 단락 평가).
+    return len(values) > 0 and all(isinstance(v, (bool, np.bool_)) for v in values)
+
+
 def align_boolean_labels(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
     """불리언 하드 라벨을 다른 쪽 표기에 맞춘다 — `proba > 0.5` 를 그대로 저장한 True/False 예측과 0/1 정답.
 
@@ -120,6 +134,7 @@ def align_boolean_labels(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
     - 예측만 불리언이고 정답이 숫자형이거나 표기가 0/1 뿐 → 예측을 1/0 으로.
     - 정답만 불리언이고 예측 표기가 0/1 뿐 → 예측을 True/False 로. 정답 표기('True'·'False')는 화면 metadata 의
       클래스·양성과 같아야 하므로 정답 쪽을 바꾸지 않는다.
+    불리언 판정은 dtype 이 아니라 값으로 한다(_boolean_labels — 빈 칸이 섞여 object 로 읽힌 컬럼도).
     둘 다 불리언이면 'True'/'False' 그대로(보관본 표기). 그 밖의 조합('cat' 과 True)은 맞출 근거가 없어 그대로다.
     평가 전처리와 검증(validation_service)이 이 함수 하나를 쓴다 — 검증이 미리 센 클래스와 평가의 클래스가 같게.
     """
@@ -127,8 +142,10 @@ def align_boolean_labels(df: pd.DataFrame, mapping_dict: dict) -> pd.DataFrame:
     if not true_col or not pred_col:
         return df
     truth, pred = df[true_col], df[pred_col]
-    true_bool, pred_bool = pd.api.types.is_bool_dtype(truth), pd.api.types.is_bool_dtype(pred)
+    true_bool, pred_bool = _boolean_labels(truth), _boolean_labels(pred)
     if pred_bool and not true_bool and (pd.api.types.is_numeric_dtype(truth) or _zero_one_only(truth)):
+        if pred.isna().any():
+            return df.assign(**{pred_col: pred.map(lambda v: v if pd.isna(v) else int(v))})
         return df.assign(**{pred_col: pred.astype("int64")})
     if true_bool and not pred_bool and _zero_one_only(pred):
         return df.assign(**{pred_col: pred.map(lambda v: v if pd.isna(v) else normalize_label(v) == "1")})

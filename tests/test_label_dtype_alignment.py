@@ -79,6 +79,63 @@ def test_mixed_bool_multiclass_is_not_zero(make, labels):
     assert r["M21"]["labels"] == labels
 
 
+# 불리언 쪽에 빈 칸이 하나라도 있으면 read_csv 가 True/False/NaN 을 object 로 읽는다. 빈 행을 뺀 뒤에도 dtype 은
+# object 라 bool dtype 만 보면 맞추기를 건너뛰어 위 회귀가 그대로 남았다(라운드 C 재검토).
+def _int_truth_bool_pred_with_blank() -> pd.DataFrame:
+    csv = "label,pred,prob\n" + "".join(f"{t},{p},{s}\n" for t, p, s in ROWS) + "1,,0.5\n"
+    df = pd.read_csv(io.StringIO(csv))
+    assert df["pred"].dtype == object
+    return df
+
+
+def _bool_truth_with_blank_int_pred() -> pd.DataFrame:
+    csv = "label,pred\n" + "".join(f"{p},{t}\n" for t, p, _s in ROWS) + ",1\n"
+    df = pd.read_csv(io.StringIO(csv))
+    assert df["label"].dtype == object
+    return df
+
+
+def test_blank_in_bool_pred_binary_matches_old_engine():
+    # 기대값은 같은 CSV 를 b13e55c 의 engine.evaluate 에 넣어 얻은 값이다.
+    r = evaluate(_int_truth_bool_pred_with_blank(), _m(score=True), "binary", BIN)
+    assert "error" not in r, r.get("error")
+    assert (r["M1"], r["M2"], r["M3"]) == (0.75, 1.0, 0.5)
+    assert r["M21"]["labels"] == ["0", "1"]
+    assert r["M21"]["matrix"] == [[50, 0], [25, 25]]
+
+
+def test_blank_in_bool_pred_multiclass_is_not_zero():
+    r = evaluate(_int_truth_bool_pred_with_blank(), _m(), "multiclass", ["M1", "M21"])
+    assert r["M1"] == 0.75
+    assert r["M21"]["labels"] == ["0", "1"]
+
+
+def test_blank_in_bool_truth_follows_truth_notation():
+    # b13e55c 는 이 경우 지표마다 'unknown is not supported' 였다 — 빈 행을 뺀 나머지는 빈 칸 없는 경우와 같은
+    # 데이터이므로 기대값은 test_bool_truth_int_pred_keeps_truth_notation 과 같다.
+    for positive in (None, "True"):
+        r = evaluate(_bool_truth_with_blank_int_pred(), _m(), "binary", BIN, positive_class=positive)
+        assert "error" not in r, r.get("error")
+        assert (r["M1"], r["M2"], r["M3"]) == (0.75, 0.5, 1.0)
+        assert r["M21"]["labels"] == ["False", "True"]
+    r = evaluate(_bool_truth_with_blank_int_pred(), _m(), "multiclass", ["M1", "M21"])
+    assert r["M1"] == 0.75
+    assert r["M21"]["labels"] == ["False", "True"]
+
+
+def test_validation_agrees_with_evaluation_on_blank_bool_pred():
+    from app.evaluation.frame import build_evaluation_frame
+
+    mapping = {"y_true": "label", "y_pred": "pred"}
+    df, _excluded, _notes = build_evaluation_frame(
+        _int_truth_bool_pred_with_blank(), _m(score=True), "binary", ["M1"]
+    )
+    df = preprocessor.align_boolean_labels(df, mapping)
+    binary = {i.name: i for i in check_binary(df, mapping, {"score_positive": ["prob"]})}
+    assert binary["Binary class system error"].status == "pass", binary["Binary class system error"].result
+    assert check_class_mismatch(df, mapping)[0].status == "pass"
+
+
 def test_both_bool_keep_true_false_names():
     df = pd.DataFrame({"label": [True, False, True, False], "pred": [True, False, False, False]})
     r = evaluate(df, _m(), "binary", ["M1", "M21"])
