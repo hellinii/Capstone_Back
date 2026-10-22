@@ -300,6 +300,15 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
             notes.append("평가 엔진은 임계값 조정 여지가 크지 않다고 봤다. 결정 임계값을 위험으로 쓰지 않는다.")
     elif section_id == "8.1":
         pass
+    if section_id in ("7.1", "8.2", "8.3") and task_type in ("multiclass", "multilabel"):
+        macro = [m.display_name for m in fs.metrics if m.metric_id in fact_view.MACRO_METRICS]
+        if macro:
+            noun = "레이블" if task_type == "multilabel" else "클래스"
+            notes.append(
+                f"{', '.join(macro)} 값은 {noun}별 값의 매크로 평균(단순 평균)이다. {noun}마다 같은 무게라 약한 {noun}의 부진이 "
+                f"이 평균에 그대로 반영된다. '평균 지표에는 약한 {noun}의 부진이 드러나지 않을 수 있다'처럼 가중 평균·마이크로 "
+                "평균에만 맞는 설명을 이 지표에 쓰지 않는다. 평균 방식은 사실 시트 지표 표의 '평균 방식'에 맞게만 설명한다."
+            )
     if section_id in ("7.1", "8.3"):
         tied, trimmed = weakest_ties(fs)
         if tied:

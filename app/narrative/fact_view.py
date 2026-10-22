@@ -233,7 +233,24 @@ def _verdict(fs: FactSheet, derived: dict) -> dict:
     return out
 
 
-def _metrics(fs: FactSheet) -> list[dict]:
+# 지표의 평균 방식(엔진 app/evaluation/metrics — 세션 C 에서 확인): 이진의 Precision·Recall·F1·F-beta 는 양성 클래스 기준,
+# 다중·멀티레이블은 매크로 평균(average='macro'), 멀티레이블 Jaccard 는 표본 평균(average='samples'). 실호출(yeast 약한
+# 모델)이 매크로 F1 을 두고 '평균 지표에는 약한 레이블의 부진이 드러나지 않을 수 있다'(가중·마이크로에만 맞는 말)고 썼다.
+MACRO_METRICS = ("M2", "M3", "M4", "M5")
+
+
+def averaging_text(metric_id: str, task_type: str) -> str | None:
+    if metric_id in MACRO_METRICS:
+        if task_type == "binary":
+            return "양성 클래스 기준(평균 아님)"
+        noun = "레이블" if task_type == "multilabel" else "클래스"
+        return f"매크로 평균({noun}별 값의 단순 평균 — {noun}마다 같은 무게)"
+    if metric_id == "M17" and task_type == "multilabel":
+        return "표본 평균(표본마다 값을 구해 평균)"
+    return None
+
+
+def _metrics(fs: FactSheet, task_type: str = "") -> list[dict]:
     rows = []
     for m in fs.metrics:
         if m.metric_id in TABLE_METRICS:
@@ -248,6 +265,7 @@ def _metrics(fs: FactSheet) -> list[dict]:
             "핵심 지표": "예" if m.is_core else "아니오",
             "좋은 방향": None if m.higher_is_better is None else ("높을수록 좋음" if m.higher_is_better else "낮을수록 좋음"),
             "β": m.beta,
+            "평균 방식": averaging_text(m.metric_id, task_type),
         }
         if m.margin is not None:
             row["목표와의 차이(0 이상이면 충족 쪽)"] = m.margin_text if m.margin_text else m.margin
@@ -557,7 +575,7 @@ def build_fact_view(
     view = {
         "평가 개요": _overview(fs, task_label, report_purpose),
         "판정": _verdict(fs, derived),
-        "지표": _metrics(fs),
+        "지표": _metrics(fs, task_type),
         "혼동행렬": _confusion(fs, derived, task_type),
         "클래스별 성능": _per_class(fs),
         "분포·불균형": _distribution(fs, derived, task_type),

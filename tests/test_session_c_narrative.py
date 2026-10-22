@@ -510,3 +510,37 @@ def test_tied_weakest_labels_in_multilabel_use_label_josa_and_view():
     assert ctx.view["서술용 파생값"]["F1 이 가장 낮은 레이블"]["F1 이 같은 레이블"] == ["sports", "finance"]
     risk = next(c for c in conclusions if c.item_id == "8.3-01")
     assert risk.template_text == "F1 이 가장 낮은 레이블은 F1 0.4322로 같은 두 레이블(sports, finance)이다."
+
+
+# ── 4e. 매크로 평균 — 평균 방식에 맞게만 설명한다 ─────────────────────────────────────
+
+
+def test_metric_rows_carry_the_averaging_method():
+    # 엔진(app/evaluation/metrics/common.py): 이진은 양성 클래스 기준, 다중·멀티레이블의 Precision·Recall·F1·F-beta 는 매크로 평균.
+    for task, noun in (("multiclass", "클래스"), ("multilabel", "레이블")):
+        _, _, _, _, ctx, _, _ = generator._prepare(NarrativeRequest.model_validate(_raw(task)))
+        f1 = next(r for r in ctx.view["지표"] if r["지표"] == "F1 Score")
+        assert f1["평균 방식"] == f"매크로 평균({noun}별 값의 단순 평균 — {noun}마다 같은 무게)"
+    _, _, _, _, ctx, _, _ = generator._prepare(NarrativeRequest.model_validate(_raw("multilabel")))
+    jac = next(r for r in ctx.view["지표"] if r["지표"] == "Jaccard Index")
+    assert jac["평균 방식"] == "표본 평균(표본마다 값을 구해 평균)"
+    hamming = next(r for r in ctx.view["지표"] if r["지표"] == "Hamming Loss")
+    assert "평균 방식" not in hamming
+    _, _, _, _, ctx, _, _ = generator._prepare(NarrativeRequest.model_validate(_raw("binary")))
+    f1 = next(r for r in ctx.view["지표"] if r["지표"] == "F1 Score")
+    assert f1["평균 방식"] == "양성 클래스 기준(평균 아님)"
+
+
+MACRO_NOTE = ("F1 Score 값은 레이블별 값의 매크로 평균(단순 평균)이다. 레이블마다 같은 무게라 약한 레이블의 부진이 이 평균에 그대로 "
+              "반영된다. '평균 지표에는 약한 레이블의 부진이 드러나지 않을 수 있다'처럼 가중 평균·마이크로 평균에만 맞는 설명을 "
+              "이 지표에 쓰지 않는다. 평균 방식은 사실 시트 지표 표의 '평균 방식'에 맞게만 설명한다.")
+
+
+def test_macro_note_in_sections_that_interpret_weak_classes():
+    _, _, _, _, ctx, _, _ = generator._prepare(NarrativeRequest.model_validate(_raw("multilabel")))
+    for sid in ("7.1", "8.2", "8.3"):
+        assert MACRO_NOTE in ctx.briefs[sid].notes, sid
+    _, _, _, _, ctx, _, _ = generator._prepare(NarrativeRequest.model_validate(_raw("multiclass")))
+    assert any(n.startswith("Precision, Recall, F1 Score 값은 클래스별 값의 매크로 평균(단순 평균)이다.") for n in ctx.briefs["8.3"].notes)
+    _, _, _, _, ctx, _, _ = generator._prepare(NarrativeRequest.model_validate(_raw("binary")))
+    assert not any("매크로 평균(단순 평균)" in n for sid in ("7.1", "8.2", "8.3") for n in ctx.briefs[sid].notes)
