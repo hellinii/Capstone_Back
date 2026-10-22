@@ -433,7 +433,9 @@ def test_error_nature_material_and_interpretation(boundary, confident, material,
     req = NarrativeRequest.model_validate(raw)
     item = next(c for c in select_items(req.fact_sheet, None, "binary") if c.item_id == "7.1-11")
     assert material in item.text and sentence in item.template_text
-    assert not re.search(r"\d", item.template_text) and not re.search(r"\d", item.text)
+    # 재료의 숫자는 '근거 건수' 한 문장에만 있다(세션 C — 문장에 쓰지 말라는 말과 함께). 그 밖에는 숫자가 없다.
+    outside = re.sub(r"근거 건수\([^)]*\): [^.]*\.", "", item.text)
+    assert not re.search(r"\d", item.template_text) and not re.search(r"\d", outside)
 
 
 def test_error_nature_without_any_misclassification_has_no_interpretation():

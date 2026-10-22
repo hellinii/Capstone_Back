@@ -336,24 +336,93 @@ def _weakest(ctx: Ctx) -> str | None:
     return text
 
 
-# 오류의 성격(D30) — 고정 문구 17 이 숫자를 찍는다. 해석 재료는 '우세한 오류'(경계 오류와 확신 오류 중 많은 쪽).
+# 오류의 성격(D30) — 고정 문구 17 이 숫자를 찍는다. 해석 재료는 '우세한 오류'(경계 오류와 확신 오류 중 많은 쪽)와
+# 근거 건수, 그리고 일반화 제한이다. 세션 C 실호출에서 오분류 3건 중 경계 1건을 '오류의 상당 부분', 49건 중 확신 1건을
+# '확률이 높은 예측 전반을 믿을 수 없다'로 일반화했다(사용자 결정 2026-10-22 — 재료·지시문으로 막는다).
+
+# 오분류가 이보다 적으면 오류 '성격'을 일반화하지 않는다(경계·확신 오류가 과반이어도).
+ERROR_NATURE_MIN_COUNT = 10
+
+
+def _never_overlap(er) -> bool:
+    """경계 오류와 확신 오류가 한 사례에 겹칠 수 없는가. 다중(최댓값 선택 — 임계값 없음)은 틀린 쪽 확률이 확신 기준 이상이면
+    정답 확률과의 차가 2×기준−1 이상이라 경계가 아니다. 이진·멀티레이블은 임계값 t 가 [1−기준+거리, 기준−거리] 안일 때만
+    (t=0.85 면 0.9 이상 확률이 경계 0.75~0.95 에도 든다 — 엔진 metrics/misclassification)."""
+    margin, level = er.boundary_margin, er.confident_level
+    if er.threshold is None:
+        return 2 * level - 1 >= margin
+    values = er.threshold.values() if isinstance(er.threshold, dict) else (er.threshold,)
+    return all(1 - level + margin <= float(t) <= level - margin for t in values)
+
+
+def error_breakdown(er) -> tuple[int, int, int | None] | None:
+    """(경계 오류, 확신 오류, 둘 다 아닌 오류) 건수. 둘 다 아닌 건수는 두 오류가 겹칠 수 없을 때만(아니면 None) —
+    확률이 있는 오분류 − 경계 − 확신. 경계 오류를 계산하지 않았거나 오분류가 없으면 None. 생성기는 이 수를 허용 목록에 넣는다
+    (지시문에 보이는 숫자다 — 문장에 쓰지 말라고 하지만 옮겨 적어도 사실이다)."""
+    if er is None or er.boundary is None or er.misclassified == 0:
+        return None
+    b, c = er.boundary.count, er.confident.count
+    neither = er.misclassified - b - c if _never_overlap(er) and b + c <= er.misclassified else None
+    return b, c, neither
+
+
+def _confident_minority(er) -> str:
+    c = er.confident.count
+    if c and c * 2 < er.misclassified:
+        return (
+            " 확신 오류는 오분류 가운데 소수다. 확률이 높은 예측 전반을 믿을 수 없다고 일반화하지 말고, 그 사례의 입력과 "
+            "정답 라벨을 점검할 필요가 있다는 수준으로만 쓴다."
+        )
+    return ""
 
 
 def _error_nature(ctx: Ctx) -> str | None:
-    """AI 에게 주는 해석 재료(숫자 없음 — 숫자는 17 이 찍는다)."""
+    """AI 에게 주는 해석 재료. 숫자는 근거 건수 한 문장에만 — 성적서가 17 로 찍는 숫자라 문장에 쓰지 말라고 적는다."""
     er = ctx.fs.error_ratios
     if er is None:
         return None
     if er.misclassified == 0:
         return "확률이 있는 오분류가 없어 경계 오류·확신 오류를 산출하지 않았다."
     if er.boundary is None:
-        return "경계 오류는 계산하지 않았다. " + ("확신 오류가 있다." if er.confident.count else "확신 오류는 없다.")
-    b, c = er.boundary.count, er.confident.count
+        head = "경계 오류는 계산하지 않았다. " + ("확신 오류가 있다." if er.confident.count else "확신 오류는 없다.")
+        return head + _confident_minority(er)
+    b, c, neither = error_breakdown(er)
+    m = er.misclassified
+    if b == 0 and c == 0:
+        return "경계 오류와 확신 오류가 모두 없다."
     if b > c:
-        return "경계 오류가 확신 오류보다 많다(우세한 오류는 경계 오류)."
-    if c > b:
-        return "확신 오류가 경계 오류보다 많다(우세한 오류는 확신 오류)."
-    return "경계 오류와 확신 오류가 같은 수다(우세한 오류 없음)." if b else "경계 오류와 확신 오류가 모두 없다."
+        relation, dominant = "경계 오류가 확신 오류보다 많다", "경계 오류"
+    elif c > b:
+        relation, dominant = "확신 오류가 경계 오류보다 많다", "확신 오류"
+    else:
+        relation, dominant = "경계 오류와 확신 오류가 같은 수다", None
+    # 두 오류가 겹칠 수 있으면 합이 부풀 수 있다 — 큰 쪽만으로 과반을 본다(과반이라고 잘못 말하지 않게).
+    majority = (b + c if neither is not None else max(b, c)) * 2 > m
+    few = m < ERROR_NATURE_MIN_COUNT
+    reasons = []
+    if few:
+        reasons.append("오분류 건수가 적")
+    if not majority:
+        reasons.append("경계 오류와 확신 오류를 합쳐도 오분류의 절반에 이르지 않")
+    guarded = bool(reasons) and dominant is not None
+    if dominant is None:
+        text = f"{relation}(우세한 오류 없음)."
+    elif guarded:
+        text = f"{relation}."
+    else:
+        text = f"{relation}(우세한 오류는 {dominant})."
+    cell = "칸" if er.unit == "label_cell" else "건"
+    note = "해석의 근거로만 보고 문장에 쓰지 않는다" if ctx.prints("17") else "둘 다 아닌 오류의 건수는 사실 시트에 없는 값이라 문장에 쓰지 않는다"
+    counts = f"경계 오류 {b}{cell}, 확신 오류 {c}{cell}"
+    if neither is not None:
+        counts += f", 둘 다 아닌 오류 {neither}{cell}"
+    text += f" 근거 건수({note}): 확률이 있는 오분류 {m}{cell} 가운데 {counts}."
+    if guarded:
+        text += (
+            f" {'고 '.join(reasons)}{'어' if reasons[-1].endswith('적') else '아'} 오류 전체의 성격으로 일반화하지 않는다. '상당 부분'·'대부분'·'우세한 성격'·'~가 중심' "
+            f"같은 말 없이 '{relation}' 수준으로만 쓴다."
+        )
+    return text + _confident_minority(er)
 
 
 def _error_interpretation(er) -> str | None:

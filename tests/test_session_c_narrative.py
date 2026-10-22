@@ -213,3 +213,99 @@ def test_all_equal_declaration_is_named_in_the_imbalance_note():
 
 def test_imbalance_label_in_fact_view_is_observation_wording():
     assert fact_view.IMBALANCE_KO["affected"].startswith("불균형에 따른 성능 지표 왜곡이 관찰됨")
+
+
+# ── 4a. 오류 성격 — 건수가 적거나 두 오류가 소수면 일반화하지 않는다 ───────────────────────
+
+import re  # noqa: E402
+
+from app.narrative.grounding import build_number_whitelist  # noqa: E402
+from app.narrative.required_items import ERROR_NATURE_MIN_COUNT, error_breakdown  # noqa: E402
+from app.narrative.schemas import ErrorRatiosFact  # noqa: E402
+
+GENERALIZE_BAN = "'상당 부분'·'대부분'·'우세한 성격'·'~가 중심' 같은 말 없이"
+
+
+def _er(m, b, c, *, threshold=0.5, unit="sample"):
+    return ErrorRatiosFact(
+        unit=unit, misclassified=m,
+        boundary=None if b is None else {"count": b, "ratio": round(b / m, 4) if m else None},
+        boundary_note="threshold_unknown" if b is None else None,
+        confident={"count": c, "ratio": round(c / m, 4) if m else None},
+        threshold=threshold,
+    )
+
+
+def _nature(er: ErrorRatiosFact, task="binary", *, printed=True):
+    raw = _raw(task)
+    raw["fact_sheet"]["error_ratios"] = json.loads(er.model_dump_json())
+    if not printed:
+        raw["fact_sheet"].pop("facts", None)
+    req = NarrativeRequest.model_validate(raw)
+    return next(c for c in select_items(req.fact_sheet, None, task) if c.item_id == "7.1-11")
+
+
+def test_error_breakdown_counts_neither_only_when_the_two_kinds_cannot_overlap():
+    assert error_breakdown(_er(3, 1, 0)) == (1, 0, 2)                         # 이진 임계값 0.5 — 겹칠 수 없다
+    assert error_breakdown(_er(6, 2, 0, threshold=None)) == (2, 0, 4)          # 다중(최댓값 선택) — 겹칠 수 없다
+    assert error_breakdown(_er(10, 3, 4, threshold=0.85)) == (3, 4, None)      # 임계값 0.85 — 0.9 이상 확률이 경계 안에도 든다
+    assert error_breakdown(_er(10, 3, 4, threshold=0.15)) == (3, 4, None)
+    assert error_breakdown(_er(10, 3, 4, threshold={"a": 0.5, "b": 0.85})) == (3, 4, None)
+    assert error_breakdown(_er(10, 3, 4, threshold=0.8)) == (3, 4, 3)          # 경계 끝 0.9 는 '미만'이라 겹치지 않는다
+    assert error_breakdown(_er(49, None, 1)) is None
+    assert error_breakdown(_er(0, 0, 0)) is None
+
+
+def test_few_boundary_errors_are_not_generalized():
+    # 실측 bc_strong: 오분류 3건 중 경계 1건·확신 0건 — '오류의 상당 부분은 경계 근처'라고 썼다.
+    item = _nature(_er(3, 1, 0))
+    assert item.text.startswith("경계 오류가 확신 오류보다 많다.")
+    assert "우세한 오류는" not in item.text
+    assert "근거 건수(해석의 근거로만 보고 문장에 쓰지 않는다): 확률이 있는 오분류 3건 가운데 경계 오류 1건, 확신 오류 0건, 둘 다 아닌 오류 2건." in item.text
+    assert "오분류 건수가 적고 경계 오류와 확신 오류를 합쳐도 오분류의 절반에 이르지 않아" in item.text
+    assert GENERALIZE_BAN in item.text and "'경계 오류가 확신 오류보다 많다' 수준으로만 쓴다" in item.text
+    # 규칙 템플릿(성적서가 17 을 찍음)은 숫자 없이 그대로 — 정도의 주장이 없다.
+    assert item.template_text.startswith("확률이 있는 오분류 가운데 경계 오류가 확신 오류보다 많다.")
+    assert not re.search(r"\d", item.template_text)
+
+
+def test_minority_without_few_count_and_few_count_without_minority():
+    # 오분류는 충분하지만 두 오류가 소수(digits 모양을 크게): 반 미만이라는 사유만.
+    item = _nature(_er(40, 12, 3, threshold=None), "multiclass")
+    assert "경계 오류와 확신 오류를 합쳐도 오분류의 절반에 이르지 않아" in item.text and "건수가 적" not in item.text
+    assert "둘 다 아닌 오류 25건" in item.text
+    # 과반이지만 건수가 적다(기준 바로 아래).
+    item = _nature(_er(ERROR_NATURE_MIN_COUNT - 1, 7, 0))
+    assert "오분류 건수가 적어" in item.text and "절반" not in item.text and GENERALIZE_BAN in item.text
+    # 기준과 같으면(과반·충분) 일반화를 막지 않고 우세한 오류를 말한다.
+    item = _nature(_er(ERROR_NATURE_MIN_COUNT, 7, 0))
+    assert GENERALIZE_BAN not in item.text and "(우세한 오류는 경계 오류)" in item.text
+    # 두 오류가 겹칠 수 있으면 둘 다 아닌 건수를 싣지 않고, 큰 쪽만으로 과반을 본다.
+    item = _nature(_er(20, 6, 7, threshold=0.85))
+    assert "둘 다 아닌" not in item.text and "절반에 이르지 않아" in item.text
+
+
+def test_a_few_confident_errors_are_not_generalized():
+    # 실측 bc_weak: 확신 오류 49건 중 1건 — '확률이 높은 예측 전반을 믿을 수 없다'고 썼다.
+    item = _nature(_er(49, None, 1))
+    assert "확신 오류는 오분류 가운데 소수다. 확률이 높은 예측 전반을 믿을 수 없다고 일반화하지 말고" in item.text
+    item = _nature(_er(40, 2, 1))
+    assert "확신 오류는 오분류 가운데 소수다." in item.text
+    item = _nature(_er(40, 3, 30))
+    assert "소수다" not in item.text
+
+
+def test_neither_count_is_allowed_and_told_not_to_be_written():
+    raw = _raw("multiclass")  # 계약 예시: 오분류 133건, 경계 27건, 확신 2건 → 둘 다 아닌 104건
+    req = NarrativeRequest.model_validate(raw)
+    _, _, whitelist, _, ctx, _, _ = generator._prepare(req)
+    assert "104" in whitelist
+    assert "104" not in build_number_whitelist(req.fact_sheet, [], {})  # 원래 목록에는 없다 — 생성기가 넣는다
+    msg = prompt.build_user_message(ctx, ("7.1", "7.2", "7.3"))
+    assert "둘 다 아닌 오류 104건" in msg
+    assert "해석 재료의 건수도 문장에 쓰지 않는다" in msg
+
+
+def test_old_requests_are_told_not_to_write_the_neither_count():
+    item = _nature(_er(3, 1, 0), printed=False)
+    assert "근거 건수(둘 다 아닌 오류의 건수는 사실 시트에 없는 값이라 문장에 쓰지 않는다)" in item.text
