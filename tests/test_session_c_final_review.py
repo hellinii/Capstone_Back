@@ -97,6 +97,42 @@ def test_benchmark_rule_sentence_passes_its_own_check_with_extended_digits():
     assert result.passed, result
 
 
+# 판정 대상 지표의 목표 판정이 실제 경로(FactSheet → _target_of → benchmark_value_text → 규칙 문장·사실 시트 보기·허용 목록)로
+# 8.1 표기에 닿는지(재검토 P2 — 대조 표는 range_value_text 에 target 을 직접 넣어, 연결부가 빠져도 잡지 못했다).
+# (값, 목표, margin, 6.1 표기, 기대 8.1 표기, 목표 연결이 없을 때 나올 표기)
+TARGET_PATH_CASES = [
+    # 잡음만큼 목표 아래지만 프론트가 충족(margin 0)으로 정함 — 위치(아래)와 목표(충족)를 둘 다 맞추는 표기가 없어 목표 우선.
+    (0.84999999999, 0.85, 0.0, "0.850", "0.850", "0.849999"),
+    # margin 이 없는 옛 요청 — meets_target 의 10자리 반올림으로 충족을 정한다(반올림이 없으면 미달로 보고 '0.849999').
+    (0.84999999999, 0.85, None, "0.850", "0.850", "0.849999"),
+    # 목표 미달(margin 음수) — 6.1 표기 '0.920' 은 범위 안으로 읽혀 늘린다. 미달을 충족으로 잘못 넘기면 맞는 표기가 없어 '0.920'.
+    (0.92004, 0.95, -0.02996, "0.920", "0.92004", "0.92004"),
+]
+
+
+@pytest.mark.parametrize("value, threshold, margin, value_text, expected, _untargeted", TARGET_PATH_CASES)
+def test_benchmark_value_uses_target_judgment_through_fact_sheet(value, threshold, margin, value_text, expected, _untargeted):
+    from app.narrative import fact_view
+    fs = FactSheet(verdict="PASS", score=100.0, metrics=[
+        MetricFact(metric_id="M1", display_name="Accuracy", value=value, threshold=threshold,
+                   status="pass" if margin is None or margin >= 0 else "fail", value_text=value_text,
+                   margin=margin, higher_is_better=True),
+    ])
+    refs = build_benchmark_refs("binary", fs.metrics)
+    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs) if c.item_id == "8.1-01")
+    assert f"Accuracy({expected}, 참조 범위 0.85~0.92)" in text, text
+    view = fact_view._benchmarks(refs, fs)
+    assert [r["모델 값"] for r in view["지표별"] if r["지표"] == "Accuracy"] == [expected]
+    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary")))
+    assert result.passed, result
+
+
+def test_target_path_cases_differ_without_target():
+    # 위 사례들이 목표 연결을 실제로 시험하는지 — 목표 없이 고르면 처음 두 행은 다른 표기가 나온다.
+    for value, _t, _m, value_text, expected, untargeted in TARGET_PATH_CASES[:2]:
+        assert range_value_text(value, 0.85, 0.92, value_text) == untargeted != expected
+
+
 # ── 3. 7.2 소수 클래스 크기 — 작음 / 작지 않음 / 모름 ─────────────────────────────────────────
 
 
