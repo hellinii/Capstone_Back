@@ -27,6 +27,7 @@ from typing import Any
 
 from app.narrative.wording import VERDICT_LABEL as VERDICT_KO  # 성적서 8.2 판정 상자와 같은 이름 한 벌
 from app.narrative.required_items import _CAUSE as CAUSE_KO
+from app.narrative.required_items import benchmark_value_text, weakest_ties
 from app.narrative.schemas import FactSheet
 
 # 성적서 용도 이름(프론트 reportConstants.REPORT_PURPOSE_LABEL) — facts.report_purpose_label 이 없는 옛 요청에만 쓴다.
@@ -34,7 +35,7 @@ REPORT_PURPOSE_KO = {"internal": "내부 검증", "external": "외부 제출", "
 STATUS_KO = {"pass": "충족", "fail": "미달", "warning": "경고", "info": "목표값 없음(참고)"}
 PRIORITY_KO = {"HIGH": "높음", "MEDIUM": "중간", "LOW": "낮음"}
 IMBALANCE_KO = {
-    "affected": "불균형 영향 있음(불균형 비율 1.5 이상이고 차이가 0.1 이상)",
+    "affected": "불균형에 따른 성능 지표 왜곡이 관찰됨(불균형 비율 1.5 이상이고 차이가 0.1 이상)",
     "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않음(불균형 비율 1.5 이상, 차이는 0.1 미만)",
     "mild": "불균형이 경미함(불균형 비율 1.5 미만)",
 }
@@ -232,7 +233,24 @@ def _verdict(fs: FactSheet, derived: dict) -> dict:
     return out
 
 
-def _metrics(fs: FactSheet) -> list[dict]:
+# 지표의 평균 방식(엔진 app/evaluation/metrics — 세션 C 에서 확인): 이진의 Precision·Recall·F1·F-beta 는 양성 클래스 기준,
+# 다중·멀티레이블은 매크로 평균(average='macro'), 멀티레이블 Jaccard 는 표본 평균(average='samples'). 실호출(yeast 약한
+# 모델)이 매크로 F1 을 두고 '평균 지표에는 약한 레이블의 부진이 드러나지 않을 수 있다'(가중·마이크로에만 맞는 말)고 썼다.
+MACRO_METRICS = ("M2", "M3", "M4", "M5")
+
+
+def averaging_text(metric_id: str, task_type: str) -> str | None:
+    if metric_id in MACRO_METRICS:
+        if task_type == "binary":
+            return "양성 클래스 기준(평균 아님)"
+        noun = "레이블" if task_type == "multilabel" else "클래스"
+        return f"매크로 평균({noun}별 값의 단순 평균 — {noun}마다 같은 무게)"
+    if metric_id == "M17" and task_type == "multilabel":
+        return "표본 평균(표본마다 값을 구해 평균)"
+    return None
+
+
+def _metrics(fs: FactSheet, task_type: str = "") -> list[dict]:
     rows = []
     for m in fs.metrics:
         if m.metric_id in TABLE_METRICS:
@@ -247,6 +265,7 @@ def _metrics(fs: FactSheet) -> list[dict]:
             "핵심 지표": "예" if m.is_core else "아니오",
             "좋은 방향": None if m.higher_is_better is None else ("높을수록 좋음" if m.higher_is_better else "낮을수록 좋음"),
             "β": m.beta,
+            "평균 방식": averaging_text(m.metric_id, task_type),
         }
         if m.margin is not None:
             row["목표와의 차이(0 이상이면 충족 쪽)"] = m.margin_text if m.margin_text else m.margin
@@ -361,6 +380,7 @@ def _threshold_gain(fs: FactSheet, derived: dict) -> dict | None:
         "향상폭(이 데이터에서 오를 수 있는 최대폭)": g.gain_text or g.gain,
         "최대 F1 의 결정 임계값": g.best_threshold,
         "평가 엔진 판단": "현재 임계값이 부적합(향상폭 0.1 이상)" if derived.get("threshold_tuning") else "조정 여지가 크지 않음(향상폭 0.1 미만)",
+        "판단 기준": "F1 만 본 판단(Recall·Precision 등 다른 지표에 대한 판단이 아님)",
     }
 
 
@@ -395,6 +415,8 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
             "매크로 F1 과의 차이": w.gap_text,
             "표본이 작음(30건 미만 또는 5% 미만)": _yes(w.low_support),
             "매크로 F1 보다 0.1 이상 낮음": _yes(w.far_below_macro),
+            # F1 이 같은 최하위 클래스(세션 C — 하나만 단독 최약처럼 쓰지 않게). 표가 잘렸으면 실린 클래스 가운데.
+            f"F1 이 같은 {noun}": weakest_ties(fs)[0] or None,
         }
     if facts.low_support_classes:
         out[f"표본이 작은 {noun}"] = [
@@ -478,7 +500,7 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
     return out
 
 
-def _benchmarks(benchmark_refs: list[dict]) -> dict | None:
+def _benchmarks(benchmark_refs: list[dict], fs: FactSheet) -> dict | None:
     if not benchmark_refs:
         return None
     return {
@@ -486,7 +508,8 @@ def _benchmarks(benchmark_refs: list[dict]) -> dict | None:
         "지표별": [
             {
                 "지표": r["metric"],
-                "모델 값": r["model_value"],
+                # 참조 범위 위치 판정과 같은 쪽으로 읽히는 표기(세션 C — 넷째 자리 0.8 이 '미흡'과 함께 가지 않게).
+                "모델 값": benchmark_value_text(fs.metrics, r),
                 "참조 범위": f"{r['ref_low']:g}~{r['ref_high']:g}",
                 "좋은 방향": "높을수록 좋음" if r.get("direction") == "higher" else "낮을수록 좋음",
                 "평가(방향 반영)": QUALITY_KO.get(r.get("quality"), r.get("quality")),
@@ -553,7 +576,7 @@ def build_fact_view(
     view = {
         "평가 개요": _overview(fs, task_label, report_purpose),
         "판정": _verdict(fs, derived),
-        "지표": _metrics(fs),
+        "지표": _metrics(fs, task_type),
         "혼동행렬": _confusion(fs, derived, task_type),
         "클래스별 성능": _per_class(fs),
         "분포·불균형": _distribution(fs, derived, task_type),
@@ -563,7 +586,7 @@ def build_fact_view(
         "지연시간": _latency(fs),
         "신뢰구간 방식": name_metric_ids(fs.ci_method_note, metric_names(fs), class_names(fs)) if fs.ci_method_note else None,
         "서술용 파생값": _facts(fs, task_type),
-        "벤치마크(내부 참조 기준)": _benchmarks(benchmark_refs),
+        "벤치마크(내부 참조 기준)": _benchmarks(benchmark_refs, fs),
         "문제 목록": _problems(fs),
         "덜어 낸 표(일부만 실림)": omitted_counts(fs),
     }

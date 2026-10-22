@@ -25,10 +25,10 @@ import json
 from dataclasses import dataclass, field
 
 from app.narrative import fact_view
-from app.narrative.required_items import Conclusion, code_prints
+from app.narrative.required_items import Conclusion, code_prints, weakest_ties
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTIONS_BY_ID
-from app.narrative.wording import class_descriptions
+from app.narrative.wording import class_descriptions, with_josa
 
 # 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예"). 한국어 이름은 이 셋으로 통일한다(W9,
 # 2026-10-18 사용자 결정) — 프론트 성적서의 TASK_TYPE_LABELS 와 같은 글자다. 이미 발급된 성적서는 저장된
@@ -55,7 +55,7 @@ SYSTEM_PROMPT = """너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 �
 7. 판정 불가이면 합격이나 불합격으로 단정하지 않고 모든 지표가 충족했다고도 쓰지 않는다. 조건부 합격이나 최종 불합격이면 모든 지표가 충족했다고 쓰지 않는다. 최종 합격이면 미달한 지표가 있다고 쓰지 않는다.
 
 [작성 규칙]
-8. 클래스는 이름과 의뢰자가 준 설명을 함께 쓴다(예: 1(불량)). 설명이 없으면 이름만 쓴다.
+8. 클래스는 이름과 의뢰자가 준 설명을 함께 쓴다(예: 1(불량)). 설명이 없으면 이름만 쓴다. 영문·숫자 이름 뒤 조사는 그 이름을 읽는 소리의 끝소리에 맞춘다. 영문 이름은 영어 발음의 끝소리로 고른다(benign과, cat과, dog와, P3이).
 9. 영어 코드값과 필드명(예: macro_f1, low_support, best_threshold)을 문장에 쓰지 않는다. 지표명(Accuracy, F1 Score 등)과 클래스 이름은 쓸 수 있다. '사실 시트'·'결론 목록'·'평가 엔진'·'고정 문구' 같은 작업용 말도 문장에 쓰지 않는다.
 10. 서술체의 완결된 문장으로 쓴다. 글머리표·번호 목록·명사로 끝나는 줄 같은 개조식으로 끊지 않는다.
 11. 과장 없이 객관적이고 간결한 시험성적서 문체로 쓴다.
@@ -83,7 +83,7 @@ SYSTEM_PROMPT = """너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 �
 # 칸마다 하는 일(user 메시지 '칸별 지시'의 첫 줄).
 SECTION_TASKS: dict[str, str] = {
     "7.1": "오분류가 얼마나, 어느 방향으로 일어났는지와 어느 클래스가 약한지, 예측이 어느 쪽으로 치우쳤는지를 해석한다.",
-    "7.2": "평가 데이터의 클래스 분포와 불균형, 불균형이 성능 수치에 준 영향, 학습 데이터와의 분포 차이를 해석한다.",
+    "7.2": "평가 데이터의 클래스 분포와 불균형, 불균형에 따른 성능 지표 왜곡이 관찰되었는지, 학습 데이터와의 분포 차이를 해석한다.",
     "7.3": (
         "결론 목록 밖에서 사실 시트로 찾은 특이사항만 쓴다. 사실 시트의 숫자를 하나 이상 인용한다. "
         "결론 목록·다른 칸의 내용을 되풀이하지 않고, 측정하지 않은 항목(지연시간 등)이나 권고를 쓰지 않으며, "
@@ -170,18 +170,27 @@ _FIXED_SENTENCE_FOR_ITEM = {
 _INTERPRET_ONLY = {
     "7.1-11": (
         "오분류의 성격(경계 오류·확신 오류 비율)은 성적서가 {where} 찍는다. 그 숫자를 되풀이하지 말고, 결정 경계 근처의 "
-        "오류와 높은 확신으로 틀린 오류가 각각 무엇을 뜻하는지만 해석한다."
+        "오류와 높은 확신으로 틀린 오류가 각각 무엇을 뜻하는지만 해석한다. 해석 재료의 건수도 문장에 쓰지 않는다. "
+        "재료가 일반화하지 말라고 하면 어느 오류가 더 많은지만 쓰고 오류 전체의 성격이라고 넓히지 않는다."
     ),
     "8.3-02": (
-        "목표값과의 차이가 목표값의 3% 미만인 지표는 성적서가 {where} 찍는다. 그 숫자를 되풀이하지 말고, 표본이 달라지면 "
-        "판정이 뒤집힐 수 있다는 위험만 해석한다. 충족한 지표를 미달했다고 쓰지 않는다."
+        "목표값과의 차이가 목표값의 3% 미만인 지표는 성적서가 {where} 찍는다. 그 숫자를 되풀이하지 말고, 판정의 여유가 작다는 "
+        "위험만 해석한다. 표본이 달라지면 판정이 뒤집힐 수 있다는 말은 신뢰구간이 목표값을 포함하는 지표나 구간이 없는 지표에만 "
+        "쓰고, 포함하지 않는 지표는 목표와의 여유가 작다는 사실만 쓴다. 충족한 지표를 미달했다고 쓰지 않는다."
     ),
 }
 
 # 고정 문장(17·18)을 받지 못했을 때 — 성적서가 따로 찍지 않으므로 AI 가 그 사실을 쓴다.
 _WRITE_IT_YOURSELF = {
-    "7.1-11": "오분류의 성격(경계 오류·확신 오류)을 사실 시트의 '오분류의 성격' 값 그대로 쓰고, 각 오류가 무엇을 뜻하는지 해석한다.",
-    "8.3-02": "사실 시트에서 '근소 차이(목표값의 3% 미만)'가 '예'인 지표를 값·목표값과 함께 쓰고, 표본이 달라지면 판정이 뒤집힐 수 있는 위험을 해석한다.",
+    "7.1-11": (
+        "오분류의 성격(경계 오류·확신 오류)을 사실 시트의 '오분류의 성격' 값 그대로 쓰고, 각 오류가 무엇을 뜻하는지 해석한다. "
+        "재료가 일반화하지 말라고 하면 어느 오류가 더 많은지만 쓰고 오류 전체의 성격이라고 넓히지 않는다."
+    ),
+    "8.3-02": (
+        "사실 시트에서 '근소 차이(목표값의 3% 미만)'가 '예'인 지표를 값·목표값과 함께 쓰고, 판정의 여유가 작다는 위험을 해석한다. "
+        "표본이 달라지면 판정이 뒤집힐 수 있다는 말은 신뢰구간이 목표값을 포함하는 지표나 구간이 없는 지표에만 쓰고, 포함하지 "
+        "않는 지표는 목표와의 여유가 작다는 사실만 쓴다."
+    ),
 }
 
 _PRINTED_ELSEWHERE = {
@@ -215,6 +224,15 @@ class SectionBrief:
     notes: list[str] = field(default_factory=list)
 
 
+# 임계값 조정 여지(D40)는 F1 만 본 판단이다 — 세션 C 실호출(bc_strong)에서 '조정 여지가 크지 않다'를 근거로 Recall 여유 문제에
+# 임계값이 소용없다고 썼다(임계값을 낮추면 Recall 은 오를 수 있다). 그 값을 말할 수 있는 칸마다 붙인다.
+_THRESHOLD_GAIN_SECTIONS = ("7.3", "8.2", "8.3", "9")
+_F1_ONLY_GAIN = (
+    "임계값 조정 여지는 F1 을 가장 높이는 결정 임계값에서 F1 이 얼마나 오르는지만 본 판단이다. "
+    "Recall·Precision 같은 다른 지표의 문제에 임계값 조정이 소용없다거나 임계값으로 해소할 수 없다고 적용하지 않는다."
+)
+
+
 def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str) -> list[str]:
     """사실에 따라 붙는 유의점(옛 지시문 규칙 10~15 를 필드명 없이 한국어로)."""
     notes: list[str] = []
@@ -235,11 +253,26 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
     elif section_id == "7.2":
         ie = fs.imbalance_effect
         if ie is not None:
+            noun = "레이블" if task_type == "multilabel" else "클래스"
+            topic = "레이블은" if task_type == "multilabel" else "클래스는"
             notes.append({
-                "affected": "불균형이 성능 수치에 영향을 주었다고 쓰고, 소수 클래스의 성능 해석에 유의해야 한다고 적는다.",
+                # 성적서 3절 불균형 진단과 같은 말투(사용자 결정 2026-10-22). 세션 C 실호출에서 '영향을 준 것으로 판단'과
+                # '소수 클래스의 성능 수치는 다수 클래스와 같은 무게로 읽지 않도록'(소수를 덜 보라는 오해 문장)이 나왔다.
+                "affected": (
+                    "불균형에 따른 성능 지표 왜곡이 관찰되었다. '불균형에 따른 성능 지표 왜곡이 관찰되었다'로 쓴다. "
+                    "불균형이 성능 수치에 영향을 주었다·준 것으로 보인다·판단된다 같은 인과 단정은 쓰지 않는다. "
+                    f"소수 {topic} 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다. "
+                    f"소수 {noun}의 성능을 덜 중요하게 보거나 다수 {with_josa(noun, '과/와')} 같은 무게로 읽지 말라는 말은 쓰지 않는다."
+                ),
                 "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다. 불균형이 성능을 왜곡했다고 쓰지 않는다.",
                 "mild": "불균형이 경미하다. 불균형 때문에 성능이 왜곡되었다고 쓰지 않는다.",
             }[ie.level])
+            decl = facts.declarations if facts is not None else None
+            if ie.level == "affected" and decl is not None and decl.class_priority == "all_equal":
+                notes.append(
+                    f"의뢰자가 모든 {noun}{'이' if noun == '레이블' else '가'} 동등하다고 밝혔으므로 소수 {noun}의 성능도 "
+                    f"다른 {noun}{'과' if noun == '레이블' else '와'} 같은 비중으로 다룬다."
+                )
         if task_type == "multilabel":
             notes.append("분포는 레이블 등장 횟수다. 한 표본에 레이블이 여럿일 수 있어 백분율을 모두 더하면 전체를 넘을 수 있다.")
     elif section_id == "8.2":
@@ -252,12 +285,42 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
         if derived.get("threshold_tuning"):
             notes.append("임계값을 바꿔 오를 수 있는 F1 향상폭은 이 데이터에서 오를 수 있는 최대폭이고 같은 평가 데이터로 고른 값이라 별도 데이터로 확인해야 한다고 덧붙인다. 성능 향상을 보장한다고 쓰지 않는다.")
     elif section_id == "8.3":
+        if any(m.threshold is not None for m in fs.metrics):
+            # 세션 C 실호출(yeast 강한 모델): 근소 차이가 아닌 Hamming Loss 를 '여유가 크지 않다'고 새로 해석했다.
+            notes.append(
+                "목표와의 여유가 작다·아슬아슬하다·판정이 뒤집힐 수 있다는 해석은 사실 시트 지표 표의 '근소 차이' 칸이 "
+                "'예'인 지표에만 쓴다(그 칸이 없으면 근소 차이 지표가 없다). 그 밖의 지표는 목표와의 차이를 그대로 적을 수는 있어도 여유가 작다고 해석하지 않는다."
+            )
         if not fs.latency.available:
             notes.append("지연시간은 측정하지 않았다. 지연 수치를 쓰지 않는다.")
         if derived.get("threshold_tuning"):
             notes.append("결정 임계값 조정의 이득은 같은 평가 데이터에서 고른 값이라 별도 데이터로 확인해야 한다. 성능 향상을 보장한다고 쓰지 않는다.")
+        elif fs.f1_threshold_gain is not None:
+            # 세션 C 실호출(bc_strong): 조정 여지가 작은데 8.3 이 임계값을 위험처럼 되풀이했다(8.3-03 은 부적합일 때만).
+            notes.append("평가 엔진은 임계값 조정 여지가 크지 않다고 봤다. 결정 임계값을 위험으로 쓰지 않는다.")
     elif section_id == "8.1":
         pass
+    if section_id in ("7.1", "8.2", "8.3") and task_type in ("multiclass", "multilabel"):
+        macro = [m.display_name for m in fs.metrics if m.metric_id in fact_view.MACRO_METRICS]
+        if macro:
+            noun = "레이블" if task_type == "multilabel" else "클래스"
+            notes.append(
+                f"{', '.join(macro)} 값은 {noun}별 값의 매크로 평균(단순 평균)이다. {noun}마다 같은 무게라 약한 {noun}의 부진이 "
+                f"이 평균에 그대로 반영된다. '평균 지표에는 약한 {noun}의 부진이 드러나지 않을 수 있다'처럼 가중 평균·마이크로 "
+                "평균에만 맞는 설명을 이 지표에 쓰지 않는다. 평균 방식은 사실 시트 지표 표의 '평균 방식'에 맞게만 설명한다."
+            )
+    if section_id in ("7.1", "8.3"):
+        tied, trimmed = weakest_ties(fs)
+        if tied:
+            noun = "레이블" if task_type == "multilabel" else "클래스"
+            scope = f"표에 실린 {noun} 가운데 " if trimmed else ""
+            more = " 등" if len(tied) > 5 else ""
+            notes.append(
+                f"{scope}F1 이 같은 최하위 {noun}{'이' if noun == '레이블' else '가'} 여럿이다({', '.join(tied[:5])}{more}). "
+                f"한 {noun}만 가장 약한 {noun}처럼 쓰지 말고 함께 밝힌다."
+            )
+    if fs.f1_threshold_gain is not None and section_id in _THRESHOLD_GAIN_SECTIONS:
+        notes.append(_F1_ONLY_GAIN)
     return notes
 
 

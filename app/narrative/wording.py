@@ -10,10 +10,12 @@
 - 작성 규칙(서술 설계 D37): 클래스는 이름과 의뢰자가 준 설명을 함께 쓴다(예: 1(불량)). 설명이 없으면 이름만.
 
 상호작용
-- 의존(import): 없음(표준 라이브러리)
+- 의존(import): 없음(표준 라이브러리 math)
 - 사용처: app.narrative.fallback, app.narrative.required_items, app.narrative.prompt, tests
 """
 from __future__ import annotations
+
+import math
 
 # 판정 이름 — 성적서 8.2 판정 상자(프론트 ConclusionSection VERDICT_CONFIG)와 같은 이름 한 벌.
 # 종전 '조건부 적합'·'부적합(불합격)'은 같은 절의 상자 이름과 달라 한 화면에 두 이름이 찍혔다.
@@ -164,6 +166,30 @@ def shown_value(m) -> str:
     return v or metric_num(m.value)
 
 
+def _position(value: float, low: float, high: float) -> str:
+    # baselines.benchmark_position 과 같은 규칙(범위 끝은 안) — wording 은 다른 모듈을 import 하지 않는다.
+    return "below" if value < low else "above" if value > high else "within"
+
+
+def range_value_text(value: float, low: float, high: float, base: str | None = None) -> str:
+    """8.1 참조 범위 비교의 모델 값 표기 — 찍힌 숫자가 위치 판정(반올림 전 값으로 한 below/within/above)과 같은 쪽으로 읽히게.
+
+    엔진 metrics/display.judged_text 와 같은 규칙: 평소 표기(base — 판정 대상의 6.1 표기, 없으면 넷째 자리)가 범위 끝과 같아
+    반대쪽으로 읽히면 자릿수를 아홉째까지 늘리고, 그래도 같으면 판정 쪽으로 자른다(라운드 검토 P2 — Precision 0.79996 이
+    '0.8, 참조 범위 0.8~0.92' 로 찍히는데 미흡). 응답의 벤치마크 표(model_value)는 바꾸지 않는다(계약)."""
+    value = float(value)
+    want = _position(value, low, high)
+    candidates = ([base] if base else []) + [num(value)] + [
+        (f"{round(value, d):.{d}f}".rstrip("0").rstrip(".") or "0") for d in range(5, 10)
+    ]
+    for text in candidates:
+        if _position(float(text), low, high) == want:
+            return text
+    scale = 10 ** 9
+    cut = math.floor(value * scale) / scale if want == "below" else math.ceil(value * scale) / scale
+    return f"{cut:.9f}".rstrip("0").rstrip(".")
+
+
 def metric_vs_target(m) -> str:
     """'지표명(값, 목표 t)' — 값은 프론트가 판정과 같은 쪽으로 읽히게 만든 인쇄 표기(value_text, 성적서 6.1 과 같음).
 
@@ -201,8 +227,8 @@ def join_and(items: list[str]) -> str:
     return ", ".join(items)
 
 
-# 세 개까지의 개수를 숫자 없이 — 숫자 검문에 걸리지 않게 '상위 3개' 대신 '세'를 쓴다.
-KOREAN_COUNT = {1: "한", 2: "두", 3: "세", 4: "네", 5: "다섯"}
+# 열 개까지의 개수를 숫자 없이 — 숫자 검문에 걸리지 않게 '상위 3개' 대신 '세'를 쓴다(그보다 많으면 호출부가 '여러').
+KOREAN_COUNT = {1: "한", 2: "두", 3: "세", 4: "네", 5: "다섯", 6: "여섯", 7: "일곱", 8: "여덟", 9: "아홉", 10: "열"}
 
 
 # ── 고객 입력의 '제공되지 않음' ──────────────────────────────────────────────────

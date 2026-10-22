@@ -1104,7 +1104,7 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
 @pytest.mark.parametrize("level, values, expected, absent", [
     ("affected", {},
      "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있고, 정확도와 매크로 F1 의 차이(0.12)와 다수 클래스(neg)와 "
-     "소수 클래스(pos)의 F1 차이(0.18)가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다.",
+     "소수 클래스(pos)의 F1 차이(0.18)가 기준(0.1) 이상이어서 불균형에 따른 성능 지표 왜곡이 관찰되었다.",
      "왜곡은 관찰되지 않았다"),
     ("no_distortion", {"accuracy_minus_macro_f1": 0.05, "majority_minus_minority_f1": 0.03},
      "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있으나, 불균형에 의한 성능 왜곡은 관찰되지 않았다. "
