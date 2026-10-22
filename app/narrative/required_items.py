@@ -459,6 +459,9 @@ def _error_nature(ctx: Ctx) -> str | None:
     if neither is not None:
         counts += f", 둘 다 아닌 오류 {neither}{cell}"
     text += f" 근거 건수({note}): 확률이 있는 오분류 {m}{cell} 가운데 {counts}."
+    if dominant is not None and not guarded:
+        # 세션 C 재확인 — 경계 오류가 과반(249건 중 171건)인데도 AI 가 일반화 금지를 스스로 적용해 해석을 보류했다.
+        text += f" 건수가 충분하고 {dominant}가 오분류의 절반을 넘으므로 오류의 주된 성격으로 해석해도 된다."
     if guarded:
         text += (
             f" {'고 '.join(reasons)}{'어' if reasons[-1].endswith('적') else '아'} 오류 전체의 성격으로 일반화하지 않는다. '상당 부분'·'대부분'·'우세한 성격'·'~가 중심' "
@@ -600,7 +603,20 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
     return text + "이다."
 
 
-def imbalance_sentence(ie, name: Callable[[str], str] = str) -> str:
+def minority_is_small(fs: FactSheet) -> bool:
+    """불균형의 소수 쪽이 작은 표본(facts.low_support_classes — 프론트가 정한 30건·5% 기준)인가.
+
+    7.2 의 '소수 쪽은 표본이 적어 수치가 흔들리기 쉽다'는 이때만 맞다. 세션 C 재확인 실호출에서 64건(37%)인 소수
+    클래스에도 이 말이 붙어, 7.1 의 '표본이 작아서 생긴 결과로 보기는 어렵다'와 어긋났다. facts 가 없는 옛 요청은 알 수
+    없으니 False(일반 문장).
+    """
+    ie = fs.imbalance_effect
+    if ie is None or fs.facts is None:
+        return False
+    return any(r.label == ie.minority_class for r in fs.facts.low_support_classes)
+
+
+def imbalance_sentence(ie, name: Callable[[str], str] = str, *, minority_small: bool = False) -> str:
     """7.2 불균형 결론 한 문장(서술 설계 D20, 규칙 템플릿). level 판정은 평가 엔진이 했고 여기서는 읽기만 한다.
 
     엔진은 두 차이 중 **하나만** 0.10 이상이어도 '영향 있음'이다. 그래서 기준 이상인 차이만 근거로 쓰고,
@@ -668,7 +684,9 @@ def imbalance_sentence(ie, name: Callable[[str], str] = str) -> str:
         text = f"{head}고, {named}가 기준(0.1) 이상이어서 불균형에 따른 성능 지표 왜곡이 관찰되었다."
         if under:
             text += " " + " ".join(under_text(n, v) + "." for n, v in under)
-        return text + f" 소수 {unit}{'은' if unit == '레이블' else '는'} 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다."
+        if minority_small:
+            return text + f" 소수 {unit}{'은' if unit == '레이블' else '는'} 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다."
+        return text + f" 소수 {unit}의 성능 지표 해석에 유의가 필요하다."
     return (
         f"{head}으나, 불균형에 의한 성능 왜곡은 관찰되지 않았다. "
         + " ".join(under_text(n, v) + "." for n, v in under)
@@ -677,7 +695,7 @@ def imbalance_sentence(ie, name: Callable[[str], str] = str) -> str:
 
 def _imbalance_effect_template(ctx: Ctx) -> str | None:
     ie = ctx.fs.imbalance_effect
-    return imbalance_sentence(ie, ctx.name) if ie is not None else None
+    return imbalance_sentence(ie, ctx.name, minority_small=minority_is_small(ctx.fs)) if ie is not None else None
 
 
 def _distribution_shift(ctx: Ctx) -> str | None:

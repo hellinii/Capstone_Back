@@ -99,7 +99,7 @@ def test_multilabel_imbalance_uses_label_gap_only():
     resp, _ = _run(_fs(imbalance_effect=ie))
     text = resp.interpretation.distribution_analysis
     assert "다수 레이블(sports)과 소수 레이블(tech)의 F1 차이(0.3)가 기준(0.1) 이상" in text
-    assert "매크로" not in text and "소수 레이블은 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다." in text
+    assert "매크로" not in text and "소수 레이블의 성능 지표 해석에 유의가 필요하다." in text and "표본이 적어" not in text
 
 
 # ── BE-03 8.2·8.3 판정 ──────────────────────────────────────────────────────

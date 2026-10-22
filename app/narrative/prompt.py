@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass, field
 
 from app.narrative import fact_view
-from app.narrative.required_items import Conclusion, code_prints, weakest_ties
+from app.narrative.required_items import Conclusion, code_prints, minority_is_small, weakest_ties
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTIONS_BY_ID
 from app.narrative.wording import class_descriptions, with_josa
@@ -52,7 +52,7 @@ SYSTEM_PROMPT = """너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 �
 4. 종합 판정은 사실 시트의 판정 이름(최종 합격·조건부 합격·최종 불합격·판정 불가) 그대로 부른다.
 5. 판정 규칙은 다음 순서다. 핵심 지표가 하나라도 목표에 미달하면 최종 불합격, 핵심 지표가 산출되지 않았거나 판정 대상 지표가 없으면 판정 불가, 핵심 지표는 모두 충족했으나 그 밖의 지표가 미달하면 조건부 합격, 판정 대상 지표가 모두 충족하면 최종 합격이다. 규칙 문장은 성적서 6.1절 표에 따로 찍히므로 다시 풀어 쓰지 말고, 이 성적서의 판정 사유(어느 핵심 지표가 미달했는지 등)를 쓴다.
 6. 통과율과 '몇 개 중 몇 개 충족'은 참고 수치일 뿐 판정의 근거가 아니다. '대부분 충족해서'처럼 통과 개수로 판정을 설명하지 않는다.
-7. 판정 불가이면 합격이나 불합격으로 단정하지 않고 모든 지표가 충족했다고도 쓰지 않는다. 조건부 합격이나 최종 불합격이면 모든 지표가 충족했다고 쓰지 않는다. 최종 합격이면 미달한 지표가 있다고 쓰지 않는다.
+7. 판정 불가이면 합격이나 불합격으로 단정하지 않고 모든 지표가 충족했다고도 쓰지 않는다. 조건부 합격이나 최종 불합격이면 모든 지표가 충족했다고 쓰지 않는다. 최종 합격이면 미달한 지표가 있다고 쓰지 않는다. 미달한 지표가 있으면 그 미달이 종합 판정과 무관하다·영향이 없다고 쓰지 않는다(핵심 지표 미달은 최종 불합격, 그 밖의 지표 미달은 조건부 합격의 사유다).
 
 [작성 규칙]
 8. 클래스는 이름과 의뢰자가 준 설명을 함께 쓴다(예: 1(불량)). 설명이 없으면 이름만 쓴다. 영문·숫자 이름 뒤 조사는 그 이름을 읽는 소리의 끝소리에 맞춘다. 영문 이름은 영어 발음의 끝소리로 고른다(benign과, cat과, dog와, P3이).
@@ -255,13 +255,19 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
         if ie is not None:
             noun = "레이블" if task_type == "multilabel" else "클래스"
             topic = "레이블은" if task_type == "multilabel" else "클래스는"
+            # '표본이 적어 흔들리기 쉽다'는 소수 쪽이 실제로 작은 표본일 때만(세션 C 재확인 — 64건 클래스에 붙음).
+            minority_small = minority_is_small(fs)
             notes.append({
                 # 성적서 3절 불균형 진단과 같은 말투(사용자 결정 2026-10-22). 세션 C 실호출에서 '영향을 준 것으로 판단'과
                 # '소수 클래스의 성능 수치는 다수 클래스와 같은 무게로 읽지 않도록'(소수를 덜 보라는 오해 문장)이 나왔다.
                 "affected": (
                     "불균형에 따른 성능 지표 왜곡이 관찰되었다. '불균형에 따른 성능 지표 왜곡이 관찰되었다'로 쓴다. "
                     "불균형이 성능 수치에 영향을 주었다·준 것으로 보인다·판단된다 같은 인과 단정은 쓰지 않는다. "
-                    f"소수 {topic} 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다. "
+                    + (f"소수 {topic} 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다. "
+                     if minority_small else
+                     f"소수 {noun} {with_josa(str(ie.minority_class), '은/는')} 표본이 적은 {with_josa(noun, '이/가')} 아니므로 "
+                     "표본이 적어서 수치가 흔들린다고 쓰지 않는다. 소수 쪽 성능 지표 해석에 유의해야 한다는 뜻만 적는다. ")
+                    +
                     f"소수 {noun}의 성능을 덜 중요하게 보거나 다수 {with_josa(noun, '과/와')} 같은 무게로 읽지 말라는 말은 쓰지 않는다."
                 ),
                 "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다. 불균형이 성능을 왜곡했다고 쓰지 않는다.",

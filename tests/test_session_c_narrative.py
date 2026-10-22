@@ -159,12 +159,16 @@ from app.narrative.schemas import ImbalanceEffectFact  # noqa: E402
 CAUSAL = ("영향을 주", "영향을 준", "같은 무게", "덜 중요")
 
 
-def _affected(raw: dict, *, priority: str | None = None) -> NarrativeRequest:
+def _affected(raw: dict, *, priority: str | None = None, minority_small: bool = False) -> NarrativeRequest:
     fs = raw["fact_sheet"]
     fs["imbalance_effect"] = {
         "level": "affected", "imbalance_ratio": 2.9683, "accuracy_minus_macro_f1": 0.1533,
         "majority_minus_minority_f1": 0.1271, "majority_class": "0", "minority_class": "1",
     }
+    # 소수 쪽이 작은 표본인지는 facts.low_support_classes 가 정한다(세션 C 재확인 — 64건 클래스에도 '표본이 적어'가 붙었다).
+    fs["facts"]["low_support_classes"] = [
+        r for r in fs["facts"].get("low_support_classes", []) if r["label"] != "1"
+    ] + ([{"label": "1", "support": 12, "share": 0.04, "share_text": "0.04"}] if minority_small else [])
     if priority is not None:
         fs["facts"]["declarations"]["class_priority"] = priority
     return NarrativeRequest.model_validate(raw)
@@ -173,16 +177,20 @@ def _affected(raw: dict, *, priority: str | None = None) -> NarrativeRequest:
 def test_affected_template_says_distortion_was_observed():
     ie = ImbalanceEffectFact(level="affected", imbalance_ratio=3.2, accuracy_minus_macro_f1=0.12,
                              majority_minus_minority_f1=0.03, majority_class="neg", minority_class="pos")
-    text = imbalance_sentence(ie)
-    assert text == (
+    head = (
         "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있고, 정확도와 매크로 F1 의 차이(0.12)가 기준(0.1) 이상이어서 "
         "불균형에 따른 성능 지표 왜곡이 관찰되었다. 다수 클래스(neg)와 소수 클래스(pos)의 F1 차이(0.03)는 기준(0.1) 미만이다. "
-        "소수 클래스는 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다."
     )
+    # 소수 쪽이 작은 표본일 때만 '표본이 적어 흔들리기 쉽다'. 아니면 해석에 유의하라는 말만.
+    text = imbalance_sentence(ie, minority_small=True)
+    assert text == head + "소수 클래스는 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다."
+    plain = imbalance_sentence(ie)
+    assert plain == head + "소수 클래스의 성능 지표 해석에 유의가 필요하다."
     ml = ImbalanceEffectFact(level="affected", imbalance_ratio=52.9231, accuracy_minus_macro_f1=None,
                              majority_minus_minority_f1=0.4, majority_class="Class12", minority_class="Class14")
-    assert imbalance_sentence(ml).endswith("소수 레이블은 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다.")
-    for t in (text, imbalance_sentence(ml)):
+    assert imbalance_sentence(ml, minority_small=True).endswith("소수 레이블은 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다.")
+    assert imbalance_sentence(ml).endswith("소수 레이블의 성능 지표 해석에 유의가 필요하다.")
+    for t in (text, plain, imbalance_sentence(ml)):
         assert not any(w in t for w in CAUSAL), t
 
 
@@ -194,7 +202,9 @@ def test_affected_conclusion_and_prompt_note_follow_section_3_wording():
     notes = " ".join(ctx.briefs["7.2"].notes)
     assert "'불균형에 따른 성능 지표 왜곡이 관찰되었다'로 쓴다" in notes
     assert "영향을 주었다·준 것으로 보인다·판단된다 같은 인과 단정은 쓰지 않는다" in notes
-    assert "소수 클래스는 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다" in notes
+    # 소수 클래스 '1' 이 작은 표본이 아니면 '표본이 적어 흔들린다'고 쓰지 못하게 한다.
+    assert "소수 클래스 1은 표본이 적은 클래스가 아니므로 표본이 적어서 수치가 흔들린다고 쓰지 않는다" in notes
+    assert "표본이 적어 수치가 흔들리기 쉬우니" not in notes
     assert "덜 중요하게 보거나 다수 클래스와 같은 무게로 읽지 말라는 말은 쓰지 않는다" in notes
     assert "모든 클래스가 동등" not in notes  # 선언이 없으면 선언을 말하지 않는다
     # 지시문 전체(칸 하는 일·사실 시트 보기)에도 인과 단정 말이 없다.
@@ -203,12 +213,31 @@ def test_affected_conclusion_and_prompt_note_follow_section_3_wording():
         assert w not in msg, w
 
 
+def test_small_minority_gets_the_small_sample_note_and_template():
+    req = _affected(_raw("binary"), minority_small=True)
+    _, _, _, _, ctx, _, _ = generator._prepare(req)
+    notes = " ".join(ctx.briefs["7.2"].notes)
+    assert "소수 클래스는 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다" in notes
+    assert "표본이 적은 클래스가 아니므로" not in notes
+    from app.narrative import fallback
+    def template(r):
+        derived, refs, _, conclusions, _, _, _ = generator._prepare(r)
+        return fallback.section_template("7.2", r.fact_sheet, refs, derived, task_type="binary", conclusions=conclusions)
+
+    big = template(_affected(_raw("binary")))
+    small = template(req)
+    text_of = lambda parts: " ".join(v for v in parts.values() if isinstance(v, str))  # noqa: E731
+    assert "표본이 적어 수치가 흔들리기 쉬우므로" in text_of(small)
+    assert "표본이 적어 수치가 흔들리기 쉬우므로" not in text_of(big)
+    assert "소수 클래스의 성능 지표 해석에 유의가 필요하다." in text_of(big)
+
+
 def test_all_equal_declaration_is_named_in_the_imbalance_note():
     req = _affected(_raw("multilabel"), priority="all_equal")
     _, _, _, _, ctx, _, _ = generator._prepare(req)
     notes = " ".join(ctx.briefs["7.2"].notes)
     assert "의뢰자가 모든 레이블이 동등하다고 밝혔으므로 소수 레이블의 성능도 다른 레이블과 같은 비중으로 다룬다" in notes
-    assert "소수 레이블은 표본이 적어" in notes
+    assert "표본이 적은 레이블이 아니므로" in notes
     # 조사는 이름 끝소리로 — '다수 레이블와'가 아니다(실호출에서 AI 가 지시문 문장을 그대로 옮겨 적은 적이 있다).
     assert "덜 중요하게 보거나 다수 레이블과 같은 무게로 읽지 말라는 말은 쓰지 않는다" in notes
     assert "레이블와" not in notes
@@ -283,6 +312,9 @@ def test_minority_without_few_count_and_few_count_without_minority():
     # 기준과 같으면(과반·충분) 일반화를 막지 않고 우세한 오류를 말한다.
     item = _nature(_er(ERROR_NATURE_MIN_COUNT, 7, 0))
     assert GENERALIZE_BAN not in item.text and "(우세한 오류는 경계 오류)" in item.text
+    # 이때는 주된 성격으로 해석해도 된다고 적는다(세션 C 재확인 — digits_weak 249건 중 경계 171건인데 AI 가 해석을 보류).
+    assert "건수가 충분하고 경계 오류가 오분류의 절반을 넘으므로 오류의 주된 성격으로 해석해도 된다." in item.text
+    assert "주된 성격으로 해석해도" not in _nature(_er(3, 1, 0)).text
     # 두 오류가 겹칠 수 있으면 둘 다 아닌 건수를 싣지 않고, 큰 쪽만으로 과반을 본다.
     item = _nature(_er(20, 6, 7, threshold=0.85))
     assert "둘 다 아닌" not in item.text and "절반에 이르지 않아" in item.text
@@ -664,3 +696,9 @@ def test_session_c_templates_pass_their_own_checks(task, verdict):
     if (task, verdict) == ("binary", "FAIL"):  # 근소 지표는 이진 계약 예시(불합격)에만 있다
         assert "신뢰구간이 목표값을 포함하지 않는 지표(" in joined
     assert find_verdict_contradictions(texts, fs_obj.verdict) == []
+
+
+def test_system_prompt_forbids_saying_a_failed_metric_does_not_affect_the_verdict():
+    # 세션 C 재확인 yeast_strong: 9.2 가 비핵심 F1 미달을 '종합 판정에는 영향이 없다'고 썼다(조건부 합격의 사유인데).
+    assert "미달한 지표가 있으면 그 미달이 종합 판정과 무관하다·영향이 없다고 쓰지 않는다" in prompt.SYSTEM_PROMPT
+    assert "그 밖의 지표 미달은 조건부 합격의 사유다" in prompt.SYSTEM_PROMPT
