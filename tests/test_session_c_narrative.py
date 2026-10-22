@@ -209,6 +209,9 @@ def test_all_equal_declaration_is_named_in_the_imbalance_note():
     notes = " ".join(ctx.briefs["7.2"].notes)
     assert "의뢰자가 모든 레이블이 동등하다고 밝혔으므로 소수 레이블의 성능도 다른 레이블과 같은 비중으로 다룬다" in notes
     assert "소수 레이블은 표본이 적어" in notes
+    # 조사는 이름 끝소리로 — '다수 레이블와'가 아니다(실호출에서 AI 가 지시문 문장을 그대로 옮겨 적은 적이 있다).
+    assert "덜 중요하게 보거나 다수 레이블과 같은 무게로 읽지 말라는 말은 쓰지 않는다" in notes
+    assert "레이블와" not in notes
 
 
 def test_imbalance_label_in_fact_view_is_observation_wording():

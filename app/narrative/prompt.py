@@ -28,7 +28,7 @@ from app.narrative import fact_view
 from app.narrative.required_items import Conclusion, code_prints, weakest_ties
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTIONS_BY_ID
-from app.narrative.wording import class_descriptions
+from app.narrative.wording import class_descriptions, with_josa
 
 # 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예"). 한국어 이름은 이 셋으로 통일한다(W9,
 # 2026-10-18 사용자 결정) — 프론트 성적서의 TASK_TYPE_LABELS 와 같은 글자다. 이미 발급된 성적서는 저장된
@@ -262,7 +262,7 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
                     "불균형에 따른 성능 지표 왜곡이 관찰되었다. '불균형에 따른 성능 지표 왜곡이 관찰되었다'로 쓴다. "
                     "불균형이 성능 수치에 영향을 주었다·준 것으로 보인다·판단된다 같은 인과 단정은 쓰지 않는다. "
                     f"소수 {topic} 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다. "
-                    f"소수 {noun}의 성능을 덜 중요하게 보거나 다수 {noun}와 같은 무게로 읽지 말라는 말은 쓰지 않는다."
+                    f"소수 {noun}의 성능을 덜 중요하게 보거나 다수 {with_josa(noun, '과/와')} 같은 무게로 읽지 말라는 말은 쓰지 않는다."
                 ),
                 "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다. 불균형이 성능을 왜곡했다고 쓰지 않는다.",
                 "mild": "불균형이 경미하다. 불균형 때문에 성능이 왜곡되었다고 쓰지 않는다.",
