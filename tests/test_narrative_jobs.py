@@ -1,6 +1,6 @@
 """test_narrative_jobs.py — 서술 작업 번호(job) 방식 (서술 라운드 S3a, app.narrative.jobs).
 
-DB 는 테스트마다 인메모리 SQLite(StaticPool)다. 경로 테스트는 세션 팩토리 의존성을 그것으로 바꿔 끼우고,
+DB 는 테스트마다 임시 파일 SQLite(스레드마다 연결, 운영과 같은 BEGIN IMMEDIATE)다. 경로 테스트는 세션 팩토리 의존성을 그것으로 바꿔 끼우고,
 run_job 은 직접 await 해 단계·기록을 본다. TestClient 는 BackgroundTasks 를 응답 전에 끝까지 돌리므로
 POST 직후 GET 은 이미 끝 상태다.
 """
@@ -18,7 +18,6 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.core import concurrency, llm_budget
 from app.core.database import Base, configure_sqlite
@@ -52,12 +51,45 @@ LLM_WITH_PROBLEMS = {**LLM_NO_PROBLEMS, "9": "llm"}
 
 
 @pytest.fixture
-def factory():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+def factory(tmp_path):
+    # 임시 파일 SQLite + 기본 풀 — 스레드마다 연결을 따로 받는다(test_factory_survives_concurrent_threads).
+    # 인메모리 + StaticPool 은 연결 하나를 스레드들이 같이 써서 트랜잭션이 겹쳤다.
+    engine = create_engine(f"sqlite:///{tmp_path / 'jobs.db'}", connect_args={"check_same_thread": False})
     configure_sqlite(engine)
     Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine, autoflush=False, autocommit=False)
     engine.dispose()
+
+
+def test_factory_survives_concurrent_threads(factory):
+    """작업 경로는 DB 일을 run_in_threadpool 의 여러 스레드에서 한다(두 장이 함께 돌며 단계를 쓰고, 그 사이 read_job).
+
+    연결 하나를 같이 쓰는 엔진(StaticPool)이면 한 스레드가 트랜잭션을 연 사이 다른 스레드의 BEGIN IMMEDIATE 가
+    'cannot start a transaction within a transaction' 으로 터져 전체 스위트가 가끔 실패했다(라운드 C 검토, 약 30회에
+    1번). 스레드마다 연결을 받으면 BEGIN IMMEDIATE·busy_timeout 이 순서를 세운다 — 운영 DB 와 같은 모양.
+    """
+    import threading
+
+    job_id = "job-threads"
+    jobs._db_insert(factory, job_id, [], {}, _utcnow())
+    errors: list[Exception] = []
+    barrier = threading.Barrier(8)
+
+    def worker(i: int) -> None:
+        try:
+            barrier.wait()
+            for k in range(40):
+                jobs._db_set_stage(factory, job_id, "generating" if (i + k) % 2 else "checking", _utcnow())
+                jobs._db_read(factory, job_id, _utcnow())
+        except Exception as e:  # noqa: BLE001 — 스레드의 실패를 모은다
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors[:3]
 
 
 @pytest.fixture
