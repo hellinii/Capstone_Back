@@ -602,3 +602,60 @@ def test_benchmark_rule_sentence_and_fact_view_use_position_consistent_values():
     assert verify_grounding([text], build_number_whitelist(fs, refs, derived)).passed, text
     # 응답의 벤치마크 표(계약)는 그대로 — model_value 는 넷째 자리 숫자다.
     assert [r["model_value"] for r in refs] == [0.8, 0.95, 0.85]
+
+
+# ── 세션 C 의 새 문장이 모두 들어간 사실 시트에서도 규칙 템플릿이 자기 검문을 통과한다 ─────────────────
+
+from app.narrative import fallback  # noqa: E402
+from app.narrative.sections import SECTION_IDS  # noqa: E402
+
+
+@pytest.mark.parametrize("verdict", ["PASS", "CONDITIONAL_PASS", "FAIL", "INCONCLUSIVE"])
+@pytest.mark.parametrize("task", ["binary", "multiclass", "multilabel"])
+def test_session_c_templates_pass_their_own_checks(task, verdict):
+    from test_s6_templates import _request  # 판정 4가지로 바꾼 계약 예시
+
+    req = _request(task, verdict)
+    raw = json.loads(req.model_dump_json())
+    fs = raw["fact_sheet"]
+    # 불균형 영향 있음(affected) — 새 7.2 말투.
+    fs["imbalance_effect"] = {
+        "level": "affected", "imbalance_ratio": 2.9683,
+        "accuracy_minus_macro_f1": None if task == "multilabel" else 0.1533,
+        "majority_minus_minority_f1": 0.1271, "majority_class": fs["per_class"][0]["label"],
+        "minority_class": fs["per_class"][1]["label"],
+    }
+    # 최약 클래스 동점.
+    w = fs["facts"]["weakest_class"]
+    other = next(p for p in fs["per_class"] if p["label"] != w["label"])
+    other["f1"] = w["f1"]
+    # 근소 지표 가운데 구간이 목표를 포함하지 않는 것(FAIL 예시는 근소 지표가 있다).
+    for m in fs["metrics"]:
+        if m.get("near_target"):
+            m["ci_contains_target"] = False
+            m["ci_low"], m["ci_high"] = (m["threshold"] + 0.0011, m["threshold"] + 0.0371) if m["status"] == "pass" else (
+                m["threshold"] - 0.0371, m["threshold"] - 0.0011)
+            break
+    req = NarrativeRequest.model_validate(raw)
+    fs_obj, ci = req.fact_sheet, req.client_inputs
+    derived = compute_derived(fs_obj, task_type=task)
+    refs = build_benchmark_refs(task, fs_obj.metrics)
+    whitelist = build_number_whitelist(fs_obj, refs, derived, ci)
+    conclusions = select_items(fs_obj, ci, task)
+    exempt = checks.name_exemptions(fs_obj, ci)
+    texts = []
+    for sid in SECTION_IDS:
+        parts = generator._rec_dicts(fallback.section_template(sid, fs_obj, refs, derived, task_type=task, client_inputs=ci,
+                                                              conclusions=conclusions))
+        if sid == "9" and not fs_obj.problems:
+            continue
+        r = checks.check_section(sid, parts, whitelist=whitelist, verdict=fs_obj.verdict, conclusions=conclusions,
+                                 problem_ids=[p.id for p in fs_obj.problems], exempt=exempt,
+                                 masks=checks.verdict_masks(fs_obj, ci), labels=checks.numeric_labels(fs_obj))
+        assert r.hard_failures == [], (sid, r.as_record(), parts)
+        texts += [t for t in checks.section_texts(sid, parts) if t]
+    joined = " ".join(texts)
+    assert "불균형에 따른 성능 지표 왜곡이 관찰되었다" in joined and "같은 두" in joined
+    if (task, verdict) == ("binary", "FAIL"):  # 근소 지표는 이진 계약 예시(불합격)에만 있다
+        assert "신뢰구간이 목표값을 포함하지 않는 지표(" in joined
+    assert find_verdict_contradictions(texts, fs_obj.verdict) == []
