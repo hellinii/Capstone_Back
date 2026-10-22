@@ -317,7 +317,8 @@ def test_minority_without_few_count_and_few_count_without_minority():
     assert "주된 성격으로 해석해도" not in _nature(_er(3, 1, 0)).text
     # 두 오류가 겹칠 수 있으면 둘 다 아닌 건수를 싣지 않고, 큰 쪽만으로 과반을 본다.
     item = _nature(_er(20, 6, 7, threshold=0.85))
-    assert "둘 다 아닌" not in item.text and "절반에 이르지 않아" in item.text
+    # 합은 부풀 수 있어 '합쳐도 절반에 이르지 않는다'고 말하지 않는다(세션 C 마지막 검토).
+    assert "둘 다 아닌" not in item.text and "많은 쪽 오류도 오분류의 절반을 넘지 않아" in item.text
 
 
 def test_a_few_confident_errors_are_not_generalized():
@@ -601,14 +602,14 @@ from app.narrative.wording import range_value_text  # noqa: E402
 
 @pytest.mark.parametrize("value, low, high, base, expected", [
     (0.79996, 0.8, 0.92, None, "0.79996"),      # 넷째 자리 '0.8' 은 범위 안으로 읽힌다 — 미흡 판정
-    (0.9500004, 0.85, 0.95, None, "0.9500004"),  # '0.95' 는 범위 끝 — 우수 판정
+    (0.9500004, 0.85, 0.95, None, "0.950001"),   # '0.95' 는 범위 끝 — 우수 판정. 여섯째 자리로도 같아 위치 쪽(올림)으로 자른다
     (0.8497, 0.85, 0.92, None, "0.8497"),
     (0.92049, 0.85, 0.92, None, "0.9205"),
     (0.9, 0.85, 0.92, None, "0.9"),
     (0.85, 0.85, 0.92, None, "0.85"),            # 범위 끝과 같으면 범위 안
     (0.84996, 0.85, 0.92, "0.85", "0.84996"),    # 판정 대상의 6.1 표기(셋째 자리)도 범위 위치와 어긋나면 늘린다
     (0.861, 0.85, 0.92, "0.861", "0.861"),       # 어긋나지 않으면 6.1 표기 그대로
-    (0.7999999999999, 0.8, 0.92, None, "0.799999999"),  # 9자리로도 같아 보이면 판정 쪽으로 자른다
+    (0.7999999999999, 0.8, 0.92, None, "0.799999"),  # 여섯째 자리로도 같아 보이면 판정 쪽으로 자른다(프론트와 같은 최대 자릿수)
 ])
 def test_range_value_text(value, low, high, base, expected):
     assert range_value_text(value, low, high, base) == expected
@@ -627,13 +628,13 @@ def test_benchmark_rule_sentence_and_fact_view_use_position_consistent_values():
     fs = _bench_fs()
     refs = build_benchmark_refs("binary", fs.metrics)
     text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs) if c.item_id == "8.1-01")
-    assert "참조 범위보다 우수한 지표는 AUROC(0.9500004, 참조 범위 0.85~0.95)이고" in text
+    assert "참조 범위보다 우수한 지표는 AUROC(0.950001, 참조 범위 0.85~0.95)이고" in text
     assert "Precision(0.79996, 참조 범위 0.8~0.92)" in text and "Accuracy(0.84996, 참조 범위 0.85~0.92)" in text
     derived = compute_derived(fs, task_type="binary")
     view = fact_view.build_fact_view(fs, derived, refs, task_type="binary", task_label="이진 분류", report_purpose="internal")
     rows = {r["지표"]: r for r in view["벤치마크(내부 참조 기준)"]["지표별"]}
     assert (rows["Precision"]["모델 값"], rows["Precision"]["평가(방향 반영)"]) == ("0.79996", "미흡")
-    assert (rows["AUROC"]["모델 값"], rows["AUROC"]["평가(방향 반영)"]) == ("0.9500004", "우수")
+    assert (rows["AUROC"]["모델 값"], rows["AUROC"]["평가(방향 반영)"]) == ("0.950001", "우수")
     assert rows["Accuracy"]["모델 값"] == "0.84996"
     # 규칙 문장이 자기 검문(숫자 허용 목록)을 통과한다.
     assert verify_grounding([text], build_number_whitelist(fs, refs, derived)).passed, text

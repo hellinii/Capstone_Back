@@ -50,6 +50,7 @@ from app.narrative.wording import (
     class_name,
     is_not_provided,
     join_and,
+    meets_target,
     metric_num,
     metric_vs_target,
     num,
@@ -440,12 +441,19 @@ def _error_nature(ctx: Ctx) -> str | None:
         relation, dominant = "경계 오류와 확신 오류가 같은 수다", None
     # 두 오류가 겹칠 수 있으면 합이 부풀 수 있다 — 큰 쪽만으로 과반을 본다(과반이라고 잘못 말하지 않게).
     majority = (b + c if neither is not None else max(b, c)) * 2 > m
+    # '주된 성격'은 우세한 쪽 하나가 과반일 때만(세션 C 마지막 검토 #0 — 20건 중 경계 6·확신 5 는 합만 과반인데
+    # '경계 오류가 오분류의 절반을 넘으므로'라고 썼다).
+    dominant_majority = max(b, c) * 2 > m
     few = m < ERROR_NATURE_MIN_COUNT
     reasons = []
     if few:
         reasons.append("오분류 건수가 적")
     if not majority:
-        reasons.append("경계 오류와 확신 오류를 합쳐도 오분류의 절반에 이르지 않")
+        # 겹칠 수 있으면 합은 부풀 수 있어 '합쳐도 절반에 이르지 않는다'가 사실이 아닐 수 있다 — 큰 쪽만 말한다.
+        reasons.append(
+            "경계 오류와 확신 오류를 합쳐도 오분류의 절반에 이르지 않" if neither is not None
+            else "경계 오류와 확신 오류 가운데 많은 쪽 오류도 오분류의 절반을 넘지 않"
+        )
     guarded = bool(reasons) and dominant is not None
     if dominant is None:
         text = f"{relation}(우세한 오류 없음)."
@@ -460,8 +468,15 @@ def _error_nature(ctx: Ctx) -> str | None:
         counts += f", 둘 다 아닌 오류 {neither}{cell}"
     text += f" 근거 건수({note}): 확률이 있는 오분류 {m}{cell} 가운데 {counts}."
     if dominant is not None and not guarded:
-        # 세션 C 재확인 — 경계 오류가 과반(249건 중 171건)인데도 AI 가 일반화 금지를 스스로 적용해 해석을 보류했다.
-        text += f" 건수가 충분하고 {dominant}가 오분류의 절반을 넘으므로 오류의 주된 성격으로 해석해도 된다."
+        if dominant_majority:
+            # 세션 C 재확인 — 경계 오류가 과반(249건 중 171건)인데도 AI 가 일반화 금지를 스스로 적용해 해석을 보류했다.
+            text += f" 건수가 충분하고 {dominant}가 오분류의 절반을 넘으므로 오류의 주된 성격으로 해석해도 된다."
+        else:
+            # 두 오류가 겹칠 수 없을 때만 온다(겹칠 수 있으면 majority 도 큰 쪽으로 본다) — 합만 과반이다.
+            text += (
+                f" 건수가 충분하고 경계 오류와 확신 오류를 합치면 오분류의 절반을 넘는다. {dominant} 하나만으로는 오분류의 "
+                f"절반을 넘지 않으므로 {dominant}가 오분류의 절반을 넘는다고 쓰지 않는다."
+            )
     if guarded:
         text += (
             f" {'고 '.join(reasons)}{'어' if reasons[-1].endswith('적') else '아'} 오류 전체의 성격으로 일반화하지 않는다. '상당 부분'·'대부분'·'우세한 성격'·'~가 중심' "
@@ -603,17 +618,38 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
     return text + "이다."
 
 
-def minority_is_small(fs: FactSheet) -> bool:
-    """불균형의 소수 쪽이 작은 표본(facts.low_support_classes — 프론트가 정한 30건·5% 기준)인가.
+MinoritySize = Literal["small", "not_small", "unknown"]
 
-    7.2 의 '소수 쪽은 표본이 적어 수치가 흔들리기 쉽다'는 이때만 맞다. 세션 C 재확인 실호출에서 64건(37%)인 소수
-    클래스에도 이 말이 붙어, 7.1 의 '표본이 작아서 생긴 결과로 보기는 어렵다'와 어긋났다. facts 가 없는 옛 요청은 알 수
-    없으니 False(일반 문장).
+
+def minority_size(fs: FactSheet) -> MinoritySize:
+    """불균형의 소수 쪽이 작은 표본(facts.low_support_classes — 프론트가 정한 30건·5% 기준)인가 — 작음·작지 않음·모름.
+
+    - 작음: 소수 쪽이 low_support_classes 에 실렸다(목록이 잘렸어도 실린 것은 사실이다).
+    - 모름: facts 가 없거나(옛 요청), 목록이 잘렸거나 비워졌거나(facts.omitted 의 low_support_classes·facts_class_lists —
+      프론트 factSheetFit), 목록을 보내지 않았다(facts 형식 오류로 omitted 만 남긴 요청 — jobs._drop_facts_keep_omitted).
+      서버가 상한 초과로 목록을 비운 요청(jobs._CLASS_LEVEL_KEYS·_clear_facts)은 AI 를 부르지 않고 규칙 문장으로 끝나며,
+      규칙 문장은 모름과 작지 않음이 같은 일반 문장이다.
+    - 작지 않음: 그 밖 — 목록이 온전한데 소수 쪽이 없다.
+    7.2 의 '소수 쪽은 표본이 적어 수치가 흔들리기 쉽다'는 작음일 때만, '표본이 적은 클래스가 아니므로'는 작지 않음일 때만
+    쓴다(세션 C 재확인 실호출 — 64건(37%) 소수 클래스에 '표본이 적어'가 붙었다; 마지막 검토 #2 — 모름을 작지 않음으로 단정했다).
     """
-    ie = fs.imbalance_effect
-    if ie is None or fs.facts is None:
-        return False
-    return any(r.label == ie.minority_class for r in fs.facts.low_support_classes)
+    ie, facts = fs.imbalance_effect, fs.facts
+    if ie is None or facts is None:
+        return "unknown"
+    if any(r.label == ie.minority_class for r in facts.low_support_classes):
+        return "small"
+    if (
+        "low_support_classes" not in facts.model_fields_set
+        or facts.omitted.get("low_support_classes")
+        or facts.omitted.get("facts_class_lists")
+    ):
+        return "unknown"
+    return "not_small"
+
+
+def minority_is_small(fs: FactSheet) -> bool:
+    """규칙 문장의 갈래 — 작음이면 '표본이 적어', 작지 않음·모름이면 일반 문장."""
+    return minority_size(fs) == "small"
 
 
 def imbalance_sentence(ie, name: Callable[[str], str] = str, *, minority_small: bool = False) -> str:
@@ -745,7 +781,17 @@ def benchmark_value_text(metrics: list, ref: dict) -> str:
     low, high = float(ref["ref_low"]), float(ref["ref_high"])
     if metric is None:
         return range_value_text(float(ref["model_value"]), low, high)
-    return range_value_text(float(metric.value), low, high, shown_value(metric))
+    return range_value_text(float(metric.value), low, high, shown_value(metric), _target_of(metric))
+
+
+def _target_of(metric) -> tuple[float, bool, bool] | None:
+    """판정 대상 지표의 (목표값, 높을수록 좋음, 충족) — 8.1 표기가 목표 판정과도 맞게(세션 C 마지막 검토). 방향을 모르는 옛
+    요청은 None(목표를 보지 않는다). 충족은 프론트가 정한 margin(0 이상이면 충족 쪽)으로, 없으면 값과 목표로 본다."""
+    if metric.threshold is None or metric.higher_is_better is None:
+        return None
+    hib = metric.higher_is_better
+    passed = metric.margin >= 0 if metric.margin is not None else meets_target(metric.value, metric.threshold, hib)
+    return float(metric.threshold), hib, passed
 
 
 def _ref_value(ctx: Ctx, ref: dict) -> str:

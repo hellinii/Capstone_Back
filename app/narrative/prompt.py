@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass, field
 
 from app.narrative import fact_view
-from app.narrative.required_items import Conclusion, code_prints, minority_is_small, weakest_ties
+from app.narrative.required_items import Conclusion, code_prints, minority_size, weakest_ties
 from app.narrative.schemas import FactSheet
 from app.narrative.sections import SECTIONS_BY_ID
 from app.narrative.wording import class_descriptions, with_josa
@@ -256,18 +256,26 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
             noun = "레이블" if task_type == "multilabel" else "클래스"
             topic = "레이블은" if task_type == "multilabel" else "클래스는"
             # '표본이 적어 흔들리기 쉽다'는 소수 쪽이 실제로 작은 표본일 때만(세션 C 재확인 — 64건 클래스에 붙음).
-            minority_small = minority_is_small(fs)
+            size = minority_size(fs)
+            if size == "small":
+                minority_note = f"소수 {topic} 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다. "
+            elif size == "not_small":
+                minority_note = (
+                    f"소수 {noun} {with_josa(str(ie.minority_class), '은/는')} 표본이 적은 {with_josa(noun, '이/가')} 아니므로 "
+                    "표본이 적어서 수치가 흔들린다고 쓰지 않는다. 소수 쪽 성능 지표 해석에 유의해야 한다는 뜻만 적는다. "
+                )
+            else:  # 모름 — facts 가 없거나 목록이 잘렸다(세션 C 마지막 검토 #2: 모르는데 '작지 않다'고 단정했다)
+                minority_note = (
+                    f"소수 {noun} {str(ie.minority_class)}의 표본이 적은지는 이 사실 시트로 확인할 수 없으므로 표본이 적다·적지 않다고 "
+                    "단정하지 않는다. 소수 쪽 성능 지표 해석에 유의해야 한다는 뜻만 적는다. "
+                )
             notes.append({
                 # 성적서 3절 불균형 진단과 같은 말투(사용자 결정 2026-10-22). 세션 C 실호출에서 '영향을 준 것으로 판단'과
                 # '소수 클래스의 성능 수치는 다수 클래스와 같은 무게로 읽지 않도록'(소수를 덜 보라는 오해 문장)이 나왔다.
                 "affected": (
                     "불균형에 따른 성능 지표 왜곡이 관찰되었다. '불균형에 따른 성능 지표 왜곡이 관찰되었다'로 쓴다. "
                     "불균형이 성능 수치에 영향을 주었다·준 것으로 보인다·판단된다 같은 인과 단정은 쓰지 않는다. "
-                    + (f"소수 {topic} 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다. "
-                     if minority_small else
-                     f"소수 {noun} {with_josa(str(ie.minority_class), '은/는')} 표본이 적은 {with_josa(noun, '이/가')} 아니므로 "
-                     "표본이 적어서 수치가 흔들린다고 쓰지 않는다. 소수 쪽 성능 지표 해석에 유의해야 한다는 뜻만 적는다. ")
-                    +
+                    + minority_note +
                     f"소수 {noun}의 성능을 덜 중요하게 보거나 다수 {with_josa(noun, '과/와')} 같은 무게로 읽지 말라는 말은 쓰지 않는다."
                 ),
                 "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다. 불균형이 성능을 왜곡했다고 쓰지 않는다.",

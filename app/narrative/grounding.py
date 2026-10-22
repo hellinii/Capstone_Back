@@ -5,7 +5,8 @@ LLM 출력의 모든 숫자가 fact_sheet/파생값 화이트리스트 안에 �
 
 상호작용
 - 의존(import): re, typing.Any, app.narrative.schemas(FactSheet, GroundingInfo),
-  app.narrative.derived(THRESHOLD_GAIN_NOTABLE), app.evaluation.metrics.counts(불균형 기준값)
+  app.narrative.derived(THRESHOLD_GAIN_NOTABLE), app.narrative.required_items(benchmark_value_text — 8.1 모델 값 표기),
+  app.evaluation.metrics.counts(불균형 기준값)
 - 사용처: app.narrative.legacy·generator·checks(허용 목록·판정 모순 검사), tests
 """
 import re
@@ -14,6 +15,7 @@ from typing import Any
 # 불균형 영향 기준(D20)은 평가 엔진이 판정에 쓴 값을 그대로 가져온다(값마다 한 곳).
 from app.evaluation.metrics.counts import IMBALANCE_F1_GAP, IMBALANCE_MILD_BELOW
 from app.narrative.derived import THRESHOLD_GAIN_NOTABLE
+from app.narrative.required_items import benchmark_value_text
 from app.narrative.schemas import FactSheet, GroundingInfo
 
 
@@ -359,6 +361,12 @@ def build_number_whitelist(
 
     for ref in benchmark_refs:
         _add(wl, ref.get("model_value"))
+        # 규칙 문장·사실 시트 보기의 모델 값 — 범위 끝과 같아 보이면 자릿수를 늘린 표기(0.7999612 → '0.79996'). :g·1~4자리
+        # 반올림에 없는 꼴이라 따로 넣는다(늘린 표기만 — 세션 C 마지막 검토 #1).
+        if "metric" in ref and "ref_low" in ref and "ref_high" in ref:
+            shown = _canon(benchmark_value_text(fs.metrics, ref))
+            if shown is not None:
+                wl.add(shown)
         _add(wl, ref.get("ref_low"))
         _add(wl, ref.get("ref_high"))
         _add(wl, ref.get("target_value"))  # 목표값 수준(D31) — None 이면 _add 가 건너뛴다
