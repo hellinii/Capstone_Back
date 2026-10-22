@@ -1167,8 +1167,8 @@ def _near_template(ctx: Ctx) -> str | None:
             )
         if steady:
             sentences.append(
-                f"근소 차이 지표 가운데 신뢰구간이 목표값을 포함하지 않는 지표({_names(steady)})는 목표와의 여유가 작을 뿐, "
-                "표본이 달라져도 판정이 바뀔 가능성은 낮다."
+                # 여유가 작다는 사실만 쓴다(8.3-02 지시문과 같은 갈래) — 판정 안정성에 대한 새 주장은 덧붙이지 않는다.
+                f"근소 차이 지표 가운데 신뢰구간이 목표값을 포함하지 않는 지표({_names(steady)})는 목표와의 여유가 작다."
             )
         return " ".join(sentences) or None
     # 옛 요청 — 성적서가 18 을 찍지 않으니 합격한 근소 지표를 숫자와 함께 쓴다(종전 문장).
@@ -1187,7 +1187,7 @@ def _near_template(ctx: Ctx) -> str | None:
         items = join_and([_near_item(m) for m in steady_passed])
         sentences.append(
             f"목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표 가운데 {with_josa(items, '은/는')} 신뢰구간이 목표값을 "
-            "포함하지 않아, 목표와의 여유가 작을 뿐 표본이 달라져도 판정이 바뀔 가능성은 낮다."
+            "포함하지 않으며, 목표와의 여유가 작다."
         )
     return " ".join(sentences)
 

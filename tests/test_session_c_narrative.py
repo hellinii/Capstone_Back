@@ -353,9 +353,10 @@ def test_near_template_splits_by_interval():
     t = _item(fs).template_text
     assert t == (
         "목표값에 근소한 차이로 충족한 지표(Recall)는 표본이 달라지면 미달로 바뀔 수 있어 판정의 여유가 작다. "
-        "근소 차이 지표 가운데 신뢰구간이 목표값을 포함하지 않는 지표(AUROC)는 목표와의 여유가 작을 뿐, "
-        "표본이 달라져도 판정이 바뀔 가능성은 낮다."
+        "근소 차이 지표 가운데 신뢰구간이 목표값을 포함하지 않는 지표(AUROC)는 목표와의 여유가 작다."
     )
+    # 4b: 포함하지 않는 지표는 '여유가 작다는 사실만' — 판정 안정성에 대한 새 주장(가능성은 낮다)을 덧붙이지 않는다.
+    assert "가능성" not in t
     only_safe = _near_sheet([_near("AUROC", "M7", "pass", False)])
     t = _item(only_safe).template_text
     assert FLIP + "면" not in t and "바뀔 수 있어" not in t and "AUROC" in t
@@ -370,8 +371,9 @@ def test_near_template_for_old_requests_splits_by_interval():
     t = _item(fs).template_text
     assert t.startswith("목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Recall(0.9844, 목표 0.98, 차이 0.0044)로, "
                         "표본이 달라지면 목표에 미달할 위험이 있다.")
-    assert ("아슬아슬 합격 지표 가운데 AUROC(0.9844, 목표 0.98, 차이 0.0044)는 신뢰구간이 목표값을 포함하지 않아, "
-            "목표와의 여유가 작을 뿐 표본이 달라져도 판정이 바뀔 가능성은 낮다.") in t
+    assert ("아슬아슬 합격 지표 가운데 AUROC(0.9844, 목표 0.98, 차이 0.0044)는 신뢰구간이 목표값을 포함하지 않으며, "
+            "목표와의 여유가 작다.") in t
+    assert "가능성" not in t
 
 
 @pytest.mark.parametrize("printed", [True, False])
