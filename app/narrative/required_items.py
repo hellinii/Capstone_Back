@@ -1061,7 +1061,21 @@ def _near_target(ctx: Ctx) -> str | None:
         stems.append(f"목표를 충족한 지표는 {join_and(passed)}이")
     if failed:
         stems.append(f"목표에 미달한 지표는 {join_and(failed)}이")
-    return "근소 차이 지표 가운데 " + _clauses(stems) if stems else "근소 차이 지표가 있다."
+    text = "근소 차이 지표 가운데 " + _clauses(stems) if stems else "근소 차이 지표가 있다."
+    # 신뢰구간이 목표값을 포함하는지(세션 C 실호출 — 구간이 목표와 떨어진 AUROC 까지 '판정이 뒤집힐 수 있다'고 써서 8.2 와
+    # 부딪쳤다). 포함하지 않는 지표는 여유가 작다는 사실만 쓴다.
+    inside = [m.display_name for m in near if m.ci_contains_target is True]
+    outside = [m.display_name for m in near if m.ci_contains_target is False]
+    ci_stems = []
+    if inside:
+        ci_stems.append(f"신뢰구간이 목표값을 포함하는 지표는 {join_and(inside)}이")
+    if outside:
+        ci_stems.append(f"신뢰구간이 목표값을 포함하지 않는 지표는 {join_and(outside)}이")
+    if ci_stems:
+        text += " " + _clauses(ci_stems)
+    if outside:
+        text += " 포함하지 않는 지표는 표본이 달라지면 판정이 뒤집힐 수 있다고 쓰지 말고 목표와의 여유가 작다는 사실만 쓴다."
+    return text + " 근소 차이 지표는 이 지표들뿐이다. 다른 지표를 여유가 작다거나 판정이 뒤집힐 수 있다고 해석하지 않는다."
 
 
 def _near_item(m) -> str:
@@ -1075,27 +1089,51 @@ def _near_item(m) -> str:
 
 
 def _near_template(ctx: Ctx) -> str | None:
+    """근소 지표의 해석. 신뢰구간이 목표값을 포함하지 않는 지표(ci_contains_target 거짓)는 '표본이 달라지면 판정이 바뀔 수 있다'를
+    쓰지 않고 여유가 작다는 사실만 쓴다(세션 C — 8.2 의 '구간이 목표와 떨어져 있다'와 부딪치지 않게). 구간이 없으면 종전대로."""
     near = _near(ctx)
-    passed = [m for m in near if m.status == "pass"]
-    failed = [m for m in near if m.status == "fail"]
+    risky = [m for m in near if m.ci_contains_target is not False]
+    steady = [m for m in near if m.ci_contains_target is False]
+    passed = [m for m in risky if m.status == "pass"]
+    failed = [m for m in risky if m.status == "fail"]
     if ctx.prints("18"):
         # 숫자는 성적서가 8.3 서술 아래에 찍는다 — 해석 한 문장만(판정과 맞게: 충족 지표는 미달로, 미달 지표는 충족으로).
+        # 구간이 목표를 포함하지 않는 지표가 함께 있으면 두 무리를 이름으로 가른다(이름 뒤에는 괄호 — 조사를 괄호 앞 말에 맞춘다).
+        named = f"({_names(risky)})" if steady else ""
+        sentences = []
         if passed and failed:
-            return "목표값에 근소한 차이로 걸친 지표는 표본이 달라지면 충족과 미달이 서로 바뀔 수 있어 판정의 여유가 작다."
-        if passed:
-            return "목표값에 근소한 차이로 충족한 지표는 표본이 달라지면 미달로 바뀔 수 있어 판정의 여유가 작다."
-        if failed:
-            return "목표값에 근소한 차이로 미달한 지표는 표본이 달라지면 충족으로 바뀔 수도 있어, 그 판정은 표본 변동에 민감하다."
-        return None
+            sentences.append(f"목표값에 근소한 차이로 걸친 지표{named}는 표본이 달라지면 충족과 미달이 서로 바뀔 수 있어 판정의 여유가 작다.")
+        elif passed:
+            sentences.append(f"목표값에 근소한 차이로 충족한 지표{named}는 표본이 달라지면 미달로 바뀔 수 있어 판정의 여유가 작다.")
+        elif failed:
+            sentences.append(
+                f"목표값에 근소한 차이로 미달한 지표{named}는 표본이 달라지면 충족으로 바뀔 수도 있어, 그 판정은 표본 변동에 민감하다."
+            )
+        if steady:
+            sentences.append(
+                f"근소 차이 지표 가운데 신뢰구간이 목표값을 포함하지 않는 지표({_names(steady)})는 목표와의 여유가 작을 뿐, "
+                "표본이 달라져도 판정이 바뀔 가능성은 낮다."
+            )
+        return " ".join(sentences) or None
     # 옛 요청 — 성적서가 18 을 찍지 않으니 합격한 근소 지표를 숫자와 함께 쓴다(종전 문장).
-    if not passed:
+    steady_passed = [m for m in steady if m.status == "pass"]
+    if not passed and not steady_passed:
         return None
-    items = join_and([_near_item(m) for m in passed])
-    # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
-    return (
-        f"목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 {with_josa(items, '으로/로')}, "
-        "표본이 달라지면 목표에 미달할 위험이 있다."
-    )
+    sentences = []
+    if passed:
+        items = join_and([_near_item(m) for m in passed])
+        # 숫자는 값·목표값·margin·3(%)뿐이라 허용 목록 안이다(3% 는 near_target 이 있을 때만 허용).
+        sentences.append(
+            f"목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 {with_josa(items, '으로/로')}, "
+            "표본이 달라지면 목표에 미달할 위험이 있다."
+        )
+    if steady_passed:
+        items = join_and([_near_item(m) for m in steady_passed])
+        sentences.append(
+            f"목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표 가운데 {with_josa(items, '은/는')} 신뢰구간이 목표값을 "
+            "포함하지 않아, 목표와의 여유가 작을 뿐 표본이 달라져도 판정이 바뀔 가능성은 낮다."
+        )
+    return " ".join(sentences)
 
 
 def _threshold_risk(ctx: Ctx) -> str | None:

@@ -309,3 +309,90 @@ def test_neither_count_is_allowed_and_told_not_to_be_written():
 def test_old_requests_are_told_not_to_write_the_neither_count():
     item = _nature(_er(3, 1, 0), printed=False)
     assert "근거 건수(둘 다 아닌 오류의 건수는 사실 시트에 없는 값이라 문장에 쓰지 않는다)" in item.text
+
+
+# ── 4b. 근소 지표 — 신뢰구간이 목표를 포함하지 않으면 '판정이 뒤집힐 수 있다'를 쓰지 않는다 ───────────
+
+from app.narrative.grounding import find_verdict_contradictions, verify_grounding  # noqa: E402
+
+FLIP = "표본이 달라지면"
+
+
+def _near(name, mid, status, contains, *, value=None):
+    v = value if value is not None else (0.9844 if status == "pass" else 0.9756)
+    return MetricFact(metric_id=mid, display_name=name, value=v, threshold=0.98, status=status, near_target=True,
+                      margin=round(v - 0.98, 4), margin_text=f"{round(v - 0.98, 4):g}", value_text=f"{v:g}",
+                      ci_low=0.95 if contains else 0.9973, ci_high=0.9999 if contains else 1.0,
+                      ci_contains_target=contains)
+
+
+def _near_sheet(metrics, *, printed=True, verdict="PASS"):
+    facts = {"fixed_sentences": [{"id": "18", "section": "8.3", "text": "근소 차이 문장"}]} if printed else None
+    return FactSheet(verdict=verdict, score=100.0, metrics=metrics, facts=facts)
+
+
+def _item(fs, item_id="8.3-02"):
+    return next(c for c in select_items(fs, None, "binary") if c.item_id == item_id)
+
+
+def test_near_material_says_which_intervals_contain_the_target():
+    # 실측 bc_strong: Recall·F1 은 구간이 목표 포함, AUROC 는 포함하지 않는데 8.3 이 셋 다 '뒤집힐 수 있다'고 썼다.
+    fs = _near_sheet([_near("Recall", "M3", "pass", True), _near("F1 Score", "M4", "pass", True), _near("AUROC", "M7", "pass", False)])
+    text = _item(fs).text
+    assert text.startswith("근소 차이 지표 가운데 목표를 충족한 지표는 Recall, F1 Score, AUROC이다.")
+    assert "신뢰구간이 목표값을 포함하는 지표는 Recall, F1 Score이고, 신뢰구간이 목표값을 포함하지 않는 지표는 AUROC이다." in text
+    assert "포함하지 않는 지표는 표본이 달라지면 판정이 뒤집힐 수 있다고 쓰지 말고 목표와의 여유가 작다는 사실만 쓴다." in text
+    assert "근소 차이 지표는 이 지표들뿐이다. 다른 지표를 여유가 작다거나 판정이 뒤집힐 수 있다고 해석하지 않는다." in text
+
+
+def test_near_template_splits_by_interval():
+    fs = _near_sheet([_near("Recall", "M3", "pass", True), _near("AUROC", "M7", "pass", False)])
+    t = _item(fs).template_text
+    assert t == (
+        "목표값에 근소한 차이로 충족한 지표(Recall)는 표본이 달라지면 미달로 바뀔 수 있어 판정의 여유가 작다. "
+        "근소 차이 지표 가운데 신뢰구간이 목표값을 포함하지 않는 지표(AUROC)는 목표와의 여유가 작을 뿐, "
+        "표본이 달라져도 판정이 바뀔 가능성은 낮다."
+    )
+    only_safe = _near_sheet([_near("AUROC", "M7", "pass", False)])
+    t = _item(only_safe).template_text
+    assert FLIP + "면" not in t and "바뀔 수 있어" not in t and "AUROC" in t
+    # 구간이 모두 목표를 포함하면(또는 구간이 없으면) 종전 문장 그대로.
+    assert _item(_near_sheet([_near("Recall", "M3", "pass", True)])).template_text == (
+        "목표값에 근소한 차이로 충족한 지표는 표본이 달라지면 미달로 바뀔 수 있어 판정의 여유가 작다."
+    )
+
+
+def test_near_template_for_old_requests_splits_by_interval():
+    fs = _near_sheet([_near("Recall", "M3", "pass", True), _near("AUROC", "M7", "pass", False)], printed=False)
+    t = _item(fs).template_text
+    assert t.startswith("목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Recall(0.9844, 목표 0.98, 차이 0.0044)로, "
+                        "표본이 달라지면 목표에 미달할 위험이 있다.")
+    assert ("아슬아슬 합격 지표 가운데 AUROC(0.9844, 목표 0.98, 차이 0.0044)는 신뢰구간이 목표값을 포함하지 않아, "
+            "목표와의 여유가 작을 뿐 표본이 달라져도 판정이 바뀔 가능성은 낮다.") in t
+
+
+@pytest.mark.parametrize("printed", [True, False])
+@pytest.mark.parametrize("verdict, statuses", [("PASS", ("pass", "pass")), ("FAIL", ("fail", "pass")), ("FAIL", ("fail", "fail"))])
+def test_near_templates_pass_their_own_checks(printed, verdict, statuses):
+    metrics = [_near("Recall", "M3", statuses[0], True), _near("AUROC", "M7", statuses[1], False)]
+    fs = _near_sheet(metrics, printed=printed, verdict=verdict)
+    t = _item(fs).template_text
+    if t is None:  # 옛 요청은 합격한 근소 지표만 쓴다
+        assert not printed and all(s == "fail" for s in statuses)
+        return
+    assert verify_grounding([t], build_number_whitelist(fs, [], {})).passed, t
+    assert find_verdict_contradictions([t], verdict) == [], t
+
+
+def test_prompt_limits_near_interpretation_to_near_metrics():
+    req = NarrativeRequest.model_validate(_raw("binary"))
+    _, _, _, _, ctx, _, _ = generator._prepare(req)
+    msg = prompt.build_user_message(ctx, ("8.1", "8.2", "8.3"))
+    assert ("표본이 달라지면 판정이 뒤집힐 수 있다는 말은 신뢰구간이 목표값을 포함하는 지표나 구간이 없는 지표에만 쓰고, "
+            "포함하지 않는 지표는 목표와의 여유가 작다는 사실만 쓴다.") in msg
+    # 근소 지표가 없어도(실측 yeast_strong 의 Hamming Loss) 8.3 노트가 근소 해석을 근소 지표로 한정한다.
+    raw = _raw("multilabel")
+    req = NarrativeRequest.model_validate(raw)
+    _, _, _, _, ctx, _, _ = generator._prepare(req)
+    notes = " ".join(ctx.briefs["8.3"].notes)
+    assert "목표와의 여유가 작다·아슬아슬하다·판정이 뒤집힐 수 있다는 해석은 사실 시트 지표 표의 '근소 차이' 칸이 '예'인 지표에만 쓴다" in notes
