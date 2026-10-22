@@ -257,7 +257,7 @@ def _per_class_errors(ctx: Ctx) -> str | None:
     if _trimmed(ctx, "confusion_counts"):
         # 클래스가 많아 프론트가 표본 수 순으로 줄을 잘랐다 — 빠진 클래스의 오류가 더 많을 수 있다(세션 A 검토 P1).
         return (
-            f"{noun}가 많아 표에는 일부 {noun}만 실렸으며, 실린 {noun} 가운데 오류(FP+FN)가 많은 "
+            f"{with_josa(noun, '이/가')} 많아 표에는 일부 {noun}만 실렸으며, 실린 {noun} 가운데 오류(FP+FN)가 많은 "
             f"{with_josa(noun, '은/는')} {items}이다."
         )
     if len(rows) > len(top):
@@ -479,7 +479,7 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
         gaps, gaps_all = "정확도 − 매크로 F1 과 다수 − 소수 F1 차이 중 하나가", "정확도 − 매크로 F1 과 다수 − 소수 F1 차이가 모두"
     rule = _IMBALANCE_LEVEL[ie.level].format(gaps=gaps, gaps_all=gaps_all)
     text = (
-        f"평가 엔진은 {rule}. 다수 {_noun(ctx)} {ctx.name(ie.majority_class)}와 소수 {_noun(ctx)} "
+        f"평가 엔진은 {rule}. 다수 {_noun(ctx)} {with_josa(ctx.name(ie.majority_class), '과/와')} 소수 {_noun(ctx)} "
         f"{ctx.name(ie.minority_class)}의 F1 차이는 {gap}"
     )
     if ie.accuracy_minus_macro_f1 is not None:
@@ -961,7 +961,7 @@ def _weakest_risk(ctx: Ctx) -> str | None:
         return None
     purpose = _model_purpose(ctx)
     noun = _noun(ctx)
-    tail = f" 모델 용도('{purpose}')에서 그 {noun}가 가지는 위험을 쓴다." if purpose else ""
+    tail = f" 모델 용도('{purpose}')에서 그 {with_josa(noun, '이/가')} 가지는 위험을 쓴다." if purpose else ""
     return f"가장 약한 {_topic(ctx)} F1 {num(w.f1)}인 {ctx.name(w.label)}이다.{tail}"
 
 

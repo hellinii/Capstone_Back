@@ -99,3 +99,52 @@ async def test_generator_passes_class_labels_to_the_section_9_check(make_section
     sec = gen.trace["sections"]["9"]
     assert sec["checks"][0]["impact_numbers"] == []
     assert gen.section_sources["9"] == "llm"
+
+
+# ── 2. 조사 — 고정 '가'·'와' 를 받침에 맞춘다 ─────────────────────────────────────────
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from app.narrative.required_items import select_items  # noqa: E402
+from app.narrative.schemas import NarrativeRequest  # noqa: E402
+
+CONTRACT = Path(__file__).parent / "contract"
+
+
+def _raw(name: str) -> dict:
+    return json.loads((CONTRACT / f"fact_sheet_{name}.json").read_text())
+
+
+def _cons(raw: dict, client_inputs=None) -> dict:
+    req = NarrativeRequest.model_validate(raw)
+    return {c.item_id: c for c in select_items(req.fact_sheet, client_inputs, req.task_type.value)}
+
+
+def test_trimmed_multilabel_counts_use_the_right_josa():
+    raw = _raw("multilabel")
+    raw["fact_sheet"]["facts"]["omitted"] = {"confusion_counts": 3}
+    c = _cons(raw)["7.1-05"]
+    assert c.text.startswith("레이블이 많아 표에는 일부 레이블만 실렸으며, 실린 레이블 가운데")
+    assert "레이블가" not in c.text and c.template_text == c.text
+
+
+def test_weakest_risk_material_uses_the_right_josa_for_labels():
+    raw = _raw("multilabel")
+    c = _cons(raw, {"model": {"모델 용도": "기사 분류"}})["8.3-01"]
+    assert "그 레이블이 가지는 위험" in c.text and "레이블가" not in c.text
+
+
+def test_imbalance_conclusion_josa_follows_the_class_name():
+    raw = _raw("binary")
+    fs = raw["fact_sheet"]
+    fs["imbalance_effect"] = {
+        "level": "affected", "imbalance_ratio": 1.6719, "accuracy_minus_macro_f1": 0.0011,
+        "majority_minus_minority_f1": 0.1092, "majority_class": "benign", "minority_class": "malignant",
+    }
+    text = _cons(raw)["7.2-02"].text
+    assert "다수 클래스 benign과 소수 클래스 malignant의" in text
+    text = _cons(raw, {"class_label_descriptions": {"benign": "양성 종양"}})["7.2-02"].text
+    assert "다수 클래스 benign(양성 종양)과 소수" in text
+    fs["imbalance_effect"]["majority_class"] = "dog"
+    assert "다수 클래스 dog와 소수" in _cons(raw)["7.2-02"].text
