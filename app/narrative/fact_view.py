@@ -361,6 +361,7 @@ def _threshold_gain(fs: FactSheet, derived: dict) -> dict | None:
         "향상폭(이 데이터에서 오를 수 있는 최대폭)": g.gain_text or g.gain,
         "최대 F1 의 결정 임계값": g.best_threshold,
         "평가 엔진 판단": "현재 임계값이 부적합(향상폭 0.1 이상)" if derived.get("threshold_tuning") else "조정 여지가 크지 않음(향상폭 0.1 미만)",
+        "판단 기준": "F1 만 본 판단(Recall·Precision 등 다른 지표에 대한 판단이 아님)",
     }
 
 

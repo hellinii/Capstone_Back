@@ -224,6 +224,15 @@ class SectionBrief:
     notes: list[str] = field(default_factory=list)
 
 
+# 임계값 조정 여지(D40)는 F1 만 본 판단이다 — 세션 C 실호출(bc_strong)에서 '조정 여지가 크지 않다'를 근거로 Recall 여유 문제에
+# 임계값이 소용없다고 썼다(임계값을 낮추면 Recall 은 오를 수 있다). 그 값을 말할 수 있는 칸마다 붙인다.
+_THRESHOLD_GAIN_SECTIONS = ("7.3", "8.2", "8.3", "9")
+_F1_ONLY_GAIN = (
+    "임계값 조정 여지는 F1 을 가장 높이는 결정 임계값에서 F1 이 얼마나 오르는지만 본 판단이다. "
+    "Recall·Precision 같은 다른 지표의 문제에 임계값 조정이 소용없다거나 임계값으로 해소할 수 없다고 적용하지 않는다."
+)
+
+
 def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str) -> list[str]:
     """사실에 따라 붙는 유의점(옛 지시문 규칙 10~15 를 필드명 없이 한국어로)."""
     notes: list[str] = []
@@ -286,8 +295,13 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
             notes.append("지연시간은 측정하지 않았다. 지연 수치를 쓰지 않는다.")
         if derived.get("threshold_tuning"):
             notes.append("결정 임계값 조정의 이득은 같은 평가 데이터에서 고른 값이라 별도 데이터로 확인해야 한다. 성능 향상을 보장한다고 쓰지 않는다.")
+        elif fs.f1_threshold_gain is not None:
+            # 세션 C 실호출(bc_strong): 조정 여지가 작은데 8.3 이 임계값을 위험처럼 되풀이했다(8.3-03 은 부적합일 때만).
+            notes.append("평가 엔진은 임계값 조정 여지가 크지 않다고 봤다. 결정 임계값을 위험으로 쓰지 않는다.")
     elif section_id == "8.1":
         pass
+    if fs.f1_threshold_gain is not None and section_id in _THRESHOLD_GAIN_SECTIONS:
+        notes.append(_F1_ONLY_GAIN)
     return notes
 
 

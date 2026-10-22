@@ -396,3 +396,37 @@ def test_prompt_limits_near_interpretation_to_near_metrics():
     _, _, _, _, ctx, _, _ = generator._prepare(req)
     notes = " ".join(ctx.briefs["8.3"].notes)
     assert "목표와의 여유가 작다·아슬아슬하다·판정이 뒤집힐 수 있다는 해석은 사실 시트 지표 표의 '근소 차이' 칸이 '예'인 지표에만 쓴다" in notes
+
+
+# ── 4c. 임계값 조정 여지는 F1 기준 판단이다 ─────────────────────────────────────────
+
+F1_BASIS = ("임계값 조정 여지는 F1 을 가장 높이는 결정 임계값에서 F1 이 얼마나 오르는지만 본 판단이다. "
+            "Recall·Precision 같은 다른 지표의 문제에 임계값 조정이 소용없다거나 임계값으로 해소할 수 없다고 적용하지 않는다.")
+
+
+def _gain_raw(notable: bool) -> dict:
+    raw = _raw("binary")
+    g = raw["fact_sheet"]["f1_threshold_gain"]
+    if not notable:
+        g.update(max_f1=0.9844, current_f1=0.9767, gain=0.0077, gain_text="0.0077", best_threshold=0.6166, notable=False)
+        raw["fact_sheet"]["problems"] = [p for p in raw["fact_sheet"]["problems"] if p["kind"] != "threshold_tuning"]
+    return raw
+
+
+@pytest.mark.parametrize("notable", [True, False])
+def test_threshold_gain_is_f1_only_in_every_section_that_may_mention_it(notable):
+    req = NarrativeRequest.model_validate(_gain_raw(notable))
+    assert req.fact_sheet.f1_threshold_gain is not None
+    _, _, _, _, ctx, _, _ = generator._prepare(req)
+    for sid in ("7.3", "8.2", "8.3", "9"):
+        assert F1_BASIS in ctx.briefs[sid].notes, (sid, ctx.briefs[sid].notes)
+    view = ctx.view["임계값 조정 여지"]
+    assert view["판단 기준"] == "F1 만 본 판단(Recall·Precision 등 다른 지표에 대한 판단이 아님)"
+    risk_note = "평가 엔진은 임계값 조정 여지가 크지 않다고 봤다. 결정 임계값을 위험으로 쓰지 않는다."
+    assert (risk_note in ctx.briefs["8.3"].notes) is (not notable)
+
+
+def test_no_threshold_note_without_gain():
+    req = NarrativeRequest.model_validate(_raw("multiclass"))
+    _, _, _, _, ctx, _, _ = generator._prepare(req)
+    assert all(F1_BASIS not in ctx.briefs[sid].notes for sid in ("7.3", "8.2", "8.3", "9"))
