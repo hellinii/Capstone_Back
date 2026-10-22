@@ -32,10 +32,9 @@
 ## 2. 디렉토리 지도
 
 ```
-/Users/minseokim/Capstone
-├── PROJECT_OVERVIEW.md         # (이 문서) 프론트+백 통합 진입 지도
+(두 저장소를 나란히 받은 폴더)
 ├── Capstone_Front/             # 프론트엔드
-└── Capstone_Back/              # 백엔드
+└── Capstone_Back/              # 백엔드 — 이 문서는 Capstone_Back/docs/PROJECT_OVERVIEW.md
 ```
 
 ### Capstone_Front — "페이지 = 얇은 조립자(Assembler)" 아키텍처
@@ -96,11 +95,17 @@ Capstone_Back
         칸별 검사(숫자·판정 모순·권고·선언 숫자·형식) → 걸린 칸만 다시/규칙 문장 → GET /api/narrative/jobs/{id} 로 조회
         ※ 옛 프론트는 POST /api/generate-narrative(한 번 호출, narrative.legacy)
         ※ verdict/score 는 프론트 computeVerdict 가 권위, 백엔드는 fact_sheet 값으로 강제
+        ※ 서술 작업 경로: 프론트는 작업 번호를 run 에 저장하고 조회만 한다 — done 이어야 완성본(isEvaluated), 그 전에는
+          인쇄·PDF·발급 잠금, 실패면 "서술 다시 만들기"(프론트 docs/ARCHITECTURE.md §6.1, 백엔드 §10)
 
 [성적서 발급/조회]
    └ POST /api/reports/issue (run_id 멱등) · reissue(번호 유지·버전업) · GET 조회
         ※ isEvaluated 인 run 에만 발급 허용
 ```
+
+- **성적서 판(contentSchema)**: 성적서 데이터에 판 번호가 찍힌다(지금 판 3). 발급한 옛 판(1·2)은 번호로 열어도 발급 당시 모양 그대로 그린다. 판 3 은 소절 번호·7.3 추가 관찰·7절 ※ 한 줄이 있고, 본문에 AI·LLM 표현이 없다(1.4 LLM 면책 항목 없음). 프론트 `docs/ARCHITECTURE.md` §6.3.
+- **작성 기록**: 칸마다 AI 작성(모델 이름)·규칙 기반 문장·고정 문구인지를 발급 보관본에 저장하고(작업 결과 `section_sources`·`section_models`), 서비스 화면의 "작성 기록" 상자에만 보인다 — 인쇄물에는 없다.
+- **기관 이름**: 시드·프론트 자리표시자의 기관 이름은 "리트머스"(옛 "한국 AI 인증원"). 운영 DB 의 기존 행은 배포 때 한 번 바꾼다(`docs/DEPLOYMENT_PLAN.md`).
 
 ---
 
@@ -134,7 +139,7 @@ Capstone_Back
 | `Capstone_Back/docs/DEPLOYMENT_PLAN.md` | **배포 작업 시** — Render+Neon+Vercel, `DATABASE_URL`/`VITE_API_BASE_URL`, 콜드스타트. |
 | `Capstone_Back/docs/ISSUANCE_DB_DESIGN.md` | **발급/채번/재발급** 로직 수정 시 — 3테이블(organization·report·issuance)·연도별 채번. |
 | `Capstone_Back/docs/REPORT_NARRATIVE_DESIGN.md` | **성적서 서술(7·8·9절)** 설계 이력 — LLM grounding·verdict/score 규칙·fallback·benchmark. 현행(작업 번호·칸별 검문 사다리·규칙 템플릿·결정 번호 색인)은 `docs/ARCHITECTURE.md` §10. |
-| `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. |
+| `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. 성적서 서술 흐름·사실 시트·판(contentSchema)·고정 문구 번호 표는 §6. |
 | `Capstone_Front/docs/FRONTEND_DEVELOPMENT_GUIDELINE.md` | 프론트에 새 페이지/컴포넌트/유틸 추가 시 지킬 규칙. |
 | `Capstone_Front/README.md` | UI/스타일 작업 시 (색상·타이포·컴포넌트 패턴)과 7단계 목록. |
 

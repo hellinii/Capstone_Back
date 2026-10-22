@@ -33,7 +33,7 @@ cp .env.example .env                  # ANTHROPIC_API_KEY(서술 — 없으면 �
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 또는 python -m app.main
 venv/bin/python -m pytest            # 테스트 (pytest.ini: asyncio_mode=auto)
 ```
-첫 부팅 시 `init_db()` + `seed_organization()` 이 자동 실행됩니다(발급 표·서술 작업 표). 키 없이도 기동되며 LLM 기능은 규칙 기반으로 대체됩니다.
+첫 부팅 시 `init_db()` + `seed_organization()` 이 자동 실행됩니다(발급 표·서술 작업 표, 기관 표가 비어 있으면 기관 행 "리트머스" — 운영 DB 의 옛 이름 바꾸기는 `docs/DEPLOYMENT_PLAN.md`). 키 없이도 기동되며 LLM 기능은 규칙 기반으로 대체됩니다.
 
 ## 배포
 Render web service(`capstone-back`) + Neon PostgreSQL. `autoDeploy:false` — 배포는 CI(`.github/workflows/ci.yml`)의 Render Deploy Hook 호출로 이루어집니다. 자세히는 `docs/DEPLOYMENT_PLAN.md`.
