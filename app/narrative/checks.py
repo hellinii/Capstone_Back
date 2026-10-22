@@ -6,7 +6,8 @@ app.narrative.generator 가 한다. 검사는 순수 함수다(호출·기록 �
 ① 숫자: 그 칸 글의 숫자가 모두 허용 목록 안(app.narrative.grounding — 원본 사실 시트로 만든 목록).
 ② 판정 모순: 강제된 판정과 어긋나는 문장(grounding.find_verdict_contradictions — 오탐·누락을 함께 고친 판, 점검 BE-04).
 ③ 9칸: 기대 효과의 예측 수치(지표값·향상폭 — 사용자 결정 "막는 숫자는 예측 수치만", 다-9: '1차 원인'·'3개월 내'는
-   막지 않는다), 권고가 빠진 문제(D22 — 문제마다 권고 하나 이상).
+   막지 않는다. 숫자 꼴 클래스 이름 '클래스 2'도 단위·개선 낱말이 붙지 않으면 막지 않는다), 권고가 빠진 문제(D22 — 문제마다
+   권고 하나 이상).
 ④ D24 선언 숫자: 그 칸의 D24 항목(7.1 위험 쪽 오류·8.2 선언 평균 방식·8.3 대화형 응답 시간)의 확인 숫자 중 하나가
    글에 있는가(required_items.Conclusion.d24_values, 허용 목록과 같은 표기 변형). '특별한 것 없음'이면 항목이 없어 끈다.
 ⑤ 형식: 빈 칸, 7.3 은 허용 숫자를 하나 이상 인용(D7·D38), 영어 판정 코드·필드명(작성 규칙 D37 — 운영에서 "판정은
@@ -107,21 +108,53 @@ _NOT_PREDICTION_UNIT = re.compile(r"\s*(?:차|단계|번째|순위|순차|개월
 _IMPROVEMENT_AFTER = re.compile(r"\s*(?:을|를|이|가|만큼|씩|정도)?\s*(?:단축|감소|줄|늘|향상|개선|증가|상승|낮아|높아|올라|내려)")
 
 
-def predicted_numbers(text: str) -> list[str]:
+# 숫자 꼴 클래스 이름("클래스 2"·"2(숫자 2)"·"'2'")은 예측 수치가 아니다 — 뒤에 수량 단위나 개선 낱말이 붙을 때만 예측
+# 수치로 본다("2건 감소"·"2배"). 세션 C 실호출: Digits 9칸이 "클래스 2" 로 두 번 걸려 9칸 전체가 규칙 문장이 됐다.
+_LABEL_AS_AMOUNT = re.compile(r"\s*(?:건|개|칸|배|%p?)")
+
+
+def predicted_numbers(text: str, labels: frozenset[str] | set[str] = frozenset()) -> list[str]:
+    """기대 효과 글의 예측 수치. labels 는 사실 시트의 숫자 꼴 클래스·레이블 이름(numeric_labels — 정규 표기)."""
     if not isinstance(text, str):
         return []
     stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(text))
     found = []
     for m in _NUMBER_RE.finditer(stripped):
         token = m.group(0)
-        if _canon(token) is None:
+        canon = _canon(token)
+        if canon is None:
             continue
         decimal_or_pct = "." in token or "%" in token or stripped[m.end():m.end() + 2].startswith("%p")
         unit = None if decimal_or_pct else _NOT_PREDICTION_UNIT.match(stripped, m.end())
         if unit and not _IMPROVEMENT_AFTER.match(stripped, unit.end()):
             continue
+        if (
+            not decimal_or_pct and canon in labels
+            and not _LABEL_AS_AMOUNT.match(stripped, m.end()) and not _IMPROVEMENT_AFTER.match(stripped, m.end())
+        ):
+            continue  # 클래스 이름을 부른 것
         found.append(token)
     return found
+
+
+def numeric_labels(fs: FactSheet) -> frozenset[str]:
+    """사실 시트의 클래스·레이블 이름 가운데 정수 꼴인 것(정규 표기) — 기대 효과 검사가 이름으로 본다.
+
+    이름 목록은 판정 모순 가리기(verdict_masks)와 같은 출처다: 클래스별 표·엔진 건수·혼동행렬·분포·불균형 영향·facts 목록."""
+    names: list[str] = [p.label for p in fs.per_class] + [r.label for r in fs.confusion_counts]
+    if fs.confusion:
+        names += list(fs.confusion.labels)
+    if fs.distribution:
+        names += list(fs.distribution.class_distribution)
+    if fs.imbalance_effect:
+        names += [fs.imbalance_effect.majority_class, fs.imbalance_effect.minority_class]
+    names += _fact_labels(fs)
+    out: set[str] = set()
+    for name in names:
+        text = str(name).strip()
+        if re.fullmatch(r"[+-]?\d+", text):
+            out.add(_canon(text))
+    return frozenset(out)
 
 
 # ── ④ D24 선언 숫자 ─────────────────────────────────────────────────────────────
@@ -260,6 +293,7 @@ def check_section(
     problem_ids: list[str],
     exempt: set[str],
     masks: tuple[str, ...] = (),
+    labels: frozenset[str] = frozenset(),
 ) -> SectionCheck:
     """AI 가 쓴 칸 하나를 검사한다. parts 는 그 칸의 응답 필드(점 표기) → 값(9칸의 권고는 dict 목록)."""
     result = SectionCheck(section=section_id)
@@ -285,7 +319,7 @@ def check_section(
     if section_id == "9":
         recs = parts.get("recommendations") or []
         for rec in recs:
-            result.impact_numbers.extend(predicted_numbers(rec.get("expected_impact", "")))
+            result.impact_numbers.extend(predicted_numbers(rec.get("expected_impact", ""), labels))
         answered = {str(r.get("problem_id") or "").strip() for r in recs}
         result.missing_recommendations = [pid for pid in problem_ids if pid not in answered]
 

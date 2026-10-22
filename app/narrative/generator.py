@@ -196,6 +196,7 @@ async def generate_sections(
     derived, refs, whitelist, conclusions, ctx, exempt, masks = await run_cpu_bound(_prepare, req)
     effort = effort or job_effort()
     problem_ids = [p.id for p in fs.problems]
+    labels = checks.numeric_labels(fs)  # 9칸 기대 효과에서 '클래스 2' 를 예측 수치로 보지 않게
     # 8.1 이 성적서 고정 문구 16 뿐이면 AI 에 맡기지 않는다 — 쓸 것이 16 의 되풀이뿐이라 빈 글이 맞다.
     benchmark_fixed = benchmark_printed_only(fs, refs, conclusions)
     states = {sid: SectionState(sid) for sid in SECTION_IDS}
@@ -318,7 +319,7 @@ async def generate_sections(
         aligned = _align(parts, fs.problems, fill_missing=False)[0] if sid == "9" else parts
         result = checks.check_section(
             sid, _rec_dicts(aligned), whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
-            problem_ids=problem_ids, exempt=exempt, masks=masks,
+            problem_ids=problem_ids, exempt=exempt, masks=masks, labels=labels,
         )
         st.checks.append(result.as_record())
         hard = result.hard_failures
