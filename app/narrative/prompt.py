@@ -83,7 +83,7 @@ SYSTEM_PROMPT = """너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 �
 # 칸마다 하는 일(user 메시지 '칸별 지시'의 첫 줄).
 SECTION_TASKS: dict[str, str] = {
     "7.1": "오분류가 얼마나, 어느 방향으로 일어났는지와 어느 클래스가 약한지, 예측이 어느 쪽으로 치우쳤는지를 해석한다.",
-    "7.2": "평가 데이터의 클래스 분포와 불균형, 불균형이 성능 수치에 준 영향, 학습 데이터와의 분포 차이를 해석한다.",
+    "7.2": "평가 데이터의 클래스 분포와 불균형, 불균형에 따른 성능 지표 왜곡이 관찰되었는지, 학습 데이터와의 분포 차이를 해석한다.",
     "7.3": (
         "결론 목록 밖에서 사실 시트로 찾은 특이사항만 쓴다. 사실 시트의 숫자를 하나 이상 인용한다. "
         "결론 목록·다른 칸의 내용을 되풀이하지 않고, 측정하지 않은 항목(지연시간 등)이나 권고를 쓰지 않으며, "
@@ -235,11 +235,26 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
     elif section_id == "7.2":
         ie = fs.imbalance_effect
         if ie is not None:
+            noun = "레이블" if task_type == "multilabel" else "클래스"
+            topic = "레이블은" if task_type == "multilabel" else "클래스는"
             notes.append({
-                "affected": "불균형이 성능 수치에 영향을 주었다고 쓰고, 소수 클래스의 성능 해석에 유의해야 한다고 적는다.",
+                # 성적서 3절 불균형 진단과 같은 말투(사용자 결정 2026-10-22). 세션 C 실호출에서 '영향을 준 것으로 판단'과
+                # '소수 클래스의 성능 수치는 다수 클래스와 같은 무게로 읽지 않도록'(소수를 덜 보라는 오해 문장)이 나왔다.
+                "affected": (
+                    "불균형에 따른 성능 지표 왜곡이 관찰되었다. '불균형에 따른 성능 지표 왜곡이 관찰되었다'로 쓴다. "
+                    "불균형이 성능 수치에 영향을 주었다·준 것으로 보인다·판단된다 같은 인과 단정은 쓰지 않는다. "
+                    f"소수 {topic} 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다. "
+                    f"소수 {noun}의 성능을 덜 중요하게 보거나 다수 {noun}와 같은 무게로 읽지 말라는 말은 쓰지 않는다."
+                ),
                 "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다. 불균형이 성능을 왜곡했다고 쓰지 않는다.",
                 "mild": "불균형이 경미하다. 불균형 때문에 성능이 왜곡되었다고 쓰지 않는다.",
             }[ie.level])
+            decl = facts.declarations if facts is not None else None
+            if ie.level == "affected" and decl is not None and decl.class_priority == "all_equal":
+                notes.append(
+                    f"의뢰자가 모든 {noun}{'이' if noun == '레이블' else '가'} 동등하다고 밝혔으므로 소수 {noun}의 성능도 "
+                    f"다른 {noun}{'과' if noun == '레이블' else '와'} 같은 비중으로 다룬다."
+                )
         if task_type == "multilabel":
             notes.append("분포는 레이블 등장 횟수다. 한 표본에 레이블이 여럿일 수 있어 백분율을 모두 더하면 전체를 넘을 수 있다.")
     elif section_id == "8.2":

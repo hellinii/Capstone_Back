@@ -148,3 +148,68 @@ def test_imbalance_conclusion_josa_follows_the_class_name():
     assert "다수 클래스 benign(양성 종양)과 소수" in text
     fs["imbalance_effect"]["majority_class"] = "dog"
     assert "다수 클래스 dog와 소수" in _cons(raw)["7.2-02"].text
+
+
+# ── 3. 7.2 불균형 말투 — 3절과 같은 '불균형에 따른 성능 지표 왜곡이 관찰되었다' ─────────────────
+
+from app.narrative import fact_view, generator, prompt  # noqa: E402
+from app.narrative.required_items import imbalance_sentence  # noqa: E402
+from app.narrative.schemas import ImbalanceEffectFact  # noqa: E402
+
+CAUSAL = ("영향을 주", "영향을 준", "같은 무게", "덜 중요")
+
+
+def _affected(raw: dict, *, priority: str | None = None) -> NarrativeRequest:
+    fs = raw["fact_sheet"]
+    fs["imbalance_effect"] = {
+        "level": "affected", "imbalance_ratio": 2.9683, "accuracy_minus_macro_f1": 0.1533,
+        "majority_minus_minority_f1": 0.1271, "majority_class": "0", "minority_class": "1",
+    }
+    if priority is not None:
+        fs["facts"]["declarations"]["class_priority"] = priority
+    return NarrativeRequest.model_validate(raw)
+
+
+def test_affected_template_says_distortion_was_observed():
+    ie = ImbalanceEffectFact(level="affected", imbalance_ratio=3.2, accuracy_minus_macro_f1=0.12,
+                             majority_minus_minority_f1=0.03, majority_class="neg", minority_class="pos")
+    text = imbalance_sentence(ie)
+    assert text == (
+        "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있고, 정확도와 매크로 F1 의 차이(0.12)가 기준(0.1) 이상이어서 "
+        "불균형에 따른 성능 지표 왜곡이 관찰되었다. 다수 클래스(neg)와 소수 클래스(pos)의 F1 차이(0.03)는 기준(0.1) 미만이다. "
+        "소수 클래스는 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다."
+    )
+    ml = ImbalanceEffectFact(level="affected", imbalance_ratio=52.9231, accuracy_minus_macro_f1=None,
+                             majority_minus_minority_f1=0.4, majority_class="Class12", minority_class="Class14")
+    assert imbalance_sentence(ml).endswith("소수 레이블은 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다.")
+    for t in (text, imbalance_sentence(ml)):
+        assert not any(w in t for w in CAUSAL), t
+
+
+def test_affected_conclusion_and_prompt_note_follow_section_3_wording():
+    req = _affected(_raw("binary"))
+    cons = {c.item_id: c for c in select_items(req.fact_sheet, None, "binary")}
+    assert cons["7.2-02"].text.startswith("불균형에 따른 성능 지표 왜곡이 관찰되었다(비율이 1.5 이상이고 ")
+    _, _, _, _, ctx, _, _ = generator._prepare(req)
+    notes = " ".join(ctx.briefs["7.2"].notes)
+    assert "'불균형에 따른 성능 지표 왜곡이 관찰되었다'로 쓴다" in notes
+    assert "영향을 주었다·준 것으로 보인다·판단된다 같은 인과 단정은 쓰지 않는다" in notes
+    assert "소수 클래스는 표본이 적어 수치가 흔들리기 쉬우니 해석에 유의해야 한다는 뜻으로 적는다" in notes
+    assert "덜 중요하게 보거나 다수 클래스와 같은 무게로 읽지 말라는 말은 쓰지 않는다" in notes
+    assert "모든 클래스가 동등" not in notes  # 선언이 없으면 선언을 말하지 않는다
+    # 지시문 전체(칸 하는 일·사실 시트 보기)에도 인과 단정 말이 없다.
+    msg = prompt.build_user_message(ctx, ("7.1", "7.2", "7.3"))
+    for w in ("영향을 주었다고 판단", "영향을 준 것으로", "불균형 영향 있음", "성능 수치에 준 영향"):
+        assert w not in msg, w
+
+
+def test_all_equal_declaration_is_named_in_the_imbalance_note():
+    req = _affected(_raw("multilabel"), priority="all_equal")
+    _, _, _, _, ctx, _, _ = generator._prepare(req)
+    notes = " ".join(ctx.briefs["7.2"].notes)
+    assert "의뢰자가 모든 레이블이 동등하다고 밝혔으므로 소수 레이블의 성능도 다른 레이블과 같은 비중으로 다룬다" in notes
+    assert "소수 레이블은 표본이 적어" in notes
+
+
+def test_imbalance_label_in_fact_view_is_observation_wording():
+    assert fact_view.IMBALANCE_KO["affected"].startswith("불균형에 따른 성능 지표 왜곡이 관찰됨")

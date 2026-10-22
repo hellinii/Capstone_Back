@@ -34,7 +34,7 @@ REPORT_PURPOSE_KO = {"internal": "내부 검증", "external": "외부 제출", "
 STATUS_KO = {"pass": "충족", "fail": "미달", "warning": "경고", "info": "목표값 없음(참고)"}
 PRIORITY_KO = {"HIGH": "높음", "MEDIUM": "중간", "LOW": "낮음"}
 IMBALANCE_KO = {
-    "affected": "불균형 영향 있음(불균형 비율 1.5 이상이고 차이가 0.1 이상)",
+    "affected": "불균형에 따른 성능 지표 왜곡이 관찰됨(불균형 비율 1.5 이상이고 차이가 0.1 이상)",
     "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않음(불균형 비율 1.5 이상, 차이는 0.1 미만)",
     "mild": "불균형이 경미함(불균형 비율 1.5 미만)",
 }

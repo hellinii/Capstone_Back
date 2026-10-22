@@ -459,11 +459,12 @@ def _imbalance_ratio_template(ctx: Ctx) -> str | None:
 
 
 # 엔진 판정 규칙(D20)의 설명 — 이진·다중은 '정확도 − 매크로 F1' 과 '다수 − 소수 F1' 둘을, 멀티레이블은 다수·소수
-# 레이블 F1 차 하나만 본다(S4b 검토 RI-08).
+# 레이블 F1 차 하나만 본다(S4b 검토 RI-08). 말투는 성적서 3절 불균형 진단과 같게 '관찰되었다'로 쓴다 — '불균형이 성능
+# 수치에 영향을 주었다'·'판단했다' 같은 인과 단정은 쓰지 않는다(사용자 결정 2026-10-22, 세션 C 실호출에서 3절과 말투가 갈렸다).
 _IMBALANCE_LEVEL = {
-    "affected": "불균형이 성능 수치에 영향을 주었다고 판단했다(비율이 1.5 이상이고 {gaps} 0.1 이상)",
-    "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다고 판단했다(비율이 1.5 이상이고 {gaps_all} 0.1 미만)",
-    "mild": "불균형이 경미하다고 판단했다(비율이 1.5 미만)",
+    "affected": "불균형에 따른 성능 지표 왜곡이 관찰되었다(비율이 1.5 이상이고 {gaps} 0.1 이상)",
+    "no_distortion": "불균형은 있으나 성능 왜곡은 관찰되지 않았다(비율이 1.5 이상이고 {gaps_all} 0.1 미만)",
+    "mild": "불균형이 경미하다(비율이 1.5 미만)",
 }
 
 
@@ -479,7 +480,7 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
         gaps, gaps_all = "정확도 − 매크로 F1 과 다수 − 소수 F1 차이 중 하나가", "정확도 − 매크로 F1 과 다수 − 소수 F1 차이가 모두"
     rule = _IMBALANCE_LEVEL[ie.level].format(gaps=gaps, gaps_all=gaps_all)
     text = (
-        f"평가 엔진은 {rule}. 다수 {_noun(ctx)} {with_josa(ctx.name(ie.majority_class), '과/와')} 소수 {_noun(ctx)} "
+        f"{rule}. 다수 {_noun(ctx)} {with_josa(ctx.name(ie.majority_class), '과/와')} 소수 {_noun(ctx)} "
         f"{ctx.name(ie.minority_class)}의 F1 차이는 {gap}"
     )
     if ie.accuracy_minus_macro_f1 is not None:
@@ -551,10 +552,12 @@ def imbalance_sentence(ie, name: Callable[[str], str] = str) -> str:
     head = f"불균형 비율({ir_text})이 1.5 이상이어서 불균형이 있"
     if over:
         named = "와 ".join(f"{n}({val(n, v)})" for n, v in over)
-        text = f"{head}고, {named}가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다."
+        # 3절 불균형 진단과 같은 말투(사용자 결정 2026-10-22) — 인과 단정('영향을 준 것으로 보인다')을 쓰지 않고, 소수 쪽은
+        # 표본이 적어 수치가 흔들리기 쉽다는 뜻으로만 쓴다(덜 중요하게 보라는 뜻으로 읽히지 않게).
+        text = f"{head}고, {named}가 기준(0.1) 이상이어서 불균형에 따른 성능 지표 왜곡이 관찰되었다."
         if under:
             text += " " + " ".join(under_text(n, v) + "." for n, v in under)
-        return text + f" 소수 {unit}의 성능 지표 해석에 유의가 필요하다."
+        return text + f" 소수 {unit}{'은' if unit == '레이블' else '는'} 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다."
     return (
         f"{head}으나, 불균형에 의한 성능 왜곡은 관찰되지 않았다. "
         + " ".join(under_text(n, v) + "." for n, v in under)

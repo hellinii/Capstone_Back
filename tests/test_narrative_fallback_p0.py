@@ -53,7 +53,7 @@ def test_only_accuracy_gap_is_cited_as_over_and_negative_class_gap_is_explained(
     """점검 재현값: 정확도 차이 0.1533 만 기준 이상, 클래스 차이 −0.0213(소수가 더 잘 맞음)."""
     resp, _ = _run(_fs(imbalance_effect=_ie("affected", 0.1533, -0.0213)))
     text = resp.interpretation.distribution_analysis
-    assert "정확도와 매크로 F1 의 차이(0.1533)가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다." in text
+    assert "정확도와 매크로 F1 의 차이(0.1533)가 기준(0.1) 이상이어서 불균형에 따른 성능 지표 왜곡이 관찰되었다." in text
     assert "F1 차이(-0.0213)는 음수로 소수 클래스의 F1 이 더 높다." in text
     assert "벌어져" not in text
     # 기준 이상이라고 말하는 문장에 음수 차이가 들어가지 않는다.
@@ -99,7 +99,7 @@ def test_multilabel_imbalance_uses_label_gap_only():
     resp, _ = _run(_fs(imbalance_effect=ie))
     text = resp.interpretation.distribution_analysis
     assert "다수 레이블(sports)과 소수 레이블(tech)의 F1 차이(0.3)가 기준(0.1) 이상" in text
-    assert "매크로" not in text and "소수 레이블의 성능 지표 해석" in text
+    assert "매크로" not in text and "소수 레이블은 표본이 적어 수치가 흔들리기 쉬우므로 성능 지표 해석에 유의가 필요하다." in text
 
 
 # ── BE-03 8.2·8.3 판정 ──────────────────────────────────────────────────────

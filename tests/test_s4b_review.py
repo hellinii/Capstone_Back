@@ -205,7 +205,7 @@ def test_emptied_distribution_still_reports_engine_imbalance():
                              majority_minus_minority_f1=0.3, majority_class="a", minority_class="b")
     fs = _fs(imbalance_effect=ie, facts=NarrativeFactsFact(omitted={"class_distribution": 300}))
     text = _fallback(fs).interpretation.distribution_analysis
-    assert "생략" in text and "불균형이 성능 수치에 영향을 준 것으로 보인다" in text
+    assert "생략" in text and "불균형에 따른 성능 지표 왜곡이 관찰되었다" in text
     assert "분포 분석을 생략한다" not in text
 
 
