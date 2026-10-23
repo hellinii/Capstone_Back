@@ -43,7 +43,10 @@ ISSUED_PAIRS = {
 }
 
 CONTRACT_CASES = ("binary", "multiclass", "multilabel")
-JOB_CASES = (*CONTRACT_CASES, "bc_strong")
+# 합성 입력(tests/golden_frozen/inputs/fact_sheet_<이름>.json) — 계약·발급본이 지나지 않는 규칙 문장 갈래를 지나게 만든 것.
+# 만든 방법은 tests/golden_frozen/README.md.
+SYNTH_CASES = ("synth_inconclusive", "synth_conditional")
+JOB_CASES = (*CONTRACT_CASES, *ISSUED_PAIRS.values(), *SYNTH_CASES)
 LEGACY_PROMPT_CASES = ("legacy_main", "binary")
 
 # 옛 골든(tests/golden/narrative_job_fallback_*)을 만든 테스트(test_s6_templates)의 고객 입력 — 그대로 옮김.
@@ -90,7 +93,11 @@ def issued_request_raw(name: str) -> dict:
 
 
 def job_case_raw(case: str) -> dict:
-    return issued_request_raw(case) if case == "bc_strong" else contract_raw(case)
+    """작업 경로 정답의 입력 — 계약 3종·합성 입력은 inputs/ 사본, 그 밖은 발급본 요청 원문."""
+    if case in CONTRACT_CASES or case in SYNTH_CASES:
+        return contract_raw(case)
+    assert case in ISSUED_PAIRS.values(), case
+    return issued_request_raw(case)
 
 
 # ── 1. 옛 골든의 재계산(tests/golden 의 narrative_*·validate_* 를 만든 것과 같은 입력) ──────────

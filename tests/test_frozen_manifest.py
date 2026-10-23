@@ -8,8 +8,9 @@ from pathlib import Path
 
 import frozen_s0 as fz
 
-# MANIFEST.sha256 에 실린 파일 수 — 고정 폴더 40(사본 12·평가 기준 4·입력 4·판 3 정답 20) + 발급본 자료 12.
-MANIFEST_COUNT = 52
+# MANIFEST.sha256 에 실린 파일 수 — 고정 폴더 63(사본 12·평가 기준 4·입력 6(계약 4·합성 2)·판 3 정답 41) + 발급본 자료 12.
+# 판 3 정답 41 = 작업 경로 11예 × 3(규칙 문장·지시문·사실 시트 보기) + 옛 경로 지시문 2 + 발급본 검문 6.
+MANIFEST_COUNT = 75
 
 
 def _manifest_files() -> dict[str, str]:
