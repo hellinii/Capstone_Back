@@ -37,7 +37,7 @@ def test_same_source_template_is_b23_word_for_word():
     assert _PROBLEM_TEMPLATES["same_source"] == B23
     shape = SPEC["problems"]["same_source"]["shape"]
     p = ProblemFact(**{**shape, "id": "P2"})
-    rec = problem_recommendation(p)
+    rec = problem_recommendation(p, edition=4)  # 판 4 에만 오는 종류
     assert (rec.problem_id, rec.priority) == ("P2", "LOW")
     assert (rec.category, rec.action, rec.expected_impact) == B23
 

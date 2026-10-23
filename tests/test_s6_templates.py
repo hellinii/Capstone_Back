@@ -553,7 +553,7 @@ def test_benchmark_values_are_not_raw():
 def test_error_ratio_sentence_uses_cells_for_multilabel():
     er = ErrorRatiosFact(unit="label_cell", misclassified=12, boundary={"count": 5, "ratio": 0.4167},
                          confident={"count": 2, "ratio": 0.1667})
-    assert error_ratio_sentence(er).startswith("틀린 레이블 칸 12칸 중 결정 경계와의 거리가 0.1 미만인 경계 오류는 5칸(41.7%)")
+    assert error_ratio_sentence(er, edition=3).startswith("틀린 레이블 칸 12칸 중 결정 경계와의 거리가 0.1 미만인 경계 오류는 5칸(41.7%)")
 
 
 def test_copied_requests_are_not_mutated_by_templates():

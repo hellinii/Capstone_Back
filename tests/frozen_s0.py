@@ -316,7 +316,7 @@ def _check_one(sid: str, parts: dict, req: NarrativeRequest, prepared) -> dict:
     fs = req.fact_sheet
     _, _, whitelist, conclusions, _, exempt, masks = prepared
     problem_ids = [p.id for p in fs.problems]
-    aligned = generator._align(parts, fs.problems, fill_missing=False)[0] if sid == "9" else parts
+    aligned = generator._align(parts, fs.problems, fill_missing=False, edition=3)[0] if sid == "9" else parts
     rec_parts = generator._rec_dicts(aligned)
     result = checks.check_section(
         sid, rec_parts, whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,

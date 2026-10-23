@@ -150,10 +150,10 @@ def _extract(section_id: str, data: dict) -> dict | None:
     return parts
 
 
-def _align(parts: dict, problems: list, *, fill_missing: bool) -> tuple[dict, list[str]]:
+def _align(parts: dict, problems: list, *, fill_missing: bool, edition: int) -> tuple[dict, list[str]]:
     """권고를 문제 목록에 맞춘다(D22) — 목록 밖 번호는 버리고, 우선순위는 문제의 것, 문제 번호 순서.
 
-    fill_missing 이면 권고가 없는 문제를 종류별 폴백 템플릿으로 채운다. 채운 문제 번호를 돌려준다."""
+    fill_missing 이면 권고가 없는 문제를 종류별 폴백 템플릿(그 판의 글 — edition)으로 채운다. 채운 문제 번호를 돌려준다."""
     by_id: dict[str, list[dict]] = {p.id: [] for p in problems}
     for r in parts.get("recommendations") or []:
         if r["problem_id"] in by_id:
@@ -163,7 +163,7 @@ def _align(parts: dict, problems: list, *, fill_missing: bool) -> tuple[dict, li
     for p in problems:
         if not by_id[p.id]:
             if fill_missing:
-                aligned.append(fallback.problem_recommendation(p))
+                aligned.append(fallback.problem_recommendation(p, edition=edition))
                 filled.append(p.id)
             continue
         for r in by_id[p.id]:
@@ -326,7 +326,7 @@ async def generate_sections(
 
         model 은 이 글을 낸 호출의 응답 모델 — 글을 실으면 칸 모델로 남긴다(section_models)."""
         st = states[sid]
-        aligned = _align(parts, fs.problems, fill_missing=False)[0] if sid == "9" else parts
+        aligned = _align(parts, fs.problems, fill_missing=False, edition=edition)[0] if sid == "9" else parts
         result = checks.check_section(
             sid, _rec_dicts(aligned), whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
             problem_ids=problem_ids, exempt=exempt, masks=masks, labels=labels, edition=edition,
@@ -350,7 +350,7 @@ async def generate_sections(
             st.kept = ("missing_rec", parts, model)
         if sid == "9" and last_chance and hard == ["missing_recommendation"]:
             # 다시 부른 뒤에도 권고가 빠진 문제만 남았다 — D22 대로 종류별 폴백 템플릿으로 채운다(9칸은 규칙 문장이 섞임).
-            filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
+            filled_parts, filled = _align(parts, fs.problems, fill_missing=True, edition=edition)
             st.parts, st.source, st.outcome, st.reason = filled_parts, "fallback", "filled", "missing_recommendation"
             trace["recommendations_from_template"] = filled
             return True
@@ -377,7 +377,7 @@ async def generate_sections(
             st.parts, st.source, st.outcome, st.d24_missing, st.reason = parts, "llm", "kept_first", True, None
             st.model = model
         else:
-            filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
+            filled_parts, filled = _align(parts, fs.problems, fill_missing=True, edition=edition)
             st.parts, st.source, st.outcome, st.reason = filled_parts, "fallback", "filled", "missing_recommendation"
             trace["recommendations_from_template"] = filled
 

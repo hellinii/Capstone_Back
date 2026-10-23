@@ -471,7 +471,7 @@ def _align_recommendations(recs: list, problems: list) -> list[RecommendationOut
     for p in problems:
         matched = by_id[p.id]
         if not matched:
-            aligned.append(problem_recommendation(p))
+            aligned.append(problem_recommendation(p, edition=EDITION))
             continue
         for r in matched:
             aligned.append(RecommendationOut(**{**r, "problem_id": p.id, "priority": p.priority}))

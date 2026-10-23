@@ -299,7 +299,7 @@ def test_fallback_recommendations_one_template_per_problem():
     assert resp.recommendations[1].category == _PROBLEM_TEMPLATES["threshold_tuning"][0]
     # 불균형 + 편향 노력 "수행 안 함" 메모 → 권고 앞에 그 사실
     assert resp.recommendations[2].action.startswith("의뢰자가 편향 감소 노력을 수행하지 않았다고")
-    assert not problem_recommendation(_problem("P1", "imbalance_effect", "MEDIUM")).action.startswith("의뢰자가")
+    assert not problem_recommendation(_problem("P1", "imbalance_effect", "MEDIUM"), edition=3).action.startswith("의뢰자가")
 
 
 def test_fallback_no_problems_no_recommendations():
