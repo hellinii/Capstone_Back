@@ -13,7 +13,7 @@
 
 | | Capstone_Front | Capstone_Back |
 |---|---|---|
-| 역할 | UI / 7단계 워크플로우 / 성적서 렌더 | 컬럼 매핑·검증·지표계산·LLM 서술·발급 API |
+| 역할 | UI / 평가 흐름(입력 화면) / 성적서 렌더 | 컬럼 매핑·검증·지표계산·LLM 서술·발급 API |
 | 스택 | React 18 · TS · Vite · Zustand · Tailwind/shadcn · pnpm | Python 3.12 · FastAPI · pandas · scikit-learn · Anthropic · OpenAI · SQLAlchemy · Pydantic |
 | 배포 | **Vercel** | **Render** web service + **Neon PostgreSQL** (로컬은 SQLite) |
 | 원격 | github.com/hwanginyong02/Capstone_Front | github.com/hwanginyong02/Capstone_Back |
@@ -40,7 +40,7 @@ Capstone_Front
 ├── docs/ARCHITECTURE.md        # 프론트 구조 기준 문서
 ├── docs/FRONTEND_DEVELOPMENT_GUIDELINE.md   # 개발 시 지켜야 할 구조 규칙
 └── src/
-    ├── App.tsx / routes.ts      # 라우팅 (7단계 워크플로우는 /app/*)
+    ├── App.tsx / routes.ts      # 라우팅 (발급 전 입력 화면은 /app/*, 성적서는 /report/*)
     ├── pages/                   # 얇은 조립자 (단계별 페이지 + report/ + workspaces/)
     ├── components/              # 도메인별 UI (basic-info, ..., report, workspaces, landing, ui)
     ├── layout/                  # WorkflowShell(워크플로우 셸) · AppShell(비-워크플로우 셸)
@@ -49,7 +49,7 @@ Capstone_Front
     ├── utils/                   # styling · format · domain · stores(Zustand: useWorkflowStore/useWorkspaceStore)
     └── data/ · types/ · styles/ · test/
 ```
-7단계 워크플로우: **기본정보 → 지표선택 → 지표상세 → 데이터업로드 → 컬럼매핑 → 데이터검증 → 리포트**.
+평가 흐름: **작업 유형 선택(`/app`) → 평가 흐름 만들기(`/app/composer`, 넣을 입력 카드와 순서를 고름) → 고른 순서대로 입력 화면(의뢰자·모델·데이터 업로드·컬럼 매핑·평가 관점·지표 등, 최소 8·전체 12 화면) → 데이터 검증 → 확인과 생성(`/report/:id`)**. 화면 순서는 고정이 아니라 사용자가 정한다(프론트 저장소 `docs/MATERIAL_PICKER.md` §11·§12).
 
 ### Capstone_Back — "라우터(얇은 HTTP) → 서비스(오케스트레이션) → 순수 로직" 계층
 ```
