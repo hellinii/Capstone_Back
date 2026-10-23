@@ -179,7 +179,7 @@ def test_bump_version():
 
 def test_issuer_defaults_to_org(db_session):
     r = svc.issue_report(db_session, run_id="run-1", now=datetime(2026, 7, 4))
-    assert r.issuances[0].issuer == "한국 AI 인증원 평가부"
+    assert r.issuances[0].issuer == "리트머스 평가부"
 
 
 def test_issuer_explicit_override(db_session):
@@ -195,7 +195,7 @@ def test_api_get_organization(client):
     resp = client.get("/api/organization")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["org_name"] == "한국 AI 인증원"
+    assert body["org_name"] == "리트머스"
     assert body["evaluator"] == "자동 평가 엔진"
 
 
@@ -209,8 +209,8 @@ def test_api_issue_reissue_reopen_flow(client):
     d = resp.json()
     assert re.match(r"^RPT-\d{4}-0001$", d["report_no"])
     assert d["version"] == "v1.0"
-    assert d["issuer"] == "한국 AI 인증원 평가부"
-    assert d["organization"]["org_name"] == "한국 AI 인증원"
+    assert d["issuer"] == "리트머스 평가부"
+    assert d["organization"]["org_name"] == "리트머스"
     assert len(d["history"]) == 1
     # 시각은 offset 포함 ISO8601(프론트가 KST 로 변환 가능해야 함)
     assert d["issued_at"].endswith("+00:00")
@@ -322,7 +322,7 @@ def test_api_issue_blank_note_becomes_first_issue(client):
     r = client.post("/api/reports/issue", json={"run_id": "run-blank-note", "note": "   ", "issuer": "  "})
     assert r.status_code == 200, r.text
     assert r.json()["history"][0]["note"] == "최초 발급"
-    assert r.json()["issuer"] == "한국 AI 인증원 평가부"
+    assert r.json()["issuer"] == "리트머스 평가부"
 
 
 def test_api_issue_note_trimmed_before_limit(client):

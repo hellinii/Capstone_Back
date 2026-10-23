@@ -25,6 +25,7 @@ from app.evaluation.labels import normalize_label
 from app.evaluation.preprocessor import class_distribution_of
 
 from . import binary, common
+from .display import judged_text, plain_text
 
 
 def calculate_confusion_counts(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
@@ -49,12 +50,51 @@ def calculate_confusion_counts(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     else:
         matrix = np.array(cm["matrix"])
         total = int(matrix.sum())
+        # 줄은 정답 클래스만 둔다. 예측에만 있는 클래스(유령)는 평가 클래스가 아니다 — 그 예측은 정답 클래스 줄의
+        # FN 으로 이미 세어진다. 줄을 두면 tp 0·fn 0·fp k 인 '클래스'가 사실 시트에 실렸다.
+        classes = set(common.evaluation_classes(df, mapping_dict))
         for i, label in enumerate(cm["labels"]):
+            if label not in classes:
+                continue
             tp = int(matrix[i, i])
             fp = int(matrix[:, i].sum()) - tp
             fn = int(matrix[i, :].sum()) - tp
             rows.append({"label": label, "tp": tp, "fp": fp, "fn": fn, "tn": total - tp - fp - fn})
     return {"type": "per_class", "rows": rows}
+
+
+# ── 늘 계산하는 혼동행렬·클래스별 표(S2) ──
+# 서술 7.1·8.3 과 9절 최약 클래스는 M21·M22 를 고르지 않아도 행렬·표를 쓴다(사용자 결정 2026-10-19). 성적서
+# 6절의 M21·M22 표 인쇄는 지금처럼 선택을 따른다 — 이 두 키는 서술·사실 시트·문제 목록의 재료다.
+
+def calculate_confusion_matrix_always(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
+    """success_metrics.confusion_matrix — M21 과 같은 모양 + n_samples.
+
+    멀티레이블은 레이블마다 2×2 라 각 2×2 의 합이 표본 수이고, 모든 칸의 합은 '레이블 칸' 수다. 그 단위를
+    unit = "label_cell"·cell_total 로 밝힌다(200행·레이블 4개면 800칸 — 800건으로 읽으면 표본 수와 어긋난다).
+    """
+    cm = common.calculate_confusion_matrix(df, mapping_dict)
+    out = {**cm, "n_samples": int(len(df))}
+    if cm["type"] == "multilabel":
+        out["unit"] = "label_cell"
+        out["cell_total"] = int(sum(sum(sum(row) for row in block) for block in cm["matrix"]))
+    return out
+
+
+def calculate_class_report_always(df: pd.DataFrame, mapping_dict: dict) -> Dict[str, Any]:
+    """success_metrics.class_report — M22 와 같은 모양(sklearn classification_report).
+
+    이진·다중은 'accuracy' 를 늘 싣고 'micro avg' 는 싣지 않는다. sklearn 은 예측에만 있는 클래스가 있으면
+    accuracy 대신 정답 클래스로 좁힌 'micro avg' 를 내는데, 다중 클래스의 마이크로 평균은 Accuracy 다
+    (프론트 classReportTable 이 이 값으로 마이크로 평균 줄을 만든다). 멀티레이블은 sklearn 그대로
+    (매크로·가중·마이크로·샘플 평균).
+    """
+    report = common.calculate_class_metrics(df, mapping_dict)
+    if mapping_dict.get("_task_type") in ("binary", "multiclass"):
+        y_true, y_pred = common._get_true_pred(df, mapping_dict)
+        report.pop("micro avg", None)
+        report["accuracy"] = float(accuracy_score(y_true, y_pred))
+    return report
 
 
 # ── 불균형 영향(서술 설계 D20) ──
@@ -96,6 +136,10 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     멀티레이블(자체 설정): 레이블 등장 빈도로 IR 을 내고, 다수·소수 레이블의 F1 차만 본다.
     한 표본에 레이블이 여럿이라 "정확도 − 매크로 F1" 은 뜻이 서지 않아 null 로 둔다.
 
+    차이를 만든 네 값도 싣는다(3절 불균형 진단 문장, 사용자 결정 2026-10-22): accuracy·macro_f1(판정에 쓴 것과 같은 정의 —
+    정확도와 클래스별 F1 의 단순 평균; 멀티레이블은 판정에 쓰지 않아 둘 다 null)·majority_f1·minority_f1. 판정과 무관한
+    값이라 display 의 같은 이름 칸은 엔진의 평소 표기(plain_text — 넷째 자리)다.
+
     정답이나 예측이 없거나 정답 클래스가 하나뿐이면 예외 — 엔진이 키를 두지 않는다.
     """
     task_type = mapping_dict.get("_task_type")
@@ -111,12 +155,13 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
         labels = [normalize_label(l) for l in mapping_dict.get("_mlb_classes", [])]
         per_label = f1_score(y_true, y_pred, average=None, zero_division=0)
         f1_by = dict(zip(labels, (float(v) for v in per_label)))
-        accuracy_gap = None
+        accuracy = macro_f1 = accuracy_gap = None
     else:
         kwargs = common._label_kwargs(df, mapping_dict, y_true)
         per_class = f1_score(y_true, y_pred, average=None, zero_division=0, **kwargs)
         f1_by = dict(zip((normalize_label(l) for l in kwargs["labels"]), (float(v) for v in per_class)))
-        accuracy_gap = float(accuracy_score(y_true, y_pred)) - float(np.mean(per_class))
+        accuracy, macro_f1 = float(accuracy_score(y_true, y_pred)), float(np.mean(per_class))
+        accuracy_gap = accuracy - macro_f1
     class_gap = f1_by[majority] - f1_by[minority]
 
     if _clean(ratio) < IMBALANCE_MILD_BELOW:
@@ -127,11 +172,28 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
     else:
         level = "no_distortion"
 
+    over_gap = lambda gap: _clean(gap) >= IMBALANCE_F1_GAP  # noqa: E731 — 판정과 같은 식
     return {
         "level": level,
+        # 판정과 같은 쪽으로 읽히게 자릿수를 늘린 표시 문자열(S2) — 1.49996 은 넷째 자리로 1.5 지만 '경미'다.
+        # 성적서·사실 시트·7.2 문장이 숫자를 찍을 때 이 값을 쓴다. 아래 숫자 칸은 종전과 같다.
+        "display": {
+            "imbalance_ratio": judged_text(ratio, IMBALANCE_MILD_BELOW, _clean(ratio) >= IMBALANCE_MILD_BELOW),
+            "accuracy_minus_macro_f1": None if accuracy_gap is None
+            else judged_text(accuracy_gap, IMBALANCE_F1_GAP, over_gap(accuracy_gap)),
+            "majority_minus_minority_f1": judged_text(class_gap, IMBALANCE_F1_GAP, over_gap(class_gap)),
+            "accuracy": None if accuracy is None else plain_text(accuracy),
+            "macro_f1": None if macro_f1 is None else plain_text(macro_f1),
+            "majority_f1": plain_text(f1_by[majority]),
+            "minority_f1": plain_text(f1_by[minority]),
+        },
         "imbalance_ratio": round(ratio, 4),
         "accuracy_minus_macro_f1": None if accuracy_gap is None else round(accuracy_gap, 4),
         "majority_minus_minority_f1": round(class_gap, 4),
+        "accuracy": None if accuracy is None else round(accuracy, 4),
+        "macro_f1": None if macro_f1 is None else round(macro_f1, 4),
+        "majority_f1": round(f1_by[majority], 4),
+        "minority_f1": round(f1_by[minority], 4),
         "majority_class": majority,
         "minority_class": minority,
     }

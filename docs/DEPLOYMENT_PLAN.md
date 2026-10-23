@@ -20,6 +20,7 @@
 > | 배포 경로 | Blueprint 자동 배포 | **CI 게이트 → 포크 미러(`hellinii/*`) → Deploy Hook**. `render.yaml` 의 `autoDeploy: false` 라 팀 레포 push 만으로는 배포되지 않습니다 |
 > | `PUT /api/organization` | 설계에 포함 | **제거됨**(ISSUES.md G-01) — 무인증으로 발급 완료된 모든 성적서의 기관 표기를 소급 변경할 수 있었습니다 |
 > | LLM 키(2026-10~) | `OPENAI_API_KEY` 하나 | 매핑 `OPENAI_API_KEY` + 서술 `ANTHROPIC_API_KEY`(Claude Sonnet 5.5). 둘 다 Render 대시보드 Environment 에만. 서술만 문제가 생기면 `ANTHROPIC_API_KEY` 만 지워 규칙 문장으로 돌린다. `/health` 의 `llm.*.key` 로 들어 있는지 본다 |
+> | 서술 작업 표(2026-10~, 서술 라운드) | 발급 3표만 | 기동 때 `init_db` 의 `create_all` 이 새 표 `narrative_jobs` 를 Neon 에 만든다(기존 표는 건드리지 않음). 새 환경변수는 모두 선택이고 코드 기본값 = 운영값(작업 경로 effort `NARRATIVE_JOB_EFFORT` 기본 high 등 — ARCHITECTURE §10.8). 로컬 Postgres 왕복 검증은 ARCHITECTURE §10.7 |
 
 
 > 현재 코드 구조는 docs/ARCHITECTURE.md 참조(이 문서는 설계 근거).
@@ -65,6 +66,7 @@
 - **런타임 파일 쓰기 없음**: 업로드 CSV는 `await file.read()` → `io.BytesIO` 인메모리 처리. `Data/`는 테스트 전용 픽스처(커밋됨). → Render의 휘발성 디스크에서 문제없음.
 - **모델 타입 전부 이식 가능**: Integer/String(길이 없음)/DateTime(naive UTC)/FK만 사용. JSON 컬럼·server default·rowid 의존 없음.
 - **스타트업 훅**: `app/main.py` lifespan에서 `init_db()`(create_all) + `seed_organization()` → Neon 첫 부팅 시 테이블 자동 생성 + 기관 시드. 수동 마이그레이션 불필요.
+  - **기관 이름 변경("한국 AI 인증원" → "리트머스", 2026-10)**: 시드는 `organization` 이 비어 있을 때만 들어가므로 운영 DB 의 기존 행은 그대로 옛 이름이다. 배포 뒤 운영 DB 에서 한 번 직접 바꾼다 — `UPDATE organization SET org_name = '리트머스' WHERE id = 1;`. 이미 발급한 성적서의 `issuance.issuer`(발급 당시 스냅샷, 예 "한국 AI 인증원 평가부")는 바꾸지 않는다(발급 당시 그대로가 맞다).
 - **CORS**: `allow_origins=["*"]`, credentials 미사용 → Vercel 프로덕션/프리뷰 URL 모두 즉시 동작. 변경 불필요.
 - `GET /health` 엔드포인트 존재 → Render 헬스체크로 사용.
 

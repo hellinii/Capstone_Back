@@ -148,7 +148,7 @@ async def test_narrative_does_not_block_event_loop(monkeypatch):
     """[G-04b] /api/generate-narrative — 파일 업로드조차 필요 없는 순수 JSON 경로."""
     from test_narrative_router import _sample_request
 
-    monkeypatch.setattr("app.narrative.service.compute_derived", _slow)
+    monkeypatch.setattr("app.narrative.legacy.compute_derived", _slow)
     payload = json.loads(_sample_request().model_dump_json())
 
     async def _post(c):

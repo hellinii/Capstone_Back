@@ -103,14 +103,19 @@ def test_probability_mapped_as_pred_is_rejected():
 
 
 def test_integer_valued_float_pred_is_still_accepted():
-    """소수점 표기지만 값이 정수인 예측(1.0/0.0)은 정상 캐스팅된다(오탐 방지)."""
+    """소수점 표기지만 값이 정수인 예측(1.0/0.0)은 막지 않는다(오탐 방지).
+
+    S2 부터 전처리가 정답·예측을 같은 표기로 맞춘다 — 정수 정답 1 과 예측 1.0 이 같은 클래스('1')다. 둘 다 정수 값
+    숫자라 문자열이 아니라 int64 로 맞춘다(문자열로 바꾸면 큰 데이터의 평가가 약 20배 느려졌다 — 라운드 C 검토).
+    """
     df = pd.DataFrame({"id": [1, 2, 3, 4], "t": [1, 0, 1, 0], "p": [1.0, 0.0, 1.0, 0.0]})
     mappings = [{"column": "id", "role": "sample_id"},
                 {"column": "t", "role": "y_true"},
                 {"column": "p", "role": "y_pred"}]
 
     out, _ = preprocess_data(df, mappings, "binary")
-    assert out["p"].tolist() == [1, 0, 1, 0]
+    assert out["p"].dtype == "int64" and out["p"].tolist() == [1, 0, 1, 0]
+    assert out["t"].dtype == "int64" and out["t"].tolist() == [1, 0, 1, 0]
     assert common.calculate_accuracy(out, _binary_mapping()) == 1.0
 
 

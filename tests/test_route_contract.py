@@ -15,6 +15,8 @@ EXPECTED_OPERATIONS = {
     ("post", "/api/confirm-mapping"),
     ("post", "/api/evaluate"),
     ("post", "/api/generate-narrative"),
+    ("post", "/api/narrative/jobs"),            # 서술 작업 번호 방식(서술 라운드 S3a)
+    ("get", "/api/narrative/jobs/{job_id}"),
     ("get", "/api/organization"),
     ("post", "/api/reports/issue"),
     ("get", "/api/reports/{report_no}"),
@@ -135,3 +137,19 @@ def test_validate_data_response_fields():
 def test_validation_check_item_fields():
     """`handling` 은 6단계 화면이 인쇄한다(D-03 이 문구를 고친 자리)."""
     assert {"name", "result", "handling", "status", "group"} <= _fields("ValidationCheckItem")
+
+
+def test_narrative_job_response_fields():
+    """서술 작업 번호 경로(서술 라운드 S3a). 프론트가 진행 표시·8.1 표·이어 조회·다시 만들기에 읽는 칸.
+
+    고객용 응답이라 강등 사유·숫자 검문 위반(옛 응답의 meta)은 없어야 한다 — 내부 기록에만 둔다. 모델은 칸별
+    모델 이름(section_models)만 싣는다(사용자 결정 2026-10-22 — 성적서 화면의 '작성 기록').
+    """
+    assert _fields("NarrativeJobCreated") == {"job_id", "status", "stage", "benchmark_refs", "result"}
+    assert _fields("NarrativeJobOut") == {
+        "job_id", "status", "stage", "failure", "benchmark_refs", "result", "created_at", "updated_at",
+    }
+    assert _fields("NarrativeJobResult") == {
+        "interpretation", "conclusion", "recommendation_narrative", "recommendations", "section_sources",
+        "section_models",
+    }

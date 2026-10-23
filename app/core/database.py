@@ -143,4 +143,5 @@ def init_db() -> None:
     # Base 에 테이블을 등록하기 위해 지연 import (models 가 이 모듈의 Base 를 import → 순환 방지).
     # ⚠️ 함수 내부 지연 import 유지 필수 — 최상단으로 올리면 database↔models 순환으로 깨진다.
     import app.issuance.models  # noqa: F401
+    import app.narrative.models  # noqa: F401  — 서술 작업 번호 표(narrative_jobs, 서술 라운드 S3a)
     Base.metadata.create_all(bind=engine)

@@ -1,0 +1,147 @@
+{
+  "contract": "facts-1",
+  "status": "S4a 첫 산출물(2026-10-21), 반박 검토 3명(설계·프론트·백엔드) 반영판. 같은 사본을 프론트 src/test/contract/ 와 백엔드 tests/contract/ 에 둔다(계약 파일 + 예시 요청). 고치면 세 곳을 함께 고친다 — 두 저장소 사본이 같은지는 skipIf 테스트가 본다.",
+  "examples": {
+    "$comment": "실제 요청 예시(계약 테스트가 비교하는 값). 프론트가 백엔드 골든 evaluate 세 개 + 고정한 의뢰자 입력으로 만든다. 프론트 테스트: 골든 사본 → assembleEvaluatedReport → buildFactSheet → fitFactSheet = 예시. 백엔드 테스트: 예시 → NarrativeRequest → (S4b) select_items.",
+    "binary": "fact_sheet_binary.json",
+    "multiclass": "fact_sheet_multiclass.json",
+    "multilabel": "fact_sheet_multilabel.json",
+    "legacy": "fact_sheet_legacy_main.json — 운영 main 프론트 모양(facts 없음, metrics 에 M21·M22 가 value 0·info). 백엔드 옛 경로·작업 경로 모두 200"
+  },
+  "principles": [
+    "숫자는 한 곳에서 계산한다. facts 의 값은 프론트 src/lib/report/narrativeFacts.ts 가 계산하고, 9절 문제 목록·D6 표·사실 시트가 같은 값을 읽는다. 백엔드는 다시 계산하지 않는다(옛 요청에만 지금의 자체 셈을 남긴다).",
+    "엔진이 계산하는 값(FP/FN = confusion_counts, 신뢰구간, 경계·확신 오류, 불균형 영향, 임계값 조정 여지)은 옮기기만 한다.",
+    "사실 시트·facts·문제 목록의 혼동행렬·클래스별 표는 M21·M22 선택과 무관하게 엔진의 새 칸(success_metrics.confusion_matrix·class_report)에서 읽는다(새 칸이 없는 옛 응답이면 M21·M22). 성적서 6절 인쇄(stage1Report.classReport·charts.confusionMatrix)만 종전처럼 M21·M22 선택을 따른다.",
+    "class_report 는 정답 클래스만 줄로 둔다. 예측에만 나온 클래스는 confusion_matrix 의 줄(0)·열로만 남고, facts 에서는 prediction_bias 에만 actual 0 줄로 나온다. 클래스 수·최약 클래스·작은 표본은 정답 클래스(support > 0)로 센다.",
+    "클래스 순서는 엔진 순서 하나(confusion_matrix.labels — 엔진 sort_labels). '표 순서 앞'은 이 순서다.",
+    "기준과 비교되는 값은 두 벌로 싣는다: 숫자(반올림 전 값을 9자리로 정리)와 *_text(엔진 judged_text 와 같은 규칙 — 넷째 자리부터, 반올림하면 판정과 반대로 읽히면 아홉째 자리까지 늘림, 끝의 0 제거). 판정(flagged·low_support 등)은 반올림 전 값과 judgedNumber.difference(1e-10 보정)로 정한다. 서술·템플릿은 *_text 를 인용한다.",
+    "클래스 단위 결론(최약·작은 표본·최다 오분류 쌍·편향)은 facts 만 근거로 쓴다 — 잘린 표에서 다시 고르지 않는다.",
+    "facts 와 그 안의 모든 하위 칸은 선택이다. 옛 요청(운영 main 프론트, run 에 저장된 다시 만들기 요청)은 facts 가 없다. 백엔드는 contract 값을 막지 않고, 빠진 하위 칸은 기본값으로 읽는다.",
+    "JSON 키는 영어 snake_case(계약). AI 가 영어 키를 베끼지 않게 하는 일은 S5 지시문 직렬화가 맡는다."
+  ],
+  "constants": {
+    "$comment": "백엔드 app/narrative/schemas.py 의 MAX_* 와 같은 값 — 프론트 src/lib/report/factSheetLimits.ts 가 같은 이름으로 들고 미리 자른다. 두 쪽 테스트가 이 계약 사본과 값이 같은지 단언한다.",
+    "MAX_METRIC_FACTS": 64,
+    "MAX_CLASS_ENTRIES": 256,
+    "MAX_CI_METHOD_NOTE_CHARS": 500,
+    "MAX_PROBLEMS": 16,
+    "MAX_PROBLEM_TEXT_CHARS": 1000,
+    "MAX_PROBLEM_EVIDENCE_CHARS": 20000,
+    "MAX_FIXED_SENTENCES": 16,
+    "MAX_FIXED_SENTENCE_CHARS": 1000,
+    "MAX_CI_SKIP_REASON_CHARS": 300,
+    "MAX_FACTS_CHARS": 30000,
+    "$comment_facts_chars": "facts 를 공백 없는 JSON(separators=(',', ':'), ensure_ascii=False)으로 만든 코드포인트 수 — 백엔드 client_inputs_length 와 같은 잣대. 프론트는 [...JSON.stringify(facts)].length 로 같은 값을 잰다.",
+    "NARRATIVE_BODY_BUDGET_BYTES": 1800000,
+    "$comment_budget": "프론트만 쓴다 — 백엔드 본문 상한 2MB(2,097,152)보다 작게 두어 413 을 피한다. 요청 본문(UTF-8 바이트)이 넘으면 클래스 단위 칸(confusion·per_class·class_averages·confusion_counts·distribution, facts 의 클래스 목록)을 비우고 omitted 에 남긴다.",
+    "LOW_SUPPORT_MIN": 30,
+    "LOW_SHARE_MIN": 0.05,
+    "WEAKEST_F1_GAP": 0.1,
+    "PR_GAP_MIN": 0.1,
+    "DISTRIBUTION_SHIFT_MIN": 0.1,
+    "NEAR_TARGET_RATIO": 0.03,
+    "TOP_CONFUSION_PAIRS": 3,
+    "$comment_benchmark_metric_names": "8.1 내부 참조 기준표(백엔드 app/narrative/baselines.py BASELINES)에 있는 지표 이름(표시 이름), 유형별. 프론트 src/lib/report/benchmarkBaselines.ts 가 같은 목록을 들고 고정 문구 16(기준치 없는 서술 지표)을 사실 시트보다 먼저 계산한다. 두 쪽 테스트가 자기 코드와 같은지 단언한다.",
+    "benchmark_metric_names": {
+      "binary": ["Accuracy", "Precision", "Recall", "F1 Score", "AUROC", "AUPRC", "MCC"],
+      "multiclass": ["Accuracy", "Precision", "Recall", "F1 Score"],
+      "multilabel": ["F1 Score", "Jaccard Index", "Hamming Loss"]
+    }
+  },
+  "changes_to_existing_fields": {
+    "metrics[]": {
+      "higher_is_better": "bool (새 칸). 백엔드 기본값은 null(모름 — 옛 요청). null 이면 방향 문장을 만들지 않는다.",
+      "beta": "number|null (새 칸). F-beta 의 β. display_name 에는 넣지 않는다(이름이 두 벌이 되고 숫자 검문에 걸림). S4b 허용 목록에 넣는다.",
+      "margin_text": "string|null (새 칸). margin 의 서술용 표기 — 0 과 비교한 판정(충족 = margin ≥ 0)과 같은 쪽으로 읽히게(실패 지표 −0.00004 가 '0' 이 되지 않게).",
+      "ci_contains_target": "bool|null (새 칸). 판정 대상이고 구간이 있을 때만 — 반올림 전 값으로 ci_low ≤ 목표 ≤ ci_high. 백엔드 derived.ci_contains_target 은 이 값을 옮긴다(옛 요청만 자체 판정).",
+      "value_text": "그대로(S2) — 판정 대상 지표 값의 표시 문자열(성적서 6.1 과 같은 규칙).",
+      "M21·M22": "지표 목록에서 뺀다(다-3). 옛 요청의 M21·M22 줄은 S4b 가 metric_id 로 거른다.",
+      "unavailable": "산출 실패 지표는 종전처럼 빼고, 핵심이면 facts.verdict_detail.unavailable_core 에 남긴다."
+    },
+    "f1_threshold_gain": "엔진 그대로 — notable(bool)·gain_text(string) 를 계약 칸으로 올린다(지금 백엔드가 버림).",
+    "imbalance_effect": "엔진 그대로 — display{imbalance_ratio, accuracy_minus_macro_f1|null, majority_minus_minority_f1}(문자열) 를 계약 칸으로 올린다(지금 백엔드가 버림).",
+    "per_class": "class_report(없으면 M22)의 클래스 줄(정답 클래스), 엔진 순서. 넘으면 '꼭 남길 클래스'(weakest_class·low_support_classes·top_confusion_pairs 양쪽·average_gap.reference_class) 먼저, 남은 자리를 support 큰 순으로 채우고 원래 순서로 둔다. omitted.per_class = 뺀 수.",
+    "class_averages": "작업 유형을 넘겨 만든다 — 다중은 accuracy 로 만든 '마이크로 평균' 줄이 성적서 6.2 와 같게 들어간다(재-5).",
+    "confusion": "confusion_matrix(없으면 M21). 멀티레이블은 종전처럼 레이블별 2×2 의 합. positive_class 는 confusion_counts.positive_class 에서(M21 무관). 클래스가 MAX_CLASS_ENTRIES 를 넘으면 null, omitted.confusion = 뺀 클래스 수(= 전체).",
+    "confusion_counts": "엔진 그대로. 넘으면 per_class 와 같은 규칙으로 자른다. omitted.confusion_counts.",
+    "distribution.class_distribution": "그대로. 넘으면 per_class 와 같은 규칙(남은 자리는 건수 큰 순). omitted.class_distribution.",
+    "ci_method_note": "그대로(6.0 문장). 500자로 자른다. 구조화된 생략 사유는 facts.ci_skipped.",
+    "problems": "그대로 모양. 근거 값은 facts 를 옮긴다(최약 클래스 = facts.weakest_class, 분포 차 = facts.distribution_shift 중 flagged, 판정 문제 = facts.verdict_detail). 최약 클래스 조건의 'M22 를 골랐고' 삭제. 분포 차 문제의 걸린 클래스는 |차이| 합 ≤ 2 라 많아야 20개(자르지 않음). title 은 1000자로 자른다. 근거 키는 지금 키를 그대로 둔다(골든 안정)."
+  },
+  "facts": {
+    "$comment": "fact_sheet.facts — 새 선택 칸. 계산은 narrativeFacts.ts, 자르기는 fitFactSheet. 생성 때의 facts(자른 뒤 — 보낸 것과 같은 값)를 성적서 데이터(FinalReportData.narrativeFacts)에도 저장한다 — S7 D6 표와 /report/:id 가 같은 값을 그린다.",
+    "contract": {"type": "string", "value": "facts-1"},
+    "positive_class": {"type": "string|null", "when": "이진", "from": "confusion_counts.positive_class → 없으면 metadata.positive_class"},
+    "n_classes": {"type": "int|null", "rule": "정답 클래스 수(support > 0). 멀티레이블은 정답에 한 번이라도 나온 레이블 수(같은 규칙)"},
+    "class_share_basis": {"type": "\"samples\"|\"label_occurrences\"", "rule": "share 의 분모 — 이진·다중은 표본 수, 멀티레이블은 레이블 등장 총수(전체 표본 대비 비율이 아님)"},
+    "report_purpose_label": {"type": "string|null", "values": ["내부 검증", "외부 제출", "과제 산출물"], "rule": "최상위 report_purpose 는 코드값 그대로(백엔드 enum)"},
+    "core_metrics_source": {"type": "\"default\"|\"client\"", "rule": "기본값이면 '의뢰자가 지정한' 이라고 쓰지 않는다. 기본값이면 client_inputs.core_metrics 를 보내지 않는다(재-7). client 이면 core_metrics 값은 '(Mn)' 없이 지표 이름만"},
+    "selected_metrics": {"type": "[string]", "rule": "의뢰자가 고른 지표(M 표기, 표 지표 M21·M22·산출 실패 포함, 고른 순서). 사실 시트 metrics 는 표 지표를 빼므로 5절의 '지표 X 를 골랐으면' 조건(8.2 macro↔weighted·micro 의 M22, P↔R 의 M2·M3, Hamming↔Exact 의 M15·M16)은 이 목록으로 본다"},
+    "declarations": {
+      "risk_direction": {"type": "\"fn\"|\"fp\"|\"similar\"|null", "when": "이진", "from": "criticalErrorType: 'Missed (FN)'→fn, 'False alarm (FP)'→fp, 'Similar'→similar"},
+      "class_priority": {"type": "\"all_equal\"|\"larger_first\"|\"samples_first\"|null", "when": "다중·멀티", "from": "classPriority: 'All equal'→all_equal, 'Larger classes first'→larger_first, 'Individual samples first'→samples_first"},
+      "usage_mode": {"type": "\"realtime\"|\"batch\"|null", "from": "usageMode: 'Real-time'→realtime, 'Batch'→batch"},
+      "rule": "'모름'·미제공·이 유형에 없는 선언·S8 의 '모름 + 글'은 null. 화면 글자와 덧붙인 글은 client_inputs.declarations 로 그대로 간다."
+    },
+    "verdict_detail": {
+      "verdict": "\"PASS\"|\"CONDITIONAL_PASS\"|\"FAIL\"|\"INCONCLUSIVE\" — 최상위 verdict 와 같음(백엔드는 이쪽만 Literal, 최상위는 옛 요청 때문에 str)",
+      "judged_count": "int — 판정 대상(목표값이 있고 산출된) 지표 수. 산출 실패는 들지 않는다",
+      "passed_count": "int — 그중 충족 수. 불변식: score = round(passed/judged × 100, 1)(judged 0 이면 0). 통과율은 참고 수치(D19)",
+      "failed_core": "[{metric_id, display_name}]",
+      "failed_noncore": "[{metric_id, display_name}] — 판정이 FAIL 이어도 센다",
+      "unavailable_core": "[{metric_id, display_name}] — 산출에 실패한 핵심 지표(판정과 무관하게)",
+      "inconclusive_cause": "\"core_not_computed\"|\"no_target\"|\"no_judged\"|null",
+      "inconclusive_metrics": "[{metric_id, display_name}] — 그 원인에 해당하는 핵심 지표(no_judged 면 빈 배열)",
+      "rule": "목록은 MAX_METRIC_FACTS 까지"
+    },
+    "error_totals": {"type": "{unit, total, misclassified}|null", "rule": "자르기 전 엔진 값으로. 이진 fp+fn / n, 다중 Σfn(confusion_counts) / n, 멀티 Σ(fp+fn) / Σ(tp+fp+fn+tn), unit = sample|label_cell. 혼동행렬이 잘려 null 이어도 7.1 오분류 총건수가 남는다"},
+    "weakest_class": {
+      "type": "object|null",
+      "fields": {"label": "string", "f1": "number", "support": "int", "share": "number", "share_text": "string (LOW_SHARE_MIN 과 비교한 판정과 같게)", "macro_f1": "number|null (엔진 매크로 평균 — 6.2 표와 같은 값)", "gap_from_macro": "number|null (macro − f1)", "gap_text": "string|null (WEAKEST_F1_GAP 과 비교)", "low_support": "bool (support < 30 또는 share < 0.05)", "far_below_macro": "bool (gap ≥ 0.10)"},
+      "rule": "정답 클래스 중 F1 최저, 같으면 엔진 순서 앞. 정답 클래스가 2개 미만이면 null. 지표 선택과 무관하게 늘 계산(결정 A). 9절 문제 7 은 low_support 또는 far_below_macro 일 때"
+    },
+    "low_support_classes": {"type": "[{label, support, share, share_text}]", "rule": "정답 클래스 중 support < 30 또는 share < 0.05, 엔진 순서. 정답 클래스가 2개 미만이면 []. 넘으면 support 작은 순으로 남긴다"},
+    "top_confusion_pairs": {"type": "[{actual, predicted, count, share_of_errors}]", "when": "다중(혼동행렬이 있을 때)", "rule": "비대각 count > 0 을 count 내림차순 상위 3. 같으면 정답 클래스 엔진 순서 앞, 그다음 예측 클래스 엔진 순서 앞. share_of_errors = count ÷ 전체 오분류"},
+    "prediction_bias": {
+      "type": "{unit, rows:[{label, predicted, actual, difference}]}|null",
+      "unit": "positive_class(이진, label = 양성 클래스: tp+fp vs tp+fn, difference = fp − fn) | per_class(다중: 열합 vs 줄합, 혼동행렬이 없으면 confusion_counts 의 tp+fp vs tp+fn — 그때는 예측에만 나온 클래스가 빠진다) | label_total(멀티, label null: 정답 레이블 집합 안의 Σ(tp+fp) vs Σ(tp+fn))",
+      "rule": "difference = predicted − actual(정수). 넘으면 |difference| 큰 순으로 남긴다"
+    },
+    "declared_risk_errors": {"type": "{side, count, total_errors, share, share_text}|null", "when": "이진이고 risk_direction 이 fn·fp", "rule": "count = 그쪽 건수, total_errors = fp + fn, share = count ÷ total_errors(오류 0 이면 null), share_text 는 소수 넷째 자리 정리"},
+    "precision_recall_gap": {"type": "{precision, recall, difference, difference_text, flagged}|null", "when": "이진이고 양성 클래스 줄이 있을 때", "rule": "difference = precision − recall, flagged = |difference| ≥ 0.10. 서술에 넣을지는 5절 조건(M2·M3 선택)을 select_items 가 본다"},
+    "average_gap": {
+      "type": "{kind, macro_f1, other_f1, difference, difference_text, reference_class:{label, support, f1}}|null",
+      "kind": "macro_vs_weighted(다중: 가중 − 매크로 F1, reference = support 최대 정답 클래스, 같으면 엔진 순서 앞) | macro_vs_micro(멀티: 마이크로 − 매크로 F1, reference = F1 최저 레이블)",
+      "rule": "difference = other − macro, difference_text = 넷째 자리 표기(아주 작은 차이가 지수 표기로 직렬화되지 않게). 늘 계산(정답 클래스 2개 이상). 서술 조건(5절 M22)은 select_items 가 본다"
+    },
+    "declared_average": {"type": "{class_priority, average, precision, recall, f1}|null", "when": "다중·멀티이고 class_priority 가 larger_first(→ weighted) 또는 samples_first(→ micro)", "rule": "class_averages 의 그 평균 줄(다중 micro = accuracy 줄). 멀티의 samples_first → 마이크로 평균은 다중(D28)과 같은 대응을 쓴 자체 설정(고정 문구 4 는 다중 한정)"},
+    "distribution_shift_status": {"type": "\"compared\"|\"not_provided\"|\"uncovered\"", "rule": "not_provided = 학습 분포 없음·모름·빈 칸·숫자 아님·합 0, uncovered = 평가 정답 클래스 중 학습 분포에 없는 것이 있음"},
+    "distribution_shift": {"type": "[{label, training_ratio, evaluation_ratio, difference, difference_text, flagged}]", "when": "status = compared", "rule": "두 쪽 클래스 이름은 normalize_label 과 같은 규칙(앞뒤 공백, 정수 실수 '1.0' → '1')으로 맞춰 비교. 대상 = 평가 정답 클래스 ∪ 학습 칸. training_ratio 분모 = 학습 칸 합, evaluation_ratio 분모 = 평가 class_distribution 합(멀티는 레이블 등장 합). difference = training − evaluation, flagged = |difference| ≥ 0.10. 넘으면 |difference| 큰 순으로 남긴다"},
+    "ci_available": {"type": "bool", "rule": "엔진이 confidence_intervals 를 보냈는지. false 면 ci_skipped 는 []"},
+    "ci_skipped": {"type": "[{metric_id, display_name, reason}]", "rule": "판정 대상인데 구간이 없는 지표 전부(reason 은 엔진 사유, 300자, 없으면 null). 판정 대상 전부가 생략돼도 남는다"},
+    "fixed_sentences": {"type": "[{id, section, text}]", "rule": "7~9절에 코드가 찍을 고정 문장 전부(AI·템플릿은 같은 숫자를 되풀이하지 않고 해석만). 지금: 9(7.1 앞, 파생 예측이 있을 때), 17(7.1, 확률이 있을 때), 7(7.2 — 멀티레이블 불균형 비율 정의, 12 앞), 12(7.2), 16(8.1 표 아래 — 고른 서술 지표(산출 실패·M21·M22 제외) 중 기준표(constants.benchmark_metric_names)에 없는 것이 있을 때, 일부/전부 두 갈래), 11a·11b(8.2), 18(8.3 — 승인 문안 그대로, 지표 ID 포함), 6(9, 문제 0개). 15(7.3 '해당 없음')는 생성 뒤 칸이 비면 성적서가 찍으므로 보내지 않는다. 문장당 1000자"},
+    "omitted": {"type": "{[field]: int}", "rule": "자르기로 뺀 개수(언제나 '뺀 수'). 키는 칸 이름(per_class, confusion, confusion_counts, class_distribution, low_support_classes, prediction_bias, distribution_shift, facts_class_lists). 자르지 않았으면 빈 객체"}
+  },
+  "size_rules": [
+    "칸별 상한: 클래스 목록(per_class·confusion·confusion_counts·class_distribution·low_support_classes·prediction_bias.rows·distribution_shift) = MAX_CLASS_ENTRIES, 지표 목록(metrics·verdict_detail 목록·ci_skipped) = MAX_METRIC_FACTS, fixed_sentences = MAX_FIXED_SENTENCES × MAX_FIXED_SENTENCE_CHARS.",
+    "facts 전체가 MAX_FACTS_CHARS 를 넘으면 프론트가 차례로 줄인다: distribution_shift(flagged 만) → prediction_bias(|difference| 상위 20) → low_support_classes(상위 20) → 세 칸 비움(omitted.facts_class_lists). 그래도 넘으면 fixed_sentences 를 비운다.",
+    "요청 본문이 NARRATIVE_BODY_BUDGET_BYTES 를 넘으면 클래스 단위 칸을 모두 비운다(백엔드 jobs._CLASS_LEVEL_KEYS 와 같은 칸 + facts 의 세 목록).",
+    "백엔드 작업 경로: facts 의 상한 초과는 클래스 목록·고정 문장을 비우고, 그래도 넘으면 facts = null — 상한 초과는 규칙 문장으로 완료(input_too_large). facts 안의 형식 오류(모르는 코드값 등)는 facts 를 버리되 omitted 는 남기고, 표시 문자열(value_text·margin_text·gain_text·display·*_text — 숫자 꼴만)이 틀리면 그 칸만 버린다 — 둘 다 AI 는 그대로 부른다(422 막다른 길 금지, 상한 오류 뒤에 숨은 형식 오류도 같다). 옛 경로는 422 그대로.",
+    "AI 를 실제로 부를 수 있는 크기는 지시문 상한 80,000자가 정한다(클래스 약 70~90개). 넘을 때 지시문에서만 줄이는 순서(혼동행렬 → 표 하위 줄)는 S5 몫 — 허용 목록은 원본으로 만든다."
+  ],
+  "d24_checks": {
+    "$comment": "S4b required_items 의 '생성 뒤 확인' — 그 칸의 글에 아래 숫자가 하나 이상(허용 목록과 같은 표기 변형) 있으면 통과.",
+    "7.1": "declared_risk_errors.count 또는 share(백분율 포함). 끔: risk_direction 이 similar·null, declared_risk_errors 가 null",
+    "8.2": "declared_average.f1(다중 micro 는 P·R·F1 이 같은 값). 끔: class_priority 가 all_equal·null, declared_average 가 null",
+    "8.3": "latency 의 mean·p50·p95·p99 중 하나. 끔: usage_mode 가 batch·null, latency.available false"
+  },
+  "decisions": [
+    "파생값 계산 위치는 계획 요지 4(프론트 narrativeFacts). 백엔드 derived 에는 혼동행렬 합계·백분율만 계산으로 남고, counts 는 facts.verdict_detail 을, ci_contains_target 은 metrics[].ci_contains_target 을, 행렬이 없을 때 오분류 총건수는 facts.error_totals 를 옮긴다(facts 없는 옛 요청은 지금 셈 그대로).",
+    "성적서 용도: 최상위 report_purpose 는 enum 코드값 그대로, 한국어 이름은 facts.report_purpose_label.",
+    "재-4 범위: S4a 는 이름 값(성적서 용도 한국어, client_inputs.core_metrics 의 '(Mn)' 제거, β 칸)까지. 문제 근거 키·JSON 키·지시문 속 필드명을 AI 에게 한국어로 보이는 일은 S5.",
+    "찍힐 고정 문장 목록은 7~9절에 지금 찍히는 고정 문장 전부.",
+    "S4b 허용 목록: 지표 이름·클래스 이름 속 숫자, metrics[].beta, 부호 있는 차이의 절댓값(margin·difference 칸 전부), *_text 표기, 켜진 판정의 기준값(low_support → 30·0.05, far_below_macro·flagged → 0.1, near_target → 0.03, imbalance → 1.5·0.1), latency 가 있으면 50·95·99, n_classes, omitted 의 k, ci_skipped.reason 속 숫자. 빼는 것: *_text·value_text·display·gain_text 가 있는 값의 '판정과 반대로 읽히는' 짧은 반올림 표기만. 고정 문장 속 숫자는 따로 넣지 않는다(재료 칸에 이미 있음 — 되풀이 금지는 S5·S6 검사).",
+    "D6 표·/report/:id 를 위해 보낸 facts 를 FinalReportData.narrativeFacts 에 저장한다. 없는 옛 run 은 D6 표를 그리지 않는다(S7).",
+    "정답 클래스가 21개를 넘으면 대부분 클래스가 5% 미만이라, M22 를 고르지 않아도 최약 클래스 LOW 문제가 거의 늘 붙는다 — 결정 A 의 예상된 결과(골든 세 개는 변화 없음)."
+  ]
+}

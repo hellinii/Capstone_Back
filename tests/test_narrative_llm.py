@@ -12,9 +12,10 @@ import pytest
 
 from app.core import concurrency, llm_budget
 from app.core.schemas import TaskType
-from app.narrative import llm, service
+from app.narrative import llm
+from app.narrative import legacy as service
 from app.narrative.schemas import NarrativeRequest
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 from tests.conftest import fake_beta_message
 from tests.test_narrator import _no_special_fact_sheet
 
@@ -211,7 +212,7 @@ def test_cost_unknown_model_is_none_not_guessed():
     (anthropic.APITimeoutError(request=_REQ), "timeout"),
     (anthropic.NotFoundError("no model", response=httpx2.Response(404, request=_REQ), body=None), "model_unavailable"),
     (anthropic.InternalServerError("down", response=httpx2.Response(500, request=_REQ), body=None), "api_error"),
-    (anthropic.RateLimitError("slow", response=httpx2.Response(429, request=_REQ), body=None), "api_error"),
+    (anthropic.RateLimitError("slow", response=httpx2.Response(429, request=_REQ), body=None), "rate_limited"),  # 작업 경로는 429 를 차례 호출로 다시 부른다(S5)
     (anthropic.APIConnectionError(request=_REQ), "api_error"),
 ])
 async def test_sdk_errors_map_to_reasons(make_fake_anthropic_client, exc, reason):
@@ -247,8 +248,8 @@ async def test_deadline_while_waiting_for_slot_falls_back_as_busy(monkeypatch, m
     monkeypatch.setattr(service, "NARRATIVE_DEADLINE_SECONDS", 0.05)
     client = make_fake_anthropic_client(_CLEAN)
     async with contextlib.AsyncExitStack() as stack:
-        for _ in range(concurrency.MAX_CONCURRENT_LLM_CALLS):
-            await stack.enter_async_context(concurrency.llm_slot())
+        for _ in range(concurrency.MAX_CONCURRENT_NARRATIVE_CALLS):
+            await stack.enter_async_context(concurrency.narrative_slot())
         resp = await generate_narrative(client, _request())
     assert resp.meta.source == "fallback" and resp.meta.reason == "busy"
     client.beta.messages.create.assert_not_called()
@@ -346,7 +347,7 @@ async def test_oversized_prompt_falls_back_before_spending_wallet(monkeypatch, m
 def test_normal_prompt_is_far_below_size_cap():
     from app.narrative.baselines import build_benchmark_refs
     from app.narrative.derived import compute_derived
-    from app.narrative.prompt import build_system_prompt, build_user_prompt
+    from app.narrative.legacy import build_system_prompt, build_user_prompt
 
     fs = _no_special_fact_sheet()
     d = compute_derived(fs)

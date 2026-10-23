@@ -1,0 +1,260 @@
+{
+  "task_type": "binary",
+  "report_purpose": "external",
+  "fact_sheet": {
+    "n_samples": 200,
+    "dropped_rows": 0,
+    "metrics": [
+      {
+        "metric_id": "M1",
+        "display_name": "Accuracy",
+        "value": 0.505,
+        "threshold": 0.51,
+        "status": "fail",
+        "is_core": true,
+        "ci_low": 0.4363,
+        "ci_high": 0.5735,
+        "margin": -0.005,
+        "near_target": true
+      },
+      {
+        "metric_id": "M2",
+        "display_name": "Precision",
+        "value": 0.48148148148148145,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false
+      },
+      {
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "value": 0.5473684210526316,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false
+      },
+      {
+        "metric_id": "M4",
+        "display_name": "F1 Score",
+        "value": 0.5123152709359606,
+        "threshold": 0.5,
+        "status": "pass",
+        "is_core": true,
+        "ci_low": 0.4271,
+        "ci_high": 0.5909,
+        "margin": 0.012315271,
+        "near_target": true
+      },
+      {
+        "metric_id": "M5",
+        "display_name": "F-beta Score",
+        "value": 0.5123152709359606,
+        "threshold": 0.5,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.4271,
+        "ci_high": 0.5909,
+        "margin": 0.012315271,
+        "near_target": true
+      },
+      {
+        "metric_id": "M9",
+        "display_name": "AUROC",
+        "value": 0.5111779448621554,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false
+      },
+      {
+        "metric_id": "M21",
+        "display_name": "Confusion Matrix",
+        "value": 0,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false
+      },
+      {
+        "metric_id": "M22",
+        "display_name": "Classification Report",
+        "value": 0,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false
+      }
+    ],
+    "per_class": [
+      {
+        "label": "0",
+        "precision": 0.532608695652174,
+        "recall": 0.4666666666666667,
+        "f1": 0.49746192893401014,
+        "support": 105
+      },
+      {
+        "label": "1",
+        "precision": 0.48148148148148145,
+        "recall": 0.5473684210526316,
+        "f1": 0.5123152709359606,
+        "support": 95
+      }
+    ],
+    "class_averages": [
+      {
+        "label": "매크로 평균",
+        "precision": 0.5070450885668277,
+        "recall": 0.5070175438596491,
+        "f1": 0.5048885999349854,
+        "support": 200
+      },
+      {
+        "label": "가중 평균",
+        "precision": 0.508323268921095,
+        "recall": 0.505,
+        "f1": 0.5045172663849367,
+        "support": 200
+      }
+    ],
+    "confusion": {
+      "labels": [
+        "0",
+        "1"
+      ],
+      "matrix": [
+        [
+          49,
+          56
+        ],
+        [
+          43,
+          52
+        ]
+      ],
+      "positive_class": "1"
+    },
+    "confusion_counts": [
+      {
+        "label": "1",
+        "tp": 52,
+        "fp": 56,
+        "fn": 43,
+        "tn": 49
+      }
+    ],
+    "derived_prediction": null,
+    "error_ratios": {
+      "unit": "sample",
+      "misclassified": 99,
+      "boundary": null,
+      "boundary_note": "threshold_unknown",
+      "confident": {
+        "count": 31,
+        "ratio": 0.3131
+      },
+      "boundary_margin": 0.1,
+      "confident_level": 0.9,
+      "threshold": null
+    },
+    "ci_method_note": "판정 대상 지표의 95% 신뢰구간은 Wilson 점수 구간(M1), 다항 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4, M5)으로 산출하였습니다.",
+    "f1_threshold_gain": {
+      "max_f1": 0.6483,
+      "current_f1": 0.5123,
+      "gain": 0.136,
+      "best_threshold": 0.03
+    },
+    "imbalance_effect": {
+      "level": "mild",
+      "imbalance_ratio": 1.1053,
+      "accuracy_minus_macro_f1": 0.0001,
+      "majority_minus_minority_f1": -0.0149,
+      "majority_class": "0",
+      "minority_class": "1"
+    },
+    "problems": [
+      {
+        "id": "P1",
+        "kind": "core_fail",
+        "priority": "HIGH",
+        "title": "핵심 지표 미달 (Accuracy)",
+        "source_section": "8.2",
+        "recommend_section": "9.2",
+        "evidence": {
+          "Accuracy": {
+            "value": 0.505,
+            "target": 0.51
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P2",
+        "kind": "core_near_target",
+        "priority": "MEDIUM",
+        "title": "핵심 지표 아슬아슬 합격 (F1 Score)",
+        "source_section": "8.3",
+        "recommend_section": "9.2",
+        "evidence": {
+          "F1 Score": {
+            "value": 0.5123152709359606,
+            "target": 0.5,
+            "margin": 0.0123
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P3",
+        "kind": "threshold_tuning",
+        "priority": "MEDIUM",
+        "title": "임계값 부적합",
+        "source_section": "8.3",
+        "recommend_section": "9.2",
+        "evidence": {
+          "max_f1": 0.6483,
+          "current_f1": 0.5123,
+          "gain": 0.136,
+          "best_threshold": 0.03,
+          "notable": true,
+          "gain_text": "0.136"
+        },
+        "note": null
+      }
+    ],
+    "distribution": {
+      "class_distribution": {
+        "0": 105,
+        "1": 95
+      },
+      "imbalance_ratio": 1.105263157894737
+    },
+    "verdict": "FAIL",
+    "score": 66.7,
+    "latency": {
+      "available": false,
+      "mean": null,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "unit": "ms"
+    }
+  }
+}

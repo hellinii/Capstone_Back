@@ -111,7 +111,7 @@ class Issuance(Base):
         ForeignKey("report.id"), nullable=False, index=True
     )
     version: Mapped[str] = mapped_column(String, nullable=False)  # "v1.0", "v1.1" …
-    issuer: Mapped[str] = mapped_column(String, nullable=False)   # "한국 AI 인증원 평가부"
+    issuer: Mapped[str] = mapped_column(String, nullable=False)   # "리트머스 평가부"
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     note: Mapped[str | None] = mapped_column(String, nullable=True)  # "최초 발급" / "정정 발급: …"
     status: Mapped[str] = mapped_column(String, nullable=False, default="issued")  # issued | superseded

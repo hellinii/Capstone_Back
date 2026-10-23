@@ -23,7 +23,9 @@ services:
       - key: NARRATIVE_MODEL
         sync: false            # 선택. 비우면 코드 기본값(claude-sonnet-5-5). Anthropic 모델 이름만 넣는다
       - key: NARRATIVE_EFFORT
-        sync: false            # 선택. 비우면 low. low | medium | high | xhigh | max
+        sync: false            # 선택. 옛 경로 effort. 비우면 low. low | medium | high | xhigh | max
+      - key: NARRATIVE_JOB_EFFORT
+        sync: false            # 선택. 작업 경로(/api/narrative/jobs) effort. 비우면 high
       - key: MAPPING_MODEL
         sync: false            # 선택. 비우면 코드 기본값(gpt-6-luna). 안 되면 gpt-4.1-mini 를 넣는다
       # 아래 둘은 기본 꺼짐. 이 파일은 이 서비스에 적용되지 않으므로(위 ⚠️ 참조)

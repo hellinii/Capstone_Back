@@ -19,7 +19,7 @@ import pytest
 
 from app.analysis.analysis_service import resolve_column_mapping
 from app.core.schemas import TaskType
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 from test_narrative_router import _sample_request
 
 _DF = pd.DataFrame({"id": [1, 2], "y_true": [0, 1], "y_pred": [1, 1]})
