@@ -5,6 +5,7 @@
     "dog": 74
   },
   "dropped_rows": 0,
+  "engine_version": "1.0.0",
   "environment": {
     "evaluated_at": "<비결정적 값 — 존재만 고정>",
     "libraries": "<비결정적 값 — 존재만 고정>"
@@ -303,6 +304,10 @@
         "minority_f1": 0.2742
       }
     }
+  },
+  "source_file": {
+    "sha256": "14fc967358890d88f53a0065c0f79188f66ae000771ce518014e32756b3d7aca",
+    "size_bytes": 5705
   },
   "warnings": []
 }

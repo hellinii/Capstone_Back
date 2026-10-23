@@ -206,3 +206,20 @@ def test_concurrency_cap_value_is_pinned():
     튜닝 지점이라, 조용히 올라가면 오프로드가 OOM 위험으로 되돌아간다.
     """
     assert concurrency.MAX_CONCURRENT_CPU_TASKS == 2
+
+
+async def test_evaluate_file_hash_does_not_block_event_loop(monkeypatch):
+    """[G-04b] 판 4 라운드 S1 — /api/evaluate 가 업로드 원본으로 SHA-256 을 계산하는 구간도 오프로드한다."""
+    monkeypatch.setattr("app.evaluation.router.source_file_info", _slow)
+
+    async def _post(c):
+        try:
+            return await c.post(
+                "/api/evaluate",
+                files={"file": ("d.csv", io.BytesIO(_CSV), "text/csv")},
+                data={"data": _EVAL_DATA},
+            )
+        except RuntimeError:
+            return None
+
+    await _assert_health_stays_responsive(_post)

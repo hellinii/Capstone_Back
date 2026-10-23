@@ -51,6 +51,12 @@ class EvaluationEnvironment(BaseModel):
     evaluated_at: str            = Field(description="평가 수행 시각(KST, ISO 8601)")
 
 
+class SourceFileInfo(BaseModel):
+    """평가한 업로드 파일의 지문(판 4 성적서 2.2 '파일 해시(SHA-256)'·'파일 크기', 출처: 시스템 확인)."""
+    sha256:     str = Field(pattern=r"^[0-9a-f]{64}$", description="업로드 원본 바이트의 SHA-256(소문자 16진 64자)")
+    size_bytes: int = Field(ge=0, description="업로드 원본 바이트 수")
+
+
 class EvaluateResponse(BaseModel):
     """[Step 3] 평가 결과 응답 스펙"""
     results:            dict[str, Any] = Field(description="지표별 연산 결과 수치 맵 (예: {'M1': 0.95})")
@@ -68,4 +74,13 @@ class EvaluateResponse(BaseModel):
             "multilabel 은 **레이블 등장 횟수**라 합계가 n_samples 를 넘는다. "
             "표본 수가 필요하면 n_samples 를 쓸 것."
         ),
+    )
+    # 판 4 추적 정보(판 4 라운드 S1). 판을 모른 채 늘 싣는다 — 판 3 프론트는 이 칸을 읽지 않는다.
+    source_file:        SourceFileInfo | None = Field(
+        default=None,
+        description="평가한 업로드 파일의 SHA-256·바이트 수(/api/evaluate 가 원본 바이트로 계산).",
+    )
+    engine_version:     str | None = Field(
+        default=None,
+        description="평가 엔진 버전(백엔드 코드 상수 ENGINE_VERSION — 평가 계산이 바뀔 때 올림).",
     )

@@ -4,6 +4,7 @@
     "1": 95
   },
   "dropped_rows": 0,
+  "engine_version": "1.0.0",
   "environment": {
     "evaluated_at": "<비결정적 값 — 존재만 고정>",
     "libraries": "<비결정적 값 — 존재만 고정>"
@@ -513,6 +514,10 @@
         ]
       }
     }
+  },
+  "source_file": {
+    "sha256": "6855eb7b5b15bcac361c7cfe50b170a97ed3ac4f2faac7c21be3b2b4d871e5de",
+    "size_bytes": 30401
   },
   "warnings": []
 }
