@@ -42,6 +42,7 @@ from typing import Any, Callable, Literal
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.derived import compute_derived
 from app.narrative.schemas import FactSheet
+from app.narrative import wording_ed4
 from app.narrative.sections import SECTION_IDS
 from app.narrative.wording import (
     KOREAN_COUNT,
@@ -784,6 +785,18 @@ def benchmark_value_text(metrics: list, ref: dict) -> str:
     if metric is None:
         return range_value_text(float(ref["model_value"]), low, high)
     return range_value_text(float(metric.value), low, high, shown_value(metric), _target_of(metric))
+
+
+def benchmark_value_text_ed4(metrics: list, ref: dict) -> str:
+    """판 4 참조 범위 비교(4.6·5.4)의 모델 값 — KPI 원값을 판 4 표기로(판정 대상이면 value_text, 아니면 셋째 자리 끝 0 유지).
+    기준표의 model_value(넷째 자리 반올림 — 0.9825 → 0.983 이 된다)는 쓰지 않는다(계획 2.7). 범위 끝과 같아 보여 위치와
+    반대로 읽히면 자릿수를 늘린다(wording_ed4.ed4_range_value_text). 판 4 사실 보기·규칙 문장이 이 함수 하나를 쓴다."""
+    metric = next((m for m in metrics if m.display_name == ref["metric"]), None)
+    low, high = float(ref["ref_low"]), float(ref["ref_high"])
+    if metric is None:
+        return wording_ed4.ed4_range_value_text(float(ref["model_value"]), low, high)
+    base = metric.value_text if metric.threshold is not None and metric.value_text else None
+    return wording_ed4.ed4_range_value_text(float(metric.value), low, high, base, _target_of(metric))
 
 
 def _target_of(metric) -> tuple[float, bool, bool] | None:

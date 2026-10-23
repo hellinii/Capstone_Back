@@ -137,6 +137,19 @@ def ed4_ratio_percent(numerator: int, denominator: int) -> str:
 # ── 참조 범위 위치(4.6·5.4) ─────────────────────────────────────────────────────────
 
 POSITION_KO = {"above": "참조 범위보다 높음", "within": "참조 범위 안", "below": "참조 범위보다 낮음"}
+# 참조 범위 끝은 기준표 글자 그대로 둘째 자리(예시본 4.6 '0.80 ~ 0.92'·5.4 '참조 범위 0.80~0.92'). 고정 문구 23(셋째 자리)의
+# 범위 밖이다(계획 정해진 것 6).
+RANGE_DIGITS = 2
+
+
+def ed4_range_bound(value: float) -> str:
+    """참조 범위 끝 — 둘째 자리, 끝 0 유지(0.80)."""
+    return _unneg(_fixed(value, RANGE_DIGITS))
+
+
+def ed4_range_text(low: float, high: float) -> str:
+    """참조 범위 '0.80~0.92'(서술·사실 보기의 꼴, 표는 그릴 때 '0.80 ~ 0.92')."""
+    return f"{ed4_range_bound(low)}~{ed4_range_bound(high)}"
 
 
 def _position(value: float, low: float, high: float) -> str:

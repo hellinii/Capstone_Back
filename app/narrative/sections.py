@@ -53,3 +53,20 @@ SECTIONS_BY_ID: dict[str, Section] = {s.id: s for s in SECTIONS}
 CHAPTERS: dict[str, tuple[str, ...]] = {
     ch: tuple(s.id for s in SECTIONS if s.chapter == ch) for ch in ("7", "8", "9")
 }
+
+
+# ── 판 4 자리(서술 설계 D47) ────────────────────────────────────────────────────────
+# 칸 이름(위 id — 판 3 절 번호)은 판 4 에서도 그대로이고, 판 4 성적서에서 찍히는 자리만 바뀐다. 백엔드의 판 4 절 번호는
+# 이 표 한 곳에서 읽는다(사실 보기의 '드러난 절'·'권고 절', 지시문·규칙 문장의 절 번호). 두 저장소 계약 사본
+# tests/contract/narrative_slots_ed4.json 의 slots·recommend_sections 와 같다(시험이 대조).
+EDITION4_PLACES: dict[str, str] = {
+    "8.2": "5.1", "7.1": "5.2", "7.2": "5.3", "8.1": "5.4", "8.3": "5.5", "7.3": "5.6", "9": "6",
+    "9.1": "6.1", "9.2": "6.2",
+}
+
+
+def place(section: str, *, edition: int) -> str:
+    """칸 이름(판 3 절 번호)이 그 판의 성적서에서 찍히는 절 번호. 판 3 은 그대로, 판 4 는 EDITION4_PLACES(모르는 이름은 그대로)."""
+    if edition == 4:
+        return EDITION4_PLACES.get(section, section)
+    return section

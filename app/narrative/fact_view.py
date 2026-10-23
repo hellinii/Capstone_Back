@@ -573,7 +573,17 @@ def build_fact_view(
     fs: FactSheet, derived: dict, benchmark_refs: list[dict], *, task_type: str, task_label: str, report_purpose: str,
     edition: int,
 ) -> dict:
-    """AI 가 읽는 사실 시트(한국어 이름). None·빈 칸은 뺀다. edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition)."""
+    """AI 가 읽는 사실 시트(한국어 이름). None·빈 칸은 뺀다. edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition).
+
+    판 4 요청은 판 4 보기(app.narrative.fact_view_ed4 — 판 4 표기·판정 여유·중립 위치 말)로 간다. 아래 판 3 보기는 그대로다."""
+    if edition == 4:
+        from app.narrative.fact_view_ed4 import build_fact_view_ed4  # 판 4 모듈이 이 모듈의 도구를 쓴다(순환 import 피함)
+
+        return build_fact_view_ed4(
+            fs, derived, benchmark_refs, task_type=task_type, task_label=task_label, report_purpose=report_purpose,
+        )
+    if edition != 3:
+        raise ValueError(f"모르는 성적서 판: {edition!r}")
     view = {
         "평가 개요": _overview(fs, task_label, report_purpose),
         "판정": _verdict(fs, derived),
