@@ -29,7 +29,9 @@ from app.narrative.grounding import (
     _add,
     _canon,
     _normalize_minus,
+    fact_class_labels,
     find_verdict_contradictions,
+    strip_context,
     verify_grounding,
 )
 from app.narrative.required_items import Conclusion
@@ -113,11 +115,12 @@ _IMPROVEMENT_AFTER = re.compile(r"\s*(?:을|를|이|가|만큼|씩|정도)?\s*(?
 _LABEL_AS_AMOUNT = re.compile(r"\s*(?:건|개|칸|배|%p?)")
 
 
-def predicted_numbers(text: str, labels: frozenset[str] | set[str] = frozenset()) -> list[str]:
-    """기대 효과 글의 예측 수치. labels 는 사실 시트의 숫자 꼴 클래스·레이블 이름(numeric_labels — 정규 표기)."""
+def predicted_numbers(text: str, labels: frozenset[str] | set[str] = frozenset(), *, edition: int = 3) -> list[str]:
+    """기대 효과 글의 예측 수치. labels 는 사실 시트의 숫자 꼴 클래스·레이블 이름(numeric_labels — 정규 표기).
+    edition 은 지울 절 번호의 판(grounding.context_tokens — 판 4 는 '6.2절' 등)."""
     if not isinstance(text, str):
         return []
-    stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(text))
+    stripped = strip_context(text, edition=edition)
     found = []
     for m in _NUMBER_RE.finditer(stripped):
         token = m.group(0)
@@ -160,13 +163,13 @@ def numeric_labels(fs: FactSheet) -> frozenset[str]:
 # ── ④ D24 선언 숫자 ─────────────────────────────────────────────────────────────
 
 
-def d24_present(text: str, values: tuple[float, ...]) -> bool:
-    """글에 확인 숫자 중 하나가 허용 목록과 같은 표기 변형(소수 1~4자리·백분율)으로 있는가."""
+def d24_present(text: str, values: tuple[float, ...], *, edition: int = 3) -> bool:
+    """글에 확인 숫자 중 하나가 허용 목록과 같은 표기 변형(소수 1~4자리·백분율)으로 있는가. edition 은 지울 절 번호의 판."""
     wanted: set = set()
     for v in values:
         _add(wanted, v)
         _add(wanted, abs(v))
-    stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(text or ""))
+    stripped = strip_context(text or "", edition=edition)
     return any(_canon(tok) in wanted for tok in _NUMBER_RE.findall(stripped))
 
 
@@ -210,21 +213,8 @@ def name_exemptions(fs: FactSheet, client_inputs: dict | None) -> set[str]:
 
 
 def _fact_labels(fs: FactSheet) -> list[str]:
-    """facts 안의 클래스 이름 — 프론트가 표를 잘라도 facts 의 목록(편향·헷갈린 쌍·작은 표본·평균 비교 기준)에는 남아
-    템플릿·AI 가 부를 수 있다(세션 A 검토 — 잘린 표 밖 'tiger_shark' 가 영어 코드로 걸렸다)."""
-    facts = fs.facts
-    if facts is None:
-        return []
-    labels = [r.label for r in facts.distribution_shift] + [r.label for r in facts.low_support_classes]
-    if facts.weakest_class:
-        labels.append(facts.weakest_class.label)
-    if facts.prediction_bias:
-        labels += [r.label for r in facts.prediction_bias.rows if r.label]
-    for p in facts.top_confusion_pairs:
-        labels += [p.actual, p.predicted]
-    if facts.average_gap:
-        labels.append(facts.average_gap.reference_class.label)
-    return labels
+    """facts 안의 클래스 이름(grounding.fact_class_labels — 판 4 허용 목록과 같은 한 곳)."""
+    return fact_class_labels(fs)
 
 
 # 판정 모순 검사 전에 가리는 이름 — 클래스 이름·고객이 준 클래스 설명에 판정 낱말이 들면('불합격품(기준 미달)') 이름을
@@ -278,8 +268,8 @@ def code_words(texts: list[str], exempt: set[str]) -> list[str]:
     return sorted(set(found))
 
 
-def _cites_allowed_number(text: str, whitelist: set) -> bool:
-    stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(text or ""))
+def _cites_allowed_number(text: str, whitelist: set, *, edition: int) -> bool:
+    stripped = strip_context(text or "", edition=edition)
     return any(_canon(tok) in whitelist for tok in _NUMBER_RE.findall(stripped))
 
 
@@ -298,7 +288,8 @@ def check_section(
 ) -> SectionCheck:
     """AI 가 쓴 칸 하나를 검사한다. parts 는 그 칸의 응답 필드(점 표기) → 값(9칸의 권고는 dict 목록).
 
-    edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition). 판 4 검사 갈래는 판 4 라운드 S2 ⑥ 이 더한다."""
+    edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition). 숫자를 뽑기 전에 지우는 절 번호가 그 판의 번호다(판 4 는
+    1.1~6.2 — grounding.context_tokens). 허용 목록(whitelist)은 호출부가 같은 판으로 만든 것이다."""
     result = SectionCheck(section=section_id)
     texts = [t for t in section_texts(section_id, parts) if isinstance(t, str)]
 
@@ -311,22 +302,22 @@ def check_section(
     elif not any(t.strip() for t in texts):
         return result  # 7.3 빈 글 — 통과(고정 문구 15)
 
-    result.numbers = verify_grounding(texts, whitelist).violations
+    result.numbers = verify_grounding(texts, whitelist, edition=edition).violations
     result.contradiction = bool(find_verdict_contradictions(mask_names(texts, masks), verdict))
     result.code_words = code_words(texts, exempt)
     if result.code_words:
         result.format.append("code_words")
-    if section_id == "7.3" and not _cites_allowed_number(texts[0], whitelist):
+    if section_id == "7.3" and not _cites_allowed_number(texts[0], whitelist, edition=edition):
         result.format.append("no_citation")
 
     if section_id == "9":
         recs = parts.get("recommendations") or []
         for rec in recs:
-            result.impact_numbers.extend(predicted_numbers(rec.get("expected_impact", ""), labels))
+            result.impact_numbers.extend(predicted_numbers(rec.get("expected_impact", ""), labels, edition=edition))
         answered = {str(r.get("problem_id") or "").strip() for r in recs}
         result.missing_recommendations = [pid for pid in problem_ids if pid not in answered]
 
     for c in conclusions:
-        if c.section == section_id and c.d24_values and not d24_present(" ".join(texts), c.d24_values):
+        if c.section == section_id and c.d24_values and not d24_present(" ".join(texts), c.d24_values, edition=edition):
             result.d24_missing = True
     return result

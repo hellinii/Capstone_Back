@@ -185,3 +185,52 @@ def ed4_range_value_text(
     if target is not None and not ok(cut_text):
         return base or ed4_plain(value)
     return cut_text
+
+
+# ── 사실 시트 값의 판 4 표기(사실 보기·규칙 문장·숫자 허용 목록이 함께 쓰는 한 곳) ──────────────────────────────────
+
+
+def metric_value_ed4(m) -> str:
+    """지표 값의 판 4 표기 — 판정 대상이면 프론트 value_text(판정과 같은 쪽으로 늘린 표기), 없으면 받은 판정으로 judged,
+    판정 대상이 아니면 plain. m 은 사실 시트 지표 줄(MetricFact)."""
+    if m.value_text:
+        return m.value_text
+    if m.threshold is not None and m.higher_is_better is not None:
+        return ed4_judged(m.value, m.threshold, m.higher_is_better, m.status == "pass")
+    return ed4_plain(m.value)
+
+
+def same_metric_value_ed4(metrics, metric_id: str, value: float | None) -> str | None:
+    """파생값에 실린 값이 판정 대상 지표의 값이면 그 지표의 표기 — 같은 값이 두 자리에 다른 글자로 찍히지 않게(계약 결정 7).
+    그 밖은 plain."""
+    if value is None:
+        return None
+    m = next((m for m in metrics if m.metric_id == metric_id), None)
+    if m is not None and m.threshold is not None and abs(float(m.value) - float(value)) < 1e-9:
+        return metric_value_ed4(m)
+    return ed4_plain(value)
+
+
+def imbalance_texts_ed4(ie) -> dict[str, str | None]:
+    """불균형 영향 세 판정 값과 네 값의 판 4 표기 — 프론트 display(판 4 요청은 판 4 표기)가 있으면 그것, 없으면 여기서 찍는다
+    (엔진 level 이 판정이다 — 비율은 1.5 와, 두 차이는 0.1 과 비교). ie 는 ImbalanceEffectFact."""
+    shown = ie.display
+    ratio_meets = ie.level != "mild"
+    out = {
+        "imbalance_ratio": shown.imbalance_ratio if shown else ed4_judged(ie.imbalance_ratio, 1.5, True, ratio_meets),
+        "majority_minus_minority_f1": shown.majority_minus_minority_f1 if shown else ed4_judged(
+            ie.majority_minus_minority_f1, 0.1, True, ie.majority_minus_minority_f1 >= 0.1,
+        ),
+        "accuracy_minus_macro_f1": None,
+    }
+    if ie.accuracy_minus_macro_f1 is not None:
+        out["accuracy_minus_macro_f1"] = (
+            shown.accuracy_minus_macro_f1 if shown and shown.accuracy_minus_macro_f1 else ed4_judged(
+                ie.accuracy_minus_macro_f1, 0.1, True, ie.accuracy_minus_macro_f1 >= 0.1,
+            )
+        )
+    for key in ("accuracy", "macro_f1", "majority_f1", "minority_f1"):
+        value = getattr(ie, key)
+        text = getattr(shown, key) if shown else None
+        out[key] = text or (ed4_plain(value) if value is not None else None)
+    return out
