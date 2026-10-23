@@ -414,6 +414,11 @@ def _evidence_ed4(problem, fs: FactSheet) -> dict:
                 }
             out[label] = e
         return out
+    if kind == "imbalance_effect" and fs.imbalance_effect is not None:
+        # 프론트는 근거에 판 3 파서 결과(display 도 판 3 표기 — 52.9231·0.1333)를 펼쳐 싣는다. 같은 값의 판 4 표기는 사실 시트
+        # imbalance_effect(판 4 요청은 판 4 display) 한 곳에서 — 근거의 display 를 그 표기로 바꿔 끼운다(규칙 문장·허용 목록과 같은 글자).
+        texts = imbalance_texts_ed4(fs.imbalance_effect)
+        return {**ev, "display": {k: t for k, t in texts.items() if k in ev and t is not None}}
     if kind == "threshold_tuning" and fs.f1_threshold_gain is not None:
         g = fs.f1_threshold_gain
         shown = {
