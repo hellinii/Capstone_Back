@@ -57,6 +57,13 @@ def test_falls_back_to_repr_when_scores_are_denser_than_12_digits():
     assert threshold_text(t, scores) == repr(t)
 
 
+def test_repr_fallback_gives_plain_number_for_numpy_float():
+    """numpy 2 의 np.float64 를 받아도 대체 경로가 'np.float64(…)' 가 아닌 숫자 글자를 돌려준다."""
+    t = np.float64(0.1) + np.float64(0.2)  # 0.30000000000000004
+    scores = np.array([0.30000000000000004, 0.3, 0.9])
+    assert threshold_text(t, scores) == "0.30000000000000004"
+
+
 def test_random_scores_text_is_shortest_and_keeps_predictions():
     """무작위 점수(넷째 자리 반올림 — 실데이터 모양)에서 표기를 적용한 예측 = 그 점의 예측, 한 자리 줄이면 다르다."""
     rng = random.Random(4213)

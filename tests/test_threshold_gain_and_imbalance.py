@@ -64,7 +64,7 @@ def test_gain_hand_computed_from_original_pr_curve():
     assert gain == {"max_f1": 0.8889, "current_f1": 0.3333, "gain": 0.5556, "best_threshold": 0.35,
                     "notable": True, "gain_text": "0.5556",
                     "best_recall": 1.0, "best_precision": 0.8, "current_recall": 0.25, "current_precision": 0.5,
-                    "max_f1_raw": 0.888888888888889, "current_f1_raw": 1 / 3, "gain_raw": 0.5555555555555556,
+                    "max_f1_raw": 8 / 9, "current_f1_raw": 1 / 3, "gain_raw": 8 / 9 - 1 / 3,
                     "best_threshold_raw": 0.35, "best_recall_raw": 1.0, "best_precision_raw": 0.8,
                     "current_recall_raw": 0.25, "current_precision_raw": 0.5, "best_threshold_text": "0.350"}
 
@@ -73,13 +73,29 @@ def test_gain_is_zero_when_current_threshold_is_best():
     """임계값 0.35 로 파생하면 지금 예측이 곧 최대점이다 — 이득 0."""
     gain = _binary_derived(GAIN_ROWS, threshold=0.35)["f1_threshold_gain"]
 
-    # gain_raw 는 두 F1 식(2PR/(P+R) 와 2TP/(2TP+FP+FN))의 마지막 자리 차이 그대로다 — 반올림 전 값이라 걷지 않는다.
+    # 원값의 최대 F1 도 지금 F1 과 같은 식 2TP/(2TP+FP+FN) 으로 센다 — 같은 예측이면 두 원값이 같고 gain_raw 는 정확히 0.
+    # (곡선 식 2PR/(P+R) 그대로면 8/9 가 0.888888888888889 로 나와 1.1e-16 이 남았다.)
     assert gain == {"max_f1": 0.8889, "current_f1": 0.8889, "gain": 0.0, "best_threshold": 0.35,
                     "notable": False, "gain_text": "0",
                     "best_recall": 1.0, "best_precision": 0.8, "current_recall": 1.0, "current_precision": 0.8,
-                    "max_f1_raw": 0.888888888888889, "current_f1_raw": 8 / 9, "gain_raw": 1.1102230246251565e-16,
+                    "max_f1_raw": 8 / 9, "current_f1_raw": 8 / 9, "gain_raw": 0.0,
                     "best_threshold_raw": 0.35, "best_recall_raw": 1.0, "best_precision_raw": 0.8,
                     "current_recall_raw": 1.0, "current_precision_raw": 0.8, "best_threshold_text": "0.350"}
+
+
+def test_raw_max_f1_equals_current_when_current_is_best_and_meets_exact_target():
+    """F1 이 정확히 3/4 인 점 — 곡선 식이면 0.7499999999999999 라 원값으로 0.75 목표와 겨루면 미달이 된다.
+
+    임계값 0.3 → 0.9·0.8·0.7·0.6·0.3 양성: TP3 FP2 FN0 → F1 = 6/8 = 3/4. 곡선의 최대도 이 점이다.
+    """
+    rows = [(1, 0.9), (0, 0.8), (1, 0.7), (0, 0.6), (1, 0.3), (0, 0.2)]
+    gain = _binary_derived(rows, threshold=0.3)["f1_threshold_gain"]
+
+    assert gain["best_threshold_raw"] == 0.3
+    assert gain["max_f1_raw"] == 0.75
+    assert gain["current_f1_raw"] == 0.75
+    assert gain["gain_raw"] == 0.0
+    assert gain["max_f1_raw"] >= 0.75
 
 
 def test_gain_negative_difference_is_clamped_to_zero_with_uploaded_prediction():
@@ -113,7 +129,7 @@ def test_gain_uses_uploaded_prediction_for_current_f1():
     assert gain == {"max_f1": 0.8889, "current_f1": 0.0, "gain": 0.8889, "best_threshold": 0.35,
                     "notable": True, "gain_text": "0.8889",
                     "best_recall": 1.0, "best_precision": 0.8, "current_recall": 0.0, "current_precision": 0.0,
-                    "max_f1_raw": 0.888888888888889, "current_f1_raw": 0.0, "gain_raw": 0.888888888888889,
+                    "max_f1_raw": 8 / 9, "current_f1_raw": 0.0, "gain_raw": 8 / 9,
                     "best_threshold_raw": 0.35, "best_recall_raw": 1.0, "best_precision_raw": 0.8,
                     "current_recall_raw": 0.0, "current_precision_raw": 0.0, "best_threshold_text": "0.350"}
 

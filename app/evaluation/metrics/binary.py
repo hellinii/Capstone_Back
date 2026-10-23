@@ -213,6 +213,17 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
     best_threshold = float(thresholds[best])
     best_precision, best_recall = float(precision[best]), float(recall[best])
     gain = max(0.0, max_f1 - current)
+    # 판 4 원값(*_raw)의 최대 F1 은 그 점의 건수로 current 와 **같은 식** 2TP/(2TP+FP+FN) 으로 다시 센다.
+    # 곡선 식 2PR/(P+R) 는 분수로 같은 F1 도 마지막 자리가 달라(3/4 → 0.7499999999999999), 원값으로 목표와
+    # 겨루면 미달로 잘못 판정되고 지금 예측이 곧 최대점이어도 gain_raw 가 1e-16 이 된다. 고른 점(best)과
+    # 판 3 이 읽는 넷째 자리 칸(max_f1·gain·notable·gain_text)은 위 곡선 값 그대로 둔다.
+    best_pred = np.asarray(y_score, dtype=float) >= thresholds[best]
+    positive_mask = np.asarray(y_true_bin) == 1
+    best_tp = int(np.sum(best_pred & positive_mask))
+    best_fp = int(np.sum(best_pred & ~positive_mask))
+    best_fn = int(np.sum(~best_pred & positive_mask))
+    max_f1_raw = float(2 * best_tp / (2 * best_tp + best_fp + best_fn)) if (2 * best_tp + best_fp + best_fn) > 0 else 0.0
+    gain_raw = max(0.0, max_f1_raw - current)
     # '임계값 부적합'(≥ 0.10) 판정은 반올림 전 값으로 여기 한 곳에서 한다(S2). 종전에는 프론트 문제 목록과
     # 백엔드 서술이 각자 넷째 자리 gain 으로 판정해, 실제 0.09996 이 0.1 로 반올림되어 부적합이 됐다.
     notable = threshold_gain_notable(gain)
@@ -230,9 +241,9 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
         "best_precision": round(best_precision, 4),
         "current_recall": round(current_recall, 4),
         "current_precision": round(current_precision, 4),
-        "max_f1_raw": max_f1,
+        "max_f1_raw": max_f1_raw,
         "current_f1_raw": current,
-        "gain_raw": gain,
+        "gain_raw": gain_raw,
         "best_threshold_raw": best_threshold,
         "best_recall_raw": best_recall,
         "best_precision_raw": best_precision,
@@ -255,6 +266,8 @@ def threshold_text(threshold: float, scores: np.ndarray) -> str:
     RPT-2026-0001(bc_strong): 원값 0.6166 → "0.617" 을 적용하면 0.6166 인 표본이 음성으로 바뀌어(Recall 0.984 → 0.969)
     ✗, "0.6166" ✓.
     """
+    # numpy 2 의 np.float64 는 repr 이 'np.float64(…)' 라 대체 경로에서 숫자가 아닌 글자가 나온다 — 파이썬 float 으로 바꾼다.
+    threshold = float(threshold)
     expected = scores >= threshold
     for digits in range(THRESHOLD_TEXT_MIN_DIGITS, THRESHOLD_TEXT_MAX_DIGITS + 1):
         text = f"{threshold:.{digits}f}"
