@@ -1,7 +1,8 @@
 """
-routers/narrative.py — LLM 서술 생성 API (성적서 7·8·9절).
+app/narrative/router.py — LLM 서술 생성 API (성적서 7·8·9절).
 
-- POST /api/generate-narrative         옛 경로(요청 하나로 서술, 서버 마감 120초). 운영 중인 옛 프론트가 쓴다.
+- POST /api/generate-narrative         옛 경로(요청 하나로 서술, 서버 마감 120초). 옛 클라이언트용으로 얼려 둠 —
+                                       운영 프론트는 2026-10-23 배포부터 작업 경로를 쓴다.
 - POST /api/narrative/jobs             작업 번호 경로 — 번호와 8.1 표를 즉시, 서술은 뒤에서(app.narrative.jobs)
 - GET  /api/narrative/jobs/{job_id}    작업 단계·결과
 

@@ -8,7 +8,7 @@ from pydantic_core import PydanticCustomError
 # 발급 요청에 실리는 성적서 원본(FinalReportData)의 크기 상한.
 # 통상 수십 KB 다 — ROC/PR 곡선은 60점으로 다운샘플되고 datasetSamples 는 비어 있다.
 # 이 API 는 무인증이므로 상한 없이 받으면 임의 크기 JSON 이 DB 에 영구 저장된다
-# (ISSUES.md G-03·G-04 와 같은 뿌리). 통상값의 약 20배로 여유 있게 잡는다.
+# (G-03·G-04 와 같은 뿌리). 통상값의 약 20배로 여유 있게 잡는다.
 MAX_CONTENT_BYTES = 1_048_576  # 1 MiB
 
 # 발급 비고·정정 사유·발급자의 길이 상한(B16). 이 셋은 발급 이력으로 성적서 서명란에 그대로 인쇄된다 —
@@ -131,7 +131,7 @@ class ReissueRequest(BaseModel):
     def _note_not_blank(cls, v: str) -> str:
         # 재발급은 이전 차수를 superseded 로 만들고 이력 행을 남기며, 그 이력은
         # SignatureSection 을 통해 성적서에 그대로 인쇄된다. 사유가 공란이면 제3자가
-        # 무엇이 왜 정정됐는지 판별할 근거가 사라진다(ISSUES.md F-06).
+        # 무엇이 왜 정정됐는지 판별할 근거가 사라진다(F-06).
         # UI 는 ReportLayout.tsx 에서 이미 막고 있었으나 API 는 통과했다.
         v = v.strip()
         if not v:
@@ -152,7 +152,7 @@ class IssuanceHistoryItem(BaseModel):
     changed_sections: list[str] | None = Field(
         default=None,
         description=(
-            "직전 차수 대비 값이 달라진 성적서 최상위 절 목록(ISSUES.md F-06). "
+            "직전 차수 대비 값이 달라진 성적서 최상위 절 목록(F-06). "
             "최초 발급이거나 이전 차수 스냅샷이 없으면 null — 모르는 것을 '변경 없음'으로 "
             "말하지 않는다(이 라운드 이전 발급본은 소급 백필하지 않았다)."
         ),

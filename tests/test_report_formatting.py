@@ -1,6 +1,6 @@
 """tests/test_report_formatting.py — generate_report 의 성공/실패 분류 검증.
 
-ISSUES.md C-07 — `report.py` 가 지표 결과를 "dict 이고 'error' 키가 있는가"로만
+C-07 — `report.py` 가 지표 결과를 "dict 이고 'error' 키가 있는가"로만
 분류한다. dict 를 정상 반환하는 지표(M21 혼동행렬, M22 클래스별 지표)가 에러 표현과
 같은 네임스페이스를 쓰기 때문에, 데이터에 'error' 라는 이름의 클래스가 있으면
 정상 계산된 M22 가 실패로 분류되고 그 값이 실패 사유 문자열 자리에 들어간다.

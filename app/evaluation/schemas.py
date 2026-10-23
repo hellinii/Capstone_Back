@@ -13,7 +13,7 @@ class EvaluateRequest(BaseModel):
         min_length=1,
         description=(
             "계산할 평가 지표 목록. **빈 목록은 거절한다** — 어떤 컬럼을 읽는지가 "
-            "정해지지 않아 결측 제거 범위를 좁힐 수 없다(ISSUES.md D-06). 조용히 "
+            "정해지지 않아 결측 제거 범위를 좁힐 수 없다(D-06). 조용히 "
             "전 컬럼으로 되돌리면 사용자는 좁혀진 줄 알고 넓은 규칙을 받는다."
         ),
     )
@@ -41,7 +41,7 @@ class EvaluateRequest(BaseModel):
 
 
 class EvaluationEnvironment(BaseModel):
-    """평가를 실제로 수행한 환경 (ISSUES.md F-09).
+    """평가를 실제로 수행한 환경 (F-09).
 
     성적서 4절의 '평가 도구'와 '평가 일시'는 종전에 프론트 상수에 박혀 있어
     (예: "scikit-learn 1.4.0") 실제로 계산에 쓰인 버전과 무관했다. 버전을 아는 곳은

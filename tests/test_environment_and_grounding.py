@@ -1,6 +1,6 @@
 """tests/test_environment_and_grounding.py — 평가 환경 실측 보고 · 판정 모순 차단.
 
-ISSUES.md F-09 (결정 4 — 앞으로 발급되는 것만 정정) · G-05 (결정 9).
+F-09 (결정 4 — 앞으로 발급되는 것만 정정) · G-05 (결정 9).
 """
 import pytest
 from fastapi.testclient import TestClient

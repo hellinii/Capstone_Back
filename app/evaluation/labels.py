@@ -1,7 +1,7 @@
 """app/evaluation/labels.py — 라벨 표현형의 단일 출처.
 
 "셀 하나를 어떤 라벨 목록으로 읽는가"와 "라벨을 어떤 순서로 늘어놓는가"를 정하는 규칙은
-**한 곳에만** 있어야 한다. 종전에는 라벨을 만들어내는 파서가 넷이었다(ISSUES.md D-04):
+**한 곳에만** 있어야 한다. 종전에는 라벨을 만들어내는 파서가 넷이었다(D-04):
 
   (1) `evaluation/preprocessor._parse_multilabel_value`  — literal_eval + '|' + ','
   (2) `evaluation/metrics/multilabel._parse_multilabel_col` — 같은 규칙(사본)
@@ -131,7 +131,7 @@ def normalize_distribution(distribution: dict) -> dict:
     """클래스 분포의 키를 표준 표현형으로 바꾸되 **개수를 합친다**.
 
     `{str(k): v}` 로 단순 변환하면 int 키 `1` 과 str 키 `'1'` 이 같은 키가 되면서
-    나중 값이 앞 값을 **덮어쓴다** — 예외 없이 카운트가 사라진다(ISSUES.md D-04).
+    나중 값이 앞 값을 **덮어쓴다** — 예외 없이 카운트가 사라진다(D-04).
     같은 키로 모이면 더해야 한다.
     """
     merged: dict[str, int] = {}

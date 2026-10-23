@@ -121,7 +121,7 @@ _VERDICT_CASES = {
         _m("M1", "Accuracy", 0.94, 0.85, "pass", True), _m("M4", "F1 Score", 0.82, 0.80, "pass", True)]),
     "INCONCLUSIVE": dict(verdict="INCONCLUSIVE", score=100.0, problems=[_INCONCLUSIVE_PROBLEM], metrics=[
         _m("M1", "Accuracy", 0.94, 0.85, "pass"), _m("M9", "AUROC", 0.88, 0.80, "pass")]),
-    # 운영 프론트(9-22) 모양 — is_core·problems 가 없다.
+    # 옛 프론트(9-22) 모양 — is_core·problems 가 없다.
     "FAIL_old": dict(verdict="FAIL", score=66.7, metrics=[
         _m("M1", "Accuracy", 0.94, 0.85, "pass"), _m("M4", "F1 Score", 0.70, 0.80, "fail")]),
     "INCONCLUSIVE_old": dict(verdict="INCONCLUSIVE", score=100.0, metrics=[
@@ -245,7 +245,7 @@ async def test_service_passes_task_type_so_multilabel_fallback_uses_label_cells(
     assert "레이블 칸 800칸" in resp.interpretation.confusion_analysis
 
 
-# ── 운영 프론트(9-22) 옛 판정 규칙의 조건부 합격(S1 배포 전 점검에서 발견) ─────────────
+# ── 옛 프론트(9-22) 옛 판정 규칙의 조건부 합격(S1 배포 전 점검에서 발견) ─────────────
 # 옛 computeVerdict 는 목표값이 하나도 없거나 핵심 지표가 산출되지 않으면 미달이 없어도 CONDITIONAL_PASS 다.
 
 def test_old_front_conditional_pass_without_any_target_does_not_claim_failure_or_all_passed():

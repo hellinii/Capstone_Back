@@ -29,7 +29,7 @@ class EvaluationError(Exception):
 
 def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
     """충돌검사 → 매핑변환 → engine.evaluate → 전처리오류 → 리포트 조립 → EvaluateResponse."""
-    # task_type 에 허용되지 않는 역할 차단 (SPEC §4, ISSUES.md A-10).
+    # task_type 에 허용되지 않는 역할 차단 (SPEC §4, A-10).
     # confirm-mapping 을 건너뛰고 이 엔드포인트를 직접 호출하는 경로의 백스톱이다 —
     # 프론트 드롭다운 제한은 UI 경로만 막는다.
     invalid_roles = find_invalid_roles(request.column_mappings, request.task_type)
@@ -75,7 +75,7 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
 
     return EvaluateResponse(
         results=formatted_results,
-        # 성적서 4절이 인쇄하는 '평가 도구·일시'를 서버가 확정한다(ISSUES.md F-09).
+        # 성적서 4절이 인쇄하는 '평가 도구·일시'를 서버가 확정한다(F-09).
         environment=EvaluationEnvironment(
             libraries=library_versions(), evaluated_at=evaluated_at()
         ),

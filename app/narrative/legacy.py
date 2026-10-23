@@ -1,6 +1,7 @@
 """app/narrative/legacy.py — 옛 동기 경로(`POST /api/generate-narrative`)의 서술 생성(S1 판, 서술 라운드 S5 에서 얼림).
 
-운영 중인 옛 프론트(main 9-22)가 쓰는 경로다. 서술 라운드 S5 가 작업 번호 경로의 생성기를 장별 호출·칸별 검문 사다리로
+옛 프론트(main 9-22)가 쓰던 경로다. 운영 프론트는 2026-10-23 배포부터 작업 경로를 쓰고, 이 경로는 옛 클라이언트를 위해
+얼려 둔다. 서술 라운드 S5 가 작업 번호 경로의 생성기를 장별 호출·칸별 검문 사다리로
 바꾸면서(app.narrative.generator), 이 경로는 **S1 그대로** 둔다 — 한 번 호출·빠른 effort(llm 기본)·서버 마감 120초·
 옛 지시문(아래 build_system_prompt·build_user_prompt·build_response_schema). 같은 서술 예산에서 보고서 1건으로 센다.
 다음 라운드에 지운다(계획 설계 요지 7).
@@ -574,7 +575,7 @@ async def _narrate_body(
         )
         return _rule_text(req, fs, benchmark_refs, derived, reason="input_too_large")
 
-    # 1-2. 시간당 예산 소진 → 폴백(ISSUES.md G-03, 결정 9).
+    # 1-2. 시간당 예산 소진 → 폴백(G-03, 결정 9).
     #      **429 가 아니라 200 + 폴백이다** — 프론트는 비 200 을 폴백이 아니라 오류로
     #      처리해 7·8·9절이 '생성 예정' 안내로 인쇄된다(사용자에게는 서비스 고장으로 보인다).
     #      서술 지갑은 매핑 지갑과 따로다 — 옛 경로는 호출 1번이 보고서 1건이다. 작업 번호 경로는 작업을
@@ -645,7 +646,7 @@ async def _narrate_body(
             fb.meta.grounding = grounding  # 어떤 환각이 잡혔는지 추적성 보존
             return fb
 
-        # 숫자가 없는 정성 서술은 위 검사를 **무조건 통과**한다(ISSUES.md G-05).
+        # 숫자가 없는 정성 서술은 위 검사를 **무조건 통과**한다(G-05).
         # 강제된 판정과 직접 모순되는 주장만 따로 잡는다 — 판정이 FAIL 인 성적서에
         # "모든 항목이 충족되었다"가 실리면 독자는 정반대 결론을 읽는다.
         contradictions = find_verdict_contradictions(_collect_grounding_texts(data), fs.verdict)

@@ -3,7 +3,7 @@
 완료 기준(계획 "세션 재구성" A·S6 검증)을 장치마다 따로 시험한다.
 - 작업 유형 × 판정 4가지 — 템플릿 출력이 자기 검문(숫자 허용 목록·판정 모순·영어 코드·D24 선언 숫자)을 통과한다.
 - 고정 문구 17·18 을 성적서가 찍으면 그 숫자 묶음이 서술에 다시 나오지 않는다(옛 요청은 템플릿이 한 번 쓴다).
-- 옛 경로 골든(운영 main 프론트 모양 사실 시트)과 새 골든(작업 경로·계약 예시)을 따로 둔다.
+- 옛 경로 골든(옛 프론트 모양 사실 시트)과 새 골든(작업 경로·계약 예시)을 따로 둔다.
 - 결론 목록을 읽는다(빠졌던 항목), 고객 입력(클래스 설명 D37), facts·task_type 없는 옛 요청, 조사·날값·개조식,
   해석형 항목은 사실 문장만, 신뢰구간 두 갈래·생략 사유, 17·18 해석 재료(우세한 오류·근소 지표의 판정).
 바탕값은 다른 칸에서 우연히 같은 숫자가 나오지 않게 고른다(판정을 바꿀 때 목표값 차이 0.0731 — 라운드 작업 함정).
@@ -223,7 +223,7 @@ def test_fixed_18_numbers_are_not_repeated_and_the_interpretation_follows_the_ve
 
 
 def test_old_requests_get_the_17_18_numbers_once():
-    """운영 main 프론트(facts 없음)는 17·18 을 찍지 않는다 — 템플릿이 숫자를 한 번 쓴다."""
+    """옛 프론트(facts 없음)는 17·18 을 찍지 않는다 — 템플릿이 숫자를 한 번 쓴다."""
     req = NarrativeRequest.model_validate(_raw("legacy_main"))
     assert not code_prints(req.fact_sheet, "17") and not code_prints(req.fact_sheet, "18")
     texts = _all_texts(_sections(req))
@@ -258,7 +258,7 @@ def _no_client():
 
 
 def test_legacy_route_golden_with_production_front_shape(_no_client):
-    """옛 경로(/api/generate-narrative)·운영 main 프론트 모양 사실 시트 — 규칙 문장이 이유 없이 바뀌지 않게."""
+    """옛 경로(/api/generate-narrative)·옛 프론트 모양 사실 시트 — 규칙 문장이 이유 없이 바뀌지 않게."""
     body = TestClient(app).post("/api/generate-narrative", json=_raw("legacy_main"))
     assert body.status_code == 200, body.text
     data = body.json()

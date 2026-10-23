@@ -59,7 +59,7 @@ _PRED_ROLES: dict[TaskType, list[ColumnRole]] = {
 #
 # 문구는 **사실이어야 한다.** 종전 multiclass 의 MISSING_PROB_PER_CLASS 는 "확률 기반 세부
 # 지표를 계산할 수 없다"고 했으나 multiclass 에는 확률을 읽는 지표가 하나도 없어 정상 매핑
-# 에서도 항상 뜨는 거짓 경고였다(ISSUES.md A-11). 확률의 실제 쓸모는 '예측의 대체 입력'이다.
+# 에서도 항상 뜨는 거짓 경고였다(A-11). 확률의 실제 쓸모는 '예측의 대체 입력'이다.
 _WARNING_CONDITIONS: dict[TaskType, list[tuple[ColumnRole, str, str]]] = {
     TaskType.binary: [
         (
@@ -146,7 +146,7 @@ def find_column_conflicts(
 def find_invalid_roles(
     mappings: list[ColumnMapping], task_type: TaskType
 ) -> list[MappingValidationError]:
-    """task_type 에 허용되지 않는 역할이 매핑됐는지 검사한다 (SPEC §4, ISSUES.md A-10).
+    """task_type 에 허용되지 않는 역할이 매핑됐는지 검사한다 (SPEC §4, A-10).
 
     SPEC §4 는 "Binary 인데 prob_class_*", "Multiclass 인데 score", "Multilabel 인데
     score 또는 prob_class_*" 세 가지를 진행 차단 Error 로 규정한다. 세 가지를 손으로
@@ -199,7 +199,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
     # 현재 매핑에서 어떤 role들이 사용됐는지 추출
     mapped_roles = {m.role for m in mappings}
 
-    # ── 1. 역할 유효성 — task_type 에 허용되지 않는 역할 (SPEC §4, ISSUES.md A-10) ──
+    # ── 1. 역할 유효성 — task_type 에 허용되지 않는 역할 (SPEC §4, A-10) ──
     # 중복 체크보다 **앞**에 둔다. 잘못된 역할을 두 컬럼에 준 경우 사용자가 고쳐야 할 것은
     # 중복이 아니라 역할 자체인데, 뒤에 두면 DUPLICATE_ROLE 이 먼저 보고돼 안내가 어긋난다.
     errors.extend(find_invalid_roles(mappings, task_type))
@@ -268,7 +268,7 @@ def validate_mapping(request: ConfirmMappingRequest) -> ConfirmMappingResponse:
             available_metric_ids.append(metric_id)
         else:
             # 순서를 정렬로 고정한다 — str-Enum set 의 iteration 순서는 PYTHONHASHSEED 에
-            # 따라 달라져 같은 입력이 실행마다 다른 문구를 만들었다(ISSUES.md H-07).
+            # 따라 달라져 같은 입력이 실행마다 다른 문구를 만들었다(H-07).
             missing_str = ", ".join(sorted(r.value for r in missing))
             unavailable_metric_ids.append(f"{metric_id} (누락: {missing_str})")
             
@@ -297,7 +297,7 @@ def _unsatisfied_roles(
     """요구 역할 중 매핑으로 충족되지 않은 것.
 
     예측 역할(y_pred/pred_labels)은 **확률 역할로도 충족된다** — 하드 예측이 없으면
-    전처리가 확률에서 파생하기 때문이다(PREDICTION_ROLES_BY_TASK, ISSUES.md A-01·A-02).
+    전처리가 확률에서 파생하기 때문이다(PREDICTION_ROLES_BY_TASK, A-01·A-02).
     종전에는 단순 issubset 이라 확률만 제출한 사용자가 `MISSING_METRIC_REQUIREMENT` 로
     막혔다 — SPEC §5 가 '계산 가능'이라고 적은 조합인데도.
     """

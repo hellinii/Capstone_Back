@@ -1,4 +1,4 @@
-"""test_issuance.py — 발급 메타 채번/멱등/재발급/API 테스트 (설계 문서 §9 Phase C).
+"""test_issuance.py — 발급 메타 채번/멱등/재발급/API 테스트 (docs/ARCHITECTURE.md 발급 절).
 
 격리: 테스트마다 in-memory SQLite(StaticPool)로 fresh DB 를 만들어 기관을 시드한다.
 API 테스트는 get_db 의존성을 이 세션으로 오버라이드하고, lifespan(실제 data/app.db)은
@@ -359,7 +359,7 @@ def test_api_reissue_note_is_trimmed(client):
     assert r.json()["history"][-1]["note"] == "오탈자 정정"
 
 
-# ── 파일 DB(프로덕션 배선) 레벨 — 리뷰 #7, 설계 §9 ────────────────────────────
+# ── 파일 DB(프로덕션 배선) 레벨 — 리뷰 #7 ────────────────────────────────────
 
 def test_file_db_seed_and_fk(tmp_path):
     """실제 파일 DB: 테이블·파일 생성 + FK 강제가 새 커넥션에서도 작동."""

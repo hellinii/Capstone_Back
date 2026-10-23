@@ -17,8 +17,8 @@ def _files() -> list[Path]:
 
 def test_no_private_doc_links_in_docs_or_code():
     files = _files()
-    # 빈 집합을 돌면 늘 통과한다 — 문서 5개 + app 코드가 실제로 잡히는지 먼저 본다.
-    assert len([p for p in files if p.suffix == ".md"]) >= 5
+    # 빈 집합을 돌면 늘 통과한다 — 문서 3개(README·ARCHITECTURE·PROJECT_OVERVIEW) + app 코드가 실제로 잡히는지 먼저 본다.
+    assert len([p for p in files if p.suffix == ".md"]) >= 3
     assert len(files) > 50
     hits = [
         f"{p.relative_to(ROOT)}:{i}"

@@ -1,6 +1,6 @@
 """tests/test_probability_support.py — 확률·점수만 있는 데이터셋의 전면 지원.
 
-ISSUES.md A-01·A-02·D-08·D-09 (2026-09-07 ★확정된 제품 결정 1).
+A-01·A-02·D-08·D-09 (2026-09-07 제품 결정).
 
 하드 예측(y_pred/pred_labels)이 없고 확률·점수만 있는 데이터셋도 평가를 끝낼 수 있어야 한다.
 - binary     : score_positive ≥ decision_threshold → 양/음성 클래스 라벨로 파생
