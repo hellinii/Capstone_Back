@@ -10,6 +10,9 @@ benchmark_baselines.py — 지표별 "내부 참조 기준치" 정적 테이블.
 from typing import Optional
 
 SOURCE_NOTE = "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)"
+# 판 4 출처 글 — 예시본 4.6 ※ 줄 글 그대로(계획 부록 A10, 대응표 22). 판 3 성적서·옛 경로는 위 글 그대로다.
+SOURCE_NOTE_ED4 = "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+SOURCE_NOTES = {3: SOURCE_NOTE, 4: SOURCE_NOTE_ED4}
 
 # task_type → {지표 display_name: (range_low, range_high)}
 BASELINES: dict[str, dict[str, tuple[float, float]]] = {
@@ -79,7 +82,10 @@ def build_benchmark_refs(task_type: str, metrics: list, *, edition: int) -> list
     (None 일 때만 '목표 없음'). 목표가 없으면 두 키 모두 None.
 
     metrics: MetricFact 리스트 (또는 .display_name/.value/.threshold 속성을 가진 객체)
+    edition: 성적서 양식 판(3 | 4) — 출처 글(source_note)만 판마다 다르다(판 4 는 예시본 4.6 ※ 줄 글). 위치·방향·품질
+    코드값과 숫자는 판과 무관하다(판 4 글은 position 으로 묶고 quality 를 말로 쓰지 않는다 — required_items·fact_view_ed4).
     """
+    source_note = SOURCE_NOTES[edition]
     refs = []
     for m in metrics:
         name = getattr(m, "display_name", None)
@@ -108,6 +114,6 @@ def build_benchmark_refs(task_type: str, metrics: list, *, edition: int) -> list
             "quality": _quality(position, lower_is_better),
             "target_value": target_value,
             "target_position": target_position,
-            "source_note": SOURCE_NOTE,
+            "source_note": source_note,
         })
     return refs

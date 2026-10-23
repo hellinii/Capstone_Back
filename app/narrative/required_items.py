@@ -768,6 +768,13 @@ _QUALITY_GROUP = (
     ("within", "참조 범위 안에 드는 지표"),
     ("worse", "참조 범위에 비해 미흡한 지표"),
 )
+# 판 4(대응표 22, 부록 A10·B21) — 방향을 반영한 우열(우수/미흡) 대신 수치 위치(position)로 묶는다. 낮을수록 좋은 지표도
+# 수치로만 말한다(Hamming Loss 0.03 은 '참조 범위보다 낮은 지표'). 평가 말을 쓰지 않는다.
+_POSITION_GROUP_ED4 = (
+    ("above", "참조 범위보다 높은 지표"),
+    ("within", "참조 범위 안에 드는 지표"),
+    ("below", "참조 범위보다 낮은 지표"),
+)
 # 목표값 수준(D31) — 단순 수치 위치라 방향(우수/미흡)으로 바꾸지 않는다.
 _TARGET_GROUP = (
     ("below", "목표값이 참조 범위보다 낮은 지표"),
@@ -826,9 +833,33 @@ def _grouped(groups, refs: list[dict], key: str, item) -> str:
     return _clauses(stems)
 
 
+def _clauses_ed4(stems: list[str]) -> str:
+    """'…이고, …이며, …이다.' — 부록 B21 의 이음(첫 이음 '고', 그다음 '며'). 없는 갈래는 호출부가 뺀다."""
+    out = stems[0]
+    for i, stem in enumerate(stems[1:]):
+        out += ("고, " if i == 0 else "며, ") + stem
+    return out + "다."
+
+
+def _benchmark_ed4(ctx: Ctx) -> str:
+    """판 4 참조 범위 위치 문장(부록 B21) — 수치 위치로 묶고, 값은 KPI 원값의 판 4 표기, 범위 끝은 둘째 자리."""
+    stems = []
+    for code, head in _POSITION_GROUP_ED4:
+        listed = [
+            f"{r['metric']}({benchmark_value_text_ed4(ctx.fs.metrics, r)}, "
+            f"참조 범위 {wording_ed4.ed4_range_text(r['ref_low'], r['ref_high'])})"
+            for r in ctx.benchmark_refs if r.get("position") == code
+        ]
+        if listed:
+            stems.append(f"{head}는 {join_and(listed)}이")
+    return "내부 참조 기준과 비교하면 " + _clauses_ed4(stems)
+
+
 def _benchmark(ctx: Ctx) -> str | None:
     if not ctx.benchmark_refs:
         return None
+    if ctx.edition == 4:
+        return _benchmark_ed4(ctx)
     return "내부 참조 기준과 비교하면 " + _grouped(
         _QUALITY_GROUP, ctx.benchmark_refs, "quality",
         lambda r: f"{r['metric']}({_ref_value(ctx, r)}, 참조 범위 {num(float(r['ref_low']))}~{num(float(r['ref_high']))})",
@@ -839,7 +870,9 @@ def _target_level(ctx: Ctx) -> str | None:
     refs = [r for r in ctx.benchmark_refs if r.get("target_value") is not None]
     if not refs:
         return None
-    return _grouped(_TARGET_GROUP, refs, "target_position", lambda r: f"{r['metric']}(목표 {target_text(r['target_value'])})")
+    # 목표값 표기 — 판 4 는 합격 기준과 같은 셋째 자리 끝 0 유지(0.950, 고정 문구 23), 판 3 은 반올림하지 않은 값.
+    target = wording_ed4.ed4_plain if ctx.edition == 4 else target_text
+    return _grouped(_TARGET_GROUP, refs, "target_position", lambda r: f"{r['metric']}(목표 {target(r['target_value'])})")
 
 
 def _no_benchmark(ctx: Ctx) -> str | None:
