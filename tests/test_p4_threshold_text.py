@@ -75,8 +75,10 @@ def test_random_scores_text_is_shortest_and_keeps_predictions():
 
 def test_best_and_current_recall_precision_match_sklearn():
     rng = random.Random(7)
-    rows = [(int(rng.random() < 0.4), round(rng.random(), 4)) for _ in range(120)]
+    # 점수는 여섯째 자리 — 원값 임계값이 넷째 자리 칸(best_threshold)과 달라야 반올림을 시험할 수 있다.
+    rows = [(int(rng.random() < 0.4), round(rng.random(), 6)) for _ in range(120)]
     gain = _gain(rows)
+    assert gain["best_threshold_raw"] != gain["best_threshold"]
     y = np.array([r[0] for r in rows])
     s = np.array([r[1] for r in rows])
     t = gain["best_threshold_raw"]
