@@ -1,0 +1,120 @@
+{
+  "class_distribution": {
+    "0": 100,
+    "1": 95,
+    "3": 1,
+    "spam": 1
+  },
+  "error_count": 2,
+  "execution_summary": [
+    {
+      "label": "Total validated rows",
+      "note": "업로드된 파일의 전체 행 수",
+      "value": "200 rows"
+    },
+    {
+      "label": "Valid prediction rows",
+      "note": "결측치 제거 후 평가에 사용될 행 수",
+      "value": "197 rows"
+    },
+    {
+      "label": "Excluded samples",
+      "note": "결측치·오류로 인해 제외된 행 수",
+      "value": "3 rows"
+    },
+    {
+      "label": "Selected metric count",
+      "note": "선택된 메트릭: M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M19, M20, M21, M22, M23",
+      "value": "15 items"
+    },
+    {
+      "label": "Validation result",
+      "note": "아래 상세 테이블 참조",
+      "value": "Errors 2 / Warnings 4"
+    }
+  ],
+  "selected_metric_ids": [
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M6",
+    "M7",
+    "M8",
+    "M9",
+    "M10",
+    "M19",
+    "M20",
+    "M21",
+    "M22",
+    "M23"
+  ],
+  "task_type": "binary",
+  "validation_details": [
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
+      "name": "Empty dataset (no data rows)",
+      "result": "200 rows",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
+      "name": "Missing required column",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Rows with missing values are excluded from evaluation",
+      "name": "Missing value",
+      "result": "3 rows",
+      "status": "warning"
+    },
+    {
+      "group": "common",
+      "handling": "Reported only — duplicate rows are still evaluated",
+      "name": "Duplicate ID",
+      "result": "2 rows",
+      "status": "warning"
+    },
+    {
+      "group": "common",
+      "handling": "Counted as a misclassification of the true class (rows are kept)",
+      "name": "Class mismatch",
+      "result": "Pred has unknown classes: 2, normal",
+      "status": "warning"
+    },
+    {
+      "group": "common",
+      "handling": "같은 클래스로 계산(행은 그대로)",
+      "name": "Label notation",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude only rows with missing or invalid values",
+      "name": "Excluded samples",
+      "result": "3 rows",
+      "status": "warning"
+    },
+    {
+      "group": "binary",
+      "handling": "Stop evaluation — values must be in [0.0, 1.0]",
+      "name": "Score range error",
+      "result": "3 rows out of [0, 1]",
+      "status": "error"
+    },
+    {
+      "group": "binary",
+      "handling": "Stop evaluation",
+      "name": "Binary class system error",
+      "result": "Expected 2 classes, found 6",
+      "status": "error"
+    }
+  ],
+  "warning_count": 4
+}
