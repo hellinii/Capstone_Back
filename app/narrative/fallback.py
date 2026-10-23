@@ -156,9 +156,11 @@ class _Input:
 
     def __init__(
         self, fs: FactSheet, refs: list[dict], derived: dict, conclusions: list[Conclusion], descriptions: dict,
-        *, benchmark_fixed: bool = False,
+        *, edition: int, benchmark_fixed: bool = False,
     ):
         self.fs, self.refs, self.derived, self.conclusions, self.descriptions = fs, refs, derived, conclusions, descriptions
+        # 성적서 양식 판(3 | 4 — 요청의 report_edition). 기본값 없음(판 4 라운드 S2 ②).
+        self.edition = edition
         # 8.1 이 성적서 고정 문구 16 뿐(작업 경로만 — required_items.benchmark_printed_only).
         self.benchmark_fixed = benchmark_fixed
 
@@ -290,14 +292,15 @@ SECTION_TEMPLATES = {
 }
 
 
-def _input(fs, benchmark_refs, derived, *, task_type, client_inputs, conclusions, job: bool = False) -> _Input:
+def _input(fs, benchmark_refs, derived, *, task_type, client_inputs, conclusions, edition: int, job: bool = False) -> _Input:
     if conclusions is None:
         conclusions = select_items(
-            fs, client_inputs, task_type or infer_task_type(fs, derived), derived=derived, benchmark_refs=benchmark_refs,
+            fs, client_inputs, task_type or infer_task_type(fs, derived),
+            edition=edition, derived=derived, benchmark_refs=benchmark_refs,
         )
     return _Input(
         fs, benchmark_refs, derived, conclusions, class_descriptions(client_inputs),
-        benchmark_fixed=job and benchmark_printed_only(fs, benchmark_refs, conclusions),
+        edition=edition, benchmark_fixed=job and benchmark_printed_only(fs, benchmark_refs, conclusions),
     )
 
 
@@ -310,14 +313,16 @@ def section_template(
     task_type: str | None = None,
     client_inputs: dict | None = None,
     conclusions: list[Conclusion] | None = None,
+    edition: int,
 ) -> dict:
-    """칸 하나의 규칙 문장 — {응답 필드(점 표기): 값}.
+    """칸 하나의 규칙 문장 — {응답 필드(점 표기): 값}. edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition).
 
     conclusions 를 주면(작업 경로 — 지시문과 같은 목록) 그것을 읽고, 없으면 select_items 로 만든다. task_type 이 없는 옛
     호출은 사실 시트로 짐작한다(required_items.infer_task_type). client_inputs 의 클래스 설명으로 클래스를 부른다(D37).
     작업 경로 전용이다 — 8.1 이 고정 문구 16 뿐이면 빈 글(옛 경로 build_fallback_narrative 는 지금 문장)."""
     inp = _input(
-        fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=conclusions, job=True,
+        fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=conclusions,
+        edition=edition, job=True,
     )
     return SECTION_TEMPLATES[section_id](inp)
 
@@ -353,11 +358,15 @@ def build_fallback_narrative(
     *,
     task_type: str | None = None,
     client_inputs: dict | None = None,
+    edition: int,
 ) -> NarrativeResponse:
     """규칙 기반 폴백 서술 — 일곱 칸의 템플릿을 모은다. reason: no_key | api_error | grounding_failed …
 
-    옛 경로(legacy)는 요청의 task_type·client_inputs 를 넘긴다. 둘 없이 부르면(옛 호출) 작업 유형을 짐작하고 클래스 설명 없이 쓴다."""
-    inp = _input(fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=None)
+    옛 경로(legacy)는 요청의 task_type·client_inputs 를 넘긴다. 둘 없이 부르면(옛 호출) 작업 유형을 짐작하고 클래스 설명 없이 쓴다.
+    edition 은 성적서 양식 판 — 옛 경로는 늘 판 3 을 넘긴다(legacy.EDITION)."""
+    inp = _input(
+        fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=None, edition=edition,
+    )
     parts: dict = {}
     for section_id, fn in SECTION_TEMPLATES.items():
         parts.update(fn(inp))

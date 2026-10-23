@@ -125,6 +125,8 @@ class Ctx:
     client_inputs: dict[str, Any]
     derived: dict
     benchmark_refs: list[dict]
+    # 성적서 양식 판(3 | 4 — 요청의 report_edition). 기본값을 두지 않는다 — 빠뜨리면 바로 오류(판 4 라운드 S2 ②).
+    edition: int
     selected: set[str] = field(default_factory=set)
     descriptions: dict[str, str] = field(default_factory=dict)
 
@@ -1426,6 +1428,7 @@ def select_items(
     client_inputs: dict | None,
     task_type: str | None,
     *,
+    edition: int,
     derived: dict | None = None,
     benchmark_refs: list[dict] | None = None,
 ) -> list[Conclusion]:
@@ -1433,7 +1436,8 @@ def select_items(
 
     작업 유형이 맞지 않거나 재료가 없으면(결론 함수가 None) 뺀다. D24 항목은 확인할 숫자(d24_values)를 함께 싣는다.
     facts 가 없는 옛 요청에서도 깨지지 않고 받은 것만으로 고른다. task_type 이 없으면 infer_task_type 으로 짐작한다.
-    derived·benchmark_refs 를 주면(규칙 템플릿 — 호출부가 이미 만든 값) 그것을 쓴다 — 칸 머리 문장과 같은 값을 읽게.
+    derived·benchmark_refs 를 주면(규칙 템플릿·작업 경로 — 호출부가 이미 만든 값) 그것을 쓴다 — 칸 머리 문장과 같은 값을
+    읽게. edition 은 성적서 양식 판(3 | 4) — 기준표를 여기서 만들 때도 같은 판으로 만든다.
     """
     task = task_type or infer_task_type(fs, derived)
     ctx = Ctx(
@@ -1441,7 +1445,10 @@ def select_items(
         task_type=task,
         client_inputs=client_inputs if isinstance(client_inputs, dict) else {},
         derived=derived if derived is not None else compute_derived(fs, task_type=task),
-        benchmark_refs=benchmark_refs if benchmark_refs is not None else build_benchmark_refs(task, fs.metrics),
+        benchmark_refs=(
+            benchmark_refs if benchmark_refs is not None else build_benchmark_refs(task, fs.metrics, edition=edition)
+        ),
+        edition=edition,
         selected=_selected_metrics(fs),
         descriptions=class_descriptions(client_inputs),
     )

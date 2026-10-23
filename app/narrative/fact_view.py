@@ -571,8 +571,9 @@ def omitted_counts(fs: FactSheet) -> dict[str, int]:
 
 def build_fact_view(
     fs: FactSheet, derived: dict, benchmark_refs: list[dict], *, task_type: str, task_label: str, report_purpose: str,
+    edition: int,
 ) -> dict:
-    """AI 가 읽는 사실 시트(한국어 이름). None·빈 칸은 뺀다."""
+    """AI 가 읽는 사실 시트(한국어 이름). None·빈 칸은 뺀다. edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition)."""
     view = {
         "평가 개요": _overview(fs, task_label, report_purpose),
         "판정": _verdict(fs, derived),

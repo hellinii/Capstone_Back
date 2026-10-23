@@ -292,7 +292,7 @@ def test_every_kind_has_template_without_numbers():
 
 def test_fallback_recommendations_one_template_per_problem():
     fs = _fact_sheet()
-    resp = build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key")
+    resp = build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key", edition=3)
     assert [(r.problem_id, r.priority) for r in resp.recommendations] == [
         ("P1", "HIGH"), ("P2", "MEDIUM"), ("P3", "MEDIUM"),
     ]
@@ -306,7 +306,7 @@ def test_fallback_no_problems_no_recommendations():
     """종전 충돌 4곳(D22): 문제 없는 '운영 모니터링', 제외 행 권고, IR>1.5 권고, 미달 지표 권고가 없다."""
     fs = _fact_sheet(problems=[], dropped_rows=3, distribution={"class_distribution": {"0": 150, "1": 50},
                                                                  "imbalance_ratio": 3.0})
-    resp = build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key")
+    resp = build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key", edition=3)
     assert resp.recommendations == []
     narr = resp.recommendation_narrative
     assert narr.data_quality == "데이터 측면에서 권고 대상으로 지목된 문제는 없다. 전처리에서 3건이 평가에서 제외되었다."
@@ -317,40 +317,40 @@ def test_fallback_no_problems_no_recommendations():
 
 def test_fallback_narrative_splits_problems_by_section():
     fs = _fact_sheet()
-    narr = build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key").recommendation_narrative
+    narr = build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key", edition=3).recommendation_narrative
     assert "P3(불균형 영향 있음 (다수 0 · 소수 1))" in narr.data_quality
     assert "P1" not in narr.data_quality and "P2" not in narr.data_quality
     assert "P1(핵심 지표 미달 (Recall))" in narr.model_ops and "P2(임계값 부적합)" in narr.model_ops
     assert "P3" not in narr.model_ops
 
     data_only = _fact_sheet(problems=[_problem("P1", "label_caution", "LOW", "정답 라벨 주의")])
-    narr = build_fallback_narrative(data_only, [], compute_derived(data_only), "no_key").recommendation_narrative
+    narr = build_fallback_narrative(data_only, [], compute_derived(data_only), "no_key", edition=3).recommendation_narrative
     assert narr.model_ops == "모델 측면에서 권고 대상으로 지목된 문제는 없다."
 
 
 def test_fallback_with_problems_passes_grounding():
     fs = _fact_sheet()
     derived = compute_derived(fs)
-    refs = build_benchmark_refs("binary", fs.metrics)
-    resp = build_fallback_narrative(fs, refs, derived, reason="no_key")
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    resp = build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
     texts = _collect_grounding_texts(resp.model_dump(exclude={"meta", "benchmark_refs"}))
-    g = verify_grounding(texts, build_number_whitelist(fs, refs, derived))
+    g = verify_grounding(texts, build_number_whitelist(fs, refs, derived, edition=3))
     assert g.passed, g.violations
 
 
 # ── grounding 허용 목록 ─────────────────────────────────────────────────────────
 
 def test_whitelist_takes_problem_evidence_recursively():
-    without = build_number_whitelist(_fact_sheet(problems=[]), [], {})
+    without = build_number_whitelist(_fact_sheet(problems=[]), [], {}, edition=3)
     for tok in ("0.1409", "0.37", "3.2", "0.8421"):
         assert tok not in without, tok
-    wl = build_number_whitelist(_fact_sheet(), [], {})
+    wl = build_number_whitelist(_fact_sheet(), [], {}, edition=3)
     for tok in ("0.1409", "14.09", "0.37", "3.2", "0.8421", "0.7012"):
         assert tok in wl, tok
     # 중첩 dict·문자열 속 숫자(이름 속 숫자 꼴 클래스)도
     nested = _fact_sheet(problems=[_problem(
         "P1", "distribution_shift", "LOW", "학습↔평가 분포 차이 (7)",
         {"7": {"train": 0.412, "eval": "0.288"}}, note="표본 4321건")])
-    wl = build_number_whitelist(nested, [], {})
+    wl = build_number_whitelist(nested, [], {}, edition=3)
     for tok in ("0.412", "0.288", "7", "4321"):
         assert tok in wl, tok

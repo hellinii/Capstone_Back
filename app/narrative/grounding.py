@@ -210,8 +210,12 @@ def build_number_whitelist(
     benchmark_refs: list[dict],
     derived: dict,
     client_inputs: dict | None = None,
+    *,
+    edition: int,
 ) -> set:
-    """출력 검증용 허용 숫자 집합 (fact_sheet + 파생값 + 고객 입력의 다중 표기)."""
+    """출력 검증용 허용 숫자 집합 (fact_sheet + 파생값 + 고객 입력의 다중 표기).
+
+    edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition). 판 4 숫자 규칙은 판 4 라운드 S2 ⑥ 이 이 함수에 더한다."""
     wl: set = set()
 
     _add(wl, fs.n_samples)

@@ -320,7 +320,7 @@ def _check_one(sid: str, parts: dict, req: NarrativeRequest, prepared) -> dict:
     rec_parts = generator._rec_dicts(aligned)
     result = checks.check_section(
         sid, rec_parts, whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
-        problem_ids=problem_ids, exempt=exempt, masks=masks, labels=checks.numeric_labels(fs),
+        problem_ids=problem_ids, exempt=exempt, masks=masks, labels=checks.numeric_labels(fs), edition=3,
     )
     texts = [t for t in checks.section_texts(sid, rec_parts) if isinstance(t, str)]
     grounding = verify_grounding(texts, whitelist)

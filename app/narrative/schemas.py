@@ -53,6 +53,15 @@ MAX_DISPLAY_TEXT_CHARS = 40
 # 표시 문자열은 숫자 하나의 표기다(엔진 judged_text·프론트 judgedText) — 숫자가 아닌 글이 서술에 그대로 찍히거나
 # 폴백이 float 로 읽다 멈추지 않게 숫자 꼴만 받는다(S4b 검토 BE-03). 작업 경로는 이 칸이 틀리면 그 칸만 버린다.
 NumText = Annotated[str, StringConstraints(pattern=r"^-?\d+(\.\d+)?$", max_length=MAX_DISPLAY_TEXT_CHARS)]
+# F1 최대 임계값 표기(판 4, 평가 엔진 binary.threshold_text 를 프론트가 옮긴다). 엔진은 12자리로도 예측을 못 맞추면 repr 로
+# 떨어지는데, 아주 작은 점수(1e-05)면 지수 꼴이다 — 그 꼴도 숫자 하나의 표기라 받는다(판 4 라운드 S2 ②, 계약 not_decided).
+ThresholdText = Annotated[
+    str, StringConstraints(pattern=r"^-?\d+(\.\d+)?([eE][-+]?\d+)?$", max_length=MAX_DISPLAY_TEXT_CHARS)
+]
+
+# 성적서 양식 판(판 4 라운드). 판 3 이 기본이다 — 기본값은 요청 경계(NarrativeRequest)와 옛 경로 입구(legacy)에만 두고,
+# 안쪽 함수는 기본값 없는 keyword-only edition 으로 받는다(빠뜨리면 바로 오류). 판 결정은 프론트 한 곳이다.
+ReportEdition = Literal[3, 4]
 
 # 문제 종류 9종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
 ProblemKind = Literal[
@@ -102,6 +111,11 @@ class MetricFact(BaseModel):
     ci_contains_target: bool | None = Field(
         default=None, description="구간이 목표값을 포함하는가(프론트가 반올림 전 값으로 판정). None 이면 해당 없음·모름",
     )
+    # ── 판 4 요청에만 있는 칸(계약 fact_sheet_contract_ed4.json). 판 3 요청에는 키가 없다.
+    ci_low_text:  NumText | None = Field(
+        default=None, description="판 4 — 신뢰구간 하한의 표기(반올림 전 경계로, 목표와의 대소가 원값과 같게 자릿수를 늘림)",
+    )
+    ci_high_text: NumText | None = Field(default=None, description="판 4 — 신뢰구간 상한의 표기(ci_low_text 와 같은 규칙)")
 
 
 class PerClassFact(BaseModel):
@@ -231,6 +245,29 @@ class F1ThresholdGainFact(BaseModel):
         default=None,
         description="gain 의 표시 문자열 — 판정(notable)과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2)",
     )
+    # ── 판 4 요청에만 있는 칸(계약 fact_sheet_contract_ed4.json — 4.4 임계값 표와 5.6 서술). 판 3 요청에는 키가 없다.
+    best_threshold_text:    ThresholdText | None = Field(default=None, description="판 4 — F1 최대 임계값 표기(엔진 값 그대로)")
+    max_f1_text:            NumText | None = Field(default=None, description="판 4 — 그 임계값의 F1 표기")
+    current_f1_text:        NumText | None = Field(default=None, description="판 4 — 지금 예측의 F1 표기")
+    best_recall_text:       NumText | None = Field(default=None, description="판 4 — 그 임계값의 Recall 표기")
+    best_precision_text:    NumText | None = Field(default=None, description="판 4 — 그 임계값의 Precision 표기")
+    current_recall_text:    NumText | None = Field(default=None, description="판 4 — 지금 예측의 Recall 표기")
+    current_precision_text: NumText | None = Field(default=None, description="판 4 — 지금 예측의 Precision 표기")
+    risk_side:              "RiskSideFact | None" = Field(
+        default=None, description="판 4 — 의뢰자가 더 위험하다고 밝힌 쪽 지표와 그 목표 충족(지금·최대 임계값)",
+    )
+
+
+class RiskSideFact(BaseModel):
+    """판 4 — 의뢰자가 밝힌 위험 방향 쪽 지표(FN → Recall, FP → Precision)의 목표 충족. 프론트가 반올림 전 값으로 정했다."""
+    side:                 Literal["fn", "fp"]
+    metric_id:            str = Field(max_length=8)
+    display_name:         str = Field(max_length=MAX_PROBLEM_TEXT_CHARS)
+    meets_target_now:     bool | None = Field(default=None, description="지금 예측이 그 지표 목표를 충족하는가. 판정 대상이 아니면 None")
+    meets_target_at_best: bool | None = Field(default=None, description="F1 최대 임계값에서 충족하는가. 판정 대상이 아니면 None")
+
+
+F1ThresholdGainFact.model_rebuild()
 
 
 class ImbalanceEffectFact(BaseModel):
@@ -417,6 +454,8 @@ class DistributionShiftRowFact(BaseModel):
     difference:       float
     difference_text:  NumText
     flagged:          bool
+    # 판 4 전용(facts 안 유일) — 평가 − 학습 표기(4.5 차이 열과 같은 값). 판 3 요청에는 키가 없다.
+    evaluation_minus_training_text: NumText | None = None
 
 
 class CiSkippedFact(BaseModel):
@@ -536,6 +575,9 @@ class FactSheet(BaseModel):
 class NarrativeRequest(BaseModel):
     """[Step 4] LLM 서술 생성 요청"""
     task_type:      TaskType      = Field(description="분류 모델 유형")
+    # 판 신호는 이것 하나다(facts 안에 두지 않는다 — facts 는 형식이 틀리면 통째로 버려질 수 있다). 선택 칸이다 — 판 3 요청에는
+    # 키가 없고(기본 3), 판 4 프론트만 4 를 싣는다. 3·4 밖의 값은 422.
+    report_edition: ReportEdition = Field(default=3, description="성적서 양식 판(3 | 4). 판 3 요청은 싣지 않는다")
     report_purpose: ReportPurpose = Field(default=ReportPurpose.external, description="internal | external | project")
     fact_sheet:     FactSheet     = Field(description="평가 결과 사실 시트")
     client_inputs:  dict[str, Any] | None = Field(

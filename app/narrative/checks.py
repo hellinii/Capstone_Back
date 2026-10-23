@@ -294,8 +294,11 @@ def check_section(
     exempt: set[str],
     masks: tuple[str, ...] = (),
     labels: frozenset[str] = frozenset(),
+    edition: int,
 ) -> SectionCheck:
-    """AI 가 쓴 칸 하나를 검사한다. parts 는 그 칸의 응답 필드(점 표기) → 값(9칸의 권고는 dict 목록)."""
+    """AI 가 쓴 칸 하나를 검사한다. parts 는 그 칸의 응답 필드(점 표기) → 값(9칸의 권고는 dict 목록).
+
+    edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition). 판 4 검사 갈래는 판 4 라운드 S2 ⑥ 이 더한다."""
     result = SectionCheck(section=section_id)
     texts = [t for t in section_texts(section_id, parts) if isinstance(t, str)]
 

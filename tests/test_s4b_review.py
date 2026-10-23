@@ -113,7 +113,7 @@ def _fs(**over) -> FactSheet:
 
 
 def _passes(fs: FactSheet, text: str) -> bool:
-    return verify_grounding([text], build_number_whitelist(fs, [], {})).passed
+    return verify_grounding([text], build_number_whitelist(fs, [], {}, edition=3)).passed
 
 
 def test_structural_fact_fields_do_not_leak_numbers():
@@ -162,7 +162,7 @@ def test_judged_share_pair_drops_short_rounding():
 # ── 폴백 ───────────────────────────────────────────────────────────────────────
 
 def _fallback(fs: FactSheet, task_type: str | None = None):
-    return build_fallback_narrative(fs, [], compute_derived(fs, task_type=task_type), reason="no_key")
+    return build_fallback_narrative(fs, [], compute_derived(fs, task_type=task_type), reason="no_key", edition=3)
 
 
 def test_failed_metric_target_is_not_rounded_when_value_text_is_used():
@@ -212,7 +212,7 @@ def test_emptied_distribution_still_reports_engine_imbalance():
 # ── 결론 목록 ───────────────────────────────────────────────────────────────────
 
 def _ids_texts(fs: FactSheet, task="binary", client=None) -> dict[str, str]:
-    return {c.item_id: c.text for c in select_items(fs, client, task)}
+    return {c.item_id: c.text for c in select_items(fs, client, task, edition=3)}
 
 
 def test_weakest_share_is_printed_with_judged_digits_and_split_reasons():
@@ -304,7 +304,7 @@ def test_prompt_trimming_marks_what_was_dropped():
     req = req.model_copy(update={"fact_sheet": fs})
     derived = compute_derived(fs, task_type="multiclass")
     before = copy.deepcopy(derived)
-    _, user, dropped = build_prompts_within_limit(req, fs, derived, build_benchmark_refs("multiclass", fs.metrics))
+    _, user, dropped = build_prompts_within_limit(req, fs, derived, build_benchmark_refs("multiclass", fs.metrics, edition=3))
     assert dropped[0] == "confusion.matrix" and "distribution" in dropped
     assert '"omitted": {"confusion": 150' in user and '"class_distribution": 150' in user
     assert derived == before  # 원본 파생값(허용 목록·폴백이 씀)은 그대로

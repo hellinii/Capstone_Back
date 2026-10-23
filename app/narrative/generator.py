@@ -106,13 +106,16 @@ async def _no_stage(_stage: str) -> None:
 def _prepare(req: NarrativeRequest):
     fs = req.fact_sheet
     task = req.task_type.value
+    # 성적서 양식 판 — 요청의 report_edition 하나만 읽고(판 결정은 프론트 한 곳), 하위 함수에는 모두 이 값을 넘긴다.
+    edition = req.report_edition
     derived = compute_derived(fs, task_type=task)
-    refs = build_benchmark_refs(task, fs.metrics)
-    whitelist = build_number_whitelist(fs, refs, derived, req.client_inputs)
-    conclusions = select_items(fs, req.client_inputs, task)
+    refs = build_benchmark_refs(task, fs.metrics, edition=edition)
+    whitelist = build_number_whitelist(fs, refs, derived, req.client_inputs, edition=edition)
+    # 결론 목록도 여기서 만든 파생값·기준표를 읽는다 — 다시 계산하면 판이 다른 기준표를 읽을 수 있다(판 4 라운드 S2 ②).
+    conclusions = select_items(fs, req.client_inputs, task, edition=edition, derived=derived, benchmark_refs=refs)
     ctx = prompt.build_context(
         fs, derived, refs, task_type=task, report_purpose=req.report_purpose.value,
-        client_inputs=req.client_inputs, conclusions=conclusions,
+        client_inputs=req.client_inputs, conclusions=conclusions, edition=edition,
     )
     # 지시문에서 덜어 낸 표의 개수('외 k개')도 서술이 쓸 수 있다 — 원본 사실 시트에 없는 수일 수 있어 넣는다.
     for count in (ctx.view.get("덜어 낸 표(일부만 실림)") or {}).values():
@@ -198,6 +201,7 @@ async def generate_sections(
     started = time.perf_counter()
     deadline_at = started + deadline_seconds if deadline_seconds is not None else None
     fs = req.fact_sheet
+    edition = req.report_edition
     derived, refs, whitelist, conclusions, ctx, exempt, masks = await run_cpu_bound(_prepare, req)
     effort = effort or job_effort()
     problem_ids = [p.id for p in fs.problems]
@@ -222,6 +226,7 @@ async def generate_sections(
         st = states[sid]
         st.parts = fallback.section_template(
             sid, fs, refs, derived, task_type=req.task_type.value, client_inputs=req.client_inputs, conclusions=conclusions,
+            edition=edition,
         )
         if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems) or (sid == "8.1" and benchmark_fixed):
             st.source, st.outcome = "fixed", "fixed"  # 7.3 을 검문으로 뺐으면 호출부가 dropped 로 덮는다
@@ -324,7 +329,7 @@ async def generate_sections(
         aligned = _align(parts, fs.problems, fill_missing=False)[0] if sid == "9" else parts
         result = checks.check_section(
             sid, _rec_dicts(aligned), whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
-            problem_ids=problem_ids, exempt=exempt, masks=masks, labels=labels,
+            problem_ids=problem_ids, exempt=exempt, masks=masks, labels=labels, edition=edition,
         )
         st.checks.append(result.as_record())
         hard = result.hard_failures

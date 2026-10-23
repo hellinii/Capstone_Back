@@ -352,5 +352,5 @@ def test_normal_prompt_is_far_below_size_cap():
     fs = _no_special_fact_sheet()
     d = compute_derived(fs)
     size = len(build_system_prompt("external", "binary", fs)) + len(
-        build_user_prompt(fs.model_dump(), build_benchmark_refs("binary", fs.metrics), d, None))
+        build_user_prompt(fs.model_dump(), build_benchmark_refs("binary", fs.metrics, edition=3), d, None))
     assert size * 5 < service.MAX_NARRATIVE_PROMPT_CHARS

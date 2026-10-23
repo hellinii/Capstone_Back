@@ -67,7 +67,7 @@ def _quality(position: str, lower_is_better: bool) -> str:
     return "better" if position == "above" else "worse"
 
 
-def build_benchmark_refs(task_type: str, metrics: list) -> list[dict]:
+def build_benchmark_refs(task_type: str, metrics: list, *, edition: int) -> list[dict]:
     """
     fact_sheet.metrics 각 지표를 참조 테이블과 대조해 position 을 미리 계산한다.
     LLM 은 이 position 을 산문화만 하고 숫자 비교를 직접 하지 않는다.

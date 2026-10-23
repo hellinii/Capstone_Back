@@ -408,17 +408,20 @@ class PromptContext:
     conclusions: list[Conclusion]
     briefs: dict[str, SectionBrief]
     class_descriptions: dict[str, str]
+    # 성적서 양식 판(3 | 4 — 요청의 report_edition). 기본값 없음(판 4 라운드 S2 ②).
+    edition: int
     trimmed: list[str] = field(default_factory=list)
     dropped_client_keys: list[str] = field(default_factory=list)
 
 
 def build_context(
     fs: FactSheet, derived: dict, benchmark_refs: list[dict], *, task_type: str, report_purpose: str,
-    client_inputs: dict | None, conclusions: list[Conclusion],
+    client_inputs: dict | None, conclusions: list[Conclusion], edition: int,
 ) -> PromptContext:
     view = fact_view.build_fact_view(
         fs, derived, benchmark_refs,
         task_type=task_type, task_label=TASK_TYPE_LABELS.get(task_type, task_type), report_purpose=report_purpose,
+        edition=edition,
     )
     client_view, dropped = fact_view.build_client_view(client_inputs)
     # 규칙 문장(fallback)과 같은 한 벌 — 빈 설명·'제공되지 않음'(으로 시작하는 글)·이름과 같은 설명은 뺀다(D37).
@@ -426,7 +429,7 @@ def build_context(
     ctx = PromptContext(
         fs=fs, task_type=task_type, view=view, client_view=client_view, conclusions=conclusions,
         briefs=section_briefs(fs, derived, conclusions, task_type), class_descriptions=descriptions,
-        dropped_client_keys=dropped,
+        edition=edition, dropped_client_keys=dropped,
     )
     _fit(ctx)
     return ctx

@@ -154,11 +154,11 @@ def test_snake_case_class_names_are_exempt_but_field_names_are_not():
 def test_section_9_is_empty_when_either_text_is_blank():
     parts = {"recommendation_narrative.data_quality": "데이터 권고다.", "recommendation_narrative.model_ops": " ",
              "recommendations": [{"problem_id": "P1", "category": "c", "action": "a", "expected_impact": "e"}]}
-    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set())
+    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set(), edition=3)
     assert r.format == ["empty"]
     parts["recommendation_narrative.model_ops"] = "모델 권고다."
     parts["recommendations"] = []
-    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set())
+    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set(), edition=3)
     assert r.format == ["empty"]
 
 

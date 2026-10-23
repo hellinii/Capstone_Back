@@ -44,6 +44,21 @@ from app.core.concurrency import narrative_slot, run_cpu_bound
 
 logger = logging.getLogger(__name__)
 
+# 옛 경로는 늘 판 3 이다(판 4 라운드 S2 ②) — 요청에 report_edition 이 4 로 와도 읽지 않는다. 안쪽 함수(기준표·허용 목록·
+# 규칙 문장)는 기본값 없는 edition 을 받으므로 이 입구에서 판 3 을 넘긴다. 기본값 3 을 두는 곳은 요청 경계와 여기뿐이다.
+EDITION = 3
+
+# 판 4 요청에만 있는 칸(계약 fact_sheet_contract_ed4.json 의 edition4_only_keys 중 사실 시트 안). 옛 지시문은 사실 시트를
+# 통째로 덤프하므로 이 칸들을 빼야 판 3 지시문이 한 글자도 바뀌지 않는다(값이 None 이어도 키가 늘면 글이 바뀐다).
+EDITION4_ONLY_SHEET_FIELDS: dict = {
+    "metrics": {"__all__": {"ci_low_text", "ci_high_text"}},
+    "f1_threshold_gain": {
+        "best_threshold_text", "max_f1_text", "current_f1_text", "best_recall_text", "best_precision_text",
+        "current_recall_text", "current_precision_text", "risk_side",
+    },
+    "facts": {"distribution_shift": {"__all__": {"evaluation_minus_training_text"}}},
+}
+
 
 # ── 옛 지시문(S1 판 그대로 — 얼림) ─────────────────────────────────────────────────
 
@@ -398,7 +413,7 @@ def build_prompts_within_limit(req, fs, derived, benchmark_refs) -> tuple[str, s
     돌려주는 세 번째 값은 덜어 낸 자리(내부 기록). 다 덜어도 넘으면 호출부가 input_too_large 로 끝낸다.
     """
     system = build_system_prompt(req.report_purpose.value, req.task_type.value, fs, derived)
-    sheet = fs.model_dump()
+    sheet = fs.model_dump(exclude=EDITION4_ONLY_SHEET_FIELDS)  # 판 4 칸은 옛 지시문에 싣지 않는다
     view = copy.deepcopy(derived)  # 지시문용 파생값 사본 — 허용 목록·폴백은 원본을 쓴다
     user = build_user_prompt(sheet, benchmark_refs, view, req.client_inputs)
     dropped: list[str] = []
@@ -419,8 +434,8 @@ def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
     이벤트 루프를 15.1 초 막았다).
     """
     derived = compute_derived(fs, task_type=task_type_value)
-    benchmark_refs = build_benchmark_refs(task_type_value, fs.metrics)
-    whitelist = build_number_whitelist(fs, benchmark_refs, derived, client_inputs)
+    benchmark_refs = build_benchmark_refs(task_type_value, fs.metrics, edition=EDITION)
+    whitelist = build_number_whitelist(fs, benchmark_refs, derived, client_inputs, edition=EDITION)
     return derived, benchmark_refs, whitelist
 
 
@@ -538,6 +553,7 @@ def _rule_text(req, fs, benchmark_refs, derived, *, reason: str) -> NarrativeRes
     옛 경로 흐름은 얼렸고, 규칙 문장만 작업 경로와 같은 템플릿을 쓴다(옛 경로 골든 — tests/test_s6_templates.py)."""
     return build_fallback_narrative(
         fs, benchmark_refs, derived, reason, task_type=req.task_type.value, client_inputs=req.client_inputs,
+        edition=EDITION,
     )
 
 
