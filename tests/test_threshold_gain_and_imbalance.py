@@ -59,16 +59,27 @@ GAIN_ROWS = [
 def test_gain_hand_computed_from_original_pr_curve():
     gain = _binary_derived(GAIN_ROWS)["f1_threshold_gain"]
 
+    # 판 4 재료(S1): 0.35 점 TP4 FP1 FN0 → P 0.8·R 1.0, 지금(0.5) TP1 FP1 FN3 → P 0.5·R 0.25.
+    # 표기: "0.350" 을 적용해도 0.35 와 예측이 같다(셋째 자리, 끝 0 유지).
     assert gain == {"max_f1": 0.8889, "current_f1": 0.3333, "gain": 0.5556, "best_threshold": 0.35,
-                    "notable": True, "gain_text": "0.5556"}
+                    "notable": True, "gain_text": "0.5556",
+                    "best_recall": 1.0, "best_precision": 0.8, "current_recall": 0.25, "current_precision": 0.5,
+                    "max_f1_raw": 0.888888888888889, "current_f1_raw": 1 / 3, "gain_raw": 0.5555555555555556,
+                    "best_threshold_raw": 0.35, "best_recall_raw": 1.0, "best_precision_raw": 0.8,
+                    "current_recall_raw": 0.25, "current_precision_raw": 0.5, "best_threshold_text": "0.350"}
 
 
 def test_gain_is_zero_when_current_threshold_is_best():
     """임계값 0.35 로 파생하면 지금 예측이 곧 최대점이다 — 이득 0."""
     gain = _binary_derived(GAIN_ROWS, threshold=0.35)["f1_threshold_gain"]
 
+    # gain_raw 는 두 F1 식(2PR/(P+R) 와 2TP/(2TP+FP+FN))의 마지막 자리 차이 그대로다 — 반올림 전 값이라 걷지 않는다.
     assert gain == {"max_f1": 0.8889, "current_f1": 0.8889, "gain": 0.0, "best_threshold": 0.35,
-                    "notable": False, "gain_text": "0"}
+                    "notable": False, "gain_text": "0",
+                    "best_recall": 1.0, "best_precision": 0.8, "current_recall": 1.0, "current_precision": 0.8,
+                    "max_f1_raw": 0.888888888888889, "current_f1_raw": 8 / 9, "gain_raw": 1.1102230246251565e-16,
+                    "best_threshold_raw": 0.35, "best_recall_raw": 1.0, "best_precision_raw": 0.8,
+                    "current_recall_raw": 1.0, "current_precision_raw": 0.8, "best_threshold_text": "0.350"}
 
 
 def test_gain_negative_difference_is_clamped_to_zero_with_uploaded_prediction():
@@ -82,7 +93,11 @@ def test_gain_negative_difference_is_clamped_to_zero_with_uploaded_prediction():
 
     # 곡선: 임계값 0.2 → TP2 FP1 → F1 = 4/5. 지금 예측은 완벽 → F1 = 1.
     assert gain == {"max_f1": 0.8, "current_f1": 1.0, "gain": 0.0, "best_threshold": 0.2,
-                    "notable": False, "gain_text": "0"}
+                    "notable": False, "gain_text": "0",
+                    "best_recall": 1.0, "best_precision": 0.6667, "current_recall": 1.0, "current_precision": 1.0,
+                    "max_f1_raw": 0.8, "current_f1_raw": 1.0, "gain_raw": 0.0,
+                    "best_threshold_raw": 0.2, "best_recall_raw": 1.0, "best_precision_raw": 2 / 3,
+                    "current_recall_raw": 1.0, "current_precision_raw": 1.0, "best_threshold_text": "0.200"}
 
 
 def test_gain_uses_uploaded_prediction_for_current_f1():
@@ -94,8 +109,13 @@ def test_gain_uses_uploaded_prediction_for_current_f1():
     mappings = BINARY_PRED + [{"role": "score_positive", "column": "score"}]
     gain = evaluate(df, mappings, "binary", ["M1"], positive_class="1")["f1_threshold_gain"]
 
+    # 지금 예측 TP0 → Recall·Precision 모두 0(분모 FP1 이 있어 정의되지만 TP 가 0).
     assert gain == {"max_f1": 0.8889, "current_f1": 0.0, "gain": 0.8889, "best_threshold": 0.35,
-                    "notable": True, "gain_text": "0.8889"}
+                    "notable": True, "gain_text": "0.8889",
+                    "best_recall": 1.0, "best_precision": 0.8, "current_recall": 0.0, "current_precision": 0.0,
+                    "max_f1_raw": 0.888888888888889, "current_f1_raw": 0.0, "gain_raw": 0.888888888888889,
+                    "best_threshold_raw": 0.35, "best_recall_raw": 1.0, "best_precision_raw": 0.8,
+                    "current_recall_raw": 0.0, "current_precision_raw": 0.0, "best_threshold_text": "0.350"}
 
 
 def test_gain_tie_with_float_noise_picks_lowest_threshold():
@@ -112,6 +132,9 @@ def test_gain_tie_with_float_noise_picks_lowest_threshold():
 
     assert gain["max_f1"] == 0.6667
     assert gain["best_threshold"] == 0.6
+    # 판 4 재료도 낮은 임계값(0.6) 점에서 온다: TP3 FP2 FN1 → P 0.6·R 0.75(0.9 점이면 P 1.0·R 0.5).
+    assert (gain["best_threshold_raw"], gain["best_precision_raw"], gain["best_recall_raw"]) == (0.6, 0.6, 0.75)
+    assert gain["best_threshold_text"] == "0.600"
 
 
 def test_gain_absent_without_score_or_for_other_tasks():

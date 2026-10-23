@@ -186,6 +186,8 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
       아닐 수 있어 차이가 음수가 될 수 있다 — 그때는 "올릴 여지 없음"이므로 0.
     값은 4자리로 반올림해 싣는다. "≥ 0.10 이면 임계값 부적합" 판정은 반올림 전 값으로 여기서 해 notable 로
     싣고(S2), 판정과 같은 쪽으로 읽히는 표시 문자열을 gain_text 로 싣는다.
+    - 판 4 재료(판 4 라운드 S1): 그 점(best_*)과 지금 예측(current_*)의 Recall·Precision, 모든 숫자 칸의 반올림 전
+      값(*_raw), 임계값 표기 best_threshold_text(`threshold_text`). 동률이면 위와 같이 낮은 임계값 점의 값이다.
     """
     y_true, y_score = _get_true_score(df, mapping_dict)
     positive = _resolve_positive_value(y_true, mapping_dict.get('_positive_class'))
@@ -204,7 +206,12 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
 
     _tn, fp, fn, tp = _binary_confusion_counts(df, mapping_dict)
     current = float(2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) > 0 else 0.0
+    # 지금 예측의 Recall·Precision — 양성 기준·분모 0 처리는 M2·M3(zero_division=0)과 같다.
+    current_precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+    current_recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
     max_f1 = float(f1[best])
+    best_threshold = float(thresholds[best])
+    best_precision, best_recall = float(precision[best]), float(recall[best])
     gain = max(0.0, max_f1 - current)
     # '임계값 부적합'(≥ 0.10) 판정은 반올림 전 값으로 여기 한 곳에서 한다(S2). 종전에는 프론트 문제 목록과
     # 백엔드 서술이 각자 넷째 자리 gain 으로 판정해, 실제 0.09996 이 0.1 로 반올림되어 부적합이 됐다.
@@ -213,7 +220,44 @@ def calculate_f1_threshold_gain(df: pd.DataFrame, mapping_dict: dict) -> dict:
         "max_f1": round(max_f1, 4),
         "current_f1": round(current, 4),
         "gain": round(gain, 4),
-        "best_threshold": round(float(thresholds[best]), 4),
+        "best_threshold": round(best_threshold, 4),
         "notable": notable,
         "gain_text": judged_text(gain, THRESHOLD_GAIN_NOTABLE, notable),
+        # ── 판 4 재료(판 4 라운드 S1, 대응표 26) — 위 칸은 그대로 두고 더하기만 한다. 판 3 프론트 파서는 아는 키만 읽는다.
+        # 4.4 임계값 표의 그 점·지금의 Recall·Precision(넷째 자리, 위 칸과 같은 반올림)과 반올림 전 값(*_raw).
+        # 판 4 는 셋째 자리로 찍고 목표와 겨룰 때 자릿수를 늘리므로, 넷째 자리 값을 다시 반올림하지 않게 원값을 싣는다.
+        "best_recall": round(best_recall, 4),
+        "best_precision": round(best_precision, 4),
+        "current_recall": round(current_recall, 4),
+        "current_precision": round(current_precision, 4),
+        "max_f1_raw": max_f1,
+        "current_f1_raw": current,
+        "gain_raw": gain,
+        "best_threshold_raw": best_threshold,
+        "best_recall_raw": best_recall,
+        "best_precision_raw": best_precision,
+        "current_recall_raw": current_recall,
+        "current_precision_raw": current_precision,
+        "best_threshold_text": threshold_text(best_threshold, np.asarray(y_score, dtype=float)),
     }
+
+
+# 임계값 표기의 가장 짧은 자릿수 — 판 4 숫자 규칙의 셋째 자리.
+THRESHOLD_TEXT_MIN_DIGITS = 3
+# 이 자릿수까지 늘려도 예측이 같아지지 않으면(점수가 그만큼 촘촘하면) 원값의 짧은 repr 을 쓴다.
+THRESHOLD_TEXT_MAX_DIGITS = 12
+
+
+def threshold_text(threshold: float, scores: np.ndarray) -> str:
+    """결정 임계값의 표기 — 그 표기를 **실제로 적용해도 예측이 같은** 가장 짧은 자릿수(정해진 것 3, 판 4 4.4·5.6).
+
+    셋째 자리부터 한 자리씩 늘린다. 예측은 곡선과 같은 규칙(점수 ≥ 임계값 → 양성)이다. 끝 0은 남긴다(0.500).
+    RPT-2026-0001(bc_strong): 원값 0.6166 → "0.617" 을 적용하면 0.6166 인 표본이 음성으로 바뀌어(Recall 0.984 → 0.969)
+    ✗, "0.6166" ✓.
+    """
+    expected = scores >= threshold
+    for digits in range(THRESHOLD_TEXT_MIN_DIGITS, THRESHOLD_TEXT_MAX_DIGITS + 1):
+        text = f"{threshold:.{digits}f}"
+        if np.array_equal(scores >= float(text), expected):
+            return text
+    return repr(threshold)
