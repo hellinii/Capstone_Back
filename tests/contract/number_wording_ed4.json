@@ -1,0 +1,1465 @@
+{
+  "name": "판 4 숫자 표기·조사 대조 표",
+  "status": "판 4 라운드 S2 ① 공통 계약(2026-10-24). 같은 바이트 사본이 백엔드 tests/contract/ 와 프론트 src/test/contract/ 에 있다. 두 저장소 시험이 이 표를 읽어 (1) 표가 규칙과 맞는지 시험 안의 기준 구현으로, (2) 자기 저장소 함수가 표와 같은지 본다. 바꾸면 두 저장소를 함께 바꾸고 sha256 을 이유와 함께 고친다.",
+  "rules": {
+    "rounding": "반올림은 이진 값 그대로의 절반에서 0에서 먼 쪽이다(JS Number.prototype.toFixed, 파이썬 Decimal(value).quantize(…, ROUND_HALF_UP)). 파이썬 round()·'%.3f' 는 절반에서 짝수 쪽이라 쓰지 않는다(0.0625 → 0.063).",
+    "plain": "판정과 무관한 값 — 셋째 자리, 끝 0 유지(0.950, 1.000, 1.672). 음의 0 은 부호 없이 0.000. 음수는 ASCII '-'.",
+    "judged": "판정 대상 지표 값(metrics[].value_text, 4.3 산출 결과)과 기준과 비교되는 파생값 — 셋째 자리부터 여섯째 자리까지 늘려, 찍힌 값을 기준과 비교한 결과(높을수록 좋음이면 ≥, 낮을수록 좋음이면 ≤, 차이는 1e-10 보정)가 실제 판정(meets)과 같아지는 첫 표기. 여섯째 자리로도 어긋나면 판정 쪽으로 자른다(충족 쪽이 목표에서 멀어지는 방향). 음의 0 은 부호 없이. 프론트 formatJudgedValue 와 같다(음의 0 만 다름). 판 3 사실 시트의 넷째 자리·아홉째 자리·끝 0 빼기는 판 4 에서 쓰지 않는다.",
+    "signed_judged": "부호 있는 차이를 크기(|값|)로 기준과 비교하는 칸(Precision − Recall, 분포 차) — 크기를 judged(높을수록 좋음)로 찍고 음수면 '-' 를 붙인다. 크기가 모두 0 이면 부호 없음.",
+    "ci_bound": "판정 대상 지표의 신뢰구간 경계 — 반올림 전 경계(평가 응답 low_raw·high_raw)를 셋째 자리부터 여섯째 자리까지 늘려, 찍힌 경계와 목표의 대소(<·=·>, 1e-10 보정)가 반올림 전 경계와 목표의 대소와 같아지는 첫 표기. 여섯째 자리로도 안 되면 원값 쪽으로 자른다(목표보다 아래면 내림, 위면 올림). 판정 대상이 아닌 지표의 경계는 4.3 에 찍지 않는다.",
+    "percent": "소수 표기 글자를 소수점 두 칸 옮겨 % — 소수 자릿수는 (원래 소수 자릿수 − 2), 최소 1(0.374 → 37.4%, 0.000 → 0.0%, 0.04996 → 4.996%). 숫자로 곱하지 않는다.",
+    "percent_point": "percent 와 같이 옮기고 %p — 양수 '+', 음수 U+2212(−), 0 은 부호 없음(4.5 차이 열).",
+    "signed_count": "정수 차이 — 양수 '+', 음수 U+2212, 0 은 부호 없음(4.4 예측 편향).",
+    "given": "의뢰자가 준 결정 임계값과 판정 기준값은 늘이지도 끝 0 을 채우지도 않는다(0.5, 0.1, 1.5). F1 최대 임계값은 백엔드 엔진 표기(best_threshold_text)를 옮긴다.",
+    "text_fields": "사실 시트의 *_text 칸은 plain·judged·signed_judged·ci_bound 의 결과(숫자 꼴)만 싣는다. percent·percent_point·signed_count 는 그릴 때와 글에서만 쓴다.",
+    "allow_list": "판 4 숫자 허용 목록은 이 표의 규칙으로 찍힌 표기(셋째 자리와 늘린 표기, 백분율 첫째 자리)만 받는다 — 판 3 넷째 자리 표기(0.9767)는 판 4 글에서 위반이다. 판 4 절 번호(narrative_slots_ed4.json edition4_section_numbers)는 숫자로 보지 않는다.",
+    "copula": "'이다' 는 고르지 않고 글자 그대로 쓴다(예시본 '1.672이다', '0.008이다', '33.3%이다').",
+    "josa": "조사는 찍힌 글자로 고른다 — 숫자가 바뀌면 조사도 다시(0.0046으로 → 0.005로). 이름 뒤는 공통 규칙(따옴표·공백 건너뜀, '이름(설명)'은 괄호 앞 이름, 쉼표로 이은 이름은 마지막 이름 — 끝 글자를 보므로 저절로 그렇다). pair 는 '받침 있을 때/없을 때'. '으로/로' 는 ㄹ 받침 뒤에도 '로'."
+  },
+  "functions": {
+    "$comment": "두 저장소가 같은 일을 하는 함수는 같은 이름(파이썬 snake_case ↔ TS camelCase)으로 둔다. 시험은 number_wording_ed4.json 의 표를 읽어 자기 함수를 본다.",
+    "plain": {
+      "frontend": "ed4Plain(value)",
+      "backend": "ed4_plain(value)"
+    },
+    "judged": {
+      "frontend": "ed4Judged(value, threshold, higherIsBetter, meets) — formatJudgedValue 와 같은 규칙",
+      "backend": "ed4_judged(value, threshold, higher_is_better, meets)"
+    },
+    "signed_judged": {
+      "frontend": "ed4SignedJudged(value, threshold, meets)",
+      "backend": "ed4_signed_judged(value, threshold, meets)"
+    },
+    "ci_bound": {
+      "frontend": "ed4CiBound(raw, target)",
+      "backend": "ed4_ci_bound(raw, target)"
+    },
+    "percent": {
+      "frontend": "ed4Percent(fractionText)",
+      "backend": "ed4_percent(fraction_text)"
+    },
+    "percent_point": {
+      "frontend": "ed4PercentPoint(fractionText)",
+      "backend": "ed4_percent_point(fraction_text)"
+    },
+    "signed_count": {
+      "frontend": "ed4SignedCount(n)",
+      "backend": "ed4_signed_count(n)"
+    },
+    "given": {
+      "frontend": "String(value)",
+      "backend": "repr(float) — 의뢰자가 준 결정 임계값 그대로(늘이지도 채우지도 않음)"
+    },
+    "josa": {
+      "frontend": "josa(word, pair) — koreanJosa.ts 에 새로(공통 규칙 nameFinalSound). 지금 있는 josaWaGwa·josaEunNeun·josaEuroRo·josaEulReul(숫자)은 그대로",
+      "backend": "wording.josa(word, pair) — 이미 있음"
+    },
+    "judgment_margin": {
+      "frontend": "judgmentMargin(...) → \"small\"|\"ample\"|null (src/lib/report/edition4/, KpiResult.judgmentMargin 에 저장)",
+      "backend": "없음 — 요청의 near_target 을 읽는다(다시 계산하지 않음)"
+    },
+    "file_places": {
+      "frontend": "src/lib/report/edition4/edition4Number.ts (숫자), koreanJosa.ts (josa)",
+      "backend": "app/narrative/wording.py 의 판 4 절(또는 wording_ed4.py) — S2 ⑥ 이 정함"
+    }
+  },
+  "constants": {
+    "$comment": "판정 기준값은 정한 꼴 그대로 찍는다(given). 예시본 글자.",
+    "0.1": "0.1 (5.1 '기준 0.1', 5.2 '0.1 미만', 5.3 '0.1 미만')",
+    "1.5": "1.5 (5.3 '1.5 이상')",
+    "0.9": "0.9 (4.4·5.2 '0.9 이상')",
+    "30": "30 (4.4 '30건 미만')",
+    "0.05": "5% (4.4 '전체의 5% 미만')",
+    "0.1(분포 차)": "10%p (5.3 '10%p 미만')",
+    "0.03": "3% (3.4·4.3 '목표값의 3% 미만')"
+  },
+  "number_cases": [
+    {
+      "rule": "plain",
+      "value": 0.9824561403508771,
+      "expected": "0.982",
+      "source": "예시본 4.3·4.6 Accuracy — KPI 원값(4.6 모델 값도 이 값)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.9825,
+      "trap": true,
+      "expected": "0.983",
+      "source": "함정: 백엔드 modelValue(넷째 자리 0.9825)를 다시 반올림하면 0.983 — 4.6 에 쓰지 않는다(원값 0.982)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.9692307692307692,
+      "expected": "0.969",
+      "source": "예시본 4.3·4.4 Precision(참고 지표)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.984375,
+      "expected": "0.984",
+      "source": "예시본 4.3 Recall"
+    },
+    {
+      "rule": "plain",
+      "value": 0.9767441860465116,
+      "expected": "0.977",
+      "source": "예시본 4.3 F1 Score·4.4 최약 클래스 F1"
+    },
+    {
+      "rule": "plain",
+      "value": 0.999269859813084,
+      "expected": "0.999",
+      "source": "예시본 4.3 AUROC"
+    },
+    {
+      "rule": "plain",
+      "value": 0.9988367417279411,
+      "expected": "0.999",
+      "source": "예시본 4.3 AUPRC"
+    },
+    {
+      "rule": "plain",
+      "value": 0.05349956773981483,
+      "expected": "0.053",
+      "source": "예시본 4.3 Log Loss"
+    },
+    {
+      "rule": "plain",
+      "value": 1.671875,
+      "expected": "1.672",
+      "source": "예시본 4.3 M23·4.5·5.3 불균형 비율 — M23 원값 1.671875"
+    },
+    {
+      "rule": "plain",
+      "value": 0.95,
+      "expected": "0.950",
+      "source": "예시본 3.1·4.3 합격 기준 Accuracy·F1"
+    },
+    {
+      "rule": "plain",
+      "value": 0.97,
+      "expected": "0.970",
+      "source": "예시본 3.1·4.3·5.1·5.6 합격 기준 Recall"
+    },
+    {
+      "rule": "plain",
+      "value": 0.98,
+      "expected": "0.980",
+      "source": "예시본 3.1·4.3 합격 기준 AUROC"
+    },
+    {
+      "rule": "plain",
+      "value": 0.1,
+      "expected": "0.100",
+      "source": "예시본 3.1·4.3 합격 기준 Log Loss"
+    },
+    {
+      "rule": "plain",
+      "value": 1,
+      "expected": "1.000",
+      "source": "정수 1"
+    },
+    {
+      "rule": "plain",
+      "value": 0,
+      "expected": "0.000",
+      "source": "정수 0"
+    },
+    {
+      "rule": "plain",
+      "value": 0.981329839502129,
+      "expected": "0.981",
+      "source": "bc_strong 매크로 F1"
+    },
+    {
+      "rule": "plain",
+      "value": 0.9859154929577465,
+      "expected": "0.986",
+      "source": "bc_strong 다수 클래스 F1"
+    },
+    {
+      "rule": "plain",
+      "value": 0.628140704,
+      "expected": "0.628",
+      "source": "예시본 4.5 benign 학습 비율(250/398, 사실 시트 9자리 정리값)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.625730994,
+      "expected": "0.626",
+      "source": "예시본 4.5 benign 평가 비율(107/171)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.371859296,
+      "expected": "0.372",
+      "source": "예시본 4.5 malignant 학습 비율(148/398)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.374269006,
+      "expected": "0.374",
+      "source": "예시본 4.5 malignant 평가 비율(64/171)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.017543859649122806,
+      "expected": "0.018",
+      "source": "예시본 5.2 오분류 3/171(→ 1.8%)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.333333333,
+      "expected": "0.333",
+      "source": "예시본 4.4·5.2 위험 쪽 오류 1/3(→ 33.3%)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.0,
+      "expected": "0.000",
+      "source": "예시본 4.4 확신 오류 0/3(→ 0.0%)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.0011263008487480963,
+      "expected": "0.001",
+      "source": "예시본 5.3 정확도 − 매크로 F1"
+    },
+    {
+      "rule": "plain",
+      "value": 2.2884615384615383,
+      "expected": "2.288",
+      "source": "bc_strong M23 구간 위쪽(참고 지표라 판정 없음)"
+    },
+    {
+      "rule": "plain",
+      "value": 0.0625,
+      "expected": "0.063",
+      "source": "반올림 절반은 0에서 먼 쪽(JS toFixed·Decimal ROUND_HALF_UP) — 파이썬 round() 는 0.062"
+    },
+    {
+      "rule": "plain",
+      "value": -0.0625,
+      "expected": "-0.063",
+      "source": "음수 절반도 0에서 먼 쪽"
+    },
+    {
+      "rule": "plain",
+      "value": 0.0005,
+      "expected": "0.001",
+      "source": "0.0005 의 이진 값은 0.0005000…01 이라 올림"
+    },
+    {
+      "rule": "plain",
+      "value": 1.0005,
+      "expected": "1.000",
+      "source": "1.0005 의 이진 값은 1.000499… 라 내림"
+    },
+    {
+      "rule": "plain",
+      "value": 0.9995,
+      "expected": "1.000",
+      "source": "0.9995 의 이진 값은 0.99950000…05 라 올림"
+    },
+    {
+      "rule": "plain",
+      "value": 0.1235,
+      "expected": "0.123",
+      "source": "0.1235 의 이진 값은 0.12349… 라 내림"
+    },
+    {
+      "rule": "plain",
+      "value": 2.675,
+      "expected": "2.675",
+      "source": "넷째 자리 없음 — 그대로"
+    },
+    {
+      "rule": "plain",
+      "value": -0.0004,
+      "expected": "0.000",
+      "source": "음의 0 은 부호 없이(-0.000 아님)"
+    },
+    {
+      "rule": "plain",
+      "value": -0.004,
+      "expected": "-0.004",
+      "source": "음수는 ASCII '-'(숫자 꼴 칸)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.9824561403508771,
+      "threshold": 0.95,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.982",
+      "source": "예시본 4.3 Accuracy(목표 ≥ 0.950 충족)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.984375,
+      "threshold": 0.97,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.984",
+      "source": "예시본 4.3·표지 Recall(핵심, ≥ 0.970 충족)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.9767441860465116,
+      "threshold": 0.95,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.977",
+      "source": "예시본 4.3 F1 Score(≥ 0.950 충족)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.999269859813084,
+      "threshold": 0.98,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.999",
+      "source": "예시본 4.3 AUROC(≥ 0.980 충족)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.05349956773981483,
+      "threshold": 0.1,
+      "higher_is_better": false,
+      "meets": true,
+      "expected": "0.053",
+      "source": "예시본 4.3 Log Loss(≤ 0.100 충족, 낮을수록 좋음)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.9696,
+      "threshold": 0.97,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.9696",
+      "source": "합성 판 3 픽스처 Recall 0.9696(목표 0.97 미달 — 0.970 은 충족으로 읽힘)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.949999,
+      "threshold": 0.95,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.949999",
+      "source": "합성 판 3 픽스처 F1 0.949999(0.950·0.9500·0.95000 모두 충족으로 읽힘)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.9499999996,
+      "threshold": 0.95,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.949999",
+      "source": "여섯째 자리로도 어긋나면 판정 쪽으로 자른다(미달 → 내림)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.7996,
+      "threshold": 0.8,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.7996",
+      "source": "서술 설계 1.3 끝 문단 예(실제 미달 0.7996 이 0.800 으로 찍히면 합격으로 읽힘)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.7999999999999999,
+      "threshold": 0.8,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.800",
+      "source": "뺄셈 잡음(0.7999999999999999)은 1e-10 으로 걷어 충족 — 0.800"
+    },
+    {
+      "rule": "judged",
+      "value": 0.1004,
+      "threshold": 0.1,
+      "higher_is_better": false,
+      "meets": false,
+      "expected": "0.1004",
+      "source": "낮을수록 좋은 지표 미달(0.100 은 ≤ 0.1 충족으로 읽힘)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.0996,
+      "threshold": 0.1,
+      "higher_is_better": false,
+      "meets": true,
+      "expected": "0.100",
+      "source": "낮을수록 좋은 지표 충족(0.0996 → 0.100 ≤ 0.1 충족으로 읽혀 그대로)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.004585654,
+      "threshold": 0.1,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.005",
+      "source": "예시본 4.4·5.2·5.5 최약 클래스의 매크로 F1과의 차이(기준 0.1 미만) — 판 3 는 0.0046"
+    },
+    {
+      "rule": "judged",
+      "value": 0.374269006,
+      "threshold": 0.05,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.374",
+      "source": "예시본 4.4·5.2 최약 클래스 비율(작은 몫 기준 0.05 이상 → 37.4%)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.04996,
+      "threshold": 0.05,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.04996",
+      "source": "작은 몫 기준 바로 아래(0.050 은 기준과 같아 보임)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.09996,
+      "threshold": 0.1,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.09996",
+      "source": "0.10 기준 바로 아래(0.100·0.1000 은 기준 이상으로 읽힘)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.0999996,
+      "threshold": 0.1,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.099999",
+      "source": "여섯째 자리로도 0.100000 이라 내림"
+    },
+    {
+      "rule": "judged",
+      "value": 0.007630813953488413,
+      "threshold": 0.1,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.008",
+      "source": "예시본 4.4·5.6 F1 최대 상승폭(gain_raw, 기준 0.1 미만)"
+    },
+    {
+      "rule": "judged",
+      "value": 1.671875,
+      "threshold": 1.5,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "1.672",
+      "source": "4.5·5.3 불균형 비율(1.5 이상)"
+    },
+    {
+      "rule": "judged",
+      "value": 1.49996,
+      "threshold": 1.5,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "1.49996",
+      "source": "불균형 비율 1.5 바로 아래(1.500 은 1.5 이상으로 읽힘)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.0011263008487480963,
+      "threshold": 0.1,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.001",
+      "source": "예시본 5.3 정확도 − 매크로 F1(0.1 미만)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.009171306911234911,
+      "threshold": 0.1,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.009",
+      "source": "예시본 5.3 다수 − 소수 클래스 F1 차이(0.1 미만)"
+    },
+    {
+      "rule": "judged",
+      "value": -0.014869,
+      "threshold": 0.1,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "-0.015",
+      "source": "음수 차이도 부호 그대로 기준과 비교(다수 − 소수 F1 이 음수)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.03245614,
+      "threshold": 0,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.032",
+      "source": "bc_strong M1 마진(0 과 비교, 충족) — 판 3 0.0325"
+    },
+    {
+      "rule": "judged",
+      "value": 0.014375,
+      "threshold": 0,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.014",
+      "source": "bc_strong M3 마진"
+    },
+    {
+      "rule": "judged",
+      "value": 0.026744186,
+      "threshold": 0,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.027",
+      "source": "bc_strong M4 마진"
+    },
+    {
+      "rule": "judged",
+      "value": 0.01926986,
+      "threshold": 0,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.019",
+      "source": "bc_strong M9 마진"
+    },
+    {
+      "rule": "judged",
+      "value": 0.046500432,
+      "threshold": 0,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.047",
+      "source": "bc_strong M19 마진(목표 − 값)"
+    },
+    {
+      "rule": "judged",
+      "value": -4e-05,
+      "threshold": 0,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "-0.00004",
+      "source": "실패 지표 마진 −0.00004 가 0 으로 읽히지 않게(-0.000 은 충족으로 읽힘)"
+    },
+    {
+      "rule": "judged",
+      "value": 4e-05,
+      "threshold": 0,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.000",
+      "source": "충족 마진 0.00004 는 0.000(≥ 0 충족으로 읽혀 그대로)"
+    },
+    {
+      "rule": "judged",
+      "value": -0.0001,
+      "threshold": 0,
+      "higher_is_better": false,
+      "meets": true,
+      "expected": "0.000",
+      "source": "음의 0 은 부호 없이(낮을수록 좋은 쪽 마진 −0.0001 충족 — -0.000 아님)"
+    },
+    {
+      "rule": "judged",
+      "value": 0.984375,
+      "threshold": 0.95,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.984",
+      "source": "예시본 4.4 F1 최대 임계값의 F1(max_f1_raw, M4 목표 0.95 충족)"
+    },
+    {
+      "rule": "signed_judged",
+      "value": -0.015144231,
+      "threshold": 0.1,
+      "meets": false,
+      "expected": "-0.015",
+      "source": "예시본 5.1 Precision − Recall(크기 0.015, 기준 0.1 미만)"
+    },
+    {
+      "rule": "signed_judged",
+      "value": 0.002409709,
+      "threshold": 0.1,
+      "meets": false,
+      "expected": "0.002",
+      "source": "예시본 4.5 benign 학습 − 평가(0.002409709)"
+    },
+    {
+      "rule": "signed_judged",
+      "value": -0.002409709,
+      "threshold": 0.1,
+      "meets": false,
+      "expected": "-0.002",
+      "source": "예시본 4.5 benign 평가 − 학습(→ −0.2%p)"
+    },
+    {
+      "rule": "signed_judged",
+      "value": -0.09996,
+      "threshold": 0.1,
+      "meets": false,
+      "expected": "-0.09996",
+      "source": "크기가 0.10 기준 바로 아래인 음수"
+    },
+    {
+      "rule": "signed_judged",
+      "value": -0.0004,
+      "threshold": 0.1,
+      "meets": false,
+      "expected": "0.000",
+      "source": "크기가 0 으로 찍히면 부호 없음"
+    },
+    {
+      "rule": "signed_judged",
+      "value": 0.1,
+      "threshold": 0.1,
+      "meets": true,
+      "expected": "0.100",
+      "source": "크기가 꼭 기준(0.10 이상 — 충족)"
+    },
+    {
+      "rule": "signed_judged",
+      "value": -0.12,
+      "threshold": 0.1,
+      "meets": true,
+      "expected": "-0.120",
+      "source": "기준 이상 음수(끝 0 유지)"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.9496962348678732,
+      "target": 0.95,
+      "expected": "0.9497",
+      "source": "예시본 4.3·5.1 Accuracy 하한(0.950 은 목표 0.950 과 같아 보임)"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.9940158635836336,
+      "target": 0.95,
+      "expected": "0.994",
+      "source": "예시본 4.3·5.1 Accuracy 상한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.9166589839990573,
+      "target": 0.97,
+      "expected": "0.917",
+      "source": "예시본 4.3·5.1 Recall 하한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.9972364580766624,
+      "target": 0.97,
+      "expected": "0.997",
+      "source": "예시본 4.3·5.1 Recall 상한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.9457293868921776,
+      "target": 0.95,
+      "expected": "0.946",
+      "source": "예시본 4.3·5.1 F1 하한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 1.0,
+      "target": 0.95,
+      "expected": "1.000",
+      "source": "예시본 4.3·5.1 F1 상한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.9972959243713961,
+      "target": 0.98,
+      "expected": "0.997",
+      "source": "예시본 4.3 AUROC 하한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 1.0,
+      "target": 0.98,
+      "expected": "1.000",
+      "source": "예시본 4.3 AUROC 상한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.032626482422720565,
+      "target": 0.1,
+      "expected": "0.033",
+      "source": "예시본 4.3 Log Loss 하한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.07912002247121414,
+      "target": 0.1,
+      "expected": "0.079",
+      "source": "예시본 4.3 Log Loss 상한"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.95,
+      "target": 0.95,
+      "expected": "0.950",
+      "source": "경계가 목표와 꼭 같으면 그대로(같음 = 같음)"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.95004,
+      "target": 0.95,
+      "expected": "0.95004",
+      "source": "목표보다 조금 위(0.950·0.9500 은 같아 보임)"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.9494,
+      "target": 0.9493,
+      "expected": "0.9494",
+      "source": "목표가 넷째 자리일 때 대소가 뒤집혀 보이는 경우(0.949 < 0.9493 인데 실제는 위)"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.94999999,
+      "target": 0.95,
+      "expected": "0.949999",
+      "source": "여섯째 자리로도 같아 보이면 원값 쪽으로 자른다(아래면 내림)"
+    },
+    {
+      "rule": "ci_bound",
+      "raw": 0.95000001,
+      "target": 0.95,
+      "expected": "0.950001",
+      "source": "여섯째 자리로도 같아 보이면 원값 쪽으로 자른다(위면 올림)"
+    },
+    {
+      "rule": "percent",
+      "text": "0.374",
+      "expected": "37.4%",
+      "source": "예시본 4.4·4.5·5.2 malignant 비율"
+    },
+    {
+      "rule": "percent",
+      "text": "0.626",
+      "expected": "62.6%",
+      "source": "예시본 4.5 benign 평가 비율"
+    },
+    {
+      "rule": "percent",
+      "text": "0.628",
+      "expected": "62.8%",
+      "source": "예시본 4.5 benign 학습 비율"
+    },
+    {
+      "rule": "percent",
+      "text": "0.372",
+      "expected": "37.2%",
+      "source": "예시본 4.5 malignant 학습 비율"
+    },
+    {
+      "rule": "percent",
+      "text": "0.018",
+      "expected": "1.8%",
+      "source": "예시본 5.2 오분류 비율"
+    },
+    {
+      "rule": "percent",
+      "text": "0.333",
+      "expected": "33.3%",
+      "source": "예시본 4.4·5.2 경계 오류·위험 쪽 오류 비율"
+    },
+    {
+      "rule": "percent",
+      "text": "0.000",
+      "expected": "0.0%",
+      "source": "예시본 4.4 확신 오류 0건"
+    },
+    {
+      "rule": "percent",
+      "text": "1.000",
+      "expected": "100.0%",
+      "source": "전부"
+    },
+    {
+      "rule": "percent",
+      "text": "0.050",
+      "expected": "5.0%",
+      "source": "끝 0 유지"
+    },
+    {
+      "rule": "percent",
+      "text": "0.04996",
+      "expected": "4.996%",
+      "source": "늘린 표기는 늘린 자릿수 그대로(5% 기준 바로 아래)"
+    },
+    {
+      "rule": "percent",
+      "text": "0.9497",
+      "expected": "94.97%",
+      "source": "넷째 자리 표기"
+    },
+    {
+      "rule": "percent_point",
+      "text": "-0.002",
+      "expected": "−0.2%p",
+      "source": "예시본 4.5 benign 차이(평가 − 학습)"
+    },
+    {
+      "rule": "percent_point",
+      "text": "0.002",
+      "expected": "+0.2%p",
+      "source": "예시본 4.5 malignant 차이"
+    },
+    {
+      "rule": "percent_point",
+      "text": "0.000",
+      "expected": "0.0%p",
+      "source": "차이 0 은 부호 없음"
+    },
+    {
+      "rule": "percent_point",
+      "text": "-0.09996",
+      "expected": "−9.996%p",
+      "source": "10%p 기준 바로 아래(늘린 표기)"
+    },
+    {
+      "rule": "percent_point",
+      "text": "0.100",
+      "expected": "+10.0%p",
+      "source": "꼭 10%p"
+    },
+    {
+      "rule": "signed_count",
+      "value": 1,
+      "expected": "+1",
+      "source": "예시본 4.4 예측 편향 malignant 65 − 64"
+    },
+    {
+      "rule": "signed_count",
+      "value": -3,
+      "expected": "−3",
+      "source": "음수는 U+2212"
+    },
+    {
+      "rule": "signed_count",
+      "value": 0,
+      "expected": "0",
+      "source": "0 은 부호 없음"
+    },
+    {
+      "rule": "signed_count",
+      "value": 13,
+      "expected": "+13",
+      "source": "두 자리"
+    },
+    {
+      "rule": "given",
+      "value": 0.5,
+      "expected": "0.5",
+      "source": "예시본 3.3·4.4 현재 결정 임계값 0.5(0.500 아님)"
+    },
+    {
+      "rule": "given",
+      "value": 0.35,
+      "expected": "0.35",
+      "source": "의뢰자 임계값 0.35"
+    },
+    {
+      "rule": "given",
+      "value": 0.3,
+      "expected": "0.3",
+      "source": "고정 문구 9 예(0.3을)"
+    },
+    {
+      "rule": "given",
+      "value": 0.1,
+      "expected": "0.1",
+      "source": "예시본 5.1·5.2·5.3 판정 기준 0.1(0.100 아님)"
+    },
+    {
+      "rule": "given",
+      "value": 1.5,
+      "expected": "1.5",
+      "source": "예시본 5.3 불균형 기준 1.5"
+    },
+    {
+      "rule": "given",
+      "value": 0.9,
+      "expected": "0.9",
+      "source": "예시본 4.4·5.2 확신 오류 기준 0.9"
+    }
+  ],
+  "engine_texts": [
+    {
+      "field": "f1_threshold_gain.best_threshold_text",
+      "raw": 0.6166,
+      "expected": "0.6166",
+      "source": "예시본 4.4·5.6 — 0.617 을 적용하면 Recall 0.969 로 예측이 달라져 넷째 자리(백엔드 S1 threshold_text, 프론트는 옮기기만)"
+    }
+  ],
+  "josa_cases": [
+    {
+      "word": "0.005",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "로",
+      "source": "예시본 5.5 '0.005로'(오 — 받침 없음)"
+    },
+    {
+      "word": "0.0046",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "으로",
+      "source": "판 3 표기 '0.0046으로'(육) — 판 4 로 숫자가 바뀌면 조사도 다시 고른다"
+    },
+    {
+      "word": "0.5",
+      "pair": "을/를",
+      "kind": "number",
+      "expected": "를",
+      "source": "예시본 3.3·고정 문구 9 '0.5를'"
+    },
+    {
+      "word": "0.970",
+      "pair": "을/를",
+      "kind": "number",
+      "expected": "을",
+      "source": "예시본 5.1·5.6 '목표 0.970을'(영)"
+    },
+    {
+      "word": "1.000",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "으로",
+      "source": "계획 2.7 '1.000으로'(영)"
+    },
+    {
+      "word": "0.984",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "로",
+      "source": "예시본 5.6 '0.984로'(사)"
+    },
+    {
+      "word": "0.977",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "로",
+      "source": "칠 — ㄹ 받침은 '로'"
+    },
+    {
+      "word": "0.6166",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "으로",
+      "source": "육"
+    },
+    {
+      "word": "0.008",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "로",
+      "source": "팔 — ㄹ"
+    },
+    {
+      "word": "1.672",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "로",
+      "source": "이"
+    },
+    {
+      "word": "0.001",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "로",
+      "source": "일 — ㄹ"
+    },
+    {
+      "word": "0.9497",
+      "pair": "을/를",
+      "kind": "number",
+      "expected": "을",
+      "source": "칠 — 을/를 은 ㄹ 도 받침"
+    },
+    {
+      "word": "0.950",
+      "pair": "을/를",
+      "kind": "number",
+      "expected": "을",
+      "source": "영"
+    },
+    {
+      "word": "0.100",
+      "pair": "을/를",
+      "kind": "number",
+      "expected": "을",
+      "source": "영"
+    },
+    {
+      "word": "0.3",
+      "pair": "을/를",
+      "kind": "number",
+      "expected": "을",
+      "source": "고정 문구 9 '0.3을'(삼)"
+    },
+    {
+      "word": "10",
+      "pair": "을/를",
+      "kind": "number",
+      "expected": "을",
+      "source": "고정 문구 9 '10을'(십)"
+    },
+    {
+      "word": "100",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "으로",
+      "source": "백"
+    },
+    {
+      "word": "37.4%",
+      "pair": "으로/로",
+      "kind": "number",
+      "expected": "로",
+      "source": "퍼센트 — 받침 없음"
+    },
+    {
+      "word": "0.970",
+      "pair": "과/와",
+      "kind": "number",
+      "expected": "과",
+      "source": "영"
+    },
+    {
+      "word": "0.505",
+      "pair": "과/와",
+      "kind": "number",
+      "expected": "와",
+      "source": "오"
+    },
+    {
+      "word": "0.984",
+      "pair": "이/가",
+      "kind": "number",
+      "expected": "가",
+      "source": "사"
+    },
+    {
+      "word": "0.977",
+      "pair": "이/가",
+      "kind": "number",
+      "expected": "이",
+      "source": "칠"
+    },
+    {
+      "word": "0.970",
+      "pair": "은/는",
+      "kind": "number",
+      "expected": "은",
+      "source": "영"
+    },
+    {
+      "word": "0.005",
+      "pair": "은/는",
+      "kind": "number",
+      "expected": "는",
+      "source": "오"
+    },
+    {
+      "word": "Recall(M3)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "과",
+      "source": "예시본 4.2 '핵심 지표 Recall(M3)과'(고정 문구 20)"
+    },
+    {
+      "word": "F1 Score(M4)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "와",
+      "source": "계획 2.7 'F1 Score(M4)와'"
+    },
+    {
+      "word": "\"BreastScreen-LR\"",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "을",
+      "source": "예시본 1.2 '\"BreastScreen-LR\"을'(따옴표 건너뜀, R 알)"
+    },
+    {
+      "word": "BreastScreen-LR",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "을",
+      "source": "따옴표 없이도 같음"
+    },
+    {
+      "word": "Recall(M3)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "이",
+      "source": "B13 '{핵심 지표}이(가)'"
+    },
+    {
+      "word": "F1 Score(M4)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "가",
+      "source": "B13"
+    },
+    {
+      "word": "Accuracy(M1)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "가",
+      "source": "고정 문구 20 조건부 합격 '{미달 지표}이(가)'"
+    },
+    {
+      "word": "Precision(M2)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "이",
+      "source": "-n 받침"
+    },
+    {
+      "word": "AUROC(M9)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "가",
+      "source": "대문자 C(씨)"
+    },
+    {
+      "word": "Log Loss(M19)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "가",
+      "source": "-s 받침 없음"
+    },
+    {
+      "word": "MCC(M20)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "가",
+      "source": "대문자 C"
+    },
+    {
+      "word": "Exact Match Ratio(M16)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "가",
+      "source": "-o"
+    },
+    {
+      "word": "Accuracy(M1), Recall(M3)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "이",
+      "source": "B13 쉼표로 이은 이름은 마지막 이름(Recall)으로"
+    },
+    {
+      "word": "Recall(M3), F1 Score(M4)",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "가",
+      "source": "B13 마지막 이름(F1 Score)"
+    },
+    {
+      "word": "Accuracy(M1), F1 Score(M4)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "와",
+      "source": "고정 문구 20 '{핵심 지표}과(와)' — 핵심 지표 여럿"
+    },
+    {
+      "word": "F1 Score(M4), Recall(M3)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "과",
+      "source": "마지막 이름 Recall"
+    },
+    {
+      "word": "Recall(M3)",
+      "pair": "은/는",
+      "kind": "name",
+      "expected": "은",
+      "source": "고정 문구 20 조건부 합격 '핵심 지표 {핵심 지표}은(는)'"
+    },
+    {
+      "word": "AUROC(M9)",
+      "pair": "은/는",
+      "kind": "name",
+      "expected": "는",
+      "source": "대문자 C"
+    },
+    {
+      "word": "Hamming Loss(M15)",
+      "pair": "은/는",
+      "kind": "name",
+      "expected": "는",
+      "source": "-s"
+    },
+    {
+      "word": "Accuracy, Recall, F1 Score",
+      "pair": "은/는",
+      "kind": "name",
+      "expected": "는",
+      "source": "예시본 5.5 'Accuracy, Recall, F1 Score는'(B22 이름 목록)"
+    },
+    {
+      "word": "AUROC",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "와",
+      "source": "예시본 5.1 'AUROC와 Log Loss는'"
+    },
+    {
+      "word": "Log Loss",
+      "pair": "은/는",
+      "kind": "name",
+      "expected": "는",
+      "source": "예시본 5.1"
+    },
+    {
+      "word": "Precision(M2)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "과",
+      "source": "-n"
+    },
+    {
+      "word": "Jaccard Index(M17)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "와",
+      "source": "-x 받침 없음"
+    },
+    {
+      "word": "F-beta Score(M5)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "와",
+      "source": "-e"
+    },
+    {
+      "word": "benign(양성 종양)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "과",
+      "source": "예시본 5.3 '다수 클래스 benign(양성 종양)과'(-n)"
+    },
+    {
+      "word": "malignant(악성 종양)",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "와",
+      "source": "자음 뒤 t 는 '트'"
+    },
+    {
+      "word": "\"대화형(실시간)\"",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "으로",
+      "source": "B7·고정 문구 4 '\"{선언 값}\"(으)로'(형 — ㅇ 받침)"
+    },
+    {
+      "word": "\"샘플 단위로 중요\"",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "로",
+      "source": "요 — 받침 없음"
+    },
+    {
+      "word": "전문가 수동",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "으로",
+      "source": "고정 문구 12 '{값}(으)로'(동)"
+    },
+    {
+      "word": "검토 없음",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "으로",
+      "source": "고정 문구 12(음 — ㅁ)"
+    },
+    {
+      "word": "운영 로그",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "로",
+      "source": "고정 문구 12(그)"
+    },
+    {
+      "word": "핵심 지표 Recall(M3)의 산출 실패",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "로",
+      "source": "B13·고정 문구 20 판정 불가 '{원인}(으)로'"
+    },
+    {
+      "word": "핵심 지표 Recall(M3)의 목표값 부재",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "로",
+      "source": "B13 판정 불가 원인"
+    },
+    {
+      "word": "판정 대상 지표 부재",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "로",
+      "source": "B13 판정 불가 원인"
+    },
+    {
+      "word": "유방검진모델",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "을",
+      "source": "1.2 모델명 뒤 을/를(델 — ㄹ)"
+    },
+    {
+      "word": "ResNet-50",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "을",
+      "source": "끝 숫자 50(오십)"
+    },
+    {
+      "word": "GPT-4",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "를",
+      "source": "끝 숫자 4(사)"
+    },
+    {
+      "word": "LightGBM",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "을",
+      "source": "대문자 M(엠)"
+    },
+    {
+      "word": "XGBoost",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "를",
+      "source": "자음 뒤 t"
+    }
+  ],
+  "chains": [
+    {
+      "number": {
+        "rule": "judged",
+        "value": 0.004585654,
+        "threshold": 0.1,
+        "higher_is_better": true,
+        "meets": false
+      },
+      "pair": "으로/로",
+      "expected": "0.005로",
+      "edition3_text": "0.0046으로",
+      "source": "예시본 5.5 '매크로 F1과의 차이가 0.005로' — 숫자가 바뀌면 조사도 다시 고른다(고정 문구 23 조건 칸)"
+    },
+    {
+      "number": {
+        "rule": "plain",
+        "value": 0.97
+      },
+      "pair": "을/를",
+      "expected": "0.970을",
+      "edition3_text": null,
+      "source": "예시본 5.1 '목표 0.970을 충족'"
+    },
+    {
+      "number": {
+        "rule": "judged",
+        "value": 0.984375,
+        "threshold": 0.97,
+        "higher_is_better": true,
+        "meets": true
+      },
+      "pair": "으로/로",
+      "expected": "0.984로",
+      "edition3_text": null,
+      "source": "예시본 5.6 'Recall은 이 임계값에서 0.984로'"
+    },
+    {
+      "number": {
+        "rule": "ci_bound",
+        "raw": 1.0,
+        "target": 0.95
+      },
+      "pair": "으로/로",
+      "expected": "1.000으로",
+      "edition3_text": null,
+      "source": "계획 2.7 '1.000으로'"
+    },
+    {
+      "number": {
+        "rule": "given",
+        "value": 0.5
+      },
+      "pair": "을/를",
+      "expected": "0.5를",
+      "edition3_text": null,
+      "source": "예시본 3.3 '결정 임계값 0.5를'"
+    },
+    {
+      "number": {
+        "rule": "judged",
+        "value": 0.007630813953488413,
+        "threshold": 0.1,
+        "higher_is_better": true,
+        "meets": false
+      },
+      "pair": "으로/로",
+      "expected": "0.008로",
+      "edition3_text": "0.0076으로",
+      "source": "F1 최대 상승폭(판 3 0.0076 은 육 — '으로')"
+    }
+  ],
+  "example_numbers": [
+    "+0.2%p",
+    "+1",
+    "0.0%",
+    "0.001",
+    "0.005",
+    "0.008",
+    "0.009",
+    "0.015",
+    "0.033",
+    "0.053",
+    "0.079",
+    "0.1",
+    "0.100",
+    "0.5",
+    "0.6166",
+    "0.9",
+    "0.917",
+    "0.946",
+    "0.9497",
+    "0.950",
+    "0.969",
+    "0.970",
+    "0.977",
+    "0.980",
+    "0.982",
+    "0.984",
+    "0.994",
+    "0.997",
+    "0.999",
+    "1.000",
+    "1.5",
+    "1.672",
+    "1.8%",
+    "33.3%",
+    "37.2%",
+    "37.4%",
+    "62.6%",
+    "62.8%",
+    "−0.2%p"
+  ]
+}
