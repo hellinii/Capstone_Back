@@ -57,6 +57,22 @@ jobs:
           NO=$(python -c "import json;print(json.load(open('/tmp/issued.json'))['report_no'])")
           curl -fsS "http://localhost:8000/api/reports/${NO}"          # 발급정보 조회
           curl -fsS "http://localhost:8000/api/reports/${NO}/content"  # 성적서 원본 복원
+          # 서술 작업 번호 왕복(서술 라운드 S3a) — 키 없이 POST → GET 완료, 모든 칸 규칙 문장(fallback).
+          # narrative_jobs 표가 init_db 로 생기는지, 응답 뒤에 도는 BackgroundTasks 가 실제 서버에서 끝까지
+          # 가는지 본다(테스트의 TestClient 는 백그라운드 작업을 응답 전에 돌려 이 차이를 못 본다).
+          curl -fsS -X POST http://localhost:8000/api/narrative/jobs \
+            -H 'Content-Type: application/json' \
+            -d '{"task_type":"binary","fact_sheet":{"n_samples":10,"verdict":"PASS","score":100,"metrics":[{"metric_id":"M1","display_name":"Accuracy","value":0.9,"threshold":0.8,"status":"pass","is_core":true}]}}' > /tmp/job.json
+          JOB=$(python -c "import json;print(json.load(open('/tmp/job.json'))['job_id'])")
+          done_ok=0
+          for i in $(seq 1 20); do
+            curl -fsS "http://localhost:8000/api/narrative/jobs/${JOB}" > /tmp/job_view.json
+            if python -c "import json,sys;v=json.load(open('/tmp/job_view.json'));sys.exit(0 if v['status']=='done' else 1)"; then done_ok=1; break; fi
+            sleep 1
+          done
+          [ "$done_ok" = "1" ] || { kill $UV_PID; cat /tmp/job_view.json; echo "::error::서술 작업이 완료되지 않음"; exit 1; }
+          python -c "import json,sys;v=json.load(open('/tmp/job_view.json'));s=set(v['result']['section_sources'].values());sys.exit(0 if s=={'fallback'} else 1)" \
+            || { kill $UV_PID; cat /tmp/job_view.json; echo "::error::키 없는 서술 작업이 규칙 문장이 아님"; exit 1; }
           kill $UV_PID
 
   # 팀 main 푸시가 CI를 통과했을 때만: 포크(hellinii) main 미러 → Render Deploy Hook.

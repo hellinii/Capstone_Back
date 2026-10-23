@@ -1,0 +1,407 @@
+{
+  "task_type": "binary",
+  "report_purpose": "external",
+  "fact_sheet": {
+    "n_samples": 200,
+    "dropped_rows": 0,
+    "metrics": [
+      {
+        "metric_id": "M1",
+        "display_name": "Accuracy",
+        "value": 0.505,
+        "threshold": 0.51,
+        "status": "fail",
+        "is_core": true,
+        "ci_low": 0.4363,
+        "ci_high": 0.5735,
+        "margin": -0.005,
+        "near_target": true,
+        "value_text": "0.505",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.005",
+        "ci_contains_target": true
+      },
+      {
+        "metric_id": "M2",
+        "display_name": "Precision",
+        "value": 0.48148148148148145,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null
+      },
+      {
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "value": 0.5473684210526316,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null
+      },
+      {
+        "metric_id": "M4",
+        "display_name": "F1 Score",
+        "value": 0.5123152709359606,
+        "threshold": 0.5,
+        "status": "pass",
+        "is_core": true,
+        "ci_low": 0.4271,
+        "ci_high": 0.5909,
+        "margin": 0.012315271,
+        "near_target": true,
+        "value_text": "0.512",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "0.0123",
+        "ci_contains_target": true
+      },
+      {
+        "metric_id": "M5",
+        "display_name": "F-beta Score",
+        "value": 0.5123152709359606,
+        "threshold": 0.5,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.4271,
+        "ci_high": 0.5909,
+        "margin": 0.012315271,
+        "near_target": true,
+        "value_text": "0.512",
+        "higher_is_better": true,
+        "beta": 1,
+        "margin_text": "0.0123",
+        "ci_contains_target": true
+      },
+      {
+        "metric_id": "M9",
+        "display_name": "AUROC",
+        "value": 0.5111779448621554,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null
+      }
+    ],
+    "per_class": [
+      {
+        "label": "0",
+        "precision": 0.532608695652174,
+        "recall": 0.4666666666666667,
+        "f1": 0.49746192893401014,
+        "support": 105
+      },
+      {
+        "label": "1",
+        "precision": 0.48148148148148145,
+        "recall": 0.5473684210526316,
+        "f1": 0.5123152709359606,
+        "support": 95
+      }
+    ],
+    "class_averages": [
+      {
+        "label": "매크로 평균",
+        "precision": 0.5070450885668277,
+        "recall": 0.5070175438596491,
+        "f1": 0.5048885999349854,
+        "support": 200
+      },
+      {
+        "label": "가중 평균",
+        "precision": 0.508323268921095,
+        "recall": 0.505,
+        "f1": 0.5045172663849367,
+        "support": 200
+      }
+    ],
+    "confusion": {
+      "labels": [
+        "0",
+        "1"
+      ],
+      "matrix": [
+        [
+          49,
+          56
+        ],
+        [
+          43,
+          52
+        ]
+      ],
+      "positive_class": "1"
+    },
+    "confusion_counts": [
+      {
+        "label": "1",
+        "tp": 52,
+        "fp": 56,
+        "fn": 43,
+        "tn": 49
+      }
+    ],
+    "derived_prediction": null,
+    "error_ratios": {
+      "unit": "sample",
+      "misclassified": 99,
+      "boundary": null,
+      "boundary_note": "threshold_unknown",
+      "confident": {
+        "count": 31,
+        "ratio": 0.3131
+      },
+      "boundary_margin": 0.1,
+      "confident_level": 0.9,
+      "threshold": null
+    },
+    "ci_method_note": "판정 대상 지표의 95% 신뢰구간은 Wilson 점수 구간(M1), 다항 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4, M5)으로 산출하였습니다.",
+    "f1_threshold_gain": {
+      "max_f1": 0.6483,
+      "current_f1": 0.5123,
+      "gain": 0.136,
+      "best_threshold": 0.03,
+      "notable": true,
+      "gain_text": "0.136"
+    },
+    "imbalance_effect": {
+      "level": "mild",
+      "imbalance_ratio": 1.1053,
+      "accuracy_minus_macro_f1": 0.0001,
+      "majority_minus_minority_f1": -0.0149,
+      "majority_class": "0",
+      "minority_class": "1",
+      "accuracy": 0.505,
+      "macro_f1": 0.5049,
+      "majority_f1": 0.4975,
+      "minority_f1": 0.5123,
+      "display": {
+        "imbalance_ratio": "1.1053",
+        "accuracy_minus_macro_f1": "0.0001",
+        "majority_minus_minority_f1": "-0.0149",
+        "accuracy": "0.505",
+        "macro_f1": "0.5049",
+        "majority_f1": "0.4975",
+        "minority_f1": "0.5123"
+      }
+    },
+    "problems": [
+      {
+        "id": "P1",
+        "kind": "core_fail",
+        "priority": "HIGH",
+        "title": "핵심 지표 미달 (Accuracy)",
+        "source_section": "8.2",
+        "recommend_section": "9.2",
+        "evidence": {
+          "Accuracy": {
+            "value": 0.505,
+            "target": 0.51
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P2",
+        "kind": "core_near_target",
+        "priority": "MEDIUM",
+        "title": "핵심 지표 아슬아슬 합격 (F1 Score)",
+        "source_section": "8.3",
+        "recommend_section": "9.2",
+        "evidence": {
+          "F1 Score": {
+            "value": 0.5123152709359606,
+            "target": 0.5,
+            "margin": 0.0123
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P3",
+        "kind": "threshold_tuning",
+        "priority": "MEDIUM",
+        "title": "임계값 부적합",
+        "source_section": "8.3",
+        "recommend_section": "9.2",
+        "evidence": {
+          "max_f1": 0.6483,
+          "current_f1": 0.5123,
+          "gain": 0.136,
+          "best_threshold": 0.03,
+          "notable": true,
+          "gain_text": "0.136"
+        },
+        "note": null
+      }
+    ],
+    "distribution": {
+      "class_distribution": {
+        "0": 105,
+        "1": 95
+      },
+      "imbalance_ratio": 1.105263157894737
+    },
+    "verdict": "FAIL",
+    "score": 66.7,
+    "latency": {
+      "available": false,
+      "mean": null,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "unit": "ms"
+    },
+    "facts": {
+      "contract": "facts-1",
+      "positive_class": "1",
+      "n_classes": 2,
+      "class_share_basis": "samples",
+      "report_purpose_label": "외부 제출",
+      "core_metrics_source": "default",
+      "selected_metrics": [
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M5",
+        "M9"
+      ],
+      "declarations": {
+        "risk_direction": "fn",
+        "class_priority": null,
+        "usage_mode": "realtime"
+      },
+      "verdict_detail": {
+        "verdict": "FAIL",
+        "judged_count": 3,
+        "passed_count": 2,
+        "failed_core": [
+          {
+            "metric_id": "M1",
+            "display_name": "Accuracy"
+          }
+        ],
+        "failed_noncore": [],
+        "unavailable_core": [],
+        "inconclusive_cause": null,
+        "inconclusive_metrics": []
+      },
+      "error_totals": {
+        "unit": "sample",
+        "total": 200,
+        "misclassified": 99
+      },
+      "weakest_class": {
+        "label": "0",
+        "f1": 0.49746192893401014,
+        "support": 105,
+        "share": 0.525,
+        "share_text": "0.525",
+        "macro_f1": 0.5048885999349854,
+        "gap_from_macro": 0.007426671,
+        "gap_text": "0.0074",
+        "low_support": false,
+        "far_below_macro": false
+      },
+      "low_support_classes": [],
+      "top_confusion_pairs": [],
+      "prediction_bias": {
+        "unit": "positive_class",
+        "rows": [
+          {
+            "label": "1",
+            "predicted": 108,
+            "actual": 95,
+            "difference": 13
+          }
+        ]
+      },
+      "declared_risk_errors": {
+        "side": "fn",
+        "count": 43,
+        "total_errors": 99,
+        "share": 0.434343434,
+        "share_text": "0.4343"
+      },
+      "precision_recall_gap": {
+        "precision": 0.48148148148148145,
+        "recall": 0.5473684210526316,
+        "difference": -0.06588694,
+        "difference_text": "-0.0659",
+        "flagged": false
+      },
+      "average_gap": null,
+      "declared_average": null,
+      "distribution_shift_status": "compared",
+      "distribution_shift": [
+        {
+          "label": "0",
+          "training_ratio": 0.6,
+          "evaluation_ratio": 0.525,
+          "difference": 0.075,
+          "difference_text": "0.075",
+          "flagged": false
+        },
+        {
+          "label": "1",
+          "training_ratio": 0.4,
+          "evaluation_ratio": 0.475,
+          "difference": -0.075,
+          "difference_text": "-0.075",
+          "flagged": false
+        }
+      ],
+      "ci_available": true,
+      "ci_skipped": [],
+      "fixed_sentences": [
+        {
+          "id": "17",
+          "section": "7.1",
+          "text": "확률이 있는 오분류 99건 중 확신 오류(틀린 쪽 확률 0.9 이상)는 31건(31.3%)이다. 경계 오류는 예측값을 직접 제출해 결정 임계값을 알 수 없어 계산하지 않았다."
+        },
+        {
+          "id": "16",
+          "section": "8.1",
+          "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: F-beta Score."
+        },
+        {
+          "id": "11a",
+          "section": "8.2",
+          "text": "평가 데이터는 학습 데이터와 동일한 출처에서 수집되었다. 본 결과는 동일 분포 내 성능을 나타내며, 다른 운영 환경에서의 일반화 성능을 보증하지 않는다."
+        },
+        {
+          "id": "18",
+          "section": "8.3",
+          "text": "목표값과의 차이가 목표값의 3% 미만인 지표(근소 차이): Accuracy(M1) 0.505(목표 0.510 이상, 미달), F1 Score(M4) 0.512(목표 0.500 이상, 충족), F-beta Score(M5) 0.512(목표 0.500 이상, 충족)."
+        }
+      ],
+      "omitted": {}
+    }
+  }
+}

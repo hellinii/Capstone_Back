@@ -18,7 +18,7 @@
 
 상호작용
 - 의존(import): anthropic(예외 타입), json, logging, os, time
-- 사용처: app.narrative.service
+- 사용처: app.narrative.generator(작업 경로), app.narrative.legacy(옛 경로)
 """
 import json
 import logging
@@ -42,7 +42,7 @@ FALLBACKS = "default"
 MAX_TOKENS = 16000
 
 # 클라이언트 설정(app.main 이 쓴다). 옛 경로는 `호출 시간 제한 × (재시도 + 1)` 이 서버 마감 안에 들어야 한다
-# — 서버 마감은 service.NARRATIVE_DEADLINE_SECONDS, 테스트가 이 부등식을 고정한다.
+# — 서버 마감은 legacy.NARRATIVE_DEADLINE_SECONDS, 테스트가 이 부등식을 고정한다.
 CALL_TIMEOUT_SECONDS = 55.0
 MAX_RETRIES = 1
 
@@ -156,7 +156,7 @@ async def call_narrative_llm(client, *, system: str, user: str, schema: dict, ef
     """서술 JSON 을 한 번 요청한다. 예외를 던지지 않고 실패는 LLMResult.failure 로 돌려준다.
 
     failure: refusal(대체도 거절·대체 없음·대체가 한도에 걸림 — 세 경우 모두) · max_tokens(잘림) ·
-    model_unavailable(모델 없음) · timeout · api_error · invalid_json.
+    model_unavailable(모델 없음) · rate_limited(429) · timeout · api_error · invalid_json.
     """
     model = narrative_model()
     record = CallRecord(requested_model=model, effort=effort or narrative_effort())
@@ -175,11 +175,17 @@ async def call_narrative_llm(client, *, system: str, user: str, schema: dict, ef
             },
         )
     except anthropic.APITimeoutError as exc:
-        return _finish(record, started, "timeout", error=repr(exc))
+        return _finish(record, started, "timeout", error=repr(exc))  # 끊김 — 과금됐는지 모른다(비용 None)
     except anthropic.NotFoundError as exc:
-        return _finish(record, started, "model_unavailable", error=repr(exc))
+        return _finish(record, started, "model_unavailable", error=repr(exc), billed_zero=True)
+    except anthropic.RateLimitError as exc:
+        # 사용 한도(429). 작업 경로는 장별 동시 호출을 차례 호출로 바꿔 한 번 더 부른다(app.narrative.generator).
+        return _finish(record, started, "rate_limited", error=repr(exc), billed_zero=True)
+    except anthropic.APIStatusError as exc:
+        # 서버가 오류 응답을 돌려줬다 — 생성하지 않았으니 비용 0(S5 검토 jobs-2: 429 하나로 작업 비용이 '모름'이 되던 것).
+        return _finish(record, started, "api_error", error=repr(exc), billed_zero=True)
     except anthropic.APIError as exc:
-        return _finish(record, started, "api_error", error=repr(exc))
+        return _finish(record, started, "api_error", error=repr(exc))  # 연결 오류 — 비용 모름
 
     _fill_from_response(record, response)
     # 거절·잘림을 본문보다 먼저 본다 — 거절이면 content 가 비었거나(출력 전) 쓸 수 없다.
@@ -201,8 +207,12 @@ async def call_narrative_llm(client, *, system: str, user: str, schema: dict, ef
     return LLMResult(data=data, failure=None, record=record)
 
 
-def _finish(record: CallRecord, started: float, failure: str, *, error: str | None = None) -> LLMResult:
+def _finish(
+    record: CallRecord, started: float, failure: str, *, error: str | None = None, billed_zero: bool = False,
+) -> LLMResult:
     record.seconds = round(time.perf_counter() - started, 3)
     record.error = error
+    if billed_zero:
+        record.cost_usd = 0.0
     _log(record, failure)
     return LLMResult(data=None, failure=failure, record=record)

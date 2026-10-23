@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from app.core.schemas import TaskType
 from app.narrative.schemas import ConfusionFact, DistributionFact, FactSheet, MetricFact, NarrativeRequest
-from app.narrative.service import generate_narrative
+from app.narrative.legacy import generate_narrative
 from app.narrative.derived import compute_derived
 from app.narrative.grounding import (
     build_number_whitelist, verify_grounding, _collect_grounding_texts,
@@ -371,7 +371,7 @@ def test_client_inputs_limit_boundary_is_exact():
 
 
 def test_client_inputs_reach_the_prompt():
-    from app.narrative.prompt import build_user_prompt
+    from app.narrative.legacy import build_user_prompt
 
     prompt = build_user_prompt({"verdict": "PASS"}, [], {}, {"declarations": {"사용 방식": "배치"}})
     assert '"client_inputs"' in prompt and "배치" in prompt
@@ -413,7 +413,7 @@ def test_class_averages_are_bounded():
 
 def test_system_prompt_names_the_task_type():
     """분류 유형 이름이 AI 에 직접 간다(재료 목록 2절 "작업 유형 — AI 예")."""
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     assert "이진 분류" in build_system_prompt("internal", "binary")
     assert "다중 클래스 분류" in build_system_prompt("internal", "multiclass")
@@ -426,7 +426,7 @@ def test_system_prompt_names_the_task_type():
 def test_system_prompt_core_metric_line_is_neutral():
     """W8: 핵심 지표는 의뢰자가 바꾸지 않으면 분류 유형의 기본값이다. AI 지시문이 '의뢰자가 지정'이라고
     단정하면 성적서 6.1(기본값 사용)과 서술이 갈린다. 세 유형 모두 중립 문장만 간다."""
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     for task_type in ("binary", "multiclass", "multilabel"):
         prompt = build_system_prompt("internal", task_type, _sample_fact_sheet())
@@ -530,7 +530,7 @@ def _with_derivation(method, threshold=None):
 
 def test_rule_10_follows_the_derivation_method():
     """규칙 10 은 파생 방법마다 다르다 — 다중 클래스(argmax)에는 임계값이 없다(DESIGN_GAPS R3)."""
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     threshold = build_system_prompt("internal", "binary", _with_derivation("threshold", 0.35))
     per_label = build_system_prompt("internal", "multilabel", _with_derivation("threshold_per_label", {"a": 0.4}))
@@ -615,8 +615,9 @@ def test_fallback_states_target_level_and_passes_grounding():
     resp = build_fallback_narrative(fs, refs, derived, reason="no_key")
 
     benchmark = resp.conclusion.benchmark
-    assert "목표값 수준은 Accuracy 0.0(참조 범위보다 낮음), Recall -0.1(참조 범위보다 낮음)이다." in benchmark
-    assert "AUROC 0.88(" not in benchmark  # 목표 없는 지표는 목표값 수준에 넣지 않는다
+    # S6: 8.1 은 개조식(';' 나열)이 아니라 같은 위치끼리 묶은 서술체 한 문장이다(작성 규칙 D37).
+    assert "목표값이 참조 범위보다 낮은 지표는 Accuracy(목표 0), Recall(목표 -0.1)이다." in benchmark
+    assert "AUROC(목표" not in benchmark  # 목표 없는 지표는 목표값 수준에 넣지 않는다
     assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, refs, derived)).passed
 
 
@@ -637,7 +638,7 @@ def test_whitelist_contains_target_values_from_refs():
 
 
 def test_prompt_explains_target_position():
-    from app.narrative.prompt import build_user_prompt
+    from app.narrative.legacy import build_user_prompt
 
     prompt = build_user_prompt({"verdict": "PASS"}, [], {})
     assert "target_position" in prompt and "target_value" in prompt
@@ -732,7 +733,7 @@ def test_fallback_error_sentence_for_label_cells_and_zero_errors():
     cells = _error_ratios(unit="label_cell", threshold={"score_a": 0.5})
     fs = _sample_fact_sheet().model_copy(update={"error_ratios": cells})
     text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.confusion_analysis
-    assert "틀린 레이블 칸 12건 중" in text
+    assert "틀린 레이블 칸 12칸 중" in text  # S6: 레이블 칸 단위는 '칸'(종전 '12건'은 7.1 의 '800칸'과 단위가 달랐다)
 
     zero = _error_ratios(misclassified=0, boundary={"count": 0, "ratio": None}, confident={"count": 0, "ratio": None})
     fs0 = _sample_fact_sheet().model_copy(update={"error_ratios": zero})
@@ -747,7 +748,7 @@ def test_fallback_without_error_ratios_is_unchanged():
 
 
 def test_rule_11_follows_error_ratios():
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
     known = build_system_prompt(
@@ -870,14 +871,15 @@ def test_fallback_states_metrics_whose_interval_contains_target():
 def test_fallback_without_contained_targets_has_no_interval_sentence():
     fs = _sample_fact_sheet()
     assert "신뢰구간" not in build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.narrative
+    # S6: 구간이 모두 목표값과 떨어진 두 번째 갈래도 쓴다(필수 서술 항목 8.2 신뢰구간 해석 — 종전에는 아무 말이 없었다).
     outside = fs.model_copy(update={"metrics": [_ci_metric(threshold=0.9)]})
-    assert "신뢰구간" not in build_fallback_narrative(
-        outside, [], compute_derived(outside), "no_key"
-    ).conclusion.narrative
+    narrative = build_fallback_narrative(outside, [], compute_derived(outside), "no_key").conclusion.narrative
+    assert "95% 신뢰구간이 모두 목표값과 떨어져 있어" in narrative
+    assert "포함하는 지표" not in narrative
 
 
 def test_rule_12_follows_intervals():
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
     with_ci = build_system_prompt(
@@ -968,6 +970,13 @@ def test_new_fact_fields_schema_accepts_contract_shape():
 def test_threshold_tuning_boundary(gain, notable):
     """gain ≥ 0.10 (경계 포함) — 프론트 문제 목록 threshold_tuning 과 같은 기준."""
     fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=gain))
+    assert compute_derived(fs)["threshold_tuning"] is notable
+
+
+@pytest.mark.parametrize("gain, notable", [(0.1, False), (0.0999, True)])
+def test_threshold_tuning_reads_engine_notable(gain, notable):
+    """엔진이 반올림 전 값으로 정한 notable 이 실리면 그것을 따른다 — 실제 0.09996 은 4자리로 0.1 이지만 부적합이 아니다."""
+    fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=gain, notable=notable))
     assert compute_derived(fs)["threshold_tuning"] is notable
 
 
@@ -1077,12 +1086,17 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
     derived = compute_derived(fs)
     resp = build_fallback_narrative(fs, [], derived, reason="no_key")
     risks = resp.conclusion.risks
-    assert "결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있어" in risks
-    assert "'이 데이터에서 오를 수 있는 최대폭'이므로 별도 데이터에서 확인해야 한다." in risks
+    # S6: 숫자(임계값·F1·향상폭)는 결론 목록대로 8.2(임계값 조정 여지)에, 8.3 은 숫자 없이 위험만 — 두 칸에 같은 숫자를
+    # 되풀이하지 않는다. 0.37 은 받침 ㄹ(칠)이라 '로'.
+    narrative = resp.conclusion.narrative
+    assert "결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있다." in narrative
+    assert "이 데이터의 최대폭이므로 별도 데이터에서 확인해야 한다." in narrative
+    assert "현재 결정 임계값이 최적이 아닐 수 있어" in risks and "0.37" not in risks
     assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
 
     small = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain(gain=0.0999)})
-    assert "최대폭" not in build_fallback_narrative(small, [], compute_derived(small), "no_key").conclusion.risks
+    small_resp = build_fallback_narrative(small, [], compute_derived(small), "no_key")
+    assert "최대폭" not in small_resp.conclusion.narrative and "최적이 아닐" not in small_resp.conclusion.risks
 
 
 # 서술 라운드 S1: 문장을 기준 이상인 차이만 근거로 쓰게 고쳤다(점검 BE-02). 엔진이 낼 수 없는 조합
@@ -1090,7 +1104,7 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
 @pytest.mark.parametrize("level, values, expected, absent", [
     ("affected", {},
      "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있고, 정확도와 매크로 F1 의 차이(0.12)와 다수 클래스(neg)와 "
-     "소수 클래스(pos)의 F1 차이(0.18)가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다.",
+     "소수 클래스(pos)의 F1 차이(0.18)가 기준(0.1) 이상이어서 불균형에 따른 성능 지표 왜곡이 관찰되었다.",
      "왜곡은 관찰되지 않았다"),
     ("no_distortion", {"accuracy_minus_macro_f1": 0.05, "majority_minus_minority_f1": 0.03},
      "불균형 비율(3.2)이 1.5 이상이어서 불균형이 있으나, 불균형에 의한 성능 왜곡은 관찰되지 않았다. "
@@ -1130,7 +1144,7 @@ def test_fallback_distribution_without_imbalance_effect_is_neutral():
 
 
 def test_rules_13_to_15_follow_facts():
-    from app.narrative.prompt import build_system_prompt
+    from app.narrative.legacy import build_system_prompt
 
     plain = build_system_prompt("internal", "binary", _sample_fact_sheet())
     for n in ("13. ", "14. ", "15. "):
@@ -1143,11 +1157,17 @@ def test_rules_13_to_15_follow_facts():
         "internal", "binary", _bare_fact_sheet(metrics=[_near_metric(status="fail", margin=-0.01)]))
     assert "13. " not in near_fail
 
-    gain = build_system_prompt("internal", "binary", _bare_fact_sheet(f1_threshold_gain=_gain()))
+    # 규칙 14 는 compute_derived 가 한 번 정한 threshold_tuning 을 읽는다(S4b — 따로 판정하지 않음).
+    gain_fs = _bare_fact_sheet(f1_threshold_gain=_gain())
+    gain = build_system_prompt("internal", "binary", gain_fs, compute_derived(gain_fs))
     assert "14. " in gain and "이 데이터에서 오를 수 있는 최대폭" in gain and "별도 데이터에서 확인" in gain
     assert "conclusion.narrative(8.2)" in gain and "conclusion.risks(8.3)" in gain
-    small = build_system_prompt("internal", "binary", _bare_fact_sheet(f1_threshold_gain=_gain(gain=0.0999)))
-    assert "14. " not in small
+    small_fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=0.0999))
+    assert "14. " not in build_system_prompt("internal", "binary", small_fs, compute_derived(small_fs))
+    # 엔진 notable 이 판정이다 — 4자리로 0.1 이어도 notable=False 면 규칙이 없다(0.09996).
+    edge_fs = _bare_fact_sheet(f1_threshold_gain=_gain(gain=0.1, notable=False))
+    assert "14. " not in build_system_prompt("internal", "binary", edge_fs, compute_derived(edge_fs))
+    assert "14. " not in build_system_prompt("internal", "binary", gain_fs)  # derived 없이 부르면 붙지 않는다
 
     for level, phrase in (("affected", "성능 수치에 영향을 주었다고"),
                           ("no_distortion", "성능 왜곡은 관찰되지 않았다"),

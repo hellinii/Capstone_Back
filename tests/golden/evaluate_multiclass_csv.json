@@ -94,6 +94,39 @@
       "M4": 0.3314034800929962,
       "M5": 0.3314034800929962,
       "M6": 0.007948540745002702,
+      "class_report": {
+        "accuracy": 0.335,
+        "bird": {
+          "f1-score": 0.328125,
+          "precision": 0.3559322033898305,
+          "recall": 0.30434782608695654,
+          "support": 69.0
+        },
+        "cat": {
+          "f1-score": 0.27419354838709675,
+          "precision": 0.2537313432835821,
+          "recall": 0.2982456140350877,
+          "support": 57.0
+        },
+        "dog": {
+          "f1-score": 0.3918918918918919,
+          "precision": 0.3918918918918919,
+          "recall": 0.3918918918918919,
+          "support": 74.0
+        },
+        "macro avg": {
+          "f1-score": 0.3314034800929962,
+          "precision": 0.3338518128551015,
+          "recall": 0.33149511067131204,
+          "support": 200.0
+        },
+        "weighted avg": {
+          "f1-score": 0.33634828629032254,
+          "precision": 0.3401100430053124,
+          "recall": 0.335,
+          "support": 200.0
+        }
+      },
       "confidence_intervals": {
         "M1": {
           "high": 0.403,
@@ -206,6 +239,32 @@
         ],
         "type": "per_class"
       },
+      "confusion_matrix": {
+        "labels": [
+          "bird",
+          "cat",
+          "dog"
+        ],
+        "matrix": [
+          [
+            21,
+            22,
+            26
+          ],
+          [
+            21,
+            17,
+            19
+          ],
+          [
+            17,
+            28,
+            29
+          ]
+        ],
+        "n_samples": 200,
+        "type": "multiclass_or_binary"
+      },
       "error_ratios": {
         "boundary": {
           "count": 27,
@@ -223,12 +282,25 @@
         "unit": "sample"
       },
       "imbalance_effect": {
+        "accuracy": 0.335,
         "accuracy_minus_macro_f1": 0.0036,
+        "display": {
+          "accuracy": "0.335",
+          "accuracy_minus_macro_f1": "0.0036",
+          "imbalance_ratio": "1.2982",
+          "macro_f1": "0.3314",
+          "majority_f1": "0.3919",
+          "majority_minus_minority_f1": "0.1177",
+          "minority_f1": "0.2742"
+        },
         "imbalance_ratio": 1.2982,
         "level": "mild",
+        "macro_f1": 0.3314,
         "majority_class": "dog",
+        "majority_f1": 0.3919,
         "majority_minus_minority_f1": 0.1177,
-        "minority_class": "cat"
+        "minority_class": "cat",
+        "minority_f1": 0.2742
       }
     }
   },

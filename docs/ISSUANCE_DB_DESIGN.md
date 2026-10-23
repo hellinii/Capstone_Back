@@ -73,7 +73,7 @@
 | 컬럼 | 타입 | 제약 | 설명 |
 |---|---|---|---|
 | id | INTEGER | PK (항상 1) | singleton |
-| org_name | TEXT | NOT NULL | "한국 AI 인증원" |
+| org_name | TEXT | NOT NULL | "리트머스" |
 | department | TEXT | | "평가부" (issuer 조합용) |
 | evaluator | TEXT | | "자동 평가 엔진" (performer.evaluator) |
 | contact | TEXT | | 연락처 |
@@ -107,7 +107,7 @@
 | id | INTEGER | PK autoincrement | |
 | report_id | INTEGER | FK→report.id, INDEX | 소속 성적서 |
 | version | TEXT | NOT NULL | "v1.0", "v1.1" … |
-| issuer | TEXT | NOT NULL | "한국 AI 인증원 평가부" |
+| issuer | TEXT | NOT NULL | "리트머스 평가부" |
 | issued_at | DATETIME | NOT NULL | 발급 일시 |
 | note | TEXT | | "최초 발급" / "정정 발급: …" |
 | status | TEXT | NOT NULL | "issued"(현행) / "superseded"(상위 버전에 의해 대체) |

@@ -53,7 +53,7 @@ def test_only_accuracy_gap_is_cited_as_over_and_negative_class_gap_is_explained(
     """점검 재현값: 정확도 차이 0.1533 만 기준 이상, 클래스 차이 −0.0213(소수가 더 잘 맞음)."""
     resp, _ = _run(_fs(imbalance_effect=_ie("affected", 0.1533, -0.0213)))
     text = resp.interpretation.distribution_analysis
-    assert "정확도와 매크로 F1 의 차이(0.1533)가 기준(0.1) 이상이어서 불균형이 성능 수치에 영향을 준 것으로 보인다." in text
+    assert "정확도와 매크로 F1 의 차이(0.1533)가 기준(0.1) 이상이어서 불균형에 따른 성능 지표 왜곡이 관찰되었다." in text
     assert "F1 차이(-0.0213)는 음수로 소수 클래스의 F1 이 더 높다." in text
     assert "벌어져" not in text
     # 기준 이상이라고 말하는 문장에 음수 차이가 들어가지 않는다.
@@ -99,7 +99,7 @@ def test_multilabel_imbalance_uses_label_gap_only():
     resp, _ = _run(_fs(imbalance_effect=ie))
     text = resp.interpretation.distribution_analysis
     assert "다수 레이블(sports)과 소수 레이블(tech)의 F1 차이(0.3)가 기준(0.1) 이상" in text
-    assert "매크로" not in text and "소수 레이블의 성능 지표 해석" in text
+    assert "매크로" not in text and "소수 레이블의 성능 지표 해석에 유의가 필요하다." in text and "표본이 적어" not in text
 
 
 # ── BE-03 8.2·8.3 판정 ──────────────────────────────────────────────────────
@@ -218,7 +218,8 @@ def _multilabel_fs() -> FactSheet:
 def test_multilabel_confusion_is_written_in_label_cells_not_samples():
     resp, _ = _run(_multilabel_fs(), task_type="multilabel")
     c71, c72 = resp.interpretation.confusion_analysis, resp.interpretation.distribution_analysis
-    assert "레이블 칸 800칸 중 96칸이 틀렸다(맞은 칸 704칸)." in c71
+    # S6: 결론 목록 문장(오분류 총건수·비율). '맞은 칸'은 빼고 비율을 붙였다 — 단위는 그대로 레이블 칸.
+    assert "레이블 칸 800칸 중 96칸(12%)이 틀렸다." in c71
     assert "FN)은 56칸" in c71 and "FP)은 40칸" in c71
     assert "800건" not in c71 and "전체 800" not in c71
     # 7.1 이 '건'으로 쓰는 수는 표본 단위뿐이어야 한다 — 7.2 의 표본 수와 어긋나지 않게.
@@ -231,12 +232,12 @@ def test_binary_and_old_callers_keep_sample_wording():
     resp, _ = _run(fs)  # task_type 없음(옛 호출) — 종전 그대로
     assert "전체 800건" in resp.interpretation.confusion_analysis
     resp, _ = _run(_fs(), task_type="binary")
-    assert "혼동 행렬 기준 전체 200건 중 25건이 오분류되었다" in resp.interpretation.confusion_analysis
+    assert "혼동행렬 기준 전체 200건 중 25건(12.5%)이 오분류되었다" in resp.interpretation.confusion_analysis
 
 
 async def test_service_passes_task_type_so_multilabel_fallback_uses_label_cells():
     """배선: 서비스가 compute_derived 에 작업 유형을 넘기는지(키 없음 → 폴백 경로)."""
-    from app.narrative.service import generate_narrative
+    from app.narrative.legacy import generate_narrative
 
     req = NarrativeRequest(task_type=TaskType.multilabel, report_purpose="internal", fact_sheet=_multilabel_fs())
     resp = await generate_narrative(None, req)

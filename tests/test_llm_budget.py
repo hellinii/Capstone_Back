@@ -62,7 +62,7 @@ def test_remaining_reports_what_is_left():
 
 async def test_narrative_degrades_to_rule_fallback_when_budget_is_spent(make_fake_anthropic_client):
     from app.narrative.schemas import NarrativeRequest
-    from app.narrative.service import generate_narrative
+    from app.narrative.legacy import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
 
     for _ in range(llm_budget.narrative.limit):
@@ -78,7 +78,7 @@ async def test_narrative_degrades_to_rule_fallback_when_budget_is_spent(make_fak
 
 
 async def test_narrative_still_calls_llm_within_budget(make_fake_anthropic_client):
-    from app.narrative.service import generate_narrative
+    from app.narrative.legacy import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
 
     client = make_fake_anthropic_client({"interpretation": {}, "conclusion": {}})
@@ -111,7 +111,7 @@ async def test_spent_narrative_wallet_does_not_block_mapping(make_fake_openai_cl
 
 
 async def test_spent_mapping_wallet_does_not_block_narrative(make_fake_anthropic_client):
-    from app.narrative.service import generate_narrative
+    from app.narrative.legacy import generate_narrative
     from tests.narrative_fixtures import minimal_narrative_request
 
     while llm_budget.mapping.try_consume():

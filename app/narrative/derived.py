@@ -1,24 +1,31 @@
-"""app/narrative/derived.py — 서버 파생 사실 계산(순수)
+"""app/narrative/derived.py — 서버 파생 사실(순수)
 
-혼동행렬 파생(정오분류·TP/TN/FP/FN), 클래스 분포 백분율, 임계값 지표 판정 카운트,
-신뢰구간이 목표값을 포함하는 지표 목록, 임계값 조정 여지가 큰지를 fact_sheet 로부터 미리 계산한다.
+서버가 계산하는 것은 혼동행렬 합계·백분율(멀티레이블은 레이블 칸 단위)과 클래스 분포 백분율뿐이다(계획 설계
+요지 4). 판정 카운트·구간이 목표를 포함하는 지표·오분류 총건수(행렬이 잘렸을 때)는 프론트 서술용 파생값
+(fact_sheet.facts, metrics[].ci_contains_target)을 옮긴다 — 같은 숫자를 두 곳에서 세지 않는다. facts 가 없는
+옛 요청(운영 main 프론트, 저장된 다시 만들기 요청)에만 지금까지의 서버 셈을 쓴다.
 LLM 은 계산하지 않으며 이 값들만 인용한다.
 
 상호작용
 - 의존(import): app.core.schemas(FactSheet)
-- 사용처: app.narrative.service(generate_narrative 가 서술 전 파생값 준비)
+- 사용처: app.narrative.legacy·generator·required_items·fallback(서술 전 파생값 준비)
 """
 from app.narrative.schemas import FactSheet
 
-# 임계값 조정 여지가 '부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40). 프론트 문제 목록의
-# threshold_tuning 과 같은 기준이며, 둘 다 실린 4자리 gain 으로 판정한다(계약 §1.3).
-THRESHOLD_GAIN_NOTABLE = 0.10
+# 임계값 조정 여지가 '부적합'으로 볼 만큼 큰지의 기준(서술 설계 D40) — notable 이 없는 옛 요청에만 쓴다.
+# 숫자는 엔진 한 곳(metrics.binary)에서 가져온다.
+from app.evaluation.metrics.binary import THRESHOLD_GAIN_NOTABLE  # noqa: E402
 
 
-def threshold_tuning_needed(fs: FactSheet) -> bool:
-    """f1_threshold_gain.gain ≥ 0.10 인지 — 서버 쪽 판정은 여기 한 곳(프롬프트·폴백이 읽는다)."""
-    gain = fs.f1_threshold_gain
-    return gain is not None and gain.gain >= THRESHOLD_GAIN_NOTABLE
+def _threshold_tuning(gain) -> bool:
+    """임계값 부적합인지 — 평가 엔진이 반올림 전 값으로 정한 notable(S2)을 옮긴다. 판정은 엔진 한 곳이다.
+
+    notable 이 없는 옛 요청(운영 main 프론트가 f1_threshold_gain 을 notable 없이 옮김)만 실린 4자리 gain ≥ 0.10 으로
+    본다. 지시문 규칙 14 와 폴백 8.3 은 이 값을 compute_derived 의 threshold_tuning 으로 읽는다(따로 판정하지 않음).
+    """
+    if gain.notable is not None:
+        return gain.notable
+    return gain.gain >= THRESHOLD_GAIN_NOTABLE
 
 
 def _find_pos_idx(labels: list, positive_class) -> int:
@@ -45,6 +52,31 @@ def _find_pos_idx(labels: list, positive_class) -> int:
     except ValueError:
         pass
     return 1
+
+
+def _confusion_from_counts(rows, task_type: str | None) -> dict | None:
+    """엔진 클래스별 건수로 만든 혼동행렬 합계(행렬이 없는 옛 요청). 작업 유형을 모르면 줄이 하나일 때만(이진) 센다 —
+    다중과 멀티레이블은 분모가 달라(표본 / 레이블 칸) 짐작하지 않는다."""
+    kind = task_type or ("binary" if len(rows) == 1 else None)
+    if kind == "binary" and len(rows) == 1:
+        r = rows[0]
+        total, misclassified = r.tp + r.fp + r.fn + r.tn, r.fp + r.fn
+        conf = {"total": total, "correct": total - misclassified, "misclassified": misclassified,
+                "tn": r.tn, "fp": r.fp, "fn": r.fn, "tp": r.tp}
+    elif kind == "multiclass":
+        total = sum(r.tp + r.fn for r in rows)
+        misclassified = sum(r.fn for r in rows)
+        conf = {"total": total, "correct": total - misclassified, "misclassified": misclassified}
+    elif kind == "multilabel":
+        total = sum(r.tp + r.fp + r.fn + r.tn for r in rows)
+        misclassified = sum(r.fp + r.fn for r in rows)
+        conf = {"total": total, "correct": total - misclassified, "misclassified": misclassified, "unit": "label_cell"}
+    else:
+        return None
+    if total > 0:
+        conf["correct_pct"] = round(conf["correct"] / total * 100, 1)
+        conf["misclassified_pct"] = round(misclassified / total * 100, 1)
+    return conf
 
 
 def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
@@ -93,6 +125,27 @@ def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
                     "tp_pct": round(tp / total * 100, 1),
                 })
         derived["confusion"] = conf
+    elif fs.facts is not None and fs.facts.error_totals is not None:
+        # 클래스가 많아 혼동행렬이 잘렸어도(프론트 미리 자르기) 오분류 총건수는 자르기 전 엔진 건수로 남는다.
+        totals = fs.facts.error_totals
+        conf = {
+            "total": totals.total,
+            "correct": totals.total - totals.misclassified,
+            "misclassified": totals.misclassified,
+        }
+        if totals.unit == "label_cell":
+            conf["unit"] = "label_cell"
+        if totals.total > 0:
+            conf["correct_pct"] = round(conf["correct"] / totals.total * 100, 1)
+            conf["misclassified_pct"] = round(totals.misclassified / totals.total * 100, 1)
+        derived["confusion"] = conf
+    elif fs.confusion_counts:
+        # 옛 요청(운영 main 프론트)에서 혼동행렬(M21)을 고르지 않았으면 행렬이 없다 — 엔진 클래스별 건수(confusion_counts,
+        # M21 선택과 무관하게 실림)로 오분류 총건수를 센다(계약 error_totals 와 같은 규칙: 이진 fp+fn / 전체, 다중 Σfn / Σ(tp+fn),
+        # 멀티 Σ(fp+fn) / Σ(tp+fp+fn+tn) 레이블 칸). 옛 요청만의 서버 셈이다(새 요청은 facts.error_totals 를 옮긴다).
+        conf = _confusion_from_counts(fs.confusion_counts, task_type)
+        if conf is not None:
+            derived["confusion"] = conf
 
     if fs.distribution and fs.distribution.class_distribution:
         dist = fs.distribution.class_distribution
@@ -111,31 +164,40 @@ def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
             },
         }
 
-    # 판정 카운트(통과율 근거) — 폴백/LLM 이 "N개 중 M개 통과"를 인용할 때 사용
-    # 목표값 0·음수(MCC 등)도 목표다 — "없음"은 None 뿐이다(프론트 PR #55 의 null 규칙과 같다).
-    target = sum(1 for m in fs.metrics if m.threshold is not None)
-    passed = sum(1 for m in fs.metrics if m.status == "pass" and m.threshold is not None)
+    # 판정 카운트(통과율 근거, 참고 수치) — 폴백/LLM 이 "N개 중 M개 통과"를 인용할 때 사용.
+    # 새 요청은 프론트 판정(computeVerdict)의 판정 대상 수·통과 수를 옮긴다. 옛 요청만 서버가 센다 —
+    # 목표값 0·음수(MCC 등)도 목표다("없음"은 None 뿐, 프론트 PR #55 의 null 규칙과 같다).
+    verdict_detail = fs.facts.verdict_detail if fs.facts is not None else None
+    if verdict_detail is not None:
+        target, passed = verdict_detail.judged_count, verdict_detail.passed_count
+    else:
+        target = sum(1 for m in fs.metrics if m.threshold is not None)
+        passed = sum(1 for m in fs.metrics if m.status == "pass" and m.threshold is not None)
     derived["counts"] = {
         "target": target,
         "passed": passed,
         "n_metrics": len(fs.metrics),
     }
 
-    # 구간이 목표값을 포함하는 지표(서술 설계 D29) — 판정은 여기 한 곳에서만 한다.
-    # 목표값이 구간 안(양 끝 포함)이면 표본이 달라졌을 때 그 지표의 판정이 바뀔 수 있다.
-    # 신뢰구간이 하나도 실리지 않은 사실 시트(옛 요청)에는 키를 두지 않는다 — 프롬프트·폴백이 그대로다.
+    # 구간이 목표값을 포함하는 지표(서술 설계 D29). 목표값이 구간 안(양 끝 포함)이면 표본이 달라졌을 때 그 지표의
+    # 판정이 바뀔 수 있다. 새 요청은 프론트가 반올림 전 값으로 정한 ci_contains_target 을 옮기고, 그 칸이 없는
+    # 옛 요청만 실린 값으로 본다. 신뢰구간이 하나도 실리지 않은 사실 시트에는 키를 두지 않는다.
     if any(m.ci_low is not None and m.ci_high is not None for m in fs.metrics):
         derived["ci_contains_target"] = [
             m.display_name
             for m in fs.metrics
-            if m.threshold is not None
-            and m.ci_low is not None
-            and m.ci_high is not None
-            and m.ci_low <= m.threshold <= m.ci_high
+            if (
+                m.ci_contains_target
+                if m.ci_contains_target is not None
+                else m.threshold is not None
+                and m.ci_low is not None
+                and m.ci_high is not None
+                and m.ci_low <= m.threshold <= m.ci_high
+            )
         ]
 
     # 임계값 조정 여지(D40) — 키가 실린 사실 시트에만 둔다(옛 요청은 derived 가 그대로).
     if fs.f1_threshold_gain is not None:
-        derived["threshold_tuning"] = threshold_tuning_needed(fs)
+        derived["threshold_tuning"] = _threshold_tuning(fs.f1_threshold_gain)
 
     return derived

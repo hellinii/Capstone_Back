@@ -146,7 +146,8 @@ def test_no_interval_for_failed_or_matrix_metrics():
 
 
 def test_multiclass_ghost_class_definitions_match_engine():
-    """예측에만 있는 클래스(유령)가 있으면 M2~M5 와 M11 의 클래스 집합이 갈린다 — 둘 다 점추정이 맞아야 한다."""
+    """예측에만 있는 클래스(유령)가 있어도 M2~M5·M11 의 클래스 집합은 정답 기준 하나다(S2 — 종전에는 M11 만
+    정답 ∪ 예측이라 정의가 둘이었다). 모든 지표의 점추정이 맞아야 구간이 나온다."""
     rows = [("a", "a")] * 6 + [("b", "b")] * 5 + [("c", "c")] * 4 + [("a", "z"), ("b", "a"), ("c", "z"), ("b", "c")]
     df = pd.DataFrame(rows, columns=["y_true", "y_pred"])
     metrics = ["M2", "M3", "M4", "M5", "M6", "M11", "M12", "M13", "M14"]

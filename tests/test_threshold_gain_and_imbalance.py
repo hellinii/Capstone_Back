@@ -59,14 +59,16 @@ GAIN_ROWS = [
 def test_gain_hand_computed_from_original_pr_curve():
     gain = _binary_derived(GAIN_ROWS)["f1_threshold_gain"]
 
-    assert gain == {"max_f1": 0.8889, "current_f1": 0.3333, "gain": 0.5556, "best_threshold": 0.35}
+    assert gain == {"max_f1": 0.8889, "current_f1": 0.3333, "gain": 0.5556, "best_threshold": 0.35,
+                    "notable": True, "gain_text": "0.5556"}
 
 
 def test_gain_is_zero_when_current_threshold_is_best():
     """임계값 0.35 로 파생하면 지금 예측이 곧 최대점이다 — 이득 0."""
     gain = _binary_derived(GAIN_ROWS, threshold=0.35)["f1_threshold_gain"]
 
-    assert gain == {"max_f1": 0.8889, "current_f1": 0.8889, "gain": 0.0, "best_threshold": 0.35}
+    assert gain == {"max_f1": 0.8889, "current_f1": 0.8889, "gain": 0.0, "best_threshold": 0.35,
+                    "notable": False, "gain_text": "0"}
 
 
 def test_gain_negative_difference_is_clamped_to_zero_with_uploaded_prediction():
@@ -79,7 +81,8 @@ def test_gain_negative_difference_is_clamped_to_zero_with_uploaded_prediction():
     gain = evaluate(df, mappings, "binary", ["M1"], positive_class="1")["f1_threshold_gain"]
 
     # 곡선: 임계값 0.2 → TP2 FP1 → F1 = 4/5. 지금 예측은 완벽 → F1 = 1.
-    assert gain == {"max_f1": 0.8, "current_f1": 1.0, "gain": 0.0, "best_threshold": 0.2}
+    assert gain == {"max_f1": 0.8, "current_f1": 1.0, "gain": 0.0, "best_threshold": 0.2,
+                    "notable": False, "gain_text": "0"}
 
 
 def test_gain_uses_uploaded_prediction_for_current_f1():
@@ -91,7 +94,8 @@ def test_gain_uses_uploaded_prediction_for_current_f1():
     mappings = BINARY_PRED + [{"role": "score_positive", "column": "score"}]
     gain = evaluate(df, mappings, "binary", ["M1"], positive_class="1")["f1_threshold_gain"]
 
-    assert gain == {"max_f1": 0.8889, "current_f1": 0.0, "gain": 0.8889, "best_threshold": 0.35}
+    assert gain == {"max_f1": 0.8889, "current_f1": 0.0, "gain": 0.8889, "best_threshold": 0.35,
+                    "notable": True, "gain_text": "0.8889"}
 
 
 def test_gain_tie_with_float_noise_picks_lowest_threshold():
@@ -131,9 +135,13 @@ def test_imbalance_ratio_exactly_1_5_is_not_mild():
 
     assert effect == {
         "level": "no_distortion",
+        "display": {"imbalance_ratio": "1.5", "accuracy_minus_macro_f1": "0",
+                    "majority_minus_minority_f1": "0",
+                    "accuracy": "1", "macro_f1": "1", "majority_f1": "1", "minority_f1": "1"},
         "imbalance_ratio": 1.5,
         "accuracy_minus_macro_f1": 0.0,
         "majority_minus_minority_f1": 0.0,
+        "accuracy": 1.0, "macro_f1": 1.0, "majority_f1": 1.0, "minority_f1": 1.0,
         "majority_class": "a",
         "minority_class": "b",
     }
@@ -156,9 +164,13 @@ def test_class_f1_gap_exactly_0_10_is_affected():
 
     assert effect == {
         "level": "affected",
+        "display": {"imbalance_ratio": "3.5", "accuracy_minus_macro_f1": "0.0056",
+                    "majority_minus_minority_f1": "0.1",
+                    "accuracy": "0.5556", "macro_f1": "0.55", "majority_f1": "0.6", "minority_f1": "0.5"},
         "imbalance_ratio": 3.5,
         "accuracy_minus_macro_f1": 0.0056,
         "majority_minus_minority_f1": 0.1,
+        "accuracy": 0.5556, "macro_f1": 0.55, "majority_f1": 0.6, "minority_f1": 0.5,
         "majority_class": "neg",
         "minority_class": "pos",
     }
@@ -172,9 +184,13 @@ def test_accuracy_minus_macro_f1_exactly_0_10_is_affected():
 
     assert effect == {
         "level": "affected",
+        "display": {"imbalance_ratio": "7", "accuracy_minus_macro_f1": "0.1",
+                    "majority_minus_minority_f1": "-0.2",
+                    "accuracy": "0.7", "macro_f1": "0.6", "majority_f1": "0.8", "minority_f1": "1"},
         "imbalance_ratio": 7.0,
         "accuracy_minus_macro_f1": 0.1,
         "majority_minus_minority_f1": -0.2,
+        "accuracy": 0.7, "macro_f1": 0.6, "majority_f1": 0.8, "minority_f1": 1.0,
         "majority_class": "c",
         "minority_class": "a",
     }
@@ -204,9 +220,13 @@ def test_minority_better_than_majority_is_no_distortion():
 
     assert effect == {
         "level": "no_distortion",
+        "display": {"imbalance_ratio": "2", "accuracy_minus_macro_f1": "0.0833",
+                    "majority_minus_minority_f1": "-0.5",
+                    "accuracy": "0.3333", "macro_f1": "0.25", "majority_f1": "0", "minority_f1": "0.5"},
         "imbalance_ratio": 2.0,
         "accuracy_minus_macro_f1": 0.0833,
         "majority_minus_minority_f1": -0.5,
+        "accuracy": 0.3333, "macro_f1": 0.25, "majority_f1": 0.0, "minority_f1": 0.5,
         "majority_class": "neg",
         "minority_class": "pos",
     }
@@ -247,9 +267,13 @@ def test_imbalance_multilabel_uses_label_frequency_and_class_gap_only():
     # 빈도 x 3 · y 1 → IR 3. x F1 = 1, y F1 = 0 (TP0·FN1·FP1).
     assert effect == {
         "level": "affected",
+        "display": {"imbalance_ratio": "3", "accuracy_minus_macro_f1": None,
+                    "majority_minus_minority_f1": "1",
+                    "accuracy": None, "macro_f1": None, "majority_f1": "1", "minority_f1": "0"},
         "imbalance_ratio": 3.0,
         "accuracy_minus_macro_f1": None,
         "majority_minus_minority_f1": 1.0,
+        "accuracy": None, "macro_f1": None, "majority_f1": 1.0, "minority_f1": 0.0,
         "majority_class": "x",
         "minority_class": "y",
     }
