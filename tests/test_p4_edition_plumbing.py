@@ -46,18 +46,23 @@ ED4_ONLY = [e["path"] for e in SPEC["edition4_only_keys"]]
 
 
 def _ed4_raw() -> dict:
-    """판 4 임시 예시(bc_strong). 문제 종류 same_source 는 S2 ③ 에서 스키마에 들어온다 — 그 전 단계에서는 뺀다."""
-    raw = json.loads((CONTRACT / "fact_sheet_binary_ed4.json").read_text(encoding="utf-8"))
-    raw["fact_sheet"]["problems"] = [p for p in raw["fact_sheet"]["problems"] if p["kind"] != "same_source"]
-    return raw
+    """판 4 임시 예시(bc_strong) — 문제 P2 가 판 4 에만 있는 종류 same_source 다."""
+    return json.loads((CONTRACT / "fact_sheet_binary_ed4.json").read_text(encoding="utf-8"))
 
 
-def _strip_edition4(raw: dict) -> dict:
-    """판 4 예시에서 판 4 키(명세 edition4_only_keys)를 모두 지운 사본 — 판 4 칸이 없는 같은 요청."""
+def _strip_keys(raw: dict) -> dict:
+    """판 4 예시에서 판 4 키(명세 edition4_only_keys — 판 신호 포함)만 지운 사본."""
     out = copy.deepcopy(raw)
     for path in ED4_ONLY:
         for node, key in _containers(out, path):
             node.pop(key, None)
+    return out
+
+
+def _strip_edition4(raw: dict) -> dict:
+    """판 4 키와 판 4 문제 종류(same_source)를 지운 사본 — 판 3 프론트가 보낼 법한 같은 요청."""
+    out = _strip_keys(raw)
+    out["fact_sheet"]["problems"] = [p for p in out["fact_sheet"]["problems"] if p["kind"] != "same_source"]
     return out
 
 
@@ -337,7 +342,7 @@ def test_legacy_edition4_fields_match_the_contract():
 def test_legacy_prompts_ignore_edition4_request():
     """판 4 요청이 옛 경로로 와도 판 4 칸·판 신호를 지운 같은 요청과 지시문·허용 목록·기준표가 같다."""
     ed4 = NarrativeRequest.model_validate(_ed4_raw())
-    ed3 = NarrativeRequest.model_validate(_strip_edition4(_ed4_raw()))
+    ed3 = NarrativeRequest.model_validate(_strip_keys(_ed4_raw()))
     assert ed4.report_edition == 4 and ed3.report_edition == 3
     got = []
     for req in (ed4, ed3):
@@ -354,7 +359,7 @@ def test_legacy_prompts_ignore_edition4_request():
 
 def test_legacy_route_answers_edition4_request_as_edition3():
     ed4 = TestClient(app).post("/api/generate-narrative", json=_ed4_raw())
-    ed3 = TestClient(app).post("/api/generate-narrative", json=_strip_edition4(_ed4_raw()))
+    ed3 = TestClient(app).post("/api/generate-narrative", json=_strip_keys(_ed4_raw()))
     assert ed4.status_code == ed3.status_code == 200
     a, b = ed4.json(), ed3.json()
     assert a["benchmark_refs"] and a == b

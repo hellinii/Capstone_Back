@@ -34,7 +34,7 @@ def client_inputs_length(v: dict[str, Any]) -> int:
 
 # 6.0 신뢰구간 방식 한 줄(ci_method_note)의 길이 상한. 방식 종류를 나열한 한 문장이라 수백 자를 넘지 않는다.
 MAX_CI_METHOD_NOTE_CHARS = 500
-# 9절 문제 목록(problems)의 상한(서술 설계 D22). 문제는 종류(9종)마다 많아야 하나라 9개를 넘지 않는다 —
+# 9절 문제 목록(problems)의 상한(서술 설계 D22). 문제는 종류(10종)마다 많아야 하나라 10개를 넘지 않는다 —
 # 여유를 두되 무인증 과금 경로라 막는다(G-03). 근거 수치(evidence)는 자유 dict 라 직렬화 길이로 잰다:
 # 가장 큰 것은 클래스마다 학습·평가 비율을 싣는 분포 차이로, 클래스 256개에서도 수만 자를 넘지 않는다.
 MAX_PROBLEMS = 16
@@ -63,7 +63,9 @@ ThresholdText = Annotated[
 # 안쪽 함수는 기본값 없는 keyword-only edition 으로 받는다(빠뜨리면 바로 오류). 판 결정은 프론트 한 곳이다.
 ReportEdition = Literal[3, 4]
 
-# 문제 종류 9종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
+# 문제 종류 10종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
+# same_source(평가 데이터가 학습과 같은 출처, J8)는 판 4 요청에만 온다(판 4 라운드 S2 ③) — 판 3 프론트는 만들지 않는다.
+# 옛 백엔드는 이 종류를 422 로 돌려보낸다 — 판 4 를 켤 때 백엔드를 먼저 배포한다.
 ProblemKind = Literal[
     "core_fail",
     "inconclusive",
@@ -74,6 +76,7 @@ ProblemKind = Literal[
     "weakest_class",
     "distribution_shift",
     "label_caution",
+    "same_source",
 ]
 
 

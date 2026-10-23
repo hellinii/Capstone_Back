@@ -111,7 +111,7 @@ def test_problem_fact_rejects_bad_shapes():
     with pytest.raises(ValidationError):
         _problem("P1", "core_fail", "URGENT")                       # 우선순위는 세 값뿐
     with pytest.raises(ValidationError):
-        ProblemFact(id="P1", kind="made_up", priority="LOW", title="x")  # 종류는 9종뿐
+        ProblemFact(id="P1", kind="made_up", priority="LOW", title="x")  # 종류는 10종뿐
     with pytest.raises(ValidationError):
         ProblemFact(id="X1", kind="core_fail", priority="HIGH", title="x")  # 번호 꼴은 P1…
     with pytest.raises(ValidationError):
