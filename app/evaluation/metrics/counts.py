@@ -196,4 +196,13 @@ def calculate_imbalance_effect(df: pd.DataFrame, mapping_dict: dict) -> Dict[str
         "minority_f1": round(f1_by[minority], 4),
         "majority_class": majority,
         "minority_class": minority,
+        # 반올림 전 값(판 4 라운드 S1, 계획 2.7) — 판 4 는 셋째 자리로 찍는다(불균형 비율 1.671875 → 1.672). 넷째 자리
+        # 칸에서 다시 반올림하면 1.6719 처럼 x.xxx5 경계에서 이중 반올림이 생긴다. 위 칸은 판 3 이 쓰는 값이라 그대로 둔다.
+        "imbalance_ratio_raw": float(ratio),
+        "accuracy_minus_macro_f1_raw": accuracy_gap,
+        "majority_minus_minority_f1_raw": float(class_gap),
+        "accuracy_raw": accuracy,
+        "macro_f1_raw": macro_f1,
+        "majority_f1_raw": float(f1_by[majority]),
+        "minority_f1_raw": float(f1_by[minority]),
     }

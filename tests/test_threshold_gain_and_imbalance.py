@@ -167,6 +167,9 @@ def test_imbalance_ratio_exactly_1_5_is_not_mild():
         "accuracy": 1.0, "macro_f1": 1.0, "majority_f1": 1.0, "minority_f1": 1.0,
         "majority_class": "a",
         "minority_class": "b",
+        # 반올림 전 값(판 4 라운드 S1).
+        "imbalance_ratio_raw": 1.5, "accuracy_minus_macro_f1_raw": 0.0, "majority_minus_minority_f1_raw": 0.0,
+        "accuracy_raw": 1.0, "macro_f1_raw": 1.0, "majority_f1_raw": 1.0, "minority_f1_raw": 1.0,
     }
 
 
@@ -196,6 +199,10 @@ def test_class_f1_gap_exactly_0_10_is_affected():
         "accuracy": 0.5556, "macro_f1": 0.55, "majority_f1": 0.6, "minority_f1": 0.5,
         "majority_class": "neg",
         "minority_class": "pos",
+        # 반올림 전 값 — 차이는 부동소수 잡음까지 그대로(0.6 − 0.5 = 0.0999…98).
+        "imbalance_ratio_raw": 3.5, "accuracy_minus_macro_f1_raw": 5 / 9 - 0.55,
+        "majority_minus_minority_f1_raw": 0.6 - 0.5,
+        "accuracy_raw": 5 / 9, "macro_f1_raw": 0.55, "majority_f1_raw": 0.6, "minority_f1_raw": 0.5,
     }
 
 
@@ -216,6 +223,9 @@ def test_accuracy_minus_macro_f1_exactly_0_10_is_affected():
         "accuracy": 0.7, "macro_f1": 0.6, "majority_f1": 0.8, "minority_f1": 1.0,
         "majority_class": "c",
         "minority_class": "a",
+        "imbalance_ratio_raw": 7.0, "accuracy_minus_macro_f1_raw": 0.7 - 0.6,
+        "majority_minus_minority_f1_raw": -0.19999999999999996,
+        "accuracy_raw": 0.7, "macro_f1_raw": 0.6, "majority_f1_raw": 0.8, "minority_f1_raw": 1.0,
     }
 
 
@@ -252,6 +262,9 @@ def test_minority_better_than_majority_is_no_distortion():
         "accuracy": 0.3333, "macro_f1": 0.25, "majority_f1": 0.0, "minority_f1": 0.5,
         "majority_class": "neg",
         "minority_class": "pos",
+        "imbalance_ratio_raw": 2.0, "accuracy_minus_macro_f1_raw": 1 / 3 - 0.25,
+        "majority_minus_minority_f1_raw": -0.5,
+        "accuracy_raw": 1 / 3, "macro_f1_raw": 0.25, "majority_f1_raw": 0.0, "minority_f1_raw": 0.5,
     }
 
 
@@ -299,6 +312,9 @@ def test_imbalance_multilabel_uses_label_frequency_and_class_gap_only():
         "accuracy": None, "macro_f1": None, "majority_f1": 1.0, "minority_f1": 0.0,
         "majority_class": "x",
         "minority_class": "y",
+        # 멀티레이블은 정확도 갈래가 없어 원값도 null.
+        "imbalance_ratio_raw": 3.0, "accuracy_minus_macro_f1_raw": None, "majority_minus_minority_f1_raw": 1.0,
+        "accuracy_raw": None, "macro_f1_raw": None, "majority_f1_raw": 1.0, "minority_f1_raw": 0.0,
     }
 
 
