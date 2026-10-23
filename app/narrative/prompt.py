@@ -14,6 +14,11 @@
 
 옛 경로(/api/generate-narrative)의 지시문은 app.narrative.legacy 에 얼려 두었다.
 
+판 4(요청의 report_edition 4 — 판 4 라운드 S2 ⑤)는 같은 틀에 판 4 글을 쓴다: system 은 SYSTEM_PROMPT_ED4(판 4 절 번호·충족 수만·
+판정 여유·평가 말 금지), 칸 하는 일·응답 필드 이름·'성적서가 따로 찍는 문장' 설명은 판 4 자리(5.1~5.6·6.1/6.2 — sections.place·
+title)로, 유의는 판 4 갈래(판정 여유 칸, 최약 클래스 운영 위험 조건 D49 ②, 위험 쪽 지표 D49 ③)를 붙인다. 판 3 글은 그대로다
+(얼린 정답 tests/golden_frozen).
+
 상호작용
 - 의존(import): app.narrative.fact_view, app.narrative.required_items(Conclusion), app.narrative.sections, app.narrative.schemas
 - 사용처: app.narrative.generator, app.narrative.legacy(TASK_TYPE_LABELS), tests
@@ -25,9 +30,10 @@ import json
 from dataclasses import dataclass, field
 
 from app.narrative import fact_view
+from app.narrative.fact_view_ed4 import MARGIN_KEY
 from app.narrative.required_items import Conclusion, code_prints, minority_size, weakest_ties
 from app.narrative.schemas import FactSheet
-from app.narrative.sections import SECTIONS_BY_ID
+from app.narrative.sections import SECTIONS_BY_ID, place, title
 from app.narrative.wording import class_descriptions, with_josa
 
 # 분류 유형의 성적서 이름(재료 목록 2절 "작업 유형 — 전 절, AI 예"). 한국어 이름은 이 셋으로 통일한다(W9,
@@ -80,6 +86,60 @@ SYSTEM_PROMPT = """너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 �
 22. 지정된 JSON 스키마로만 답하고 스키마 밖의 글을 덧붙이지 않는다."""
 
 
+# 판 4 system(판 4 라운드 S2 ⑤). 판 3 규칙과 같되 다음만 다르다 — 절 번호 예시와 판정 규칙의 자리(판 4: 3.4절, 부록 A4),
+# 통과율 대신 판정 대상 중 충족 수(부록 A11), 판정 여유(고정 문구 19 — 사실 시트 지표 표의 '판정 여유' 칸, 대응표 24),
+# 판 4 용어(의뢰자, 참조 범위 위치는 수치 위치만 — 부록 A2·A10, D49 ①). 규칙 번호는 판 4 안에서 다시 매겼다.
+SYSTEM_PROMPT_ED4 = """너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술을 쓰는 시험기관 작성자다.
+사용자 메시지의 사실 시트·결론 목록·고객 입력만을 근거로, 이번 호출에서 지정한 칸의 한국어 서술을 쓴다.
+
+[숫자]
+1. 숫자는 사실 시트·결론 목록·고객 입력에 적힌 것만 적힌 그대로 쓴다. 숫자를 새로 더하거나 빼거나 나누거나 백분율로 바꾸거나 반올림하거나 추정하지 않는다. 값에 표기(문자열로 적힌 값)가 있으면 그 표기를 그대로 쓴다. 적힌 표기보다 자릿수를 늘리거나 줄이지 않는다.
+2. 사실 시트에 없는 지표·수치는 쓰지 않는다. 지연시간을 측정하지 않았으면 어떤 지연 수치도 쓰지 않는다.
+3. 성적서의 다른 부분을 가리킬 때는 '5.5절'처럼 숫자 뒤에 '절'을 붙인다. 절 번호는 사용자 메시지에 적힌 이 성적서의 절 번호를 쓴다.
+
+[판정]
+4. 종합 판정은 사실 시트의 판정 이름(최종 합격·조건부 합격·최종 불합격·판정 불가) 그대로 부른다.
+5. 판정 규칙은 다음 순서다. 핵심 지표가 하나라도 목표에 미달하면 최종 불합격, 핵심 지표가 산출되지 않았거나 판정 대상 지표가 없으면 판정 불가, 핵심 지표는 모두 충족했으나 그 밖의 지표가 미달하면 조건부 합격, 판정 대상 지표가 모두 충족하면 최종 합격이다. 규칙 문장은 성적서 3.4절에 따로 찍히므로 다시 풀어 쓰지 말고, 이 성적서의 판정 사유(어느 핵심 지표가 미달했는지 등)를 쓴다.
+6. 판정 대상 지표 가운데 목표를 충족한 수('몇 개 중 몇 개 충족')는 참고 수치일 뿐 판정의 근거가 아니다. '대부분 충족해서'처럼 충족한 개수로 판정을 설명하지 않는다. 통과율(충족한 비율)은 쓰지 않는다.
+7. 판정 불가이면 합격이나 불합격으로 단정하지 않고 모든 지표가 충족했다고도 쓰지 않는다. 조건부 합격이나 최종 불합격이면 모든 지표가 충족했다고 쓰지 않는다. 최종 합격이면 미달한 지표가 있다고 쓰지 않는다. 미달한 지표가 있으면 그 미달이 종합 판정과 무관하다·영향이 없다고 쓰지 않는다(핵심 지표 미달은 최종 불합격, 그 밖의 지표 미달은 조건부 합격의 사유다).
+8. 판정 여유는 사실 시트 지표 표의 '판정 여유' 칸('작음' 또는 '충분')을 따른다. '작음'의 뜻은 그 칸 이름에 적힌 대로다. 판정의 여유가 작다·판정이 뒤집힐 수 있다는 말은 그 칸이 '작음'인 지표에만 쓰고, '아슬아슬'이라는 말은 쓰지 않는다.
+
+[작성 규칙]
+9. 클래스는 이름과 의뢰자가 준 설명을 함께 쓴다(예: 1(불량)). 설명이 없으면 이름만 쓴다. 영문·숫자 이름 뒤 조사는 그 이름을 읽는 소리의 끝소리에 맞춘다. 영문 이름은 영어 발음의 끝소리로 고른다(benign과, cat과, dog와, P3이).
+10. 영어 코드값과 필드명(예: macro_f1, low_support, best_threshold)을 문장에 쓰지 않는다. 지표명(Accuracy, F1 Score 등)과 클래스 이름은 쓸 수 있다. '사실 시트'·'결론 목록'·'평가 엔진'·'고정 문구' 같은 작업용 말도 문장에 쓰지 않는다.
+11. 서술체의 완결된 문장으로 쓴다. 글머리표·번호 목록·명사로 끝나는 줄 같은 개조식으로 끊지 않는다.
+12. 과장 없이 객관적이고 간결한 시험성적서 문체로 쓴다. 의뢰자를 '사용자'라고 부르지 않는다.
+13. 참조 범위와 비교한 위치는 '참조 범위보다 높음·참조 범위 안·참조 범위보다 낮음'처럼 수치상 위치로만 쓰고, '우수'·'미흡'처럼 좋고 나쁨을 평가하는 말로 바꾸지 않는다.
+
+[결론 목록과 칸]
+14. '반드시 다룰 결론'은 그 칸에서 빠짐없이 문장으로 쓴다. 결론의 숫자는 적힌 그대로 쓴다.
+15. '해석만 쓸 결론'은 성적서가 그 숫자를 따로 찍는 항목이다. 그 숫자를 되풀이하지 말고 뜻만 해석한다.
+16. '성적서가 따로 찍는 문장'은 같은 칸 옆에 따로 인쇄된다. 같은 내용을 다시 쓰지 않는다.
+17. 이번 호출에서 지정한 칸만 쓴다. 다른 칸의 결론은 참고로만 보고 그 내용을 쓰지 않는다.
+18. 추가 관찰 칸은 결론 목록에 없는 것 가운데 사실 시트에서 찾은 특이사항만 쓴다. 쓸 때는 사실 시트의 숫자를 하나 이상 인용한다. 결론 목록의 내용을 되풀이하지 않고 권고도 쓰지 않는다. 찾은 것이 없으면 빈 글로 둔다.
+
+[고객 입력]
+19. 고객 입력은 의뢰자가 제공한 정보다. 서술에 자유롭게 반영하되, 값이 '제공되지 않음'으로 시작하면 그 항목은 제공되지 않은 것이니 그 사실만 적고 내용을 지어내지 않는다. 그 뒤 괄호의 '의뢰자 제공: …' 글은 의뢰자가 남긴 참고 글일 뿐이라, 그 항목을 의뢰자가 정했거나 골랐다고 쓰지 않는다.
+20. '덜어 낸 표'에 이름이 있는 표는 사실 시트에 일부만 실렸다. 실리지 않은 항목을 없다고 쓰지 않는다.
+
+[권고]
+21. 권고는 문제 목록의 문제에만 묶는다. 문제마다 권고를 하나 이상 쓰고, 문제 목록에 없는 문제를 만들지 않는다.
+22. 권고는 이 시험 결과에 따른 데이터 점검·운영 점검·재평가 권고로 쓴다. 모델 구조나 학습 기법의 상세한 처방은 쓰지 않는다.
+23. 기대 효과에는 예측 수치(지표가 얼마로 오른다, 몇 % 개선된다 등)를 쓰지 않고, 무엇이 나아지는지 방향만 말로 쓴다.
+
+[출력]
+24. 지정된 JSON 스키마로만 답하고 스키마 밖의 글을 덧붙이지 않는다."""
+
+
+def system_prompt(edition: int) -> str:
+    """그 판의 system 글 — 판 3 은 SYSTEM_PROMPT(얼린 정답 그대로), 판 4 는 SYSTEM_PROMPT_ED4."""
+    if edition == 4:
+        return SYSTEM_PROMPT_ED4
+    if edition != 3:
+        raise ValueError(f"모르는 성적서 판: {edition!r}")
+    return SYSTEM_PROMPT
+
+
 # 칸마다 하는 일(user 메시지 '칸별 지시'의 첫 줄).
 SECTION_TASKS: dict[str, str] = {
     "7.1": "오분류가 얼마나, 어느 방향으로 일어났는지와 어느 클래스가 약한지, 예측이 어느 쪽으로 치우쳤는지를 해석한다.",
@@ -102,6 +162,31 @@ SECTION_TASKS: dict[str, str] = {
     ),
 }
 
+# 판 4 — 칸이 하는 일은 같고 판 4 에서 달라진 것만 바꾼다: 5.4(8.1 칸)는 평가 말 없이 수치 위치만(D49 ①, 부록 A10),
+# 5.5(8.3 칸)는 '근소' 대신 판정 여유·최약 클래스는 조건에 걸릴 때만 운영 위험(D49 ②), 6절은 판 4 자리(6.1·6.2).
+SECTION_TASKS_ED4: dict[str, str] = {
+    **SECTION_TASKS,
+    "8.1": (
+        "내부 참조 기준 대비 모델 값의 위치(참조 범위보다 높음·참조 범위 안·참조 범위보다 낮음)와 목표값 수준을 쓴다. "
+        "기준의 출처·성격(공개 벤치마크 평균이 아닌 자체 설정 기준)을 함께 밝히고 '공개 벤치마크 평균'처럼 단정하지 않는다. "
+        "모델 값의 위치와 목표값의 위치는 단순한 수치 위치이므로 '우수'·'미흡'처럼 좋고 나쁨을 평가하는 말로 바꾸지 않는다."
+    ),
+    "8.3": (
+        "운영에서 문제가 될 수 있는 위험(판정 여유가 작은 지표, 약한 클래스, 결정 임계값, 응답 시간 등)을 쓴다. 가장 약한 "
+        "클래스는 늘 언급하되, 운영 위험으로 다룰지는 그 결론에 적힌 대로 따른다."
+    ),
+    "9": (
+        "6.1 글은 권고 절이 6.1절인 데이터 쪽 문제를, 6.2 글은 권고 절이 6.2절인 모델·운영 쪽 문제를 다룬다. 어느 쪽에 "
+        "문제가 없으면 그쪽에서 지목된 문제가 없다고만 쓴다. 권고표에는 문제마다 하나 이상: 문제 번호, 짧은 한국어 분류 "
+        "이름, 권고 문장, 기대 효과(방향만, 숫자 없음). 문제에 덧붙임이 있으면 권고에 반영한다."
+    ),
+}
+
+
+def section_task(section_id: str, *, edition: int) -> str:
+    return (SECTION_TASKS_ED4 if edition == 4 else SECTION_TASKS)[section_id]
+
+
 # AI 응답 필드가 어느 칸 글인지(user 메시지에 한 번 알린다). 필드 이름은 스키마 키일 뿐 문장에 쓰지 않는다.
 FIELD_NAMES: dict[str, str] = {
     "section_7_1": "7.1 혼동행렬 해석",
@@ -114,6 +199,21 @@ FIELD_NAMES: dict[str, str] = {
     "section_9_2": "9.2 모델·운영 측면 권고 글",
     "recommendations": "9절 권고표",
 }
+
+# 판 4 — 칸의 판 4 자리와 제목(sections.place·title — 예시본 5·6절 소제목). 권고표는 6절(부록 A4).
+FIELD_NAMES_ED4: dict[str, str] = {
+    **{
+        SECTIONS_BY_ID[sid].ai_fields[0]: f"{place(sid, edition=4)} {title(sid, edition=4)}"
+        for sid in ("7.1", "7.2", "7.3", "8.1", "8.2", "8.3")
+    },
+    "section_9_1": f"{place('9.1', edition=4)} {title('9.1', edition=4)} 권고 글",
+    "section_9_2": f"{place('9.2', edition=4)} {title('9.2', edition=4)} 권고 글",
+    "recommendations": f"{place('9', edition=4)}절 권고표",
+}
+
+
+def field_name(field_id: str, *, edition: int) -> str:
+    return (FIELD_NAMES_ED4 if edition == 4 else FIELD_NAMES)[field_id]
 
 
 # ── 칸 스키마 ───────────────────────────────────────────────────────────────────
@@ -180,6 +280,19 @@ _INTERPRET_ONLY = {
     ),
 }
 
+# 판 4 — 8.3-02(판정 여유가 작은 지표)는 고정 문구 18 이 없다. 값·신뢰구간·판정 여유는 성적서가 4.3 표에 찍으므로(고정
+# 문구 19) 숫자 없이 해석만 쓴다(대응표 24). 부록 B22 와 같은 두 갈래 — 구간이 목표를 포함하는 지표 / 구간이 없는 지표.
+_INTERPRET_ONLY_ED4 = {
+    "8.3-02": (
+        "판정 여유가 작은 지표는 성적서가 4.3절 표에 값·신뢰구간·판정 여유와 함께 찍는다. 그 숫자를 되풀이하지 말고, 판정의 "
+        "여유가 작다는 위험만 해석한다. 표본이 달라지면 판정이 뒤집힐 수 있다는 말은 95% 신뢰구간이 목표값을 포함하는 지표에만 "
+        "쓰고, 신뢰구간이 없는 지표는 목표값과의 차이가 목표값의 3% 미만이라 판정의 여유가 작다는 사실만 쓴다. 충족한 지표를 "
+        "미달했다고 쓰지 않는다."
+    ),
+}
+# 판 4 에서 고정 문구 17 이 찍히는 자리(4.4 혼동 행렬 건수 표 아래 — 계약 narrative_slots_ed4.json 의 fixed_sentence_places).
+_FIXED_PLACE_ED4 = {"17": "4.4"}
+
 # 고정 문장(17·18)을 받지 못했을 때 — 성적서가 따로 찍지 않으므로 AI 가 그 사실을 쓴다.
 _WRITE_IT_YOURSELF = {
     "7.1-11": (
@@ -204,6 +317,23 @@ _PRINTED_ELSEWHERE = {
     "9-01": "문제 목록 표(번호·우선순위·문제 이름)는 성적서가 9절에 찍는다.",
     "9-03": "지목된 문제가 없다는 문장을 성적서가 9절에 찍는다.",
 }
+
+
+# 판 4 — 고정 문구·양식이 찍히는 판 4 자리(계약 narrative_slots_ed4.json 의 fixed_sentence_places, 계획 4절 — 9 는 3.3, 12 는
+# 5.3 서술 앞, 16 은 4.6 표 아래, 11a/11b 는 5.1 서술 뒤, 판정 규칙(10)은 3.4, 평균 방식(4)은 3.3, 지표 선택 기준(5)은 3.1, 문제
+# 표와 문제 없음(6)은 6절).
+_PRINTED_ELSEWHERE_ED4 = {
+    "7.1-12": "예측을 확률에서 파생했다는 문장(결정 임계값 포함)을 성적서가 3.3절에 찍는다.",
+    "7.2-04": "정답 라벨에 대한 주의 문장을 성적서가 5.3절 서술 앞에 찍는다.",
+    "8.1-03": "내부 참조 기준치가 없어 벤치마크 비교를 하지 않은 지표의 문장을 성적서가 4.6절 표 아래에 찍는다.",
+    "8.2-01": "판정 규칙 문장은 성적서 3.4절에 찍힌다. 규칙을 다시 풀어 쓰지 말고 이 성적서의 판정 사유만 쓴다.",
+    "8.2-04": "일반화 해석 문장(평가 데이터와 학습 데이터의 출처 관계)을 성적서가 5.1절 서술 뒤에 찍는다.",
+    "8.2-10": "평균 방식을 고른 기준(의뢰자의 클래스 중요도 선언)은 성적서 3.3절에 찍힌다.",
+    "8.2-12": "지표 선택 기준은 의뢰자가 고른 이유로 성적서 3.1절에 찍힌다.",
+    "9-01": "문제 목록 표(번호·우선순위·문제 이름)는 성적서가 6절에 찍는다.",
+    "9-03": "지목된 문제가 없다는 문장을 성적서가 6절에 찍는다.",
+}
+assert set(_PRINTED_ELSEWHERE_ED4) == set(_PRINTED_ELSEWHERE), "판 4 설명이 판 3 과 같은 항목을 덮어야 한다"
 
 
 def _fixed_texts(fs: FactSheet, item_id: str) -> list[str]:
@@ -233,8 +363,47 @@ _F1_ONLY_GAIN = (
 )
 
 
-def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str) -> list[str]:
-    """사실에 따라 붙는 유의점(옛 지시문 규칙 10~15 를 필드명 없이 한국어로)."""
+# 판 4 — 사실 보기 지표 표의 판정 여유 칸 이름(fact_view_ed4.MARGIN_KEY)의 앞부분. 유의가 이 이름으로 그 칸을 가리킨다.
+_MARGIN_COLUMN = MARGIN_KEY.split("(", 1)[0]
+assert _MARGIN_COLUMN == "판정 여유"
+
+# 판 4 — 위험 방향 쪽 오류 이름(D49 ③ 유의).
+_RISK_SIDE_ED4 = {"fn": "거짓 음성(FN, 놓침)", "fp": "거짓 양성(FP, 잘못 잡음)"}
+
+
+def _risk_side_note(fs: FactSheet) -> str | None:
+    """판 4 — 의뢰자가 위험 방향을 밝혔으면 임계값 조정을 말할 때 그 쪽 지표를 함께 쓰라는 유의(서술 설계 D49 ③, J9)."""
+    g = fs.f1_threshold_gain
+    rs = g.risk_side if g is not None else None
+    if rs is None:
+        return None
+    name = rs.display_name
+    goal = (
+        " 목표가 있는 지표이므로 그 임계값에서 목표를 충족하는지('임계값 조정 여지'의 목표 충족 칸)도 함께 쓴다."
+        if rs.meets_target_at_best is not None else " 목표가 없는 지표이므로 목표 충족은 쓰지 않는다."
+    )
+    return (
+        f"임계값 조정을 말할 때는 의뢰자가 더 위험하다고 밝힌 {_RISK_SIDE_ED4[rs.side]} 쪽 지표인 {with_josa(name, '이/가')} "
+        f"F1 이 가장 높은 결정 임계값에서 얼마인지(사실 시트 '임계값 조정 여지'의 그 임계값의 {name})를 함께 쓴다."
+        + goal
+    )
+
+
+def _section_notes_ed4(section_id: str, fs: FactSheet, derived: dict, task_type: str) -> list[str]:
+    """판 4 유의 — 판 3 유의에서 판 4 뜻이 바뀐 것(8.3 의 근소 차이 칸 → 판정 여유 칸)을 바꾸고, D49 ③(위험 쪽 지표)을 더한다.
+    나머지는 판 3 유의 그대로. D49 ②(최약 클래스의 운영 위험 조건)는 결론 8.3-01 이 그 까닭과 함께 싣는다
+    (required_items._weakest_risk)."""
+    notes = _section_notes(section_id, fs, derived, task_type, edition=4)
+    if fs.f1_threshold_gain is not None and section_id in _THRESHOLD_GAIN_SECTIONS:
+        note = _risk_side_note(fs)
+        if note:
+            notes.append(note)
+    return notes
+
+
+def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str, *, edition: int) -> list[str]:
+    """사실에 따라 붙는 유의점(옛 지시문 규칙 10~15 를 필드명 없이 한국어로). edition 4 는 8.3 의 근소 차이 칸 유의만 판 4
+    글(판정 여유 칸)이다 — 판 4 유의 전체는 _section_notes_ed4 가 이것을 부른 뒤 더한다."""
     notes: list[str] = []
     facts = fs.facts
     if section_id == "7.1":
@@ -299,7 +468,14 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
         if derived.get("threshold_tuning"):
             notes.append("임계값을 바꿔 오를 수 있는 F1 향상폭은 이 데이터에서 오를 수 있는 최대폭이고 같은 평가 데이터로 고른 값이라 별도 데이터로 확인해야 한다고 덧붙인다. 성능 향상을 보장한다고 쓰지 않는다.")
     elif section_id == "8.3":
-        if any(m.threshold is not None for m in fs.metrics):
+        if any(m.threshold is not None for m in fs.metrics) and edition == 4:
+            # 판 4 — 근소 차이 칸 대신 판정 여유 칸(고정 문구 19 — '작음'/'충분', 대응표 24).
+            notes.append(
+                f"목표와의 여유가 작다·판정이 뒤집힐 수 있다는 해석은 사실 시트 지표 표의 '{_MARGIN_COLUMN}' 칸이 '작음'인 지표에만 "
+                "쓴다. '충분'인 지표는 목표와의 차이를 그대로 적을 수는 있어도 여유가 작다고 해석하지 않는다. 판정이 뒤집힐 수 있다는 "
+                "말은 95% 신뢰구간이 목표값을 포함하는 지표에만 쓰고, 신뢰구간이 없는 지표는 판정의 여유가 작다는 사실만 쓴다."
+            )
+        elif any(m.threshold is not None for m in fs.metrics):
             # 세션 C 실호출(yeast 강한 모델): 근소 차이가 아닌 Hamming Loss 를 '여유가 크지 않다'고 새로 해석했다.
             notes.append(
                 "목표와의 여유가 작다·아슬아슬하다·판정이 뒤집힐 수 있다는 해석은 사실 시트 지표 표의 '근소 차이' 칸이 "
@@ -338,14 +514,22 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
     return notes
 
 
-def section_briefs(fs: FactSheet, derived: dict, conclusions: list[Conclusion], task_type: str) -> dict[str, SectionBrief]:
+def section_briefs(
+    fs: FactSheet, derived: dict, conclusions: list[Conclusion], task_type: str, *, edition: int,
+) -> dict[str, SectionBrief]:
+    """칸마다 지시 재료. edition 은 성적서 양식 판(판 4 는 고정 문구 자리·설명·유의가 판 4 글)."""
     briefs = {sid: SectionBrief() for sid in SECTIONS_BY_ID}
+    printed_elsewhere = _PRINTED_ELSEWHERE_ED4 if edition == 4 else _PRINTED_ELSEWHERE
     for c in conclusions:
         brief = briefs[c.section]
         if c.open_ended:
             continue
         if c.author in ("ai", "ai_fact"):
             brief.must.append(c.text)
+        elif c.author == "fixed_interpret" and edition == 4 and c.item_id in _INTERPRET_ONLY_ED4:
+            # 판 4 — 판정 여유가 작은 지표는 고정 문구 18 이 없다(판 4 프론트가 보내지 않는다). 18 이 없다고 옛 요청 갈래
+            # (_WRITE_IT_YOURSELF — '근소 차이' 칸)로 빠지지 않게 먼저 가른다. 숫자는 4.3 표가 찍는다.
+            brief.interpret.append(_INTERPRET_ONLY_ED4[c.item_id] + f" 해석 재료: {c.text}")
         elif c.author == "fixed_interpret":
             # 결론 문장은 숫자 없는 해석 재료다(우세한 오류·근소 지표가 충족했는지 — S6). 성적서가 그 고정 문장을 찍는지는
             # 규칙 템플릿과 같은 함수(required_items.code_prints)로 본다 — facts 상한으로 문장 목록을 비웠어도 화면은 찍는다.
@@ -353,6 +537,9 @@ def section_briefs(fs: FactSheet, derived: dict, conclusions: list[Conclusion], 
             if code_prints(fs, _FIXED_SENTENCE_FOR_ITEM[c.item_id]):
                 # 문장을 덜어 냈으면 인용할 문장이 없다 — '아래 문장' 이라고 하지 않는다(S5 검토 prompt-3).
                 where = "아래 문장으로" if sentences else "따로 숫자로"
+                if edition == 4:
+                    # 판 4 는 고정 문구 17 이 5.2 서술 아래가 아니라 4.4 표 아래에 찍힌다.
+                    where = f"{_FIXED_PLACE_ED4[_FIXED_SENTENCE_FOR_ITEM[c.item_id]]}절에 {where}"
                 brief.interpret.append(
                     _INTERPRET_ONLY[c.item_id].format(where=where) + f" 해석 재료: {c.text}"
                     + "".join(f' — "{t}"' for t in sentences)
@@ -365,9 +552,12 @@ def section_briefs(fs: FactSheet, derived: dict, conclusions: list[Conclusion], 
             if sentences:
                 brief.printed.extend(f'"{t}"' for t in sentences)
             else:
-                brief.printed.append(_PRINTED_ELSEWHERE[c.item_id])
+                brief.printed.append(printed_elsewhere[c.item_id])
     for sid, brief in briefs.items():
-        brief.notes = _section_notes(sid, fs, derived, task_type)
+        if edition == 4:
+            brief.notes = _section_notes_ed4(sid, fs, derived, task_type)
+        else:
+            brief.notes = _section_notes(sid, fs, derived, task_type, edition=3)
     return briefs
 
 
@@ -379,8 +569,18 @@ _D24_TEXT = {
 }
 
 
-def _d24_lines(fs: FactSheet, conclusions: list[Conclusion], section_ids) -> list[str]:
+# 판 4 — 같은 말을 판 4 칸 이름으로(오분류·판정과 불확실성·운영 위험). 판 3 처럼 번호 없이 이름만 — AI 가 옮겨 적어도 숫자가 아니다.
+_D24_TEXT_ED4 = {
+    "7.1-03": _D24_TEXT["7.1-03"].replace("혼동행렬 해석 칸에서", "오분류 칸에서"),
+    "8.2-11": _D24_TEXT["8.2-11"].replace("종합 총평 칸에서", "판정과 불확실성 칸에서"),
+    "8.3-05": _D24_TEXT["8.3-05"].replace("리스크 칸에서", "운영 위험 칸에서"),
+}
+assert all(_D24_TEXT_ED4[k] != _D24_TEXT[k] for k in _D24_TEXT), "판 4 칸 이름 치환이 빠졌다"
+
+
+def _d24_lines(fs: FactSheet, conclusions: list[Conclusion], section_ids, *, edition: int) -> list[str]:
     facts = fs.facts
+    table = _D24_TEXT_ED4 if edition == 4 else _D24_TEXT
     lines = []
     for c in conclusions:
         if not c.d24_values or c.section not in section_ids or c.item_id not in _D24_TEXT:
@@ -391,7 +591,7 @@ def _d24_lines(fs: FactSheet, conclusions: list[Conclusion], section_ids) -> lis
             side = "FN(놓침)" if facts.declared_risk_errors.side == "fn" else "FP(잘못 잡음)"
         if facts is not None and facts.declared_average is not None:
             priority = fact_view.PRIORITY_DECL_KO[facts.declared_average.class_priority]
-        lines.append(_D24_TEXT[c.item_id].format(side=side, priority=priority))
+        lines.append(table[c.item_id].format(side=side, priority=priority))
     return lines
 
 
@@ -428,7 +628,7 @@ def build_context(
     descriptions = class_descriptions(client_inputs)
     ctx = PromptContext(
         fs=fs, task_type=task_type, view=view, client_view=client_view, conclusions=conclusions,
-        briefs=section_briefs(fs, derived, conclusions, task_type), class_descriptions=descriptions,
+        briefs=section_briefs(fs, derived, conclusions, task_type, edition=edition), class_descriptions=descriptions,
         edition=edition, dropped_client_keys=dropped,
     )
     _fit(ctx)
@@ -442,11 +642,17 @@ def _bullets(lines: list[str]) -> str:
 def build_user_message(ctx: PromptContext, section_ids, *, regenerate: bool = False) -> str:
     """이번 호출의 user 메시지. section_ids 는 이번에 쓰는 칸(첫 생성 = 장 하나, 다시 만들기 = 칸 하나)."""
     section_ids = tuple(section_ids)
+    edition = ctx.edition
     fields = [f for sid in section_ids for f in SECTIONS_BY_ID[sid].ai_fields]
-    names = ", ".join(f"{SECTIONS_BY_ID[sid].id} {SECTIONS_BY_ID[sid].title}" for sid in section_ids)
+
+    def label(sid: str) -> str:
+        # 칸을 부르는 꼴 — 판 3 은 칸 이름과 제목('8.2 종합 총평'), 판 4 는 판 4 자리와 제목('5.1 판정과 불확실성').
+        return f"{place(sid, edition=edition)} {title(sid, edition=edition)}"
+
+    names = ", ".join(label(sid) for sid in section_ids)
     head = (
         f"이번 호출은 {names} 칸{'을 다시' if regenerate else '을'} 쓴다. 응답 필드와 칸: "
-        + ", ".join(f"{f} = {FIELD_NAMES[f]}" for f in fields)
+        + ", ".join(f"{f} = {field_name(f, edition=edition)}" for f in fields)
         + ". 필드 이름은 문장에 쓰지 않는다.\n"
     )
     parts = ["[이번 호출]\n" + head]
@@ -454,7 +660,7 @@ def build_user_message(ctx: PromptContext, section_ids, *, regenerate: bool = Fa
     body = ["[칸별 지시]\n"]
     for sid in section_ids:
         brief = ctx.briefs[sid]
-        block = f"■ {sid} {SECTIONS_BY_ID[sid].title}\n  하는 일: {SECTION_TASKS[sid]}\n"
+        block = f"■ {label(sid)}\n  하는 일: {section_task(sid, edition=edition)}\n"
         if brief.must:
             block += "  반드시 다룰 결론:\n" + _bullets(brief.must)
         if brief.interpret:
@@ -466,12 +672,12 @@ def build_user_message(ctx: PromptContext, section_ids, *, regenerate: bool = Fa
         body.append(block)
     parts.append("".join(body))
 
-    d24 = _d24_lines(ctx.fs, ctx.conclusions, section_ids)
+    d24 = _d24_lines(ctx.fs, ctx.conclusions, section_ids, edition=edition)
     if d24:
         parts.append("[의뢰자 선언 — 빠뜨리지 말고 숫자로 반영]\n" + _bullets(d24))
 
     others = [
-        f"{c.section} {c.text}" for c in ctx.conclusions
+        f"{place(c.section, edition=edition)} {c.text}" for c in ctx.conclusions
         if c.section not in section_ids and c.author in ("ai", "ai_fact") and not c.open_ended
     ]
     if others:
@@ -483,7 +689,7 @@ def build_user_message(ctx: PromptContext, section_ids, *, regenerate: bool = Fa
     # 되어 부딪친다(S5 검토 prompt-4). 실측 문제는 장이 다른 경우였다.
     chapters_here = {SECTIONS_BY_ID[sid].chapter for sid in section_ids}
     printed_elsewhere = [
-        f"{c.section}절: \"{t}\""
+        f"{_printed_place(c, edition)}절: \"{t}\""
         for c in ctx.conclusions
         if SECTIONS_BY_ID[c.section].chapter not in chapters_here and c.author == "fixed_interpret"
         for t in _fixed_texts(ctx.fs, c.item_id)
@@ -510,6 +716,13 @@ def build_user_message(ctx: PromptContext, section_ids, *, regenerate: bool = Fa
     return "\n".join(parts)
 
 
+def _printed_place(c: Conclusion, edition: int) -> str:
+    """고정 문구 + 해석 항목의 문장이 찍히는 절 — 판 3 은 그 칸, 판 4 는 고정 문구 자리(17 → 4.4)."""
+    if edition == 4:
+        return _FIXED_PLACE_ED4.get(_FIXED_SENTENCE_FOR_ITEM[c.item_id], place(c.section, edition=4))
+    return c.section
+
+
 def _longest_message(ctx: PromptContext) -> int:
     from app.narrative.sections import CHAPTERS
 
@@ -519,7 +732,7 @@ def _longest_message(ctx: PromptContext) -> int:
 def _fit(ctx: PromptContext) -> None:
     """가장 긴 장 메시지 + system 이 상한을 넘으면 큰 표부터 덜어 낸다(사실 시트 보기에서만)."""
     for name, step in fact_view.TRIM_STEPS:
-        if len(SYSTEM_PROMPT) + _longest_message(ctx) <= MAX_PROMPT_CHARS:
+        if len(system_prompt(ctx.edition)) + _longest_message(ctx) <= MAX_PROMPT_CHARS:
             return
         trial = copy.deepcopy(ctx.view)
         if step(trial):
@@ -528,4 +741,4 @@ def _fit(ctx: PromptContext) -> None:
 
 
 def fits(ctx: PromptContext) -> bool:
-    return len(SYSTEM_PROMPT) + _longest_message(ctx) <= MAX_PROMPT_CHARS
+    return len(system_prompt(ctx.edition)) + _longest_message(ctx) <= MAX_PROMPT_CHARS

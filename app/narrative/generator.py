@@ -282,7 +282,8 @@ async def generate_sections(
             wait_cap = room if slot_wait is None else min(slot_wait, room)
         user = prompt.build_user_message(ctx, section_ids, regenerate=purpose == "regenerate")
         schema = prompt.response_schema(section_ids, problem_ids)
-        entry["prompt_chars"] = len(prompt.SYSTEM_PROMPT) + len(user)
+        system = prompt.system_prompt(edition)
+        entry["prompt_chars"] = len(system) + len(user)
         waited_from = time.perf_counter()
         slot = {"held": False}
         try:
@@ -308,7 +309,7 @@ async def generate_sections(
                 entry["started_at_seconds"] = round(time.perf_counter() - started, 3)
                 async with asyncio.timeout(limit):
                     result = await call_narrative_llm(
-                        client, system=prompt.SYSTEM_PROMPT, user=user, schema=schema, effort=effort,
+                        client, system=system, user=user, schema=schema, effort=effort,
                     )
         except TimeoutError:
             failure = "timeout" if slot["held"] else "busy"
