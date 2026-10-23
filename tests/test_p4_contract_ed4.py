@@ -1,11 +1,13 @@
 """tests/test_p4_contract_ed4.py — 판 4 공통 계약(판 4 라운드 S2 ①)의 백엔드 쪽.
 
-공통 파일 셋(같은 바이트 사본이 프론트 src/test/contract/ 에 있다)과 백엔드에만 있는 임시 판 4 예시를 지킨다.
+공통 파일(같은 바이트 사본이 프론트 src/test/contract/ 에 있다)을 지킨다.
 - `fact_sheet_contract_ed4.json`: 판 4 서술 요청 명세(판 신호 report_edition, 판 4 에만 있는 키, 판 4 표기로 찍는 칸).
 - `number_wording_ed4.json`: 판 4 숫자 표기·조사 대조 표. 두 저장소가 같은 표로 자기 함수를 시험한다.
 - `narrative_slots_ed4.json`: 서술 칸 → 판 4 자리, 판 4 제목, 작성 기록 줄(B25·B26).
-- `fact_sheet_binary_ed4.json`(백엔드만): bc_strong(RPT-2026-0001 입력) 판 3 요청을 명세대로 손으로 고친 **임시** 예시.
-  S3 ⑧ 에서 프론트가 실제 조립으로 뜬 예시로 바꾼다 — 그때 아래 sha256 도 이유와 함께 고친다.
+- `fact_sheet_{binary,multiclass,multilabel}_ed4.json`: 판 4 예시 — 프론트가 앱이 실제로 보내는 판 4 요청 본문으로 뜬 것
+  (S3 ⑧, 프론트 src/test/edition4/contractExamplesEd4.test.tsx). 입력은 판 3 발급본 RPT-2026-0001(bc_strong)·0003(digits_strong)·
+  0005(yeast_strong)과 같은 입력에 새 평가 응답. 이진은 S2 ① 이 명세대로 손으로 고친 임시 예시와 바이트까지 같았다(sha 그대로).
+  예시를 바꾸면 프론트에서 다시 뜨고(UPDATE_CONTRACT) 이 폴더로 바이트 그대로 옮긴 뒤 두 시험의 sha256 을 이유와 함께 고친다.
 
 판 3 명세·예시(fact_sheet_contract.json, fact_sheet_{binary,multiclass,multilabel,legacy_main}.json)는 프론트가 sha256 으로
 묶어 둔 판 3 정답이라 건드리지 않는다. 이 시험은 그 파일들에 판 4 키가 없다는 것(null 키 금지)만 본다.
@@ -32,6 +34,12 @@ FRONT_CONTRACT = TESTS.parents[1] / "Capstone_Front" / "src" / "test" / "contrac
 ROUND_SPEC = TESTS.parents[1] / "NARRATIVE_ROUND" / "사실시트_계약_ed4.json"
 SHARED = ("fact_sheet_contract_ed4.json", "number_wording_ed4.json", "narrative_slots_ed4.json")
 EXAMPLE = "fact_sheet_binary_ed4.json"
+# 판 4 예시 → 같은 입력의 판 3 발급본 요청(tests/data/edition3_issued/requests — 판 3 정답 입력).
+EXAMPLES = {
+    EXAMPLE: "bc_strong",
+    "fact_sheet_multiclass_ed4.json": "digits_strong",
+    "fact_sheet_multilabel_ed4.json": "yeast_strong",
+}
 
 # 자기 저장소 안의 고정(옆 저장소가 없는 CI 에서도 지킨다). 프론트 contractEd4.test.ts 와 같은 값이다.
 SHA256 = {
@@ -39,6 +47,8 @@ SHA256 = {
     "number_wording_ed4.json": "f377e7face2c1b3226a0d45fe4d9d527cd85b249de9fd7f54525590801e754ff",
     "narrative_slots_ed4.json": "3c43ffa35357c8c7f4c8a30d182482a85dec51caefa872dc9e556ae51d5b7d35",
     EXAMPLE: "fe05c374414fd868cf3add5b92e090bae0282e66627231b14bb81aad81879818",
+    "fact_sheet_multiclass_ed4.json": "c2e03e71f457088cb3ba784a623fbc1f20219ff2e93a5d26776d5c06d02c6f46",
+    "fact_sheet_multilabel_ed4.json": "403a8085f56ee5fab36aff107220c5393bf97e543485c745bec3ef3cdd1afc5a",
 }
 
 
@@ -62,7 +72,7 @@ def test_files_are_pinned_by_sha256():
 
 
 @pytest.mark.skipif(not FRONT_CONTRACT.exists(), reason="옆 저장소(Capstone_Front)가 없다 — CI 는 저장소 하나만 받는다")
-@pytest.mark.parametrize("name", SHARED)
+@pytest.mark.parametrize("name", SHARED + tuple(EXAMPLES))
 def test_frontend_copy_is_byte_identical(name):
     assert (FRONT_CONTRACT / name).read_bytes() == (CONTRACT / name).read_bytes()
 
@@ -171,6 +181,61 @@ def test_example_differs_from_edition3_bc_strong_only_at_declared_places():
     # 판 3 와 같은 값으로 남아야 하는 칸 몇 개 — 판 4 가 건드리면 안 된다.
     for path in ("fact_sheet.metrics[].value_text", "fact_sheet.metrics[].ci_low", "fact_sheet.score", "client_inputs"):
         assert not any(d == path or d.startswith(f"{path}.") for d in diff), path
+
+
+def _issued_edition3(tag: str) -> dict:
+    return json.loads((TESTS / "data" / "edition3_issued" / "requests" / f"{tag}.request.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("name", list(EXAMPLES))
+def test_every_example_differs_from_its_edition3_request_only_at_declared_places(name):
+    """세 예시 모두(다중·멀티 포함) — 같은 입력의 판 3 요청과 다른 자리는 명세가 판 4 키·판 4 표기·판 4 뜻으로 적은 칸뿐."""
+    ex = _load(name)
+    declared = set(ED4_ONLY) | {k for k in SPEC["edition4_notation"] if not k.startswith("$")} | set(SPEC["edition4_meaning"])
+    diff = _diff_paths(_issued_edition3(EXAMPLES[name]), ex)
+    assert "report_edition" in diff and "fact_sheet.metrics[].ci_low_text" in diff
+    # 선언된 칸이거나, 선언된 칸 아래(고정 문장 목록의 글 — 길이가 같아 칸 하나로 나온다), 또는 선언된 칸을 품은 목록(길이가 달라짐).
+    def declared_here(p: str) -> bool:
+        return any(p == d or p.startswith(f"{d}.") or p.startswith(f"{d}[]") or d.startswith(f"{p}[]") for d in declared)
+
+    stray = sorted(p for p in diff if not declared_here(p))
+    assert stray == []
+    for path in ("fact_sheet.metrics[].value_text", "fact_sheet.metrics[].ci_low", "fact_sheet.score", "client_inputs"):
+        assert not any(d == path or d.startswith(f"{path}.") for d in diff), path
+
+
+def _lost_keys(a, b, path: str = "") -> list[str]:
+    """a 의 키·값이 b 에 그대로 있는지(b 쪽에만 있는 기본값 칸은 보지 않는다 — 스키마가 채운 None). 1 == 1.0 은 같다."""
+    if isinstance(a, dict):
+        if not isinstance(b, dict):
+            return [path]
+        return [x for k, v in a.items() for x in ([f"{path}.{k}"] if k not in b else _lost_keys(v, b[k], f"{path}.{k}"))]
+    if isinstance(a, list):
+        if not isinstance(b, list) or len(a) != len(b):
+            return [path]
+        return [x for i, (v, w) in enumerate(zip(a, b)) for x in _lost_keys(v, w, f"{path}[{i}]")]
+    return [] if a == b else [f"{path} ({a!r} != {b!r})"]
+
+
+@pytest.mark.parametrize("name", list(EXAMPLES))
+def test_every_example_is_an_edition4_request_the_schema_keeps_whole(name):
+    """판 신호 4, 18 없음, 지표 줄마다 경계 표기 키, 판정 여유 불변식, 스키마를 지나도 버려지는 키·잘리는 칸 없음."""
+    from app.narrative.jobs import parse_request
+    from app.narrative.schemas import NarrativeRequest
+
+    ex = _load(name)
+    assert ex["report_edition"] == 4
+    assert "18" not in [s["id"] for s in ex["fact_sheet"]["facts"]["fixed_sentences"]]
+    metrics = ex["fact_sheet"]["metrics"]
+    assert metrics and all("ci_low_text" in m and "ci_high_text" in m for m in metrics)
+    with_ci = [m for m in metrics if m["ci_contains_target"] is not None]
+    assert with_ci
+    for m in with_ci:
+        assert m["near_target"] is m["ci_contains_target"], m["metric_id"]
+    assert [p["kind"] for p in ex["fact_sheet"]["problems"]][-1] == "same_source"
+    assert _lost_keys(ex, NarrativeRequest.model_validate(ex).model_dump(mode="json")) == []
+    req, trimmed = parse_request(json.loads(json.dumps(ex)))
+    assert (req.report_edition, trimmed) == (4, [])
 
 
 def test_spec_bc_strong_values_match_example():

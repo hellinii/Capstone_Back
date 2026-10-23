@@ -1,12 +1,13 @@
 """tests/p4_example_ed4.py — 판 4 서술 시험(S2b ⑤⑥⑦⑨)이 같이 쓰는 입력과, 판 4 예시에 묶인 기대값을 **한 곳에** 모은 것.
 
-판 4 예시 tests/contract/fact_sheet_binary_ed4.json 은 S2 ① 이 만든 **임시** 예시다(bc_strong — RPT-2026-0001 입력). S3 ⑧ 에서
-프론트가 실제로 뜬 예시로 바뀐다. 그때 바뀔 수 있는 글자(규칙 문장·허용 목록의 몇 숫자)는 이 파일의 EXAMPLE_* 에만 적었다 —
-다른 시험은 예시 글자에 기대지 않고 성질(판 4 표기·검문 통과·판 3 과 다름)로 본다. 예시를 바꿔 여기 값이 달라지면, 다른
-시험이 아니라 이 파일만 이유와 함께 고친다(달라진 글자가 정말 맞는지 예시본 5·6절과 대조).
+판 4 예시 tests/contract/fact_sheet_{binary,multiclass,multilabel}_ed4.json 은 프론트가 앱이 실제로 보내는 판 4 요청 본문으로 뜬
+것이다(S3 ⑧ — 입력은 RPT-2026-0001·0003·0005). 이진은 S2 ① 의 임시 예시(손으로 고친 것)와 바이트까지 같아 아래 EXAMPLE_* 는
+그대로다. 예시에 묶인 글자(규칙 문장·허용 목록의 몇 숫자)는 이 파일의 EXAMPLE_* 에만 적었다 — 다른 시험은 예시 글자에
+기대지 않고 성질(판 4 표기·검문 통과·판 3 과 다름)로 본다. 예시를 바꿔 여기 값이 달라지면, 다른 시험이 아니라 이 파일만
+이유와 함께 고친다(달라진 글자가 정말 맞는지 예시본 5·6절과 대조).
 
-- edition4_cases(): 판 4 로 돌려 볼 요청들 — 판 4 예시 + 판 3 입력(계약 3종·얼린 합성 2종·발급본 요청 6건)에 report_edition 4
-  만 붙인 것. 판 3 입력은 판 4 칸이 없어(None) 판 4 갈래의 '없을 때' 경로를 지난다.
+- edition4_cases(): 판 4 로 돌려 볼 요청들 — 판 4 예시 셋(이진·다중·멀티) + 판 3 입력(계약 3종·얼린 합성 2종·발급본 요청 6건)에
+  report_edition 4 만 붙인 것. 판 3 입력은 판 4 칸이 없어(None) 판 4 갈래의 '없을 때' 경로를 지난다.
 """
 from __future__ import annotations
 
@@ -21,6 +22,11 @@ CONTRACT = TESTS / "contract"
 FROZEN_INPUTS = TESTS / "golden_frozen" / "inputs"
 ISSUED_REQUESTS = TESTS / "data" / "edition3_issued" / "requests"
 EXAMPLE_PATH = CONTRACT / "fact_sheet_binary_ed4.json"
+# 다중(RPT-2026-0003 입력 digits_strong)·멀티레이블(RPT-2026-0005 입력 yeast_strong) 판 4 예시.
+MULTI_EXAMPLE_PATHS = {
+    "multiclass": CONTRACT / "fact_sheet_multiclass_ed4.json",
+    "multilabel": CONTRACT / "fact_sheet_multilabel_ed4.json",
+}
 
 
 def example_raw() -> dict:
@@ -45,11 +51,12 @@ def _load(path: Path) -> dict:
 def edition4_cases() -> list[tuple[str, dict]]:
     """(이름, 판 4 요청 원문) — 판 4 예시와, 판 3 입력에 판 신호만 4 로 붙인 것."""
     cases = [("ed4_example", example_raw())]
+    cases += [(f"ed4_example_{name}", _load(path)) for name, path in MULTI_EXAMPLE_PATHS.items()]
     for name in ("binary", "multiclass", "multilabel", "synth_inconclusive", "synth_conditional"):
         cases.append((f"ed3in_{name}", as_edition(_load(FROZEN_INPUTS / f"fact_sheet_{name}.json"), 4)))
     for path in sorted(ISSUED_REQUESTS.glob("*.request.json")):
         cases.append((f"issued_{path.name.split('.')[0]}", as_edition(_load(path), 4)))
-    assert len(cases) == 12
+    assert len(cases) == 14
     return cases
 
 
