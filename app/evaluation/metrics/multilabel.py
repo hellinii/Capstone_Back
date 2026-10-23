@@ -18,7 +18,7 @@ from app.evaluation.labels import parse_label_cell, sort_labels
 def _parse_multilabel_col(series: pd.Series):
     """멀티레이블 컬럼 → 라벨 리스트의 리스트.
 
-    파싱 규칙은 `evaluation.labels.parse_label_cell` 하나뿐이다(ISSUES.md D-04).
+    파싱 규칙은 `evaluation.labels.parse_label_cell` 하나뿐이다(D-04).
     종전에는 여기에 같은 규칙의 사본이 있었고, 구분자 처리가 조금씩 달라 같은 셀이
     계층마다 다른 라벨 집합이 됐다.
     """

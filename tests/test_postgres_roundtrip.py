@@ -4,7 +4,7 @@
 쓴다), tz 없는 시각 칸, 한국어 JSON 글 — 을 Postgres 에서 한 번 돌린다.
 
 `NARRATIVE_PG_URL`(예: postgresql://postgres:…@127.0.0.1:55433/narrative)이 있을 때만 돈다 — CI·평소에는 건너뛴다.
-로컬에서 돌리는 법은 Capstone_Back/docs/ARCHITECTURE.md 의 "서술 작업(job)" 절.
+로컬에서 돌리는 법은 Capstone_Back/docs/ARCHITECTURE.md §10.7(기록 둘과 작업 표)의 "Postgres 왕복".
 """
 import json
 import os

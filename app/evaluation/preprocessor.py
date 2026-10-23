@@ -6,7 +6,7 @@ preprocess_data 는 단계별 헬퍼(_guard/_coerce/_validate/_check/_extract)�
 "어떤 행이 평가에 들어가는가"(필수 컬럼 확인 · 멀티레이블 빈 셀 보존 · 결측 행 제거)는
 `frame.build_evaluation_frame` 이 정본이며, **검증(validation_service)도 같은 함수를
 호출한다** — 종전에는 두 계층이 서로 다른 결측 기준을 써서 성적서에 인쇄되는 표본 수가
-지표를 만든 표본 수와 달랐다(ISSUES.md D-01).
+지표를 만든 표본 수와 달랐다(D-01).
 
 상호작용
 - 의존(import): pandas, .frame
@@ -234,7 +234,7 @@ def _check_binary_classes(df: pd.DataFrame, mapping_dict: dict, task_type: str) 
         )
 
 
-# 파서는 labels.parse_label_cell 하나뿐이다(ISSUES.md D-04). 종전에는 라벨을 만드는
+# 파서는 labels.parse_label_cell 하나뿐이다(D-04). 종전에는 라벨을 만드는
 # 코드가 넷이었고 구분자 처리와 산출 타입이 서로 달랐다.
 _parse_multilabel_value = parse_label_cell
 
@@ -253,7 +253,7 @@ def score_columns(role_columns: Dict[str, List[str]]) -> List[str]:
 
     종전에는 `{role: column}` 축약에서 뽑아 역할당 마지막 컬럼 하나만 남았다. 그래서
     score_per_label 을 4개 매핑하면 앞 3개는 범위 검사를 받지 못했고, 매핑 순서만 바꿔도
-    같은 파일이 200/400 으로 갈렸다(ISSUES.md D-08).
+    같은 파일이 200/400 으로 갈렸다(D-08).
     """
     cols: List[str] = []
     for role in ('score_positive', 'prob_per_class', 'score_per_label'):
@@ -279,7 +279,7 @@ def _validate_score_columns(df: pd.DataFrame, role_columns: Dict[str, List[str]]
             if not invalid.empty:
                 # 첫 번째 에러가 발생한 위치를 구체적으로 안내.
                 # 인덱스는 0-based 라 그대로 인쇄하면 사용자가 세는 행 번호와 한 칸 어긋난다
-                # (ISSUES.md D-11). 헤더를 뺀 데이터 행 번호(1-based)로 환산해 말한다.
+                # (D-11). 헤더를 뺀 데이터 행 번호(1-based)로 환산해 말한다.
                 first_idx = invalid.index[0]
                 first_val = invalid.loc[first_idx, col]
                 raise ValueError(
@@ -437,7 +437,7 @@ def _derive_predictions(
     logs: Dict[str, Any],
     selected_metric_ids: List[str] | None = None,
 ) -> pd.DataFrame:
-    """4-2. 하드 예측이 없을 때 확률에서 예측을 파생한다(ISSUES.md A-01·A-02, 결정 1).
+    """4-2. 하드 예측이 없을 때 확률에서 예측을 파생한다(A-01·A-02, 결정 1).
 
     파생은 **모델의 실제 출력이 아니다.** SPEC §0 이 요구하는 대로 파생 사실·임계값·출처
     컬럼을 `logs["derived_prediction"]` 에 남겨 응답과 성적서가 인쇄하게 한다.
@@ -551,7 +551,7 @@ def _check_prob_sum(df: pd.DataFrame, task_type: str, prob_cols: List[str], logs
 
 
 def _warn_ghost_classes(df: pd.DataFrame, mapping_dict: dict, logs: Dict[str, Any]) -> None:
-    """5-1. 예측에만 등장한 클래스를 알린다 (ISSUES.md C-03).
+    """5-1. 예측에만 등장한 클래스를 알린다 (C-03).
 
     클래스 집합은 `y_true` 기준으로 고정되므로 이 클래스들은 어떤 지표의 분모도 되지
     않고, 그렇게 예측한 행은 정답 클래스의 오분류(FN)로 남는다. **표본 수는 변하지
@@ -598,7 +598,7 @@ def collect_role_columns(mappings: List[Dict[str, str]]) -> Dict[str, List[str]]
     """역할 → 매핑된 컬럼 **목록**(입력 순서 보존).
 
     `{role: column}` 축약은 확률 역할처럼 여러 컬럼을 갖는 역할에서 마지막 하나만
-    남겨 조용히 정보를 잃는다(ISSUES.md D-08). 목록으로 모아 두고, 단일 컬럼 역할은
+    남겨 조용히 정보를 잃는다(D-08). 목록으로 모아 두고, 단일 컬럼 역할은
     호출부가 [0] 을 쓴다.
     """
     collected: Dict[str, List[str]] = {}
@@ -631,7 +631,7 @@ def preprocess_data(
     prob_cols = role_columns.get('prob_per_class', [])
 
     # 필수 컬럼 확인 + 멀티레이블 빈 셀 보존 + 결측 행 제거를 공용 헬퍼에 위임한다.
-    # 검증(validation_service)이 같은 함수를 호출해 **같은 프레임**을 쓴다(ISSUES.md D-01).
+    # 검증(validation_service)이 같은 함수를 호출해 **같은 프레임**을 쓴다(D-01).
     df, dropped, notes = build_evaluation_frame(df, mappings, task_type, selected_metric_ids)
     if dropped > 0:
         logs["dropped_rows"] = dropped
@@ -663,7 +663,7 @@ def preprocess_data(
     _extract_class_distribution(df, mapping_dict, task_type, logs)
 
     # 실제로 지표를 계산한 행 수. 프론트가 분포 합계로 추측하던 값을 서버가 확정한다
-    # (ISSUES.md B-02). 멀티레이블에서 class_distribution 은 '레이블 등장 횟수'라
+    # (B-02). 멀티레이블에서 class_distribution 은 '레이블 등장 횟수'라
     # 합계가 행 수를 넘는다 — 두 값은 같은 것이 아니다.
     logs["n_samples"] = len(df)
 

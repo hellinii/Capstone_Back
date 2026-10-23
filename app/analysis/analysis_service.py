@@ -53,7 +53,7 @@ async def resolve_column_mapping(
         logger.warning("OPENAI_API_KEY 미설정 → 규칙 기반 폴백 컬럼 매핑으로 강등합니다.")
         return _rule_fallback("no_key")
 
-    # 시간당 예산 소진 → 규칙 폴백(ISSUES.md G-03, 결정 9). 429 로 거절하면 프론트가
+    # 시간당 예산 소진 → 규칙 폴백(G-03, 결정 9). 429 로 거절하면 프론트가
     # throw 해서 에러 화면으로 간다 — 폴백 매핑은 이미 있으므로 강등이 옳다.
     if not llm_budget.mapping.try_consume():
         logger.warning(

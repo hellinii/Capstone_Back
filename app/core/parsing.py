@@ -20,14 +20,14 @@ def _read_csv_any_encoding(file_content: bytes) -> pd.DataFrame:
     **마지막 단계 `latin-1` 은 인코딩 때문에 실패할 수 없다** — 256바이트 전부에 대응하는
     문자가 있어 `UnicodeDecodeError` 가 나지 않는다. 그래서 루프를 빠져나오는 유일한
     경로는 `ParserError`(구조가 깨진 CSV)인데, 종전 문구는 "파일 인코딩을 자동으로
-    감지할 수 없습니다"라고 말했다(ISSUES.md D-13). 원인과 무관한 안내를 받은 사용자는
+    감지할 수 없습니다"라고 말했다(D-13). 원인과 무관한 안내를 받은 사용자는
     인코딩을 바꿔 가며 헛수고를 한다.
 
     `EmptyDataError` 는 `ParserError` 의 자식이 **아니라서** except 절을 그냥 통과했고,
     pandas 영문 원문("No columns to parse from file")이 그대로 사용자에게 나갔다.
 
     거절 규칙 자체는 넓히지도 좁히지도 않는다 — 흔한 엑셀 내보내기 파일이 거절되면
-    안 된다(★작은 판단 ②).
+    안 된다(작은 판단).
     """
     last_error: Exception | None = None
     for encoding in ("utf-8", "utf-8-sig", "cp949", "latin-1"):
@@ -66,7 +66,7 @@ def _json_to_df(file_content: bytes) -> pd.DataFrame:
 
     if isinstance(raw, dict):
         values = list(raw.values())
-        # 래퍼 판정은 **키 개수가 아니라 값의 형태**로 한다(ISSUES.md D-14).
+        # 래퍼 판정은 **키 개수가 아니라 값의 형태**로 한다(D-14).
         # `{"samples": [{...}, ...]}` 는 래퍼지만 `{"y_true": [1, 0, 1]}` 은 컬럼이
         # 하나뿐인 정상 데이터다. 종전 규칙("키 1개 + 값이 리스트")은 후자를 펼쳐
         # **컬럼명 없는 단일 열**로 만들었다 — 매핑 화면에서 그 컬럼이 사라진다.

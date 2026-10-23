@@ -8,7 +8,7 @@
 - 예시가 NarrativeRequest 로 검증되고, **조용히 버려지는 키가 없다**(S2 의 value_text·gain_text·display 가 모르는
   키라 버려지던 일).
 - 계약 상수 = 백엔드 상수, 계약의 facts 칸 목록 = 스키마 칸 목록.
-- 운영 main 프론트 모양(facts 없음)의 요청도 옛 경로·작업 경로 모두 200.
+- 옛 프론트 모양(facts 없음)의 요청도 옛 경로·작업 경로 모두 200.
 - 두 저장소 사본이 같은지는 옆 저장소가 있을 때만 본다(skipIf).
 """
 import json

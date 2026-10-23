@@ -141,7 +141,7 @@ class DistributionFact(BaseModel):
         default={},
         description=(
             "클래스별 등장 횟수. multilabel 은 레이블 등장 횟수라 합계가 표본 수를 넘는다 "
-            "— 표본 수는 FactSheet.n_samples 를 쓸 것(ISSUES.md B-02)."
+            "— 표본 수는 FactSheet.n_samples 를 쓸 것(B-02)."
         ),
     )
     imbalance_ratio:    float | None   = Field(default=None, description="불균형 비율")
@@ -297,7 +297,7 @@ class ProblemFact(BaseModel):
 
 # ── 서술용 파생값(fact_sheet.facts, 계약 facts-1) ─────────────────────────────────
 # 계산은 프론트 narrativeFacts.ts 한 곳이다(계획 설계 요지 4). 서버는 받은 값을 다시 계산하지 않는다.
-# 모든 칸은 선택이다 — 옛 요청(운영 main 프론트, 저장된 다시 만들기 요청)에는 facts 자체가 없다.
+# 모든 칸은 선택이다 — 옛 요청(옛 프론트, 저장된 다시 만들기 요청)에는 facts 자체가 없다.
 # 클래스 단위 목록(작은 표본·편향·분포 차)은 상한을 넘으면 작업 경로가 통째로 비운다(app.narrative.jobs).
 
 
@@ -572,7 +572,7 @@ class ConclusionOut(BaseModel):
 
 
 class BenchmarkRefOut(BaseModel):
-    """8.1 에 숫자로 찍을 벤치마크 비교 한 줄 — 서버가 계산한 값 그대로(서술 설계 §4.8)."""
+    """8.1 에 숫자로 찍을 벤치마크 비교 한 줄 — 서버가 계산한 값 그대로(docs/ARCHITECTURE.md §10.10 벤치마크)."""
     metric:      str
     model_value: float
     ref_low:     float

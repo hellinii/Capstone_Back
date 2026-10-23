@@ -2,7 +2,7 @@
 
 /api/validate-data 의 각 점검 항목을 단일 책임 순수 함수로 분리한다.
 
-**`handling` 은 실제로 하는 일만 적는다**(ISSUES.md D-03, 결정 6-④). 종전에는
+**`handling` 은 실제로 하는 일만 적는다**(D-03, 결정 6-④). 종전에는
 "중복 ID 제거"·"미지 클래스 행 제외" 같은 문구가 있었으나 `app/` 어디에도 그 구현이
 없었다(`drop_duplicates`·`isin` 0건). 구현하는 쪽을 택하면 표본 수가 줄어 모든 골든과
 이미 발급된 성적서가 어긋나므로, 구현하지 않고 문구를 사실대로 정정했다. 각 함수는
@@ -26,7 +26,7 @@ from app.evaluation.preprocessor import probability_names_problem
 def check_column_conflicts(column_mappings, task_type) -> list[ValidationCheckItem]:
     """3-0. 역할 유효성 + 컬럼 단위 상호배타 검사 (정답=예측 동일 컬럼 등 → 가짜 100% 차단).
 
-    역할 유효성(ISSUES.md A-10)을 먼저 본다. task_type 에 맞지 않는 역할로 매핑된 컬럼은
+    역할 유효성(A-10)을 먼저 본다. task_type 에 맞지 않는 역할로 매핑된 컬럼은
     무시되는 것이 아니라 dropna 대상에 들어가 평가 표본을 조용히 깎는다.
     """
     items: list[ValidationCheckItem] = []
@@ -55,7 +55,7 @@ def check_row_count(total_rows: int) -> list[ValidationCheckItem]:
 
     종전에는 0행이 error_count=0 으로 검증을 통과해, 사용자가 6단계를 다 지난 뒤
     /api/evaluate 가 400 으로 실패했다. 그 시점에는 어디로 돌아가야 하는지 안내가
-    없다(ISSUES.md D-12). 검증 단계에서 error 로 막아 프론트 게이트가 잡게 한다.
+    없다(D-12). 검증 단계에서 error 로 막아 프론트 게이트가 잡게 한다.
 
     지표별 최소 행 수 하한은 지표마다 다르므로 여기서 정하지 않는다 — 0행만 막는다.
     """
@@ -100,7 +100,7 @@ def check_missing_values(dropped_rows: int) -> list[ValidationCheckItem]:
 
     자체 계산하지 않고 **평가 프레임이 확정한 제외 행 수를 그대로 보고한다**.
     종전에는 여기서 따로 세느라 같은 응답 안에서 "Missing value: None" 과
-    "Excluded samples: 2 rows" 가 동시에 나오는 자기모순이 있었다(ISSUES.md D-01).
+    "Excluded samples: 2 rows" 가 동시에 나오는 자기모순이 있었다(D-01).
     """
     nan_count = dropped_rows
     if nan_count > 0:
@@ -222,7 +222,7 @@ def _check_score_range(
 
     종전 multilabel 검증에는 이 검사가 아예 없었다. 그래서 `/api/validate-data` 는
     errors 0 으로 통과시키고 `/api/evaluate` 만 400 을 냈다 — 프론트 게이트는
-    error_count 만 보므로 사용자를 6단계까지 보낸 뒤 성적서 직전에 막았다(ISSUES.md D-09).
+    error_count 만 보므로 사용자를 6단계까지 보낸 뒤 성적서 직전에 막았다(D-09).
     검사 대상을 역할당 1컬럼이 아니라 전 컬럼으로 두는 것은 D-08 과 같은 이유다.
     """
     if not cols:

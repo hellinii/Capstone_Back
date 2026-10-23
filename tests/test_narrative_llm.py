@@ -233,7 +233,7 @@ async def test_bad_json_maps_to_invalid_json(make_fake_anthropic_client, content
 def test_client_timeout_budget_fits_server_deadline_and_frontend():
     worst = llm.CALL_TIMEOUT_SECONDS * (llm.MAX_RETRIES + 1)
     assert worst <= service.NARRATIVE_DEADLINE_SECONDS
-    assert service.NARRATIVE_DEADLINE_SECONDS < 160  # 운영 프론트 fetchNarrative 가 160초에 끊는다
+    assert service.NARRATIVE_DEADLINE_SECONDS < 160  # 옛 프론트의 서술 호출이 160초에 끊는다
 
 
 async def test_deadline_while_calling_falls_back_as_timeout(monkeypatch, make_fake_anthropic_client):

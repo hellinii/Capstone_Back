@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
         level=os.getenv("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
-    # 발급 메타 DB 준비: 테이블 생성(없으면) + 기관 시드(없으면). 설계 문서 §8.
+    # 발급 메타 DB 준비: 테이블 생성(없으면) + 기관 시드(없으면). docs/ARCHITECTURE.md 발급 절.
     init_db()
     seed_organization()
     logger.info("발급 메타 DB 초기화 완료 (backend=%s)",
@@ -163,7 +163,7 @@ async def health_check(request: Request):
         레포 전체에 FORWARDED_ALLOW_IPS/--proxy-headers 가 0건이라, 모든 요청이 같은
         IP 로 보이면 IP 리밋이 전역 리밋으로 붕괴해 정상 사용자 1명이 전체를 막는다)
     """
-    # 영속 여부는 **평시에도** 싣는다(ISSUES.md G-07). 종전에는 DIAG=1 을 켜야만 볼 수
+    # 영속 여부는 **평시에도** 싣는다(G-07). 종전에는 DIAG=1 을 켜야만 볼 수
     # 있었는데, 그것은 운영자가 특별한 절차를 밟아야 강등 사실을 안다는 뜻이었다.
     # 1차 라운드가 성적서 원본을 DB 에 넣은 뒤로 휘발성 DB 는 채번 중복만이 아니라
     # **발급된 성적서 자체를 잃는다.** 연결 문자열은 노출하지 않고 종류만 알린다.

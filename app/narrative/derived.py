@@ -3,7 +3,7 @@
 서버가 계산하는 것은 혼동행렬 합계·백분율(멀티레이블은 레이블 칸 단위)과 클래스 분포 백분율뿐이다(계획 설계
 요지 4). 판정 카운트·구간이 목표를 포함하는 지표·오분류 총건수(행렬이 잘렸을 때)는 프론트 서술용 파생값
 (fact_sheet.facts, metrics[].ci_contains_target)을 옮긴다 — 같은 숫자를 두 곳에서 세지 않는다. facts 가 없는
-옛 요청(운영 main 프론트, 저장된 다시 만들기 요청)에만 지금까지의 서버 셈을 쓴다.
+옛 요청(옛 프론트, 저장된 다시 만들기 요청)에만 지금까지의 서버 셈을 쓴다.
 LLM 은 계산하지 않으며 이 값들만 인용한다.
 
 상호작용
@@ -20,7 +20,7 @@ from app.evaluation.metrics.binary import THRESHOLD_GAIN_NOTABLE  # noqa: E402
 def _threshold_tuning(gain) -> bool:
     """임계값 부적합인지 — 평가 엔진이 반올림 전 값으로 정한 notable(S2)을 옮긴다. 판정은 엔진 한 곳이다.
 
-    notable 이 없는 옛 요청(운영 main 프론트가 f1_threshold_gain 을 notable 없이 옮김)만 실린 4자리 gain ≥ 0.10 으로
+    notable 이 없는 옛 요청(옛 프론트가 f1_threshold_gain 을 notable 없이 옮김)만 실린 4자리 gain ≥ 0.10 으로
     본다. 지시문 규칙 14 와 폴백 8.3 은 이 값을 compute_derived 의 threshold_tuning 으로 읽는다(따로 판정하지 않음).
     """
     if gain.notable is not None:
@@ -140,7 +140,7 @@ def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
             conf["misclassified_pct"] = round(totals.misclassified / totals.total * 100, 1)
         derived["confusion"] = conf
     elif fs.confusion_counts:
-        # 옛 요청(운영 main 프론트)에서 혼동행렬(M21)을 고르지 않았으면 행렬이 없다 — 엔진 클래스별 건수(confusion_counts,
+        # 옛 요청(옛 프론트)에서 혼동행렬(M21)을 고르지 않았으면 행렬이 없다 — 엔진 클래스별 건수(confusion_counts,
         # M21 선택과 무관하게 실림)로 오분류 총건수를 센다(계약 error_totals 와 같은 규칙: 이진 fp+fn / 전체, 다중 Σfn / Σ(tp+fn),
         # 멀티 Σ(fp+fn) / Σ(tp+fp+fn+tn) 레이블 칸). 옛 요청만의 서버 셈이다(새 요청은 facts.error_totals 를 옮긴다).
         conf = _confusion_from_counts(fs.confusion_counts, task_type)
@@ -149,7 +149,7 @@ def compute_derived(fs: FactSheet, *, task_type: str | None = None) -> dict:
 
     if fs.distribution and fs.distribution.class_distribution:
         dist = fs.distribution.class_distribution
-        # 분모는 '표본 수'이지 '등장 횟수 합'이 아니다(ISSUES.md B-02). 멀티레이블에서
+        # 분모는 '표본 수'이지 '등장 횟수 합'이 아니다(B-02). 멀티레이블에서
         # 둘은 갈린다 — 200행이 408 로 서술되던 원인이다. binary/multiclass 는
         # value_counts() 가 프레임 행을 그대로 세므로 두 값이 구조적으로 같아
         # task_type 을 알 필요가 없다. n_samples 가 없는 구 클라이언트는 종전대로 합계.

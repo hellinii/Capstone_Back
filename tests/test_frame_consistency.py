@@ -1,6 +1,6 @@
 """검증과 평가가 같은 데이터를 같은 규칙으로 판단하는지 검증.
 
-ISSUES.md D-01 — 한 시스템에 **결측 판정 기준이 셋** 있다.
+D-01 — 한 시스템에 **결측 판정 기준이 셋** 있다.
 
   (A) 표시용   validation_checks.check_missing_values — 매핑된 비-ignore 컬럼 중
                 latency 만 빼고 NaN 이 하나라도 있는 행을 센다.

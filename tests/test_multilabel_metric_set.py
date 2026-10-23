@@ -1,6 +1,6 @@
 """tests/test_multilabel_metric_set.py — multilabel 중복 지표 제거.
 
-ISSUES.md A-04 (2026-09-07 ★확정된 제품 결정 2).
+A-04 (2026-09-07 제품 결정).
 
 multilabel 에서 값이 다른 지표와 완전히 겹치는 넷을 뺀다. 근거는 **셋이 서로 다르다**:
 

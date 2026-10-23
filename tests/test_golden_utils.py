@@ -1,6 +1,6 @@
 """tests/test_golden_utils.py — 골든 헬퍼 자체의 진단 품질 검증.
 
-ISSUES.md H-02 — 골든 스냅샷은 오라클이 아니라 현행 출력의 복사본이다. 그 성질 자체는
+H-02 — 골든 스냅샷은 오라클이 아니라 현행 출력의 복사본이다. 그 성질 자체는
 골든을 고쳐서 해결되지 않지만(H-01 의 기대값 스위트가 옆에 있어야 한다), **불일치가
 났을 때 무엇이 달라졌는지 읽을 수 없다**는 것은 별개의 결함이고 즉시 고칠 수 있다.
 
@@ -99,7 +99,7 @@ def test_bootstrap_still_writes_when_missing(golden_dir):
     assert json.loads((golden_dir / "brand_new.json").read_text(encoding="utf-8")) == {"a": 1}
 
 
-# ── 비결정적 필드 리댁션 (ISSUES.md F-09 로 도입) ──────────────────────────
+# ── 비결정적 필드 리댁션 (F-09 로 도입) ──────────────────────────
 
 def test_redaction_keeps_golden_stable_across_runs(tmp_path, monkeypatch):
     """평가 시각·라이브러리 버전이 달라져도 골든이 깨지지 않는다."""
