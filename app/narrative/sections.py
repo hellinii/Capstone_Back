@@ -66,8 +66,14 @@ EDITION4_PLACES: dict[str, str] = {
 
 
 def place(section: str, *, edition: int) -> str:
-    """칸 이름(판 3 절 번호)이 그 판의 성적서에서 찍히는 절 번호. 판 3 은 그대로, 판 4 는 EDITION4_PLACES(모르는 이름은 그대로)."""
+    """칸 이름(판 3 절 번호)이 그 판의 성적서에서 찍히는 절 번호. 판 3 은 그대로, 판 4 는 EDITION4_PLACES(모르는 이름은 그대로).
+
+    '7.1·8.3' 처럼 가운뎃점으로 이은 칸 이름(프론트 문제 목록의 최약 클래스 '드러난 절')은 판 4 에서 하나씩 바꿔 다시 잇는다
+    ('5.2·5.5') — 통째로 모르는 이름으로 두면 판 4 지시문에 판 3 절 번호가 샌다.
+    """
     if edition == 4:
+        if "·" in section:
+            return "·".join(EDITION4_PLACES.get(part, part) for part in section.split("·"))
         return EDITION4_PLACES.get(section, section)
     return section
 
