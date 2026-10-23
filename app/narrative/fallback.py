@@ -271,21 +271,24 @@ def _section_8_2(inp: _Input) -> dict:
     return {"conclusion.narrative": " ".join(inp.lines("8.2"))}
 
 
-def _risks_lead(fs: FactSheet) -> str:
+def _risks_lead(fs: FactSheet, *, edition: int) -> str:
     """8.3 첫 문장 — 목표 미달·판정 불가에 따른 위험(결론 목록 밖의 사실 문장).
+
+    판 4(edition 4)는 목표 미달 지표 목록을 판 4 표기로 찍는다(값 value_text, 목표 셋째 자리 — 8.2 판정 문장과 같은 글자).
 
     판정 불가에 '모든 시험항목이 기준을 충족'이라 쓰면 확인하지 못한 것을 확인한 것처럼 읽히고 판정 모순
     검사에도 걸린다(점검 BE-03) — 판정 불가는 미달이 없어도 '위험을 확인하지 못했다'로 쓴다.
     '임계값이 설정된'은 '목표값이 설정된'으로 쓴다 — 같은 8.3 에 결정 임계값 문장이 함께 나온다.
     """
     failed = failed_metrics(fs)
+    vs_target = wording_ed4.metric_vs_target_ed4 if edition == 4 else metric_vs_target
     judged = [m for m in fs.metrics if m.threshold is not None]
     # 아슬아슬 합격(D12) — near_target 판정은 프론트가 했고 여기서는 합격한 지표만 골라 읽는다.
     near = [m for m in fs.metrics if m.near_target and m.status == "pass"]
     if failed:
         risks = (
             "목표에 미달한 지표가 있어 해당 영역의 성능 저하 위험이 존재한다"
-            f"(목표 미달 지표: {', '.join(metric_vs_target(m) for m in failed)})."
+            f"(목표 미달 지표: {', '.join(vs_target(m) for m in failed)})."
         )
         if fs.verdict == "INCONCLUSIVE":
             risks += " 다만 종합 판정이 '판정 불가'여서 판정에 따른 위험은 확인하지 못했다."
@@ -306,7 +309,7 @@ def _risks_lead(fs: FactSheet) -> str:
 
 def _section_8_3(inp: _Input) -> dict:
     """8.3 리스크 — 목표 미달 위험 + 최약 클래스(사실 문장만)·근소 차이(17·18 규칙)·임계값 부적합·지연시간·대화형 응답 시간."""
-    return {"conclusion.risks": " ".join([_risks_lead(inp.fs)] + inp.lines("8.3"))}
+    return {"conclusion.risks": " ".join([_risks_lead(inp.fs, edition=inp.edition)] + inp.lines("8.3"))}
 
 
 def _section_9(inp: _Input) -> dict:

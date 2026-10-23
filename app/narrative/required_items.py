@@ -1000,7 +1000,7 @@ def verdict_sentence(fs: FactSheet, derived: dict, *, edition: int) -> str:
 
     def vs_target(m) -> str:
         if edition == 4:
-            return f"{m.display_name}({wording_ed4.metric_value_ed4(m)}, 목표 {wording_ed4.ed4_plain(m.threshold)})"
+            return wording_ed4.metric_vs_target_ed4(m)
         return metric_vs_target(m)
 
     def listing(label: str, metrics: list) -> str:

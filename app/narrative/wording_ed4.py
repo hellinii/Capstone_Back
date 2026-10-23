@@ -200,6 +200,12 @@ def metric_value_ed4(m) -> str:
     return ed4_plain(m.value)
 
 
+def metric_vs_target_ed4(m) -> str:
+    """'지표명(값, 목표 t)' 의 판 4 판 — 값은 metric_value_ed4, 목표는 셋째 자리(plain). 판 3 `wording.metric_vs_target` 와 같은 꼴.
+    8.2 판정 문장과 8.3 목표 미달 문장이 같은 지표를 같은 글자로 찍게 한 곳에 둔다."""
+    return f"{m.display_name}({metric_value_ed4(m)}, 목표 {ed4_plain(m.threshold)})"
+
+
 def same_metric_value_ed4(metrics, metric_id: str, value: float | None) -> str | None:
     """파생값에 실린 값이 판정 대상 지표의 값이면 그 지표의 표기 — 같은 값이 두 자리에 다른 글자로 찍히지 않게(계약 결정 7).
     그 밖은 plain."""
