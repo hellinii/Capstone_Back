@@ -323,3 +323,21 @@ def test_new_edition_arguments_have_no_default():
                fallback._recommendations, generator._align):
         param = inspect.signature(fn).parameters["edition"]
         assert param.kind is inspect.Parameter.KEYWORD_ONLY and param.default is inspect.Parameter.empty, fn.__name__
+
+
+# ── 판 4 백분율 — 셋째 자리 글자를 옮긴 첫째 자리(절반에서 0에서 먼 쪽) ──────────────────────
+
+
+def test_edition4_percent_moves_the_plain_text_not_python_round():
+    """0.0625 는 판 4 셋째 자리 '0.063' → '6.3%'(공통 대조 표의 반올림 — 계약 결정 1). 판 3 pct 는 파이썬 round 라 '6.2%'.
+    사실 보기(학습 비율)와 같은 글자여야 판 4 검문을 통과한다."""
+    raw = example_raw()
+    row = raw["fact_sheet"]["facts"]["distribution_shift"][1]
+    row.update(training_ratio=0.0625, flagged=True, difference=-0.311769006, difference_text="-0.312",
+               evaluation_minus_training_text="0.312")
+    text = _conclusions(raw)["7.2-03"].text
+    assert text == "학습 분포와 평가 분포의 비율 차가 10%p 이상인 클래스는 malignant(악성 종양) 학습 6.3%·평가 37.4%이다."
+    wl = generator._prepare(_req(raw))[2]
+    assert verify_grounding([text], wl, edition=4).violations == []
+    twin = _strip_same_source(raw)
+    assert "학습 6.2%" in _conclusions(as_edition(twin, 3))["7.2-03"].text
