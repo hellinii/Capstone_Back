@@ -46,10 +46,10 @@ def _organization_at_issue(report: Report) -> OrganizationOut:
     종전에는 항상 `report.organization`(FK 조인 = 조회 시점의 singleton 행)을 조립했다.
     그래서 기관명을 한 번 바꾸면 **이미 발급된 모든 성적서의 기관 표기가 소급 변경**됐고,
     같은 응답 안에서 issuer(발급 당시 스냅샷)와 organization(현재 값)이 서로 다른
-    시점을 가리켰다(ISSUES.md G-01).
+    시점을 가리켰다(G-01).
 
     스냅샷이 없는 구 발급본은 현재 기관으로 폴백한다 — 소급 백필은 하지 않는다.
-    서버에 없던 사실을 만들어 넣지 않는다는 원칙(설계 §10 '가짜데이터 0')에 따른 것이고,
+    서버에 없던 사실을 만들어 넣지 않는다는 원칙('가짜 데이터 0' — docs/ARCHITECTURE.md 발급 절)에 따른 것이고,
     폴백 덕분에 기존 발급본의 표시는 지금과 동일하게 유지된다.
     """
     for snap in reversed(report.snapshots):
@@ -60,7 +60,7 @@ def _organization_at_issue(report: Report) -> OrganizationOut:
 
 
 def diff_report_sections(before: dict | None, after: dict | None) -> list[str] | None:
-    """두 성적서 스냅샷 사이에서 값이 달라진 **최상위 절**을 돌려준다 (ISSUES.md F-06).
+    """두 성적서 스냅샷 사이에서 값이 달라진 **최상위 절**을 돌려준다 (F-06).
 
     재발급 이력에는 "무엇이 바뀌었는지"가 없었다 — 정정본을 받은 사람은 v1.1 이
     나왔다는 사실만 알고 무엇이 달라졌는지 알 수 없었다.
@@ -89,7 +89,7 @@ def _parse_content(content_json: str | None) -> dict | None:
 
 
 def _history(report: Report) -> list[IssuanceHistoryItem]:
-    """발급 이력 — 각 차수에 **직전 차수 대비 바뀐 절**을 함께 싣는다(ISSUES.md F-06)."""
+    """발급 이력 — 각 차수에 **직전 차수 대비 바뀐 절**을 함께 싣는다(F-06)."""
     by_version = {s.version: _parse_content(s.content_json) for s in report.snapshots}
     items: list[IssuanceHistoryItem] = []
     previous_version: str | None = None

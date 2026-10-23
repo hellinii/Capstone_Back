@@ -6,7 +6,7 @@
 
 ## 1. 이 백엔드가 하는 일 (한 문단)
 
-**ISO/IEC TS 4213** 기준으로 AI **분류 모델**의 성능을 평가하고 성적서를 발급하는 FastAPI 서버입니다. 사용자가 모델 예측 결과 파일(CSV/JSON)을 올리면 → ① **어떤 컬럼이 정답/예측/점수인지 파악**하고(LLM 자동 매핑, OpenAI) → ② **지표(정확도·정밀도 등)를 계산**하고 → ③ **결과를 자연어로 설명**하고(성적서 7·8·9절, Claude) → ④ **성적서를 발급**합니다. Render + Neon Postgres에 배포됩니다.
+**ISO/IEC TS 4213** 기준으로 AI **분류 모델**의 성능을 평가하고 성적서를 발급하는 FastAPI 서버입니다. 사용자가 모델 예측 결과 파일(CSV/JSON)을 올리면 → ① **어떤 컬럼이 정답/예측/점수인지 파악**하고(LLM 자동 매핑, OpenAI) → ② **지표(정확도·정밀도 등)를 계산**하고 → ③ **결과를 자연어로 설명**하고(성적서 7·8·9절, Claude) → ④ **성적서를 발급**합니다. Render + Neon Postgres에 배포됩니다(§12).
 
 ---
 
@@ -22,7 +22,10 @@ app/
 ├── core/              🔧 모든 도메인이 공유하는 것
 │   ├── schemas.py       공용 데이터 규격(enum·역할규칙·지표요건·"분석→평가" 인계 모델)
 │   ├── database.py      DB 연결(SQLAlchemy) — 로컬 SQLite / 배포 Postgres
-│   └── parsing.py       업로드 파일(CSV/JSON) → 표(DataFrame) 변환 (공용 유틸)
+│   ├── parsing.py       업로드 파일(CSV/JSON) → 표(DataFrame) 변환 (공용 유틸)
+│   ├── upload.py        업로드 경계 검사(확장자·크기 20 MiB·빈 파일) — 업로드 라우터 셋이 같이 씀
+│   ├── concurrency.py   무거운 계산을 스레드풀로 넘기고 동시 실행 수를 묶음(이벤트 루프가 멈추지 않게)
+│   └── llm_budget.py    LLM 호출의 시간당 총량 상한(넘으면 규칙 폴백, 429 아님)
 │
 ├── analysis/          ① 분석 — 파일의 어떤 컬럼이 뭔지 파악 + 데이터 점검
 │   ├── router.py            API: 컬럼 매핑 (/api/analyze-columns, /api/confirm-mapping)
@@ -38,7 +41,11 @@ app/
 │   ├── router.py        API (/api/evaluate)          service.py  평가 흐름 조율
 │   ├── engine.py        지표 → 계산함수로 분배          preprocessor.py  계산 전 데이터 정리
 │   ├── report.py        결과 성공/실패 정리           schemas.py
+│   ├── frame.py         평가에 들어갈 행을 정하는 규칙 한 곳   labels.py  클래스 표기·양성 기본값(§9.2·§9.4)
+│   ├── errors.py        지표 계산 실패 표시 키 한 곳   environment.py  평가 환경(도구 버전·일시) 실측
 │   └── metrics/         실제 지표 계산(sklearn): common·binary·multiclass·multilabel
+│                        + counts(TP·FP 등 건수) · intervals(95% 신뢰구간) · misclassification(경계·확신 오류)
+│                        · display(판정과 같은 쪽으로 읽히게 자릿수를 늘린 표시 문자열)
 │
 ├── narrative/         ③ 서술 — 결과를 사람이 읽을 글로 (LLM: Claude Sonnet 5.5) — 자세히는 §10
 │   ├── router.py        API (/api/narrative/jobs 새 경로 · /api/generate-narrative 옛 경로)
@@ -52,12 +59,14 @@ app/
 │   └── derived.py       서버 파생 계산    baselines.py  지표 참조 기준치    schemas.py
 │
 └── issuance/          ④ 발급 — 성적서 번호 채번·발급 (DB: 발급 표 — 서술 작업 표와 함께 DB 를 쓰는 곳)
-    ├── router.py        API (/api/organization, /api/reports/*)  service.py  발급 트랜잭션
-    ├── models.py        DB 테이블(Organization·Report·Issuance)  serializers.py  DB→응답 변환
+    ├── router.py        API (/api/organization, /api/reports/issue·{no}·{no}/reissue·{no}/content)  service.py  발급 트랜잭션
+    ├── models.py        DB 테이블(Organization·Report·ReportSnapshot·Issuance)  serializers.py  DB→응답 변환
     └── bootstrap.py     기본 기관 시드                schemas.py
 ```
 
-> 💡 각 폴더의 `__init__.py`를 열면 그 도메인의 **파일 목차**가 주석으로 정리돼 있고, 각 `.py` 파일 맨 위에는 **"이 파일이 뭐고 뭐랑 상호작용하는지"** 헤더 주석이 있습니다.
+DB 표는 모두 5개다 — 발급 4개(`organization`·`report`·`report_snapshot`·`issuance`, `issuance/models.py`)와 서술 작업 1개(`narrative_jobs`, `narrative/models.py` 의 `NarrativeJob`). 자세히는 §11.
+
+> 💡 각 폴더의 `__init__.py`에는 그 도메인의 **파일 목차** 주석이 있습니다(나중에 생긴 파일이 빠져 있을 수 있으니 실제 목록은 위 나무를 보세요). 각 `.py` 파일 맨 위에는 **"이 파일이 뭐고 뭐랑 상호작용하는지"** 헤더 주석이 있습니다.
 
 ---
 
@@ -78,9 +87,11 @@ app/
       ▼
 ③ POST /api/narrative/jobs narrative : 작업 번호 + 8.1 벤치마크 표를 바로 돌려주고, 서술은 뒤에서 만든다
 ③ GET  /api/narrative/jobs/{id}      : 단계(대기·생성 중·검사 중·다시 만드는 중·완료·실패)와 결과
-      │    (옛 프론트는 /api/generate-narrative 한 번 호출 — 다음 라운드에 지운다)
+      │    (옛 경로 /api/generate-narrative 는 옛 클라이언트용으로 얼려 둠 — 운영 프론트는 2026-10-23 배포부터
+      │     작업 경로만 쓴다. 다음 라운드에 지운다)
       ▼
 ④ /api/reports/issue     issuance : 성적서 번호 발급 + DB 저장
+   (발급 뒤 GET /api/reports/{no} 발급정보 · GET /api/reports/{no}/content 발급 시점 원본 · POST /api/reports/{no}/reissue 정정 발급)
 ```
 
 - **LLM 을 쓰는 곳**: ①분석은 OpenAI(`OPENAI_API_KEY`, 모델 `MAPPING_MODEL` 기본 `gpt-6-luna`), ③서술은 Anthropic(`ANTHROPIC_API_KEY`, 모델 `NARRATIVE_MODEL` 기본 `claude-sonnet-5-5`). 키가 없거나 호출이 실패하면 자동으로 규칙 기반으로 대체돼서 서버는 안 죽습니다.
@@ -96,7 +107,7 @@ app/
 | **analysis** | 컬럼 파악 + 데이터 점검 | `/api/analyze-columns`, `/api/confirm-mapping`, `/api/validate-data` | `router.py` → `analysis_service.py` |
 | **evaluation** | 지표 계산 | `/api/evaluate` | `router.py` → `service.py` |
 | **narrative** | 결과 서술 | `/api/narrative/jobs`(새) · `/api/generate-narrative`(옛) | `router.py` → `jobs.py` → `generator.py` (옛 경로는 `legacy.py`) |
-| **issuance** | 성적서 발급 | `/api/organization`, `/api/reports/*` | `router.py` → `service.py` |
+| **issuance** | 성적서 발급 | `/api/organization`, `/api/reports/issue`, `/api/reports/{no}`, `/api/reports/{no}/reissue`, `/api/reports/{no}/content` | `router.py` → `service.py` |
 
 시스템: `GET /health` (상태 확인).
 
@@ -122,7 +133,7 @@ app/
 ## 6. 실행 방법
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements-dev.txt
 
 uvicorn app.main:app --reload      # → http://127.0.0.1:8000/docs (Swagger로 모든 API 확인)
@@ -141,7 +152,7 @@ venv/bin/python -m pytest -q       # 테스트 (tests/) — 맨 pytest 는 전�
 2. **의존 방향은 항상 도메인 → core** (core는 도메인을 모름 → 순환 없음). 예외: 평가가 분석의 파싱/검증을 재사용(상류 참조)하는 것은 허용.
 3. **`app/__init__.py`·`app/core/__init__.py`에 `import`를 넣지 마세요** — `main.py`의 `load_dotenv()`가 DB import보다 먼저 실행돼야 하는 순서가 깨집니다(파일 주석 참조).
 4. **DB 스키마는 `init_db()`의 `create_all`로 생성**(마이그레이션 도구 없음).
-5. 배포 구성은 [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) 참조.
+5. 배포 구성은 §12(배포·운영) 참조.
 
 ---
 
@@ -149,7 +160,10 @@ venv/bin/python -m pytest -q       # 테스트 (tests/) — 맨 pytest 는 전�
 
 여기 적힌 것들은 **버그가 아니라 의식적으로 그은 선**이다. 각 항목에 왜 그렇게 정했는지를
 남긴다 — 근거를 잃으면 다음 사람이 같은 논의를 처음부터 다시 한다.
-대응 항목 번호는 `ISSUES.md` 를 가리킨다.
+
+> **F-02·G-07·E-06 같은 번호**: 표와 코드 주석에 붙은 이런 번호는 예전 문제 대장(문제를 모아 번호를 매겨 고치던 목록)의
+> 항목 번호다. 대장 자체는 저장소에 없고, 번호는 "언제 무슨 문제로 바뀐 코드인가"를 알려 주는 이력 표시로만 남겨 둔다.
+> 뜻은 그 자리의 설명을 읽으면 된다.
 
 ### 8.1 성적서의 진본성 — 서버가 완전히 보증하지는 않는다 (F-02·F-03·F-05)
 
@@ -159,7 +173,7 @@ venv/bin/python -m pytest -q       # 테스트 (tests/) — 맨 pytest 는 전�
 | # | 한계 | 왜 이번 범위에서 제외했나 |
 |---|---|---|
 | **F-02** | 평가와 발급이 서버에서 결속되지 않는다 — 평가를 거치지 않고도 정식 번호를 받을 수 있다 | 백엔드 단독으로 닫히지 않는다(프론트 필수·3단 롤아웃). 무엇보다 **기존 사용자 전원이 발급 불가**가 되고, 결속을 넣어도 **2행짜리 CSV 로 평가를 통과시켜 우회**할 수 있어 실효가 낮다 |
-| **F-03** | `/api/generate-narrative` 가 클라이언트가 보낸 `fact_sheet` 를 무검증 신뢰한다 | F-02 와 같은 뿌리다. 서버가 평가 결과를 갖고 있어야 대조할 수 있는데 그것이 F-02 다 — 따로 닫으면 반쪽이 된다 |
+| **F-03** | 서술 API 가 클라이언트가 보낸 `fact_sheet` 를 다시 계산해 대조하지 않고 그대로 믿는다 — 작업 경로 `POST /api/narrative/jobs` 도 옛 경로 `/api/generate-narrative` 도 같다(형식·길이 상한 검사만 한다) | F-02 와 같은 뿌리다. 서버가 평가 결과를 갖고 있어야 대조할 수 있는데 그것이 F-02 다 — 따로 닫으면 반쪽이 된다 |
 | **F-05** | 서버가 PDF 를 만들지도 보관하지도 않는다. 최종 산출물은 브라우저 인쇄물이다 | 서버 렌더링 스택(헤드리스 브라우저)이 필요하고 Render free 512 MB 안에서 운영 위험이 크다 |
 
 **실질적 의미**: 발급된 성적서의 *내용*은 서버 사본으로 검증할 수 있지만, *그 성적서가
@@ -170,7 +184,7 @@ venv/bin/python -m pytest -q       # 테스트 (tests/) — 맨 pytest 는 전�
 | # | 한계 | 판단 |
 |---|---|---|
 | **G-03** | LLM 예산 상한이 **프로세스 로컬**이라 워커가 N개면 실효 상한도 N배 | 과허용 방향으로만 틀리므로 정상 사용자를 잘못 막지 않는다. 정확한 총량이 필요해지면 DB 카운터로 옮긴다 |
-| **G-03** | 인증·레이트리밋 없음 | 인증은 넣지 않기로 확정(★결정 9). IP 리밋은 **프록시 뒤 실제 client IP 가 미관측**이라 보류 — 모든 요청이 같은 IP 로 보이면 IP 리밋이 전역 리밋으로 붕괴해 정상 사용자 1명이 전체를 막는다 |
+| **G-03** | 인증·레이트리밋 없음 | 인증은 넣지 않기로 확정했다(2026-09-07 제품 결정 — 대신 LLM 호출 총량에 시간당 상한, `core/llm_budget.py`). IP 리밋은 **프록시 뒤 실제 client IP 가 미관측**이라 보류 — 모든 요청이 같은 IP 로 보이면 IP 리밋이 전역 리밋으로 붕괴해 정상 사용자 1명이 전체를 막는다 |
 | **F-11** | 마이그레이션 도구가 없다(`create_all` 만) | **기존 테이블에 컬럼을 추가하지 않는다**를 규칙으로 둔다. 신규 테이블은 `create_all` 이 정상 생성하므로(실증) 스키마 확장은 새 테이블로 한다 |
 | **F-12** | 동시 채번 직렬화(`BEGIN IMMEDIATE`)가 SQLite 전용이라 PostgreSQL 에는 적용되지 않는다 | 재시도 5회 + 유니크 제약이 실질 방어선이다. 동시 발급이 드물어 현행 유지 |
 | **H-06** | PostgreSQL 경로가 CI 에서 실행되지 않는다 | CI 에 DB 서비스를 붙이지 않았다. 서술 작업 표만 로컬 Postgres 왕복 테스트가 있다(`tests/test_postgres_roundtrip.py`, `NARRATIVE_PG_URL` 이 있을 때만 — §10.7). 발급 표의 Postgres 경로는 여전히 로컬 초록이 배포 조합의 증거가 아니다 |
@@ -182,7 +196,7 @@ venv/bin/python -m pytest -q       # 테스트 (tests/) — 맨 pytest 는 전�
 | # | 한계 | 판단 |
 |---|---|---|
 | **G-05** | grounding 이 **숫자 토큰**을 대조한다. 판정과 직접 모순되는 주장은 별도로 잡지만, 완곡한 표현이나 영어 서술은 잡지 못한다 | 일반적인 '금지 표현 사전'은 문체 취향이라 도입하지 않는다. 사실 관계(판정 모순)만 막는다 |
-| — | 숫자 검문은 숫자가 **허용 목록에 있는지**만 본다 — 값이 어느 지표·클래스의 것인지, FN·FP 를 뒤바꿨는지는 못 잡는다 | 다음 라운드의 심판(서술을 따로 채점하는 모델)이 맡는다. 이번에는 붙을 자리(칸 단위 다시 만들기·결과 기록·'검사 중' 단계)만 둔다 |
+| — | 숫자 검문은 숫자가 **허용 목록에 있는지**만 본다 — 값이 어느 지표·클래스의 것인지, FN·FP 를 뒤바꿨는지는 못 잡는다 | 알려진 한계로 둔다. 판정·숫자 자체는 코드가 정하므로 표·판정은 틀리지 않고, 문장 속 숫자의 짝이 어긋날 수 있을 뿐이다 |
 
 ### 8.4 프론트 측 한계 (`Capstone_Front`)
 
@@ -298,8 +312,8 @@ Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/
 
 | 경로 | 누가 쓰나 | 방식 |
 |---|---|---|
-| `POST /api/narrative/jobs` → `GET /api/narrative/jobs/{id}` (새) | 새 프론트 | 작업 번호와 8.1 벤치마크 표를 **바로** 주고, 서술은 BackgroundTasks 의 `jobs.run_job` → `generator.generate_sections` 가 만든다. 품질 우선(effort `high`, 최대 10분) |
-| `POST /api/generate-narrative` (옛) | 운영 중인 옛 프론트 | 한 번 호출로 일곱 칸을 받는다(`legacy.py` 에 그대로 얼림, effort `low`, 서버 마감 120초 — 넘으면 200 + 규칙 문장). 다음 라운드에 지운다 |
+| `POST /api/narrative/jobs` → `GET /api/narrative/jobs/{id}` (새) | 운영 프론트(2026-10-23 배포부터) | 작업 번호와 8.1 벤치마크 표를 **바로** 주고, 서술은 BackgroundTasks 의 `jobs.run_job` → `generator.generate_sections` 가 만든다. 품질 우선(effort `high`, 최대 10분) |
+| `POST /api/generate-narrative` (옛) | 옛 클라이언트(운영 프론트는 더 이상 부르지 않음) | 한 번 호출로 일곱 칸을 받는다(`legacy.py` 에 그대로 얼림, effort `low`, 서버 마감 120초 — 넘으면 200 + 규칙 문장). 다음 라운드에 지운다 |
 
 두 경로는 같은 사실 시트(`FactSheet`)·같은 숫자 허용 목록·같은 규칙 템플릿을 쓴다. 판정(verdict)은 늘 사실 시트 값이다(AI 가 정하지 않는다).
 
@@ -420,10 +434,10 @@ AI 가 쓸 내용과 규칙 문장이 쓸 내용이 어긋나지 않는다.
 
 - 작업 유형·고객 입력은 두 경로가 넘긴다. 넘기지 않은 옛 호출은 사실 시트로 짐작한다(`required_items.infer_task_type`).
 - 클래스가 많아 프론트가 표를 잘랐으면(`facts.omitted`) 잘린 표에서 '가장 많은'·'전부'를 단정하지 않는다(실린 클래스 가운데로 한정).
-- `facts` 가 없는 옛 요청(운영 main 프론트, 저장된 다시 만들기 요청)에서도 깨지지 않는다. 혼동행렬(M21)을 고르지 않아 행렬이 없으면
+- `facts` 가 없는 옛 요청(옛 프론트, 저장된 다시 만들기 요청)에서도 깨지지 않는다. 혼동행렬(M21)을 고르지 않아 행렬이 없으면
   엔진 클래스별 건수(`confusion_counts`)로 오분류 총건수를 센다(옛 요청만의 서버 셈 — 새 요청은 `facts.error_totals` 를 옮긴다).
 - 검증(`tests/test_s6_templates.py`): 작업 유형 3 × 판정 4 가지로 템플릿 출력이 자기 검문(①②④⑤)을 통과, 17·18 숫자 묶음이 다시
-  나오지 않음, 옛 경로 골든(`narrative_legacy_main_fallback` — 운영 main 프론트 모양)과 새 골든(`narrative_job_fallback_*`)을 따로 둔다.
+  나오지 않음, 옛 경로 골든(`narrative_legacy_main_fallback` — 옛 경로 모양)과 새 골든(`narrative_job_fallback_*`)을 따로 둔다.
 
 ### 10.7 기록 둘과 작업 표 (`jobs.py` · `models.py`)
 
@@ -498,3 +512,91 @@ AI 가 쓸 내용과 규칙 문장이 쓸 내용이 어긋나지 않는다.
 9 = 7.1 앞 예측 파생(결정 임계값) 문장, 10 = 6.1 판정 규칙 문장, 11a·11b = 8.2 학습 데이터와 같은/다른 출처, 12 = 7.2 정답 라벨 주의,
 15 = 7.3 "해당 없음", 16 = 8.1 표 아래 "내부 참조 기준치가 없어 비교하지 않은 지표", 17 = 7.1 경계·확신 오류 건수 문장, 18 = 8.3 근소 차이 지표 문장.
 새 프론트가 찍을 문장은 사실 시트 `facts.fixed_sentences`(번호·소절·문장)로도 온다.
+
+### 10.10 왜 이렇게 만들었나 — 처음 설계 때 정한 것 중 지금도 그대로인 것
+
+- **AI 는 숫자를 만드는 쪽이 아니라 옮기는 쪽이다.** 모든 숫자는 평가 엔진(`app/evaluation/`)과 서버 파생 계산이 정하고,
+  AI 는 그 값을 한국어 문장으로 옮기기만 한다. 그래서 숫자 검문(§10.5 ①)이 "허용 목록 밖 숫자 = 지어낸 숫자"로 볼 수 있다.
+- **평가(`/api/evaluate`)와 서술(`/api/narrative/jobs`)은 따로 부른다.** 서술 AI 가 실패해도 지표 계산이 500 이 되지 않고,
+  지표·차트는 바로 보이며 서술만 뒤에 온다. 다시 만들 때도 원본 CSV 를 다시 올리지 않고 사실 시트(수 KB)만 보낸다.
+- **판정(verdict)은 프론트 `src/lib/report/computeVerdict.ts` 가 규칙으로 계산한다**(AI 가 정하지 않는다). 백엔드는 사실 시트에
+  실려 온 판정을 그대로 쓴다. 판정 대상은 **목표값이 있고 산출에 성공한 지표만**이다(혼동행렬 같은 정보 제공 지표는 빠진다).
+  핵심 지표(미달이면 불합격)의 기본값은 유형별로 이진·다중 클래스 = Accuracy(M1)·F1(M4, 다중은 매크로),
+  멀티레이블 = F1(M4)·Jaccard(M17)이고, 사용자가 합격 기준 화면에서 바꿀 수 있다. 판정 규칙 네 단계는 §10.9 D19.
+- **8.1 벤치마크는 고정된 참조 표(`app/narrative/baselines.py`)로 비교한다 — 웹·벡터 DB 검색(동적 RAG)은 쓰지 않는다.**
+  검색 결과는 실행마다 달라져 같은 성적서를 다시 만들 수 없고, 출처를 확인할 수 없는 숫자가 성적서에 들어갈 수 있기 때문이다.
+  표의 범위는 공개 벤치마크 평균이 아니라 내부에서 정한 보수적인 기준이라 **"내부 참조 기준치"** 라고 부르고, 출처 문구
+  (`SOURCE_NOTE`)를 함께 싣는다 — 권위 있는 외부 기준처럼 보이지 않게. 모델 값이 범위의 아래·안·위 어디인지는 서버가 계산하고
+  (AI 는 위치를 문장으로 옮길 뿐), 표에 없는 지표는 비교하지 않는다(고정 문구 16). 나중에 실제 도메인 기준으로 바꾸려면
+  `get_baseline()` 한 곳만 바꾸면 된다.
+
+---
+
+## 11. 발급(issuance) — 성적서 번호·정정 발급·보관본
+
+한 줄 요약: **번호는 '발급' 버튼을 누를 때 받는다. 같은 평가(run)는 몇 번 눌러도 번호가 하나이고, 고칠 때는 번호를 그대로 두고 차수만 올린다.**
+
+- **번호 규칙**: `RPT-{연도}-{순번 4자리}`(예: `RPT-2026-0001`). 순번은 해마다 1 부터 다시 센다. 연도는 한국 시간(KST) 기준이다 —
+  UTC 연도를 쓰면 1월 1일 오전(KST)에 발급한 문서가 번호는 전년도, 발급일은 새해가 된다.
+- **번호를 받는 때**: 평가가 끝났을 때가 아니라 사용자가 **발급**할 때다. 평가만 하고 버린 run 에 번호를 낭비하지 않고, 번호가 있으면
+  발급본, 없으면 초안이라는 뜻이 분명해진다.
+- **같은 run = 같은 발급(멱등)**: `POST /api/reports/issue` 를 같은 `run_id` 로 다시 부르면 새 번호 없이 기존 발급본을 돌려준다.
+  `report.run_id` 에 UNIQUE 제약이 있어 동시에 두 번 눌러도 번호가 둘 생기지 않는다.
+- **정정 발급**: `POST /api/reports/{no}/reissue` 는 번호를 그대로 두고 차수를 올린다(`v1.0` → `v1.1` → `v1.2`). 이전 차수 행은
+  `superseded`(대체됨)로 바뀌고 새 차수가 `issued` 다. 요청에는 `run_id` 가 꼭 있어야 하고, 그 성적서의 run 과 다르면 거절한다(번호는
+  차례로 셀 수 있지만 run_id 는 추측할 수 없어서, 번호만 아는 제3자가 남의 성적서를 정정하지 못한다).
+- **동시에 발급할 때**: `UNIQUE(year, seq)` 와 `UNIQUE(report_id, version)` 제약이 같은 번호·같은 차수가 두 번 저장되는 것을 막고,
+  부딪히면 되돌린 뒤 다시 계산해 **최대 5번** 다시 시도한다(`service.py` `_MAX_NUMBERING_RETRIES`). SQLite 에서는 트랜잭션을
+  `BEGIN IMMEDIATE` 로 열어 쓰기를 한 줄로 세운다(PostgreSQL 에는 적용되지 않음 — 제약 + 재시도가 방어선, §8.2 F-12).
+- **기관(organization)은 한 행뿐**(id=1). 기동 때 표가 비어 있으면 기본 기관("리트머스")을 넣는다(`bootstrap.py`). 기관을 바꾸는
+  API(`PUT /api/organization`)는 **일부러 두지 않는다** — 인증이 없는 상태에서 누구나 이미 발급한 성적서의 기관 표기를 바꿀 수
+  있었기 때문이다. 바꿀 때는 §12 처럼 DB 에서 한 번 직접 바꾼다.
+- **발급 시점 보관본**: 차수마다 `report_snapshot` 한 행에 그때의 기관 정보(`org_snapshot_json`)와, 프론트가 보낸 성적서 원본
+  (`content_json`, 선택, 1 MiB 상한)과 그 SHA-256 을 저장한다. 그래서 나중에 기관 이름을 바꿔도 이미 발급한 성적서의 표기는
+  그대로다. 보관본이 없는 옛 발급본은 현재 기관 행으로 보여 준다(없던 사실을 소급해 만들어 넣지 않는다).
+  원본은 `GET /api/reports/{no}/content`(`?version=v1.0` 으로 이전 차수)로 다시 받는다. 발급 이력에는 직전 차수와 비교해 값이
+  바뀐 최상위 절 목록이 붙는다.
+- **시각**: DB 에는 tz 없는 UTC 로 저장하고, 응답의 `issued_at` 은 `+00:00` 오프셋을 붙인 ISO8601 로 내보낸다. 오프셋이 없으면
+  프론트가 한국 시간으로 잘못 읽어 날짜가 하루 어긋날 수 있다. 화면 표기(KST)는 프론트가 한다.
+- **가짜 데이터 0**: 발급 전 성적서는 가짜 번호를 만들지 않고 "초안(미발급)"으로 표시한다(프론트). 서버도 모르는 값은 지어내지 않는다.
+- **표**: `organization`(기관 1행) 1 : N `report`(번호 단위) 1 : N `issuance`(차수 이력), `report` 1 : N `report_snapshot`(차수별 보관본).
+  서술 작업 표 `narrative_jobs` 는 발급과 관계없는 따로 선 표다(§10.7). 다섯 표 모두 기동 때 `init_db()` 의 `create_all` 이 만든다.
+
+---
+
+## 12. 배포·운영
+
+한 줄 요약: **팀 저장소 main 에 push → CI 통과 → 포크로 복사 → Render 가 빌드. 되돌릴 때는 Render 의 Rollback 이 아니라 되돌리는 커밋으로.**
+
+| 구분 | 실제 값 |
+|---|---|
+| 백엔드 | Render 무료 web service — `https://capstone-back-59z8.onrender.com` |
+| 프론트 | Vercel — `https://capstone-beta-lilac.vercel.app`. 빌드 때 `VITE_API_BASE_URL` 로 Render 주소를 넣고, 브라우저가 백엔드를 **직접** 부른다(Vercel 프록시는 응답을 약 30초에 끊어 콜드 스타트·긴 LLM 응답에서 실패한다) |
+| DB | Neon PostgreSQL(무료, 연결 문자열은 Direct connection). Render 무료 Postgres 는 30일 뒤 만료되고, Supabase 무료는 7일 쉬면 일시 정지돼 손으로 살려야 해서 Neon 을 골랐다 |
+
+**배포 경로**
+
+1. 팀 저장소(`hwanginyong02/Capstone_Back`) `main` 에 push.
+2. CI(`.github/workflows/ci.yml`)의 test job — `pytest -q` 뒤 실제로 서버를 띄워 스모크: `/health` → `/api/organization` →
+   발급 → 발급정보 조회 → `/content` 원본 조회 왕복 → 서술 작업 `POST /api/narrative/jobs` → `GET` 이 `done` 이 될 때까지 보고,
+   칸 출처가 `fallback`·`fixed` 뿐인지(키 없는 CI 라 AI 칸이 없어야 함) 확인.
+3. deploy job — 포크 `hellinii/Capstone_Back` 의 `main` 으로 그대로 복사(force push) → Render Deploy Hook 호출 →
+   `/health` 의 `commit` 이 방금 커밋과 같아질 때까지 최대 15분 기다리고, `persistent:true`(영속 DB)인지도 본다.
+
+Render 는 포크 main 을 따라가지만 자동 배포가 꺼져 있어(`autoDeploy: false`) Deploy Hook 이 유일한 배포 길이다.
+`render.yaml` 은 **참고용**이다 — 이 서비스는 대시보드에서 직접 만든 것이라 Start Command·환경변수 등은 대시보드 값이 정본이다.
+
+**운영 메모**
+
+- **Rollback 금지(2026-10-23 부터)**: Render 대시보드의 Rollback 으로 옛 리비전을 띄우면 그 리비전은 종료된 옛 모델을 부른다.
+  문제가 생기면 되돌리는 커밋(revert)을 만들어 같은 배포 경로로 내보낸다.
+- **환경변수(Render 대시보드 Environment)**: `DATABASE_URL`(Neon), `OPENAI_API_KEY`(매핑), `ANTHROPIC_API_KEY`(서술), `PYTHON_VERSION`.
+  서술만 문제가 생기면 `ANTHROPIC_API_KEY` 를 지워 규칙 문장으로 돌린다. 키가 들어 있는지·어떤 모델인지는 `/health` 의
+  `llm.narrative`·`llm.mapping`(`key`·`model`)으로 본다. 환경변수를 저장해도 서버가 다시 뜨지 않을 수 있으니 **Manual Deploy** 로 다시 띄운다.
+- **기관 이름 바꾸기**: API 가 없으므로(§11) Neon SQL 편집기에서 한 번 직접 바꾼다 — 예:
+  `UPDATE organization SET org_name = '리트머스' WHERE id = 1;`(운영 DB 에는 2026-10-23 에 이미 적용). 이미 발급한 성적서의
+  `issuance.issuer`(발급 당시 발급자 문자열)와 보관본은 바꾸지 않는다 — 발급 당시 그대로가 맞다.
+- **새 표**: `narrative_jobs` 처럼 새 표는 기동 때 `create_all` 이 알아서 만든다. 이미 있는 표에 열을 더하는 것은 하지 못하므로
+  (마이그레이션 도구 없음, §7 규칙 4) 스키마를 늘릴 때는 새 표로 한다.
+- **콜드 스타트**: Render 무료는 한동안 요청이 없으면 잠들고, 깨어나는 데 30~60초쯤 걸린다. 시연 전에 `/health` 를 한 번 불러 깨운다.
+- **Neon 연결 문자열**: `sslmode=require` 를 둔다. 연결 때 `channel_binding` 옵션 오류가 나면 그 옵션만 빼면 된다.

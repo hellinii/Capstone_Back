@@ -5,11 +5,7 @@
 
 이 문서는 새 세션/새 개발자가 **프론트+백 전체 구조를 5분 안에 파악**하도록 돕는 진입 지도다. 세부는 각 문서로 연결만 하고 중복 서술하지 않는다.
 
-> **위치**: 이 파일은 `Capstone_Back/docs/PROJECT_OVERVIEW.md` 다(2026-09-07 ★결정 11 로 이동).
-> 종전에는 두 저장소의 **부모 폴더**에 있었는데, 그 폴더는 git 저장소가 아니라 로컬 전용이라
-> **아무도 이 문서를 받아볼 수 없었다** — 저장소를 클론한 사람에게는 존재하지 않는 문서였다.
-> 프론트 내용도 함께 다루지만 두 저장소 중 하나를 골라야 하므로, 스택·배포 설명이 더 무거운
-> 백엔드에 둔다.
+> 프론트 내용도 함께 다루지만 문서는 한 곳에만 두려고 백엔드 저장소(`Capstone_Back/docs/`)에 둔다.
 
 ---
 
@@ -17,7 +13,7 @@
 
 | | Capstone_Front | Capstone_Back |
 |---|---|---|
-| 역할 | UI / 7단계 워크플로우 / 성적서 렌더 | 컬럼 매핑·검증·지표계산·LLM 서술·발급 API |
+| 역할 | UI / 평가 흐름(입력 화면) / 성적서 렌더 | 컬럼 매핑·검증·지표계산·LLM 서술·발급 API |
 | 스택 | React 18 · TS · Vite · Zustand · Tailwind/shadcn · pnpm | Python 3.12 · FastAPI · pandas · scikit-learn · Anthropic · OpenAI · SQLAlchemy · Pydantic |
 | 배포 | **Vercel** | **Render** web service + **Neon PostgreSQL** (로컬은 SQLite) |
 | 원격 | github.com/hwanginyong02/Capstone_Front | github.com/hwanginyong02/Capstone_Back |
@@ -44,7 +40,7 @@ Capstone_Front
 ├── docs/ARCHITECTURE.md        # 프론트 구조 기준 문서
 ├── docs/FRONTEND_DEVELOPMENT_GUIDELINE.md   # 개발 시 지켜야 할 구조 규칙
 └── src/
-    ├── App.tsx / routes.ts      # 라우팅 (7단계 워크플로우는 /app/*)
+    ├── App.tsx / routes.ts      # 라우팅 (발급 전 입력 화면은 /app/*, 성적서는 /report/*)
     ├── pages/                   # 얇은 조립자 (단계별 페이지 + report/ + workspaces/)
     ├── components/              # 도메인별 UI (basic-info, ..., report, workspaces, landing, ui)
     ├── layout/                  # WorkflowShell(워크플로우 셸) · AppShell(비-워크플로우 셸)
@@ -53,13 +49,13 @@ Capstone_Front
     ├── utils/                   # styling · format · domain · stores(Zustand: useWorkflowStore/useWorkspaceStore)
     └── data/ · types/ · styles/ · test/
 ```
-7단계 워크플로우: **기본정보 → 지표선택 → 지표상세 → 데이터업로드 → 컬럼매핑 → 데이터검증 → 리포트**.
+평가 흐름: **작업 유형 선택(`/app`) → 평가 흐름 만들기(`/app/composer`, 넣을 입력 카드와 순서를 고름) → 고른 순서대로 입력 화면(의뢰자·모델·데이터 업로드·컬럼 매핑·평가 관점·지표 등, 최소 8·전체 12 화면) → 데이터 검증 → 확인과 생성(`/report/:id`)**. 화면 순서는 고정이 아니라 사용자가 정한다(프론트 저장소 `docs/MATERIAL_PICKER.md` §11·§12).
 
 ### Capstone_Back — "라우터(얇은 HTTP) → 서비스(오케스트레이션) → 순수 로직" 계층
 ```
 Capstone_Back
 ├── README.md                   # 스택·구조 요약·주요 API·로컬 실행·배포 (자세한 구조는 docs/ARCHITECTURE.md)
-├── docs/                       # ARCHITECTURE · DEPLOYMENT_PLAN · ISSUANCE_DB_DESIGN · REPORT_NARRATIVE_DESIGN
+├── docs/                       # ARCHITECTURE(구조·서술·발급·배포) · PROJECT_OVERVIEW(이 문서)
 ├── render.yaml · requirements.txt · pytest.ini · tests/
 └── app/
     ├── main.py                  # FastAPI 진입점 (lifespan: init_db+seed / CORS / 5개 라우터 / /health)
@@ -93,7 +89,8 @@ Capstone_Back
 [리포트 Stage2 — LLM 서술]
    └ POST /api/narrative/jobs → 작업 번호 + 8.1 표 즉시 → (뒤에서) narrative.generator: 결론 목록 → 장별 동시 호출 →
         칸별 검사(숫자·판정 모순·권고·선언 숫자·형식) → 걸린 칸만 다시/규칙 문장 → GET /api/narrative/jobs/{id} 로 조회
-        ※ 옛 프론트는 POST /api/generate-narrative(한 번 호출, narrative.legacy)
+        ※ 옛 경로 POST /api/generate-narrative(한 번 호출, narrative.legacy)는 옛 클라이언트용으로 얼려 둠 — 운영 프론트는
+          2026-10-23 배포부터 작업 경로(src/lib/report/narrativeJobApi.ts)만 쓴다. 다음 라운드에 지운다
         ※ verdict/score 는 프론트 computeVerdict 가 권위, 백엔드는 fact_sheet 값으로 강제
         ※ 서술 작업 경로: 프론트는 작업 번호를 run 에 저장하고 조회만 한다 — done 이어야 완성본(isEvaluated), 그 전에는
           인쇄·PDF·발급 잠금, 실패면 "서술 다시 만들기"(프론트 docs/ARCHITECTURE.md §6.1, 백엔드 §10)
@@ -105,7 +102,7 @@ Capstone_Back
 
 - **성적서 판(contentSchema)**: 성적서 데이터에 판 번호가 찍힌다(지금 판 3). 발급한 옛 판(1·2)은 번호로 열어도 발급 당시 모양 그대로 그린다. 판 3 은 소절 번호·7.3 추가 관찰·7절 ※ 한 줄이 있고, 본문에 AI·LLM 표현이 없다(1.4 LLM 면책 항목 없음). 프론트 `docs/ARCHITECTURE.md` §6.3.
 - **작성 기록**: 칸마다 AI 작성(모델 이름)·규칙 기반 문장·고정 문구인지를 발급 보관본에 저장하고(작업 결과 `section_sources`·`section_models`), 서비스 화면의 "작성 기록" 상자에만 보인다 — 인쇄물에는 없다.
-- **기관 이름**: 시드·프론트 자리표시자의 기관 이름은 "리트머스"(옛 "한국 AI 인증원"). 운영 DB 의 기존 행은 배포 때 한 번 바꾼다(`docs/DEPLOYMENT_PLAN.md`).
+- **기관 이름**: 시드·프론트 자리표시자의 기관 이름은 "리트머스"(옛 "한국 AI 인증원"). 운영 DB 의 기존 행은 SQL 로 한 번 바꿨다(2026-10-23, 방법은 `docs/ARCHITECTURE.md` §12 배포·운영).
 
 ---
 
@@ -120,8 +117,8 @@ Capstone_Back
 | POST `/api/validate-data` | `hooks/useDataValidation.ts` | `analysis/validation_router.py` → `validate_dataset` | Step6 |
 | POST `/api/evaluate` | `hooks/useReportData.ts` | `evaluation/router.py` → `run_evaluation_pipeline` | 리포트 S1 |
 | POST `/api/narrative/jobs`, GET `/api/narrative/jobs/{id}` | `lib/report/narrativeJobApi.ts` (payload=`buildFactSheet.ts`) | `narrative/router.py` → `jobs.create_job`·`read_job` → `generator.generate_sections` | 리포트 S2 |
-| POST `/api/generate-narrative` (옛 경로) | 운영 main 프론트 `lib/report/fetchNarrative.ts` | `narrative/router.py` → `legacy.generate_narrative` | 리포트 S2(옛) |
-| GET `/api/organization`, POST `/api/reports/issue`·`{no}/reissue`, GET `/api/reports/{no}` | `lib/report/issuanceApi.ts` · `hooks/useIssuance.ts` | `issuance/router.py` → `service` | 발급 |
+| POST `/api/generate-narrative` (옛 경로) | 없음 — 운영 프론트는 2026-10-23 배포부터 부르지 않는다(옛 클라이언트용으로 얼려 둠) | `narrative/router.py` → `legacy.generate_narrative` | 리포트 S2(옛) |
+| GET `/api/organization`, POST `/api/reports/issue`·`{no}/reissue`, GET `/api/reports/{no}`·`/api/reports/{no}/content` | `lib/report/issuanceApi.ts` · `hooks/useIssuance.ts` | `issuance/router.py` → `service` | 발급 |
 
 - **`/api/validate-data` 와 `/api/evaluate` 는 동일 요청 구조** `EvaluateRequest`(`task_type, column_mappings[], selected_metric_ids[], metadata, beta`), multipart(`file` + `data`=JSON).
 - **role 어휘 변환(drift 방지 단일 출처 2함수)**: 요청 조립 `src/lib/mapping/translateRoleToBackend.ts`(task_type 의존), 응답 역변환 `translateRoleToFrontend.ts`. 백엔드 대응물은 `app/core/schemas.py` 의 `ColumnRole` / `VALID_ROLES_BY_TASK` / `METRIC_REQUIREMENTS`(= SPEC.md의 코드 구현).
@@ -136,14 +133,15 @@ Capstone_Back
 |---|---|
 | `Capstone_Front/SPEC.md` ⭐ | **지표 요구사항·컬럼 역할·검증 규칙·task_type별 허용 지표를 다루는 모든 작업의 최우선 기준.** 변경 전 프론트/백 양쪽을 이 문서에 맞춘다. |
 | `Capstone_Back/docs/ARCHITECTURE.md` | 백엔드 온보딩·구조 기준 — `app/` 도메인 구조, router→service→순수로직 패턴, 새 지표/API/테이블 추가 위치. (`Capstone_Back/README.md`는 스택·주요 API·로컬 실행 요약) |
-| `Capstone_Back/docs/DEPLOYMENT_PLAN.md` | **배포 작업 시** — Render+Neon+Vercel, `DATABASE_URL`/`VITE_API_BASE_URL`, 콜드스타트. |
-| `Capstone_Back/docs/ISSUANCE_DB_DESIGN.md` | **발급/채번/재발급** 로직 수정 시 — 3테이블(organization·report·issuance)·연도별 채번. |
-| `Capstone_Back/docs/REPORT_NARRATIVE_DESIGN.md` | **성적서 서술(7·8·9절)** 설계 이력 — LLM grounding·verdict/score 규칙·fallback·benchmark. 현행(작업 번호·칸별 검문 사다리·규칙 템플릿·결정 번호 색인)은 `docs/ARCHITECTURE.md` §10. |
+| `Capstone_Back/docs/ARCHITECTURE.md` 의 §10 · §11 · §12 | **서술(7·8·9절)** 작업 번호·칸별 검문·규칙 템플릿·결정 번호 색인과 왜 그렇게 만들었는지(§10), **발급** 번호 규칙·정정 발급·보관본(§11), **배포·운영** 실제 주소·배포 경로·환경변수·운영 메모(§12). |
 | `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. 성적서 서술 흐름·사실 시트·판(contentSchema)·고정 문구 번호 표는 §6. |
 | `Capstone_Front/docs/FRONTEND_DEVELOPMENT_GUIDELINE.md` | 프론트에 새 페이지/컴포넌트/유틸 추가 시 지킬 규칙. |
-| `Capstone_Front/README.md` | UI/스타일 작업 시 (색상·타이포·컴포넌트 패턴)과 7단계 목록. |
+| `Capstone_Front/docs/MATERIAL_PICKER.md` | 평가 흐름 만들기 화면(작업 유형 → 블록 고르기 → 입력)의 흐름 규칙·용어. |
+| `Capstone_Front/docs/COMPOSER_COMPONENTS.md` | 평가 흐름에 넣는 블록(카드)과 항목(필드) 목록 — 코드 정본 `src/data/reportComposer.ts` 를 읽기 쉽게 옮긴 것. |
+| `Capstone_Front/docs/UI_DESIGN.md` | 세 분류 유형을 아이콘으로 나눈 진입 화면 설계. |
+| `Capstone_Front/docs/imports/` | 디자인 기준(색·간격·글꼴·가이드라인) 원본. |
 
-> **분업 구조**: 백엔드 설계 3문서(DEPLOYMENT_PLAN·ISSUANCE_DB_DESIGN·REPORT_NARRATIVE_DESIGN)는 "현재 구조는 `docs/ARCHITECTURE.md`, 설계 의도·이력은 각 문서"로 역할이 나뉜다.
+> **문서 역할**: 백엔드 문서는 셋뿐이다 — `README.md`(요약·실행), `docs/ARCHITECTURE.md`(구조와 규칙, 서술·발급·배포의 이유까지), 이 문서(프론트+백 지도). 지표·컬럼 규칙은 프론트 저장소의 `SPEC.md` 가 정본이다.
 
 ---
 
@@ -166,8 +164,8 @@ pnpm typecheck && pnpm test && pnpm build
 ```
 
 ### 배포
-- **백엔드 = Render** web service `capstone-back-59z8` (Python 3.12.13, region singapore, `healthCheckPath:/health`). 실제 URL 은 `https://capstone-back-59z8.onrender.com` — 계획서의 `capstone-back.onrender.com` 이 아니다(이름 선점으로 접미사가 붙었다). `autoDeploy:false` — 배포는 **CI(deploy job)의 Render Deploy Hook 호출이 유일 경로**. `DATABASE_URL`/`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`는 대시보드 입력(커밋 금지). ⚠️ 실제 Start Command는 대시보드 값 사용(`render.yaml`은 문서 정합용).
-- **CI** (`.github/workflows/ci.yml`): PR/push(`dev`,`main`) → test job(`pytest -q` + `/health`·`/api/organization` 스모크). `main` push & 통과 시 deploy job이 포크 미러 푸시 후 Deploy Hook POST.
+- **백엔드 = Render** web service. 주소는 `https://capstone-back-59z8.onrender.com`(하위 도메인 `capstone-back-59z8`). 배포는 **CI(deploy job)의 Render Deploy Hook 호출이 유일 경로**다. `render.yaml` 의 값(이름·리전·Python 버전·Start Command 등)은 참고용이고, 실제 설정은 Render 대시보드가 정본이다. `DATABASE_URL`/`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`는 대시보드에만 넣는다(커밋 금지).
+- **CI** (`.github/workflows/ci.yml`): PR/push(`dev`,`main`) → test job — `pytest -q` 뒤 서버를 띄워 스모크: `/health` → `/api/organization` → 발급 → 발급정보 조회 → `/content` 원본 조회 왕복 → 서술 작업 `POST /api/narrative/jobs` → `GET` 이 `done` 이 되고 칸 출처가 `fallback`·`fixed` 뿐인지(키 없음) 확인. `main` push 가 통과하면 deploy job 이 포크(`hellinii/Capstone_Back`) `main` 으로 복사 → Deploy Hook 호출 → `/health` 의 `commit` 이 새 커밋이 될 때까지 기다리고 `persistent`(영속 DB)도 확인. 자세히는 `docs/ARCHITECTURE.md` §12.
 - **프론트 = Vercel** (`vercel.json`), **DB = Neon PostgreSQL**(`ap-southeast-1`).
 
 ---

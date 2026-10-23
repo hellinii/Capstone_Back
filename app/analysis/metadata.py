@@ -76,7 +76,7 @@ def extract_metadata(
             if not val_str:
                 continue
             if task_type == TaskType.multilabel:
-                # 파싱 규칙은 evaluation.labels 하나뿐이다(ISSUES.md D-04). 종전에는 여기가
+                # 파싱 규칙은 evaluation.labels 하나뿐이다(D-04). 종전에는 여기가
                 # '|' 만 쪼개서, 평가 파서가 라벨 2개로 읽는 "a,b" 를 라벨 1개로 셌다.
                 unique_set.update(parse_label_cell(val))
             else:

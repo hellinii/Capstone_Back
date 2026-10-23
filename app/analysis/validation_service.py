@@ -95,11 +95,11 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
 
     total_rows = len(df)
     # 역할 → 컬럼 **목록**. 확률 역할처럼 여러 컬럼을 갖는 역할이 마지막 하나로 뭉개지지
-    # 않게 한다(ISSUES.md D-08). 평가 전처리와 같은 헬퍼를 써서 두 계층이 같은 시야를 갖는다.
+    # 않게 한다(D-08). 평가 전처리와 같은 헬퍼를 써서 두 계층이 같은 시야를 갖는다.
     role_columns = collect_role_columns(mappings)
     mapping_dict = {role: cols[0] for role, cols in role_columns.items()}
     # 순서를 보존한다 — `list(set(...))` 은 실행마다 순서가 달라져 누락 컬럼 안내
-    # 문구가 비결정적이었다(ISSUES.md D-17·H-07). 평가와 같은 헬퍼를 쓴다.
+    # 문구가 비결정적이었다(D-17·H-07). 평가와 같은 헬퍼를 쓴다.
     required_cols = required_columns(mappings)
 
     details: list[ValidationCheckItem] = []
@@ -122,7 +122,7 @@ def validate_dataset(df, request: EvaluateRequest) -> ValidateDataResponse:
         return _build_missing_required_response(task_type, selected_metric_ids, details, total_rows)
 
     # 3-2. 결측치 → df_clean 확정.
-    # **평가와 같은 함수로 프레임을 만든다**(ISSUES.md D-01). 종전에는 여기서 따로
+    # **평가와 같은 함수로 프레임을 만든다**(D-01). 종전에는 여기서 따로
     # `df_work.dropna()` 를 했는데, 그 기준은 latency 를 포함하고 멀티레이블 빈 셀을
     # 결측으로 셌다. 평가는 latency 를 제외하고 빈 셀을 살리므로 두 표본 수가 어긋났고,
     # 성적서 6절에 인쇄되는 수와 지표를 만든 수가 달랐다.

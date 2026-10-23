@@ -20,7 +20,7 @@ def generate_report(results: Dict[str, Any]) -> Dict[str, Any]:
     실패 판정은 engine 이 붙인 전용 키(METRIC_ERROR_KEY)로만 한다. 종전에는 평범한
     "error" 키 존재만 봤는데, M21/M22 처럼 dict 를 정상 반환하는 지표가 같은
     네임스페이스를 써서 데이터에 'error' 라는 이름의 클래스가 있으면 정상 계산된
-    M22 가 실패로 분류됐다(ISSUES.md C-07).
+    M22 가 실패로 분류됐다(C-07).
     """
     success_metrics = {}
     failed_metrics = {}

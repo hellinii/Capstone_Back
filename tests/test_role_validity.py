@@ -1,6 +1,6 @@
 """tests/test_role_validity.py — 역할 유효성 검사(SPEC §4 Error 3건).
 
-ISSUES.md A-10 (2026-09-07 ★확정된 제품 결정 3b).
+A-10 (2026-09-07 제품 결정).
 
 SPEC §4 는 task_type 에 맞지 않는 역할을 **진행 차단 Error** 로 규정한다.
 

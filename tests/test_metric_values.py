@@ -1,6 +1,6 @@
 """지표 값의 정확성을 손검산 기대값으로 고정하는 스위트.
 
-ISSUES.md H-01 — 기존 `test_evaluator.py:assert_valid_results()` 의 단정은
+H-01 — 기존 `test_evaluator.py:assert_valid_results()` 의 단정은
 `val is not None` / `not isnan` / `0.0 <= val <= 1.0` 셋뿐이고 픽스처가 전부 무작위
 노이즈(binary accuracy 0.505, corr(score, y_true)=0.02)라, **공식이 틀려도 값이
 그럴듯해서 통과한다.** 골든 스냅샷도 그 출력의 복사본이라 오라클이 아니다.
@@ -419,7 +419,7 @@ def test_m7_m8_specificity_and_fpr_are_complementary():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 확률 기반 지표 4개 — M6·M9·M10·M19 (ISSUES.md H-01 의 마지막 잔여)
+# 확률 기반 지표 4개 — M6·M9·M10·M19 (H-01 의 마지막 잔여)
 #
 # 이 넷은 "근사 유도가 필요하다"는 이유로 앞선 라운드에서 미착수로 남았다. 그러나 넷 다
 # 작은 픽스처에서는 손으로 끝까지 계산된다. 남겨 두면 값 검증이 되는 지표가 19/23 에

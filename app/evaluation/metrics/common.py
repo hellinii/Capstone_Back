@@ -27,7 +27,7 @@ from sklearn.metrics import (
 )
 
 def evaluation_classes(df: pd.DataFrame, mapping_dict: dict) -> list:
-    """평가에 쓰이는 클래스 집합 — **`y_true` 기준으로 고정한다**(ISSUES.md C-03).
+    """평가에 쓰이는 클래스 집합 — **`y_true` 기준으로 고정한다**(C-03).
 
     예측에만 등장한 클래스(유령 클래스)를 집합에 넣으면 macro 평균의 분모가 늘어 값이
     희석되고, 클래스별 표에 support 0 인 행이 생긴다. 무엇보다 M23(불균형비)과
@@ -257,7 +257,7 @@ def calculate_imbalance_ratio(df: pd.DataFrame, mapping_dict: dict) -> float:
     if len(counts) == 1:
         # 클래스가 1종이면 '가장 많은 클래스 / 가장 적은 클래스' 가 자기 자신이라 항상
         # 1.0 이 된다. 그 값을 그대로 내보내면 성적서가 '완벽한 균형 상태'라고 서술한다 —
-        # 실제로는 평가가 성립하지 않는 데이터인데 정반대 결론이 인쇄됐다(ISSUES.md C-04).
+        # 실제로는 평가가 성립하지 않는 데이터인데 정반대 결론이 인쇄됐다(C-04).
         raise ValueError(
             f"정답 클래스가 '{list(counts.index)[0]}' 하나뿐이라 불균형비를 정의할 수 "
             "없습니다(측정 불가). 두 개 이상의 클래스가 있는 데이터가 필요합니다."

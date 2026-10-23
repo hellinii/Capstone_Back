@@ -1,6 +1,7 @@
-"""models.py — 발급 메타 ORM 모델 (설계 문서 §3).
+"""models.py — 발급 메타 ORM 모델 (docs/ARCHITECTURE.md 발급 절).
 
 정규화: organization(singleton) 1 : N report(성적서 헤더=채번 단위) 1 : N issuance(발급 차수).
+report 1 : N report_snapshot(차수마다 발급 시점 원본·기관 스냅샷).
 """
 from datetime import datetime, timezone
 
@@ -38,7 +39,7 @@ class Report(Base):
     report_no: Mapped[str] = mapped_column(String, unique=True, nullable=False)  # "RPT-2026-0001"
     year: Mapped[int] = mapped_column(Integer, nullable=False)  # 채번 연도
     seq: Mapped[int] = mapped_column(Integer, nullable=False)   # 연도 내 순번
-    # 평가 연결(멱등 키). UNIQUE 로 동시 발급 시 같은 run 중복 채번을 원천 차단(설계 §11.4).
+    # 평가 연결(멱등 키). UNIQUE 로 동시 발급 시 같은 run 중복 채번을 원천 차단(멱등성은 run_id 유일성에 기댄다).
     run_id: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
     model_name: Mapped[str | None] = mapped_column(String, nullable=True)
     model_version: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -70,7 +71,7 @@ class ReportSnapshot(Base):
     왜 **신규 테이블**인가 — 기존 report/issuance 테이블에 컬럼을 추가하면 스키마
     마이그레이션 도구가 필요하다. `Base.metadata.create_all` 은 기존 테이블에 컬럼을
     추가하지 못하고(앱은 기동한 뒤 첫 SELECT 에서 죽는다), 이 프로젝트에는 Alembic 이
-    없다(ISSUES.md F-11). 반면 **신규 테이블은 create_all 이 정상 생성**하므로,
+    없다(F-11). 반면 **신규 테이블은 create_all 이 정상 생성**하므로,
     마이그레이션 인프라 없이 F-01 을 닫을 수 있다(실증 확인).
 
     보관 형식은 dialect 중립을 위해 JSON 문자열(Text)이다. SQLite/PostgreSQL 어느
@@ -80,7 +81,7 @@ class ReportSnapshot(Base):
     - content_hash    : content_json 의 SHA-256. 인쇄물 진위 대조용.
     - org_snapshot_json: **발급 시점**의 수행기관 정보. 이것이 없으면 조회 시점의
                         기관 행을 조인하게 되어, 기관명을 바꾸는 순간 이미 발급된
-                        모든 성적서의 기관 표기가 소급 변경된다(ISSUES.md G-01).
+                        모든 성적서의 기관 표기가 소급 변경된다(G-01).
     """
     __tablename__ = "report_snapshot"
 

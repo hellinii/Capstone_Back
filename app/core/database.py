@@ -1,8 +1,8 @@
 """database.py — SQLAlchemy 엔진 / 세션 / Base 및 get_db 의존성.
 
-발급 메타(조직·성적서·발급차수)를 저장하는 SQLite DB (설계 문서 §2, §8).
-- 파일: data/app.db (.gitignore). 단일 백엔드·낮은 동시성 → SQLite 로 충분.
-- ORM 추상화로 추후 PostgreSQL 전환 용이.
+발급 메타(기관·성적서·보관본·발급차수)와 서술 작업 표를 저장하는 DB (docs/ARCHITECTURE.md 발급 절).
+- 로컬: SQLite 파일 data/app.db (.gitignore). 배포: Neon PostgreSQL(DATABASE_URL).
+- SQLite 전용 설정(FK·BEGIN IMMEDIATE)은 SQLite 일 때만 건다.
 - DATABASE_URL 환경변수로 경로 재정의 가능(테스트는 인메모리/임시 파일 DB 사용).
 """
 import logging
@@ -37,7 +37,7 @@ def describe_backend(database_url: str) -> tuple[str, bool]:
 
 
 def warn_if_volatile(database_url: str) -> None:
-    """휘발성 백엔드로 내려갔으면 기동 시점에 경고를 남긴다 (ISSUES.md G-07).
+    """휘발성 백엔드로 내려갔으면 기동 시점에 경고를 남긴다 (G-07).
 
     하드 실패 가드는 기본 꺼짐이 옳다(아래 참조). 그렇다고 강등이 **아무 흔적도 남기지
     않아서는** 안 된다 — 1차 라운드가 성적서 원본을 DB 에 넣은 뒤로 휘발성 DB 는 채번
@@ -91,7 +91,7 @@ engine = create_engine(DATABASE_URL, **_ENGINE_KWARGS)
 
 
 def configure_sqlite(bind_engine) -> None:
-    """SQLite 연결/트랜잭션 설정 — FK 강제 + BEGIN IMMEDIATE 쓰기 직렬화(설계 §4).
+    """SQLite 연결/트랜잭션 설정 — FK 강제 + BEGIN IMMEDIATE 쓰기 직렬화(동시 채번 대비).
 
     pysqlite 의 암시적 BEGIN 을 끄고(isolation_level=None) 트랜잭션 시작 시 직접
     BEGIN IMMEDIATE 를 emit → 동시 채번/재발급이 교착(deadlock) 대신 RESERVED 락을
@@ -135,7 +135,7 @@ def get_db():
 
 
 def init_db() -> None:
-    """테이블 생성(이미 있으면 무시) — 마이그레이션 도구 없이 시작(설계 §8·§11)."""
+    """테이블 생성(이미 있으면 무시). 마이그레이션 도구가 없어 기존 표에 열을 더하지 못한다(docs/ARCHITECTURE.md §7 규칙 4)."""
     if _IS_SQLITE:
         path = DATABASE_URL.replace("sqlite:///", "")
         if path and path != ":memory:":

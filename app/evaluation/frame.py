@@ -2,7 +2,7 @@
 
 "어떤 행이 평가에 들어가는가"를 정하는 규칙은 **한 곳에만** 있어야 한다.
 
-종전에는 같은 데이터에 대해 결측 판정 기준이 셋이었다(ISSUES.md D-01):
+종전에는 같은 데이터에 대해 결측 판정 기준이 셋이었다(D-01):
 
   (A) 표시용   `validation_checks.check_missing_values` — latency 만 제외하고 NaN 행을 센다.
   (B) 표본수용 `validation_service` — `df_work.dropna()`. latency **포함** 전 컬럼 대상.
@@ -35,7 +35,7 @@ def required_columns(mappings: List[dict]) -> List[str]:
     """존재 확인 대상 — ignore 가 아닌 모든 매핑 컬럼.
 
     입력 순서를 보존한다(`set()` 을 쓰면 순서가 비결정적이 되어 오류 메시지와
-    프레임 컬럼 순서가 실행마다 달라진다 — ISSUES.md D-17).
+    프레임 컬럼 순서가 실행마다 달라진다 — D-17).
     """
     seen: Dict[str, None] = {}
     for m in mappings:
@@ -49,7 +49,7 @@ def dropna_roles(
 ) -> set:
     """결측 시 행을 버리는 대상 **역할**.
 
-    "선택한 지표가 실제로 읽는 컬럼"으로 좁힌다(ISSUES.md D-06). 종전에는 ignore 가
+    "선택한 지표가 실제로 읽는 컬럼"으로 좁힌다(D-06). 종전에는 ignore 가
     아닌 모든 매핑 컬럼이 대상이라, 고른 지표와 무관한 컬럼(샘플 ID, 쓰지 않는 확률
     컬럼) 하나의 빈 칸이 행을 통째로 버렸다.
 
@@ -110,7 +110,7 @@ def build_evaluation_frame(
         mappings: [{"column": ..., "role": ...}, ...]
         task_type: "binary" | "multiclass" | "multilabel"
         selected_metric_ids: 선택된 지표. 결측 제거 대상을 이 지표들이 실제로 읽는
-            컬럼으로 좁힌다(ISSUES.md D-06). None/빈 목록이면 종전대로 전 컬럼을
+            컬럼으로 좁힌다(D-06). None/빈 목록이면 종전대로 전 컬럼을
             대상으로 삼는다 — 무엇을 읽는지 모르는 호출자에게는 보수적인 쪽이 안전하다.
             (API 경로는 빈 목록을 422 로 거절하므로 여기 도달하지 않는다.)
 

@@ -1,4 +1,4 @@
-"""services/issuance.py — 채번·발급·재발급 트랜잭션 로직 (설계 문서 §4).
+"""app/issuance/service.py — 채번·발급·재발급 트랜잭션 로직 (docs/ARCHITECTURE.md 발급 절).
 
 라우터에서 분리해 단위테스트를 용이하게 한다. 모든 시각은 서버 시계(UTC, tz 없이 저장).
 동시성: SQLite 는 쓰기를 직렬화하고, UNIQUE(year, seq) + UNIQUE(run_id) 로 이중 방어한다.
@@ -43,7 +43,7 @@ def _numbering_year(now: datetime) -> int:
 
     UTC 연도를 쓰면 매년 12/31 15:00~24:00 UTC(= 1/1 00:00~09:00 KST)에 발급한 문서가
     **번호는 전년도, 인쇄된 발급일은 새해**가 되어 연도별 채번 대장과 대조되지 않는다
-    (ISSUES.md F-07).
+    (F-07).
     """
     return now.replace(tzinfo=timezone.utc).astimezone(KST).year
 
@@ -150,7 +150,7 @@ def issue_report(
     """발급(채번). 같은 run_id 로 이미 발급된 경우 신규 채번 없이 기존 report 반환(멱등).
 
     발급 시점의 성적서 원본(content)과 기관 정보를 report_snapshot 에 함께 보관한다
-    (ISSUES.md F-01·G-01). content 는 선택이지만 기관 스냅샷은 항상 기록된다.
+    (F-01·G-01). content 는 선택이지만 기관 스냅샷은 항상 기록된다.
     """
     existing = db.execute(
         select(Report).where(Report.run_id == run_id)
@@ -224,7 +224,7 @@ def reissue_report(
 ) -> Report:
     """재발급(정정). 같은 번호 유지 + 버전 차수 증가. 이전 발급차수는 superseded 로.
 
-    소지 증명 — run_id 가 주어지면 해당 성적서의 run_id 와 일치해야 한다(ISSUES.md G-02).
+    소지 증명 — run_id 가 주어지면 해당 성적서의 run_id 와 일치해야 한다(G-02).
     report_no 는 RPT-{year}-{seq:04d} 로 전수 열거가 가능하지만 run_id 는 프론트가
     crypto.randomUUID 로 만들어 추측할 수 없다. 이것이 없으면 번호만 아는 제3자가
     남의 성적서를 superseded 로 만들고 임의 사유의 정정 이력을 남길 수 있다.
@@ -282,7 +282,7 @@ def update_organization(db: Session, data: dict) -> Organization:
 
     **HTTP 로 노출되지 않는다.** 무인증 상태에서 `PUT /api/organization` 하나로 이미
     발급된 모든 성적서의 기관 표기가 소급 변경됐기 때문에 엔드포인트를 제거했다
-    (ISSUES.md G-01). 시드·운영 스크립트·테스트에서만 호출한다.
+    (G-01). 시드·운영 스크립트·테스트에서만 호출한다.
 
     발급된 성적서는 이제 발급 시점 기관을 report_snapshot 에 동결하므로, 이 함수로
     기관을 바꿔도 기존 발급본의 표기는 바뀌지 않는다(신규 발급분부터 반영).

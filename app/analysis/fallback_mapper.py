@@ -172,7 +172,7 @@ def analyze_columns_fallback(
     metadata = extract_metadata(task_type, df, sample_df, column_mappings)
 
     # 어느 규칙에도 걸리지 않은 컬럼은 조용히 ignore 가 된다 — 그 사실을 알린다
-    # (ISSUES.md B-03). elif 사슬에 else 가 없어 종전에는 안내가 **항상 비어 있었고**,
+    # (B-03). elif 사슬에 else 가 없어 종전에는 안내가 **항상 비어 있었고**,
     # 무키·예산 소진처럼 **가장 안내가 필요한 순간에** 사용자는 아무 설명도 못 받았다.
     # (LLM 경로의 reconcile 은 오히려 성실히 안내를 만든다 — 비어 있던 것은 이쪽이다.)
     column_notes = [

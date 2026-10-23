@@ -110,7 +110,7 @@ def test_generate_narrative_fallback_problems_golden():
     assert_golden("narrative_binary_fallback_problems", body)
 
 
-# 프론트 fetchNarrative.ts 가 읽는 응답 필드 전부(경로 → 허용 타입). 이름이 바뀌면 프론트가 말없이 빈 칸을 찍는다.
+# 옛 프론트의 서술 호출부가 읽는 응답 필드 전부(경로 → 허용 타입). 이름이 바뀌면 프론트가 말없이 빈 칸을 찍는다.
 _TOP_FIELDS = {
     ("interpretation", "confusion_analysis"): str,
     ("interpretation", "distribution_analysis"): str,

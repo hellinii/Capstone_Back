@@ -1,6 +1,6 @@
 """tests/test_volatile_db_visibility.py — 휘발성 DB 강등이 눈에 보인다.
 
-ISSUES.md G-07 (부분 해결분의 잔여).
+G-07 (부분 해결분의 잔여).
 
 `DATABASE_URL` 이 없으면 예외 없이 로컬 SQLite 로 내려가고 기동을 계속한다.
 하드 실패 가드(`REQUIRE_PERSISTENT_DB=1`)는 **기본 꺼짐**이고 그 판단은 옳다 —

@@ -1,4 +1,4 @@
-"""routers/reports.py — 발급/조회 API (설계 문서 §5).
+"""app/issuance/router.py — 발급/조회 API (docs/ARCHITECTURE.md 발급 절).
 
 - GET  /api/organization                  수행기관(performer) 조회
 - POST /api/reports/issue                  발급(채번) — run_id 멱등
@@ -7,7 +7,7 @@
 - GET  /api/reports/{report_no}/content    발급 시점 성적서 원본 조회(복원·진위 대조)
 
 PUT /api/organization 은 제거했다 — 무인증 상태에서 이 엔드포인트 하나로 이미 발급된
-모든 성적서의 기관 표기가 소급 변경됐고(ISSUES.md G-01), 프론트는 이 API 를 한 번도
+모든 성적서의 기관 표기가 소급 변경됐고(G-01), 프론트는 이 API 를 한 번도
 호출하지 않는다(issuanceApi.ts 전수 확인). 기관 정보는 bootstrap 시드로만 바꾼다.
 """
 from fastapi import APIRouter, Depends, HTTPException
@@ -92,7 +92,7 @@ def get_report_content(
     """발급 시점 성적서 원본 조회.
 
     version 미지정 시 최신 차수. 정정 발급이 있었어도 이전 차수를 지정해 받을 수 있어
-    무엇이 바뀌었는지 대조할 수 있다(ISSUES.md F-01·F-04·F-06).
+    무엇이 바뀌었는지 대조할 수 있다(F-01·F-04·F-06).
     """
     report = issuance_service.get_report(db, report_no)
     if report is None:

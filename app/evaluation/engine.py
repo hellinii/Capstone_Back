@@ -100,7 +100,7 @@ def evaluate(
 
     # 전처리가 확률에서 예측을 파생했다면 그 컬럼을 예측 역할로 등록한다.
     # 이 mapping_dict 는 preprocess **이후에** 다시 만들어지므로, df 에 컬럼만 붙여서는
-    # metrics 가 그것을 찾지 못한다(ISSUES.md A-01).
+    # metrics 가 그것을 찾지 못한다(A-01).
     derived = pre_logs.get("derived_prediction")
     if derived:
         mapping_dict[derived["target_role"]] = derived["column"]
