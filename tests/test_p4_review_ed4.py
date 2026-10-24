@@ -333,7 +333,7 @@ def test_t7_multilabel_weakest_share_uses_sample_denominator():
     c = _conclusions(_load("multilabel"))
     assert c["7.1-10"].text == (
         "F1 이 가장 낮은 레이블은 F1 0.048인 Class9이며, 표본은 80건으로 전체 표본의 8.7%이다. 매크로 F1 과의 차이는 0.352이다. "
-        "이 레이블은 매크로 F1 보다 0.1 이상 낮다. 그 밖에 표본이 작은 레이블은 Class14 13건이다."
+        "이 레이블은 매크로 F1 보다 0.1 이상 낮다. 그 밖에 표본이 작은 레이블은 Class14: 13건이다."  # 숫자 끝 이름(S6 뒤 결정 5)
     )
     # 80건·8.7% 는 작은 표본이 아니다 — 까닭은 매크로 F1 차이 하나
     assert "이 레이블은 매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다." in c["8.3-01"].text

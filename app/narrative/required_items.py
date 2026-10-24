@@ -146,8 +146,24 @@ class Ctx:
         return next((s for s in self.facts.fixed_sentences if s.id == sentence_id), None)
 
     def name(self, label) -> str:
-        """클래스·레이블을 부르는 꼴 — 이름(설명)(D37)."""
+        """클래스·레이블을 부르는 꼴 — 이름(설명)(D37). 판 4 는 설명에 괄호가 있으면 이름[설명](wording_ed4.class_name_ed4 —
+        S6 뒤 사용자 결정 5), 판 3 은 wording.class_name 그대로."""
+        if self.edition == 4:
+            return wording_ed4.class_name_ed4(label, self.descriptions.get(str(label).strip()))
         return class_name(label, self.descriptions)
+
+    def with_josa(self, word: str, pair: str) -> str:
+        """말 + 조사 — 판 4 는 '이름[설명]'의 대괄호 앞 이름으로 고르는 wording_ed4.with_josa, 판 3 은 wording.with_josa."""
+        return wording_ed4.with_josa(word, pair) if self.edition == 4 else with_josa(word, pair)
+
+    def cnt(self, n) -> str:
+        """정수 건수 — 판 4 는 1,000 이상이면 천 단위 쉼표(wording_ed4.ed4_count — S6 뒤 사용자 결정 4), 판 3 은 그대로(str)."""
+        return wording_ed4.ed4_count(n) if self.edition == 4 else str(n)
+
+    def name_count(self, label, count_with_unit: str) -> str:
+        """이름 바로 뒤 건수 — 판 4 는 이름이 숫자로 끝나면 '{이름}: {n}건'(wording_ed4.name_count_ed4), 판 3 은 '{이름} {n}건'."""
+        shown = self.name(label)
+        return wording_ed4.name_count_ed4(shown, count_with_unit) if self.edition == 4 else f"{shown} {count_with_unit}"
 
     def prints(self, sentence_id: str) -> bool:
         return code_prints(self.fs, sentence_id)
@@ -243,11 +259,11 @@ def _misclassified(ctx: Ctx) -> str | None:
     if conf.get("unit") == "label_cell":
         # 멀티레이블 — 합계는 표본이 아니라 레이블 칸(표본 수 × 레이블 수)이다. '전체 N건'이라 쓰면 7.2 의 표본 수와
         # 어긋난다(점검 BE-09). 경계·확신 오류 문장(D30)과 같은 '레이블 칸' 단위로 쓴다.
-        text = f"레이블별 혼동행렬을 합친 레이블 칸 {conf['total']}칸 중 {conf['misclassified']}칸{share}이 틀렸다."
+        text = f"레이블별 혼동행렬을 합친 레이블 칸 {ctx.cnt(conf['total'])}칸 중 {ctx.cnt(conf['misclassified'])}칸{share}이 틀렸다."
         if "fn" in conf and "fp" in conf:
-            text += f" 있어야 할 레이블을 놓친 칸(FN)은 {conf['fn']}칸, 없는 레이블을 붙인 칸(FP)은 {conf['fp']}칸이다."
+            text += f" 있어야 할 레이블을 놓친 칸(FN)은 {ctx.cnt(conf['fn'])}칸, 없는 레이블을 붙인 칸(FP)은 {ctx.cnt(conf['fp'])}칸이다."
         return text
-    return f"혼동행렬 기준 전체 {conf['total']}건 중 {conf['misclassified']}건{share}이 오분류되었다."
+    return f"혼동행렬 기준 전체 {ctx.cnt(conf['total'])}건 중 {ctx.cnt(conf['misclassified'])}건{share}이 오분류되었다."
 
 
 def _binary_counts(ctx: Ctx):
@@ -270,7 +286,7 @@ def _fp_fn(ctx: Ctx) -> str | None:
         return None
     label, fp, fn = got
     who = f"양성 클래스 {ctx.name(label)} 기준으로 " if label else ""
-    return f"{who}거짓 양성(FP)은 {fp}건, 거짓 음성(FN)은 {fn}건이다."
+    return f"{who}거짓 양성(FP)은 {ctx.cnt(fp)}건, 거짓 음성(FN)은 {ctx.cnt(fn)}건이다."
 
 
 _RISK_SIDE = {"fn": "거짓 음성(FN, 놓침)", "fp": "거짓 양성(FP, 잘못 잡음)"}
@@ -282,9 +298,9 @@ def _declared_risk(ctx: Ctx) -> str | None:
         return None
     side = _RISK_SIDE[dr.side]
     if dr.share is None:
-        return f"오분류가 없어 의뢰자가 더 위험하다고 밝힌 {side}도 {dr.count}건이다."
+        return f"오분류가 없어 의뢰자가 더 위험하다고 밝힌 {side}도 {ctx.cnt(dr.count)}건이다."
     share = ctx.pct_text(dr.share_text) if ctx.edition == 4 and dr.share_text else ctx.pct(dr.share)
-    return f"의뢰자가 더 위험하다고 밝힌 {side}은 {dr.count}건으로 전체 오류 {dr.total_errors}건의 {share}이다."
+    return f"의뢰자가 더 위험하다고 밝힌 {side}은 {ctx.cnt(dr.count)}건으로 전체 오류 {ctx.cnt(dr.total_errors)}건의 {share}이다."
 
 
 def _declared_risk_values(ctx: Ctx) -> tuple[float, ...]:
@@ -306,7 +322,7 @@ def _per_class_errors(ctx: Ctx) -> str | None:
         return None
     top = sorted(rows, key=lambda r: -(r.fp + r.fn))[:3]
     unit = "칸" if ctx.task_type == "multilabel" else "건"  # 멀티레이블은 레이블 칸 단위(7.1 의 합계·17 과 같은 단위)
-    items = join_and([f"{ctx.name(r.label)} FP {r.fp}{unit}·FN {r.fn}{unit}" for r in top])
+    items = join_and([f"{ctx.name(r.label)} FP {ctx.cnt(r.fp)}{unit}·FN {ctx.cnt(r.fn)}{unit}" for r in top])
     noun = _noun(ctx)
     if _trimmed(ctx, "confusion_counts"):
         # 클래스가 많아 프론트가 표본 수 순으로 줄을 잘랐다 — 빠진 클래스의 오류가 더 많을 수 있다(세션 A 검토 P1).
@@ -325,7 +341,8 @@ def _top_pairs(ctx: Ctx) -> str | None:
     if not pairs:
         return None
     items = join_and([
-        f"{ctx.name(p.actual)}→{ctx.name(p.predicted)} {p.count}건(전체 오분류의 {ctx.pct(p.share_of_errors)})" for p in pairs
+        f"{ctx.name(p.actual)}→{ctx.name_count(p.predicted, f'{ctx.cnt(p.count)}건(전체 오분류의 {ctx.pct(p.share_of_errors)})')}"
+        for p in pairs
     ])
     return f"가장 많이 헷갈린 쌍(실제→예측)은 {items}이다."
 
@@ -338,25 +355,25 @@ def _bias(ctx: Ctx, unit: str) -> str | None:
         r = bias.rows[0]
         pos = f"양성 클래스 {ctx.name(r.label)}" if r.label else "양성"
         if not r.difference:
-            return f"{with_josa(pos, '으로/로')} 예측한 것과 실제 양성이 {r.actual}건으로 같다."
+            return f"{ctx.with_josa(pos, '으로/로')} 예측한 것과 실제 양성이 {ctx.cnt(r.actual)}건으로 같다."
         lean = "많이" if r.difference > 0 else "적게"
         return (
-            f"{with_josa(pos, '으로/로')} 예측한 것은 {r.predicted}건, 실제 양성은 {r.actual}건으로, "
-            f"양성을 실제보다 {abs(r.difference)}건 {lean} 예측했다."
+            f"{ctx.with_josa(pos, '으로/로')} 예측한 것은 {ctx.cnt(r.predicted)}건, 실제 양성은 {ctx.cnt(r.actual)}건으로, "
+            f"양성을 실제보다 {ctx.cnt(abs(r.difference))}건 {lean} 예측했다."
         )
     if unit == "label_total":
         r = bias.rows[0]
         if not r.difference:
-            return f"예측한 레이블 수와 실제 레이블 수가 {r.actual}개로 같다."
+            return f"예측한 레이블 수와 실제 레이블 수가 {ctx.cnt(r.actual)}개로 같다."
         lean = "많이" if r.difference > 0 else "적게"
         return (
-            f"예측한 레이블은 모두 {r.predicted}개, 실제 레이블은 {r.actual}개로, "
-            f"레이블을 실제보다 {abs(r.difference)}개 {lean} 붙였다."
+            f"예측한 레이블은 모두 {ctx.cnt(r.predicted)}개, 실제 레이블은 {ctx.cnt(r.actual)}개로, "
+            f"레이블을 실제보다 {ctx.cnt(abs(r.difference))}개 {lean} 붙였다."
         )
     top = sorted(bias.rows, key=lambda r: -abs(r.difference))[:3]
     if all(r.difference == 0 for r in top):
         return "클래스마다 예측한 수와 실제 수가 같다."
-    items = join_and([f"{ctx.name(r.label)} 예측 {r.predicted}건·실제 {r.actual}건" for r in top if r.difference])
+    items = join_and([f"{ctx.name(r.label)} 예측 {ctx.cnt(r.predicted)}건·실제 {ctx.cnt(r.actual)}건" for r in top if r.difference])
     return f"예측 수와 실제 수의 차이가 큰 클래스는 {items}이다."
 
 
@@ -418,10 +435,10 @@ def _weakest(ctx: Ctx) -> str | None:
         # 표본·비율·매크로 F1 과의 차이는 facts 가 고른 한 클래스의 값이다 — 그 클래스를 이름으로 밝힌다.
         text = (
             _weakest_head(ctx, w, "이며, ")
-            + f"그 가운데 {ctx.name(w.label)}의 표본은 {w.support}건으로 {base}의 {ctx.pct_text(w.share_text)}이다."
+            + f"그 가운데 {ctx.name(w.label)}의 표본은 {ctx.cnt(w.support)}건으로 {base}의 {ctx.pct_text(w.share_text)}이다."
         )
     else:
-        text = _weakest_head(ctx, w, "이며, ") + f"표본은 {w.support}건으로 {base}의 {ctx.pct_text(w.share_text)}이다."
+        text = _weakest_head(ctx, w, "이며, ") + f"표본은 {ctx.cnt(w.support)}건으로 {base}의 {ctx.pct_text(w.share_text)}이다."
     if w.gap_text is not None:
         text += f" 매크로 F1 과의 차이는 {w.gap_text}이다."
     # 사유별로 따로 쓴다 — 'A 또는 B' 로 쓰면 걸리지 않은 쪽까지 주장하게 된다.
@@ -433,11 +450,11 @@ def _weakest(ctx: Ctx) -> str | None:
     if w.far_below_macro:
         stems.append("매크로 F1 보다 0.1 이상 낮")
     if stems:
-        subject = with_josa(ctx.name(w.label), "은/는") if tied else f"이 {with_josa(noun, '은/는')}"
+        subject = ctx.with_josa(ctx.name(w.label), "은/는") if tied else f"이 {with_josa(noun, '은/는')}"
         text += f" {subject} " + _clauses(stems)
     small = [r for r in ctx.facts.low_support_classes if r.label != w.label]
     if small:
-        listed = join_and([f"{ctx.name(r.label)} {r.support}건" for r in small[:5]])
+        listed = join_and([ctx.name_count(r.label, f"{ctx.cnt(r.support)}건") for r in small[:5]])
         more = len(small) > 5 or _trimmed(ctx, "low_support_classes", "facts_class_lists")
         text += f" 그 밖에 표본이 작은 {with_josa(noun, '은/는')} {listed}{' 등' if more else ''}이다."
     return text
@@ -591,22 +608,25 @@ def error_ratio_sentence(er, *, edition: int) -> str:
         subject = "틀린 레이블 칸이" if cell else "오분류가"
         return f"확률이 있는 {subject} 없어 경계 오류·확신 오류 비율은 산출하지 않았다."
 
+    # 판 4 건수는 1,000 이상이면 천 단위 쉼표(S6 뒤 사용자 결정 4 — 고정 문구 17 과 같은 '2,687개' 꼴).
+    n = wording_ed4.ed4_count if edition == 4 else str
+
     def seg(part) -> str:
         if edition == 4:
-            return f"{part.count}{counter}({wording_ed4.ed4_ratio_percent(part.count, er.misclassified)})"
+            return f"{n(part.count)}{counter}({wording_ed4.ed4_ratio_percent(part.count, er.misclassified)})"
         return f"{part.count}{counter}({pct(part.ratio)})" if part.ratio is not None else f"{part.count}{counter}"
 
     confident = f"틀린 쪽 확률이 {er.confident_level:g} 이상인 확신 오류는 {seg(er.confident)}이다."
     if er.boundary is not None:
         return (
-            f"{unit} {er.misclassified}{counter} 중 결정 경계와의 거리가 {er.boundary_margin:g} 미만인 "
+            f"{unit} {n(er.misclassified)}{counter} 중 결정 경계와의 거리가 {er.boundary_margin:g} 미만인 "
             f"경계 오류는 {seg(er.boundary)}, {confident}"
         )
     if er.boundary_note == "threshold_unknown":
         reason = "예측값을 직접 제출해 결정 임계값을 알 수 없으므로 경계 오류는 계산하지 않았고, "
     else:
         reason = "경계 오류는 계산하지 않았고, "
-    return f"{unit} {er.misclassified}{counter} 중 {reason}{confident}"
+    return f"{unit} {n(er.misclassified)}{counter} 중 {reason}{confident}"
 
 
 def _error_nature_template(ctx: Ctx) -> str | None:
@@ -685,7 +705,7 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
         gaps, gaps_all = "정확도 − 매크로 F1 과 다수 − 소수 F1 차이 중 하나가", "정확도 − 매크로 F1 과 다수 − 소수 F1 차이가 모두"
     rule = _IMBALANCE_LEVEL[ie.level].format(gaps=gaps, gaps_all=gaps_all)
     text = (
-        f"{rule}. 다수 {_noun(ctx)} {with_josa(ctx.name(ie.majority_class), '과/와')} 소수 {_noun(ctx)} "
+        f"{rule}. 다수 {_noun(ctx)} {ctx.with_josa(ctx.name(ie.majority_class), '과/와')} 소수 {_noun(ctx)} "
         f"{ctx.name(ie.minority_class)}의 F1 차이는 {gap}"
     )
     if ie.accuracy_minus_macro_f1 is not None:
@@ -1263,10 +1283,10 @@ def _average_gap(ctx: Ctx, kind: str) -> str | None:
     ref = g.reference_class
     f1 = f"F1 {ctx.class_f1(ref.label, ref.f1)}" if ref.f1 is not None else None
     if kind == "macro_vs_weighted":
-        detail = join_and([x for x in (f"표본 {ref.support}건" if ref.support is not None else None, f1) if x])
+        detail = join_and([x for x in (f"표본 {ctx.cnt(ref.support)}건" if ref.support is not None else None, f1) if x])
         text += f" 표본이 가장 많은 클래스는 {ctx.name(ref.label)}" + (f"이며 {detail}이다." if detail else "이다.")
     else:
-        detail = join_and([x for x in (f1, f"표본 {ref.support}건" if ref.support is not None else None) if x])
+        detail = join_and([x for x in (f1, f"표본 {ctx.cnt(ref.support)}건" if ref.support is not None else None) if x])
         text += f" F1 이 가장 낮은 레이블은 {ctx.name(ref.label)}" + (f"이며 {detail}이다." if detail else "이다.")
     return text
 
@@ -1366,7 +1386,7 @@ def _weakest_risk(ctx: Ctx) -> str | None:
     if tied:
         tail = f" 모델 용도('{purpose}')에서 이 {noun}들이 가지는 위험을 쓴다." if purpose and risk else ""
         if ctx.edition == 4:
-            tail = _weakest_risk_reason(ctx, w, with_josa(ctx.name(w.label), "은/는")) + tail
+            tail = _weakest_risk_reason(ctx, w, ctx.with_josa(ctx.name(w.label), "은/는")) + tail
         scope = f"표에 실린 {noun} 가운데 " if trimmed else ""
         return f"{scope}가장 약한 {_topic(ctx)} F1 {with_josa(ctx.weakest_f1(w), '으로/로')} {_tied_phrase(ctx, tied)}이다.{tail}"
     tail = f" 모델 용도('{purpose}')에서 그 {with_josa(noun, '이/가')} 가지는 위험을 쓴다." if purpose and risk else ""

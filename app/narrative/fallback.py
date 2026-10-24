@@ -159,7 +159,8 @@ def _recommendations(fs: FactSheet, *, edition: int):
     else:
         data_quality = "데이터 측면에서 권고 대상으로 지목된 문제는 없다."
     if fs.dropped_rows > 0:
-        data_quality += f" 전처리에서 {fs.dropped_rows}건이 평가에서 제외되었다."
+        dropped = wording_ed4.ed4_count(fs.dropped_rows) if edition == 4 else fs.dropped_rows
+        data_quality += f" 전처리에서 {dropped}건이 평가에서 제외되었다."
 
     if model_side:
         model_ops = (
@@ -199,7 +200,19 @@ class _Input:
         return any(c.item_id == item_id and c.template_text for c in self.conclusions)
 
     def name(self, label) -> str:
+        """이름(설명) — 판 4 는 설명에 괄호가 있으면 이름[설명](wording_ed4.class_name_ed4 — S6 뒤 사용자 결정 5)."""
+        if self.edition == 4:
+            return wording_ed4.class_name_ed4(label, self.descriptions.get(str(label).strip()))
         return class_name(label, self.descriptions)
+
+    def cnt(self, n) -> str:
+        """정수 건수 — 판 4 는 1,000 이상이면 천 단위 쉼표(wording_ed4.ed4_count — S6 뒤 사용자 결정 4), 판 3 은 그대로."""
+        return wording_ed4.ed4_count(n) if self.edition == 4 else str(n)
+
+    def name_count(self, label, count_with_unit: str) -> str:
+        """이름 바로 뒤 건수 — 판 4 는 이름이 숫자로 끝나면 '{이름}: {n}건'(wording_ed4.name_count_ed4)."""
+        shown = self.name(label)
+        return wording_ed4.name_count_ed4(shown, count_with_unit) if self.edition == 4 else f"{shown} {count_with_unit}"
 
 
 def _section_7_1(inp: _Input) -> dict:
@@ -220,23 +233,23 @@ def _distribution_intro(inp: _Input) -> str | None:
             share = {k: wording_ed4.ed4_ratio_percent(v, dist["total"]) for k, v in fs.distribution.class_distribution.items()}
         else:
             share = {k: f"{pct.get(k, 0)}%" for k in fs.distribution.class_distribution}
-        items = ", ".join(f"{inp.name(k)} {v}건({share[k]})" for k, v in fs.distribution.class_distribution.items())
+        items = ", ".join(inp.name_count(k, f"{inp.cnt(v)}건({share[k]})") for k, v in fs.distribution.class_distribution.items())
         # 프론트가 클래스 상한(256)에 맞춰 분포를 잘랐으면 잘린 목록을 전체처럼 쓰지 않는다(S4a 미리 자르기).
         cut = fs.facts.omitted.get("class_distribution", 0) if fs.facts is not None else 0
         if cut:
             items += f" 외 {cut}개 {'레이블' if dist.get('unit') == 'label' else '클래스'}"
         if dist.get("unit") == "label":
             return (
-                f"평가 데이터셋은 총 {dist['total']}건이며, 레이블별 등장 분포는 {items}이다"
+                f"평가 데이터셋은 총 {inp.cnt(dist['total'])}건이며, 레이블별 등장 분포는 {items}이다"
                 "(한 표본에 레이블이 여럿일 수 있어 비율을 모두 더하면 전체를 넘을 수 있다)."
             )
-        return f"평가 데이터셋은 총 {dist['total']}건이며, 클래스 분포는 {items}이다."
+        return f"평가 데이터셋은 총 {inp.cnt(dist['total'])}건이며, 클래스 분포는 {items}이다."
     if fs.imbalance_effect is not None:
         # 클래스가 많아 프론트가 분포 표를 비웠어도(본문 예산) 엔진의 불균형 결론은 남는다 — 9절에 불균형 문제가 있는데
         # 7.2 가 분포를 모른다고 쓰지 않게(S4b 검토 FB-02).
         cut = fs.facts.omitted.get("class_distribution", 0) if fs.facts is not None else 0
         head = f"클래스가 많아 클래스별 건수({cut}개)는 생략했다." if cut else "클래스별 건수는 싣지 않았다."
-        return f"평가 데이터셋은 총 {fs.n_samples}건이며, {head}"
+        return f"평가 데이터셋은 총 {inp.cnt(fs.n_samples)}건이며, {head}"
     return None
 
 

@@ -107,7 +107,8 @@ def test_u1_multilabel_evaluation_ratio_is_the_same_percent_as_the_distribution_
     req, (derived, refs, *_rest) = _prep(raw)
     intro = fallback._distribution_intro(fallback._input(req.fact_sheet, refs, derived, task_type="multilabel",
                                                          client_inputs=req.client_inputs, conclusions=None, edition=4))
-    assert "Class12(세포 운명) 688건(75.0%)" in intro and "Class13 683건(74.5%)" in intro
+    # 설명 붙은 이름은 그대로, 숫자로 끝나는 이름은 "{이름}: {n}건"(S6 뒤 사용자 결정 5).
+    assert "Class12(세포 운명) 688건(75.0%)" in intro and "Class13: 683건(74.5%)" in intro
     # 허용 목록은 그 퍼센트를 받고(보기 값), 학습 표본 수 분모가 아닌 비율(레이블 등장 합 분모 — Class12 688/3899 = 17.6%)은 받지 않는다.
     wl = _prep(raw)[1][2]
     assert verify_grounding([cons["7.2-03"].text, intro], wl, edition=4).violations == []
