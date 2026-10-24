@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from app.narrative.sections import SECTION_IDS
+from app.narrative import wording_ed4
 from app.narrative.wording import josa
 
 TESTS = Path(__file__).parent
@@ -56,13 +57,16 @@ EXAMPLES = {
 # S6 질문 4(2026-10-24 사용자 답 "추천대로")로 명세와 멀티 예시를 고침: 판 4 멀티레이블 최약 레이블·작은 표본 비율의 분모 = 표본 수
 # (edition4_meaning 네 줄·decided 한 줄). 멀티 예시는 프론트에서 다시 떠 옮김 — class_share_basis "samples", Class9 share 0.087·
 # low_support false, low_support_classes 는 Class14 하나, 문제 근거 weakest_class 같이. 이진·다중 예시·대조 표·칸 대응표는 그대로.
+# S6 뒤 사용자 결정 4·5(2026-10-24)로 대조 표를 고침: count 규칙과 줄(정수 건수 천 단위 쉼표), class_name·name_count 규칙과
+# class_name_cases·name_count_cases(이름(설명)·이름[설명]·숫자로 끝나는 이름 '{이름}: {n}건'), josa_cases 에 '이름[설명]' 일곱 줄.
+# 같은 결정 4 로 멀티 예시만 프론트에서 다시 떠 옮김 — 고정 문구 17(facts.fixed_sentences)의 '틀린 레이블 칸 2,687개'. 이진·다중 그대로.
 SHA256 = {
     "fact_sheet_contract_ed4.json": "f8516766cef76c0d504e21e78eb6cafe4edd6f1e6e7bedf373527d4477a80776",
-    "number_wording_ed4.json": "6d4659d849363ceac749108c19b9a41662b18ce6e1f02bdc30586f54142466fb",
+    "number_wording_ed4.json": "e138b9152a8305b59276baecdd438c4fbb5f3bb612c937d3cd7b628414d2b5fb",
     "narrative_slots_ed4.json": "3c43ffa35357c8c7f4c8a30d182482a85dec51caefa872dc9e556ae51d5b7d35",
     EXAMPLE: "0f7da6dfc88870aec7cb18c3a02204319df8487b4a9e058c344ade8dc0d63f69",
     "fact_sheet_multiclass_ed4.json": "68277d563888fdc1fdb1f4c50a0cd373d264394026c0ede9e1c421bc91ef96a5",
-    "fact_sheet_multilabel_ed4.json": "a0cdd99d04ee1127c093731f893d197ac3f741439de5c05d161cd4ded957a9e6",
+    "fact_sheet_multilabel_ed4.json": "9c3a3d73ed30839d403ba4971a25b0052754baa84bc5e888aa49dc022caf53d5",
 }
 
 
@@ -387,8 +391,27 @@ def ref_distinct(value, others) -> str:
     raise AssertionError("여섯째 자리로 다르면 여섯째 자리에서 끝난다")
 
 
+def ref_count(value) -> str:
+    """정수 건수(S6 뒤 결정 4) — 끝에서 세 자리마다 쉼표. 형식 지정자를 쓰지 않는 기준 구현."""
+    digits = str(int(value))
+    groups = []
+    while len(digits) > 3:
+        groups.insert(0, digits[-3:])
+        digits = digits[:-3]
+    return ",".join([digits] + groups)
+
+
+def ref_class_name(label, description) -> str:
+    text = (description or "").strip()
+    if not text:
+        return str(label)
+    return f"{label}[{text}]" if any(ch in text for ch in "()") else f"{label}({text})"
+
+
 def ref_number(case: dict) -> str:
     rule = case["rule"]
+    if rule == "count":
+        return ref_count(case["value"])
     if rule == "plain":
         return ref_plain(case["value"])
     if rule == "judged":
@@ -416,7 +439,7 @@ def ref_number(case: dict) -> str:
 
 RULES = (
     "plain", "judged", "signed_judged", "ci_bound", "percent", "percent_point", "signed_count", "given", "target", "latency",
-    "distinct",
+    "distinct", "count",
 )
 
 
@@ -460,7 +483,30 @@ def test_text_rules_give_number_shaped_texts():
 
 @pytest.mark.parametrize("case", TABLE["josa_cases"], ids=lambda c: f"{c['word']}{c['expected']}")
 def test_josa_table_matches_backend_josa(case):
-    assert josa(case["word"], case["pair"]) == case["expected"]
+    """판 4 조사(wording_ed4.josa)는 표 전부를, 공통 wording.josa(판 3 도 씀)는 '이름[설명]' 줄을 뺀 전부를 맞힌다 — 대괄호 꼴은 판 4
+    만 만든다(S6 뒤 결정 5). 판 3 조사 함수는 고치지 않았다."""
+    assert wording_ed4.josa(case["word"], case["pair"]) == case["expected"]
+    if "[" not in case["word"]:
+        assert josa(case["word"], case["pair"]) == case["expected"]
+
+
+def test_josa_table_has_square_bracket_names():
+    rows = [c for c in TABLE["josa_cases"] if "[" in c["word"]]
+    assert len(rows) >= 5
+    # 판 3 조사 함수는 대괄호 꼴을 모른다 — 적어도 한 줄은 다른 답(판 4 josa 갈래가 헛돌지 않는다).
+    assert any(josa(c["word"], c["pair"]) != c["expected"] for c in rows)
+
+
+@pytest.mark.parametrize("case", TABLE["class_name_cases"], ids=lambda c: c["expected"])
+def test_class_name_table_follows_the_rule(case):
+    assert ref_class_name(case["label"], case["description"]) == case["expected"]
+
+
+@pytest.mark.parametrize("case", TABLE["name_count_cases"], ids=lambda c: c["expected"])
+def test_name_count_table_follows_the_rule(case):
+    name = case["name"]
+    want = f"{name}: {case['count']}" if name[-1] in "0123456789" else f"{name} {case['count']}"
+    assert want == case["expected"]
 
 
 def test_josa_table_has_numbers_and_names_for_every_pair():

@@ -11,11 +11,14 @@
   (wording.meets_target·프론트 meetsTarget 과 같다). 이 모듈은 판정을 새로 하지 않는다 — 호출부가 받은 판정(meets)을 넘긴다.
 - 사실 시트의 *_text 칸(숫자 꼴)은 plain·judged·signed_judged·ci_bound 의 결과다. 백분율(%)·%p·부호(+, U+2212)는 그릴 때와
   글을 쓸 때만(percent·percent_point·signed_count).
-- 조사는 찍힌 글자로 고른다 — wording.josa 를 그대로 쓴다(숫자가 바뀌면 조사도 다시: 0.0046으로 → 0.005로).
+- 조사는 찍힌 글자로 고른다 — wording.josa 의 공통 규칙(숫자가 바뀌면 조사도 다시: 0.0046으로 → 0.005로)에 판 4 '이름[설명]'
+  (대괄호 앞 이름)만 더한 josa(아래). 판 3 의 wording.josa 는 그대로다.
+- 정수 건수는 1,000 이상이면 천 단위 쉼표(ed4_count — S6 뒤 사용자 결정 4), 클래스 이름은 '이름(설명)'·설명에 괄호가 있으면
+  '이름[설명]'(class_name_ed4 — 결정 5), 이름 바로 뒤 건수는 이름이 숫자로 끝나면 '{이름}: {n}건'(name_count_ed4).
 판 3 표기(wording.num 의 넷째 자리·metric_num 의 끝 0 빼기)는 판 3 경로 그대로이고, 이 모듈은 판 4 요청에서만 쓴다.
 
 상호작용
-- 의존(import): app.narrative.wording(josa — 다시 내보냄)
+- 의존(import): app.narrative.wording(josa — 판 4 대괄호 규칙을 덧댄 josa·with_josa 로 내보냄)
 - 사용처: app.narrative.fact_view(판 4 사실 보기), app.narrative.required_items(판 4 참조 범위 문장), tests
 """
 from __future__ import annotations
@@ -23,7 +26,7 @@ from __future__ import annotations
 import math
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.narrative.wording import josa, with_josa  # noqa: F401 — 판 4 도 같은 조사 함수(공통 규칙)
+from app.narrative import wording as _wording
 
 # 판 4 에서 판정 쪽으로 늘리는 최대 자릿수 — 표·사실 시트 모두 여섯째 자리(판 3 사실 시트는 아홉째). 프론트와 같다.
 MAX_DIGITS = 6
@@ -335,3 +338,64 @@ def imbalance_texts_ed4(ie) -> dict[str, str | None]:
         text = getattr(shown, key) if shown else None
         out[key] = text or (ed4_plain(value) if value is not None else None)
     return out
+
+
+# ── 건수·클래스 이름·조사(S6 뒤 사용자 결정 4·5, 2026-10-24 — 공통 대조 표 count·class_name·name_count·josa 줄) ──────────
+
+
+def ed4_count(n) -> str:
+    """정수 건수 — 1,000 이상이면 천 단위 쉼표(1197 → '1,197'), 그 밖은 그대로(999). 판 4 고객 글(규칙 문장·폴백)의 건수가 모두 이
+    함수다(프론트 ed4Count 와 같은 글자). 정수가 아닌 값(소수·글·None)은 str 그대로 — 소수·지연시간(D4)·ID·연도는 묶지 않는다."""
+    if isinstance(n, bool):
+        return str(n)
+    if isinstance(n, int):
+        return f"{n:,}"
+    if isinstance(n, float) and n.is_integer():
+        return f"{int(n):,}"
+    return str(n)
+
+
+def class_name_ed4(label, description) -> str:
+    """클래스·레이블 이름 — 설명(앞뒤 공백 뗌)이 있으면 '이름(설명)', 설명에 '(' 나 ')' 가 있으면 '이름[설명]', 없으면 이름(프론트
+    classNameEd4 와 같은 글자). 판 3 wording.class_name 은 그대로다."""
+    name = str(label)
+    text = str(description).strip() if description is not None else ""
+    if not text:
+        return name
+    return f"{name}[{text}]" if "(" in text or ")" in text else f"{name}({text})"
+
+
+def name_count_ed4(name: str, count_with_unit: str) -> str:
+    """이름 바로 뒤 건수 — 찍힌 이름이 숫자로 끝나면 '{이름}: {건수}'(digits '1: 55건'), 아니면 '{이름} {건수}'(프론트 nameCountEd4)."""
+    return f"{name}: {count_with_unit}" if name[-1:].isdigit() and name[-1:].isascii() else f"{name} {count_with_unit}"
+
+
+_SQUARE_CLOSERS = _wording._CLOSERS
+
+
+def _before_square_bracket(word: str) -> str:
+    """판 4 '이름[설명]'은 대괄호 앞 이름으로 — 괄호 규칙과 같은 방식(끝 따옴표·공백 건너뜀, 짝 맞는 '[', 앞이 비면 대괄호 안 말)."""
+    w = (word or "").rstrip()
+    while w and w[-1] in _SQUARE_CLOSERS:
+        w = w[:-1].rstrip()
+    if not w.endswith("]"):
+        return word
+    depth = 0
+    for i in range(len(w) - 1, -1, -1):
+        if w[i] == "]":
+            depth += 1
+        elif w[i] == "[":
+            depth -= 1
+            if depth == 0:
+                before = w[:i]
+                return _before_square_bracket(before) if before.strip() else w[i + 1:-1]
+    return word
+
+
+def josa(word: str, pair: str) -> str:
+    """판 4 조사 — wording.josa(공통 규칙)에 '이름[설명]'은 대괄호 앞 이름만 더한다(프론트 판 4 josa 와 같은 대조 표)."""
+    return _wording.josa(_before_square_bracket(word), pair)
+
+
+def with_josa(word: str, pair: str) -> str:
+    return f"{word}{josa(word, pair)}"

@@ -41,6 +41,8 @@ def run(case: dict) -> str:
         return w.ed4_latency(case["value"])
     if rule == "distinct":
         return w.ed4_distinct(case["value"], case["others"])
+    if rule == "count":
+        return w.ed4_count(case["value"])
     raise AssertionError(rule)
 
 
@@ -48,6 +50,8 @@ RULE_COUNTS = {
     "plain": 35, "judged": 35, "ci_bound": 15, "percent": 11, "signed_judged": 7, "given": 12,
     # distinct 7 → 12: 후속(2026-10-24) D3 클래스별 표의 class_table 줄 다섯(others = [최약 F1]).
     "percent_point": 5, "signed_count": 4, "target": 11, "latency": 7, "distinct": 12,
+    # count 8: S6 뒤 사용자 결정 4(2026-10-24) — 정수 건수 천 단위 쉼표.
+    "count": 8,
 }
 
 
@@ -70,9 +74,28 @@ def test_chain_number_then_josa(chain):
 
 
 @pytest.mark.parametrize("case", TABLE["josa_cases"], ids=lambda c: f"{c['word']}{c['expected']}")
-def test_josa_is_the_shared_function(case):
-    assert w.josa is josa
+def test_josa_is_the_shared_rule_plus_square_brackets(case):
+    """판 4 josa = 공통 wording.josa + '이름[설명]'은 대괄호 앞 이름(S6 뒤 결정 5). 대괄호가 없으면 공통 함수와 같은 답."""
     assert w.josa(case["word"], case["pair"]) == case["expected"]
+    if "[" not in case["word"]:
+        assert josa(case["word"], case["pair"]) == w.josa(case["word"], case["pair"])
+    assert w.with_josa(case["word"], case["pair"]) == case["word"] + case["expected"]
+
+
+@pytest.mark.parametrize("case", TABLE["class_name_cases"], ids=lambda c: c["expected"])
+def test_class_name_ed4_matches_table(case):
+    assert w.class_name_ed4(case["label"], case["description"]) == case["expected"]
+
+
+@pytest.mark.parametrize("case", TABLE["name_count_cases"], ids=lambda c: c["expected"])
+def test_name_count_ed4_matches_table(case):
+    assert w.name_count_ed4(case["name"], case["count"]) == case["expected"]
+
+
+def test_count_leaves_non_integers_alone():
+    """건수만 묶는다 — 소수·지연시간·글은 그대로(D4: 지연시간 '1234.56' 은 4.8 표와 같은 글자)."""
+    assert w.ed4_count(1197) == "1,197" and w.ed4_count(1197.0) == "1,197"
+    assert w.ed4_count(1234.56) == "1234.56" and w.ed4_count("2000") == "2000" and w.ed4_count(None) == "None"
 
 
 def test_trap_row_is_not_what_the_report_prints():
