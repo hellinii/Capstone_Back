@@ -57,6 +57,15 @@ def test_falls_back_to_repr_when_scores_are_denser_than_12_digits():
     assert threshold_text(t, scores) == repr(t)
 
 
+def test_fallback_is_fixed_point_without_exponent():
+    """아주 작은 점수에서 12자리로도 안 되면 대체 표기도 고정소수다 — 지수 꼴(2e-13)이 아니다(S2·S3 검토 D7)."""
+    t = 2e-13
+    scores = np.array([1e-13, t, 0.5])
+    assert repr(t) == "2e-13"
+    assert threshold_text(t, scores) == "0.0000000000002"
+    assert threshold_text(np.float64(t), scores) == "0.0000000000002"
+
+
 def test_repr_fallback_gives_plain_number_for_numpy_float():
     """numpy 2 의 np.float64 를 받아도 대체 경로가 'np.float64(…)' 가 아닌 숫자 글자를 돌려준다."""
     t = np.float64(0.1) + np.float64(0.2)  # 0.30000000000000004

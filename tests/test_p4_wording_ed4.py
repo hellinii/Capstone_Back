@@ -35,12 +35,18 @@ def run(case: dict) -> str:
         return w.ed4_signed_count(case["value"])
     if rule == "given":
         return w.ed4_given(case["value"])
+    if rule == "target":
+        return w.ed4_target(case["value"])
+    if rule == "latency":
+        return w.ed4_latency(case["value"])
+    if rule == "distinct":
+        return w.ed4_distinct(case["value"], case["others"])
     raise AssertionError(rule)
 
 
 RULE_COUNTS = {
-    "plain": 35, "judged": 32, "ci_bound": 15, "percent": 11, "signed_judged": 7, "given": 6,
-    "percent_point": 5, "signed_count": 4,
+    "plain": 35, "judged": 35, "ci_bound": 15, "percent": 11, "signed_judged": 7, "given": 12,
+    "percent_point": 5, "signed_count": 4, "target": 11, "latency": 7, "distinct": 7,
 }
 
 
@@ -86,7 +92,7 @@ def test_text_rules_give_number_shaped_texts():
 
     num = re.compile(r"^-?\d+(\.\d+)?$")
     rows = [c for c in TABLE["number_cases"] if c["rule"] in ("plain", "judged", "signed_judged", "ci_bound")]
-    assert len(rows) == 89
+    assert len(rows) == 92
     assert [run(c) for c in rows if not num.match(run(c))] == []
 
 

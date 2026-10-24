@@ -491,9 +491,9 @@ def _tie_raw(task="multiclass", *, bird_f1=0.27421, trimmed=False, extra=0):
 
 def test_weakest_ties_by_printed_digits():
     req = NarrativeRequest.model_validate(_tie_raw())
-    assert weakest_ties(req.fact_sheet) == (["cat", "bird"], False)
+    assert weakest_ties(req.fact_sheet, edition=3) == (["cat", "bird"], False)
     req = NarrativeRequest.model_validate(_tie_raw(bird_f1=0.2743))
-    assert weakest_ties(req.fact_sheet) == ([], False)
+    assert weakest_ties(req.fact_sheet, edition=3) == ([], False)
 
 
 def test_tied_weakest_conclusion_names_all_of_them():

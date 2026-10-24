@@ -500,7 +500,7 @@ def _section_notes(section_id: str, fs: FactSheet, derived: dict, task_type: str
                 "평균에만 맞는 설명을 이 지표에 쓰지 않는다. 평균 방식은 사실 시트 지표 표의 '평균 방식'에 맞게만 설명한다."
             )
     if section_id in ("7.1", "8.3"):
-        tied, trimmed = weakest_ties(fs)
+        tied, trimmed = weakest_ties(fs, edition=edition)
         if tied:
             noun = "레이블" if task_type == "multilabel" else "클래스"
             scope = f"표에 실린 {noun} 가운데 " if trimmed else ""

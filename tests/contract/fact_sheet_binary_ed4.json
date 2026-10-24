@@ -371,6 +371,7 @@
       "weakest_class": {
         "label": "malignant",
         "f1": 0.9767441860465116,
+        "f1_text": "0.977",
         "support": 64,
         "share": 0.374269006,
         "share_text": "0.374",

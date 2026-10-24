@@ -7,6 +7,8 @@
 - 사용처: app.evaluation.engine(METRIC_REGISTRY, 곡선·임계값 조정 여지 부착)
 """
 
+from decimal import Decimal
+
 import pandas as pd
 import numpy as np
 
@@ -273,4 +275,6 @@ def threshold_text(threshold: float, scores: np.ndarray) -> str:
         text = f"{threshold:.{digits}f}"
         if np.array_equal(scores >= float(text), expected):
             return text
-    return repr(threshold)
+    # 12자리로도 안 되면 반올림하지 않은 가장 짧은 십진 표기 — 지수 꼴(1e-13) 없이 늘 고정소수(S2·S3 검토 D7: 판 4 요청의
+    # best_threshold_text 는 숫자 꼴 NumText 다).
+    return format(Decimal(repr(threshold)), "f")

@@ -416,7 +416,7 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
             "표본이 작음(30건 미만 또는 5% 미만)": _yes(w.low_support),
             "매크로 F1 보다 0.1 이상 낮음": _yes(w.far_below_macro),
             # F1 이 같은 최하위 클래스(세션 C — 하나만 단독 최약처럼 쓰지 않게). 표가 잘렸으면 실린 클래스 가운데.
-            f"F1 이 같은 {noun}": weakest_ties(fs)[0] or None,
+            f"F1 이 같은 {noun}": weakest_ties(fs, edition=3)[0] or None,
         }
     if facts.low_support_classes:
         out[f"표본이 작은 {noun}"] = [

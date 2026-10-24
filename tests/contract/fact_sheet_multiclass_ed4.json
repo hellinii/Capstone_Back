@@ -615,6 +615,7 @@
       "weakest_class": {
         "label": "9",
         "f1": 0.9719626168224299,
+        "f1_text": "0.9720",
         "support": 54,
         "share": 0.1,
         "share_text": "0.100",

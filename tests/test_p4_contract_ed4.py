@@ -41,14 +41,18 @@ EXAMPLES = {
     "fact_sheet_multilabel_ed4.json": "yeast_strong",
 }
 
-# 자기 저장소 안의 고정(옆 저장소가 없는 CI 에서도 지킨다). 프론트 contractEd4.test.ts 와 같은 값이다.
+# 자기 저장소 안의 고정(옆 저장소가 없는 CI 에서도 지킨다). 프론트 contractEd4.test.ts·contractExamplesEd4.test.tsx 와 같은 값이다.
+# S2·S3 검토(2026-10-24)로 고침: 명세 — D1·D2·D3·D4·D6·D7 결정(decided), 판 4 전용 새 키 facts.weakest_class.f1_text, '임시' 글(D8)
+# 걷음. 대조 표 — target·latency·distinct 규칙과 줄, given 정수·지수 꼴(T15), judged D1·여섯째 자리(T13) 줄, 조사 줄(T14).
+# 예시 셋 — weakest_class 에 f1_text 한 줄(f1 바로 다음: 이진 0.977 = M4 value_text, 다중 0.9720 = 5 와 달라 보이게 늘림, 멀티
+# 0.048). 다른 바이트는 그대로다(프론트가 이 칸을 만들면 다시 떠서 같은 바이트가 되어야 한다).
 SHA256 = {
-    "fact_sheet_contract_ed4.json": "33c36e58ad07f1ab01b5c821ebdd3c82ea777a8badd911e6c0cbfd371fa5c357",
-    "number_wording_ed4.json": "f377e7face2c1b3226a0d45fe4d9d527cd85b249de9fd7f54525590801e754ff",
+    "fact_sheet_contract_ed4.json": "b39895a5377c8d65d01973b5a65e58e0d3739424a509a3d27a0cc6cf4fe775c8",
+    "number_wording_ed4.json": "cd6e6ac860b7458d0922f7d4e8878dc44715e019106f2c9d5fa0a0e86c249338",
     "narrative_slots_ed4.json": "3c43ffa35357c8c7f4c8a30d182482a85dec51caefa872dc9e556ae51d5b7d35",
-    EXAMPLE: "fe05c374414fd868cf3add5b92e090bae0282e66627231b14bb81aad81879818",
-    "fact_sheet_multiclass_ed4.json": "c2e03e71f457088cb3ba784a623fbc1f20219ff2e93a5d26776d5c06d02c6f46",
-    "fact_sheet_multilabel_ed4.json": "403a8085f56ee5fab36aff107220c5393bf97e543485c745bec3ef3cdd1afc5a",
+    EXAMPLE: "55f98135ccbb95b028668a5fbd97c5b6f7616c9af800396f1f596ace79adac54",
+    "fact_sheet_multiclass_ed4.json": "8b6eff4fd54f1d9a20261f969f9eb36483d353ed505cf928914fda9f41997359",
+    "fact_sheet_multilabel_ed4.json": "226d4950d84f5aeb34182072021b8ef516be0c5aeb7b49a7c884dc0b767f385a",
 }
 
 
@@ -142,8 +146,10 @@ def test_edition4_only_keys_are_declared_once():
     assert len(ED4_ONLY) >= 10
     assert len(set(ED4_ONLY)) == len(ED4_ONLY)
     assert ED4_ONLY[0] == "report_edition"
-    # facts 안에 더한 판 4 키는 하나뿐이다(명세 원칙).
-    assert [p for p in ED4_ONLY if ".facts." in p] == ["fact_sheet.facts.distribution_shift[].evaluation_minus_training_text"]
+    # facts 안에 더한 판 4 키는 둘뿐이다(명세 원칙 — 최약 클래스 F1 글자는 S2·S3 검토 D2·D3 로 더함).
+    assert [p for p in ED4_ONLY if ".facts." in p] == [
+        "fact_sheet.facts.distribution_shift[].evaluation_minus_training_text", "fact_sheet.facts.weakest_class.f1_text",
+    ]
 
 
 @pytest.mark.parametrize("path", ED4_ONLY)
@@ -342,8 +348,33 @@ def ref_signed_count(n: int) -> str:
     return f"+{n}" if n > 0 else f"−{-n}" if n < 0 else "0"
 
 
+def _shortest(value) -> Decimal:
+    return Decimal(repr(float(value)))
+
+
 def ref_given(value) -> str:
-    return repr(float(value))
+    d = _shortest(value)
+    return str(int(d)) if d == int(d) else format(d, "f")
+
+
+def ref_target(value) -> str:
+    d = _shortest(value)
+    decimals = 0 if d == int(d) else -d.as_tuple().exponent
+    if decimals <= 3:
+        return ref_plain(value)
+    return format(d, "f") if decimals <= 6 else _fixed(value, 6)
+
+
+def ref_latency(value) -> str:
+    return _fixed(value, 2)
+
+
+def ref_distinct(value, others) -> str:
+    rivals = [o for o in others if _fixed(o, 6) != _fixed(value, 6)]
+    for digits in range(3, 7):
+        if all(_fixed(o, digits) != _fixed(value, digits) for o in rivals):
+            return _unneg(_fixed(value, digits))
+    raise AssertionError("여섯째 자리로 다르면 여섯째 자리에서 끝난다")
 
 
 def ref_number(case: dict) -> str:
@@ -364,10 +395,19 @@ def ref_number(case: dict) -> str:
         return ref_signed_count(case["value"])
     if rule == "given":
         return ref_given(case["value"])
+    if rule == "target":
+        return ref_target(case["value"])
+    if rule == "latency":
+        return ref_latency(case["value"])
+    if rule == "distinct":
+        return ref_distinct(case["value"], case["others"])
     raise AssertionError(f"모르는 규칙 {rule}")
 
 
-RULES = ("plain", "judged", "signed_judged", "ci_bound", "percent", "percent_point", "signed_count", "given")
+RULES = (
+    "plain", "judged", "signed_judged", "ci_bound", "percent", "percent_point", "signed_count", "given", "target", "latency",
+    "distinct",
+)
 
 
 def test_table_covers_every_rule_with_several_cases():
@@ -400,7 +440,7 @@ def test_text_rules_give_number_shaped_texts():
     import re
 
     num = re.compile(r"^-?\d+(\.\d+)?$")
-    rows = [c for c in TABLE["number_cases"] if c["rule"] in ("plain", "judged", "signed_judged", "ci_bound")]
+    rows = [c for c in TABLE["number_cases"] if c["rule"] in ("plain", "judged", "signed_judged", "ci_bound", "distinct", "target", "given", "latency")]
     assert rows
     assert [c["expected"] for c in rows if not num.match(c["expected"])] == []
     # 그리는 규칙(percent·percent_point·signed_count)의 결과는 숫자 꼴이 아니다 — *_text 칸에 싣지 않는다.
@@ -568,3 +608,19 @@ def test_record_panel_lines_are_the_approved_b26_text():
     assert SLOTS["record_panel"]["header"] + SLOTS["record_panel"]["header_note"] == (
         "작성 기록 · 5·6절 칸마다 쓴 방식(화면에만 보이며 인쇄본에는 없습니다)"
     )
+
+
+@pytest.mark.parametrize("name", sorted(EXAMPLES))
+def test_every_example_weakest_f1_text_follows_d2_then_d3(name):
+    """facts.weakest_class.f1_text(판 4 전용) — 판정 대상 지표와 같은 원값이면 그 value_text(D2), 아니면 distinct(다른 클래스 F1
+    — D3). 기준 구현으로 본다(프론트가 다시 떠도 이 규칙이어야 한다)."""
+    fs = _load(name)["fact_sheet"]
+    w = fs["facts"]["weakest_class"]
+    same = [m["value_text"] for m in fs["metrics"]
+            if m.get("value_text") and m["threshold"] is not None and abs(m["value"] - w["f1"]) < 1e-9]
+    want = same[0] if same else ref_distinct(w["f1"], [p["f1"] for p in fs["per_class"] if p["label"] != w["label"]])
+    assert w["f1_text"] == want
+    assert {"fact_sheet_binary_ed4.json": "0.977", "fact_sheet_multiclass_ed4.json": "0.9720",
+            "fact_sheet_multilabel_ed4.json": "0.048"}[name] == want
+    if name == "fact_sheet_binary_ed4.json":
+        assert same == ["0.977"]  # 이진 — 양성 클래스 F1 = F1 Score(M4)

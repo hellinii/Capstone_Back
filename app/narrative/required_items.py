@@ -159,6 +159,26 @@ class Ctx:
             return wording_ed4.ed4_plain(value)
         return num(value)
 
+    def same(self, value) -> str:
+        """판정과 무관한 자리의 값 — 판 4 는 같은 원값의 판정 대상 지표가 있으면 그 value_text(D2 — wording_ed4.same_value_text_ed4),
+        아니면 plain. 판 3 은 num 그대로."""
+        if self.edition == 4:
+            return wording_ed4.same_value_text_ed4(self.fs.metrics, value)
+        return num(value)
+
+    def weakest_f1(self, w) -> str:
+        """최약 클래스 F1 — 판 4 는 프론트가 실은 글자(facts.weakest_class.f1_text, D2·D3 — wording_ed4.weakest_f1_text_ed4), 판 3 은 num."""
+        if self.edition == 4:
+            return wording_ed4.weakest_f1_text_ed4(self.fs)
+        return num(w.f1)
+
+    def class_f1(self, label, value) -> str:
+        """클래스 하나의 F1 — 판 4 에서 그 클래스가 최약 클래스면 최약 클래스 F1 글자(같은 수는 같은 글자), 아니면 same."""
+        w = self.facts.weakest_class if self.facts is not None else None
+        if self.edition == 4 and w is not None and label == w.label:
+            return self.weakest_f1(w)
+        return self.same(value)
+
     def pct(self, ratio: float) -> str:
         """비율(0~1)의 백분율 — 판 4 는 plain 글자를 옮긴 첫째 자리(ed4_percent(ed4_plain)), 판 3 은 wording.pct."""
         if self.edition == 4:
@@ -341,19 +361,26 @@ def _bias(ctx: Ctx, unit: str) -> str | None:
 
 
 # 최약 클래스 동점(세션 C 실호출 — Digits 는 2·8, yeast 는 아홉 레이블이 F1 0 인데 facts.weakest_class 하나만 단독 최약처럼
-# 썼다). 동점은 인쇄 자릿수(num — 넷째 자리)로 같은 F1 이다. 이름은 다섯까지만 싣는다.
+# 썼다). 판 3 의 동점은 인쇄 자릿수(num — 넷째 자리)로 같은 F1 이다. 판 4 는 셋째 자리로 같아 보이면 서로 달라질 때까지 여섯째
+# 자리까지 늘려 찍으므로(D3 — wording_ed4.ed4_distinct, 프론트 최약 클래스 고르기와 같은 기준) 여섯째 자리로도 같을 때만 동점이다.
+# 이름은 다섯까지만 싣는다.
 _TIE_NAMES_SHOWN = 5
 
 
-def weakest_ties(fs: FactSheet) -> tuple[list[str], bool]:
+def _tie_key(value: float, edition: int) -> str:
+    return wording_ed4._fixed(float(value), wording_ed4.MAX_DIGITS) if edition == 4 else num(float(value))
+
+
+def weakest_ties(fs: FactSheet, *, edition: int) -> tuple[list[str], bool]:
     """(F1 이 최약 클래스와 같은 클래스 이름 — 최약 클래스가 맨 앞, 클래스별 표가 잘렸는가). 동점이 없으면 빈 목록.
 
-    클래스별 표(per_class)로 본다. 프론트가 표를 잘랐으면(facts.omitted.per_class) 실린 클래스 가운데의 동점이다."""
+    클래스별 표(per_class)로 본다. 프론트가 표를 잘랐으면(facts.omitted.per_class) 실린 클래스 가운데의 동점이다.
+    edition 은 동점을 가르는 자릿수의 판(판 3 넷째 자리, 판 4 여섯째 자리 — 위 주석)."""
     w = fs.facts.weakest_class if fs.facts is not None else None
     if w is None or not fs.per_class:
         return [], False
-    key = num(float(w.f1))
-    tied = [p.label for p in fs.per_class if p.f1 is not None and p.label != w.label and num(float(p.f1)) == key]
+    key = _tie_key(w.f1, edition)
+    tied = [p.label for p in fs.per_class if p.f1 is not None and p.label != w.label and _tie_key(p.f1, edition) == key]
     trimmed = bool(fs.facts.omitted.get("per_class"))
     return ([w.label] + tied if tied else []), trimmed
 
@@ -368,11 +395,16 @@ def _tied_phrase(ctx: Ctx, tied: list[str]) -> str:
 
 def _weakest_head(ctx: Ctx, w, tail: str) -> str:
     """최약 클래스 첫머리 — 동점이면 함께 부른다. tail 은 동점이 없을 때 이름 뒤에 붙는 말('이며'·'이다')."""
-    tied, trimmed = weakest_ties(ctx.fs)
+    tied, trimmed = weakest_ties(ctx.fs, edition=ctx.edition)
     if not tied:
-        return f"F1 이 가장 낮은 {_topic(ctx)} F1 {ctx.num(w.f1)}인 {ctx.name(w.label)}{tail}"
+        return f"F1 이 가장 낮은 {_topic(ctx)} F1 {ctx.weakest_f1(w)}인 {ctx.name(w.label)}{tail}"
     scope = f"표에 실린 {_noun(ctx)} 가운데 " if trimmed else ""
-    return f"{scope}F1 이 가장 낮은 {_topic(ctx)} F1 {with_josa(ctx.num(w.f1), '으로/로')} {_tied_phrase(ctx, tied)}{tail}"
+    return f"{scope}F1 이 가장 낮은 {_topic(ctx)} F1 {with_josa(ctx.weakest_f1(w), '으로/로')} {_tied_phrase(ctx, tied)}{tail}"
+
+
+def _share_base(ctx: Ctx) -> str:
+    """최약 클래스 비율의 분모 이름 — 멀티레이블은 레이블 등장 횟수, 그 밖은 전체 표본(facts.class_share_basis)."""
+    return "레이블 등장" if ctx.facts.class_share_basis == "label_occurrences" else "전체 표본"
 
 
 def _weakest(ctx: Ctx) -> str | None:
@@ -380,8 +412,8 @@ def _weakest(ctx: Ctx) -> str | None:
     if w is None:
         return None
     noun = _noun(ctx)
-    base = "레이블 등장" if ctx.facts.class_share_basis == "label_occurrences" else "전체 표본"
-    tied, _ = weakest_ties(ctx.fs)
+    base = _share_base(ctx)
+    tied, _ = weakest_ties(ctx.fs, edition=ctx.edition)
     if tied:
         # 표본·비율·매크로 F1 과의 차이는 facts 가 고른 한 클래스의 값이다 — 그 클래스를 이름으로 밝힌다.
         text = (
@@ -916,8 +948,9 @@ def _target_level(ctx: Ctx) -> str | None:
     refs = [r for r in ctx.benchmark_refs if r.get("target_value") is not None]
     if not refs:
         return None
-    # 목표값 표기 — 판 4 는 합격 기준과 같은 셋째 자리 끝 0 유지(0.950, 고정 문구 23), 판 3 은 반올림하지 않은 값.
-    target = wording_ed4.ed4_plain if ctx.edition == 4 else target_text
+    # 목표값 표기 — 판 4 는 합격 기준과 같은 글자(ed4_target — 셋째 자리 끝 0 유지 0.950, 넷째 자리 이상 목표는 받은 글자 그대로,
+    # D1), 판 3 은 반올림하지 않은 값.
+    target = wording_ed4.ed4_target if ctx.edition == 4 else target_text
     return _grouped(_TARGET_GROUP, refs, "target_position", lambda r: f"{r['metric']}(목표 {target(r['target_value'])})")
 
 
@@ -1097,7 +1130,7 @@ def _ci(ctx: Ctx) -> str | None:
                     # 판 4 — 경계는 프론트 판 4 표기(반올림 전 경계로 목표와의 대소를 지킨 표기 — 0.9497), 목표는 셋째 자리.
                     low = m.ci_low_text or wording_ed4.ed4_ci_bound(m.ci_low, m.threshold)
                     high = m.ci_high_text or wording_ed4.ed4_ci_bound(m.ci_high, m.threshold)
-                    return f"{m.display_name}(구간 {low}~{high}, 목표 {wording_ed4.ed4_plain(m.threshold)})"
+                    return f"{m.display_name}(구간 {low}~{high}, 목표 {wording_ed4.ed4_target(m.threshold)})"
                 # 목표값 — 새 요청(value_text 가 있음)은 반올림하지 않은 값, 옛 요청은 성적서처럼 셋째 자리(S10).
                 target = target_text(m.threshold) if m.value_text else metric_num(m.threshold)
                 return f"{m.display_name}(구간 {_ci_end(m.ci_low, target)}~{_ci_end(m.ci_high, target)}, 목표 {target})"
@@ -1182,7 +1215,7 @@ def _risk_side_sentence(ctx: Ctx, g) -> str | None:
     metric = next((m for m in ctx.fs.metrics if m.metric_id == rs.metric_id), None)
     if metric is not None and metric.threshold is not None and rs.meets_target_at_best is not None:
         verb = "충족한다" if rs.meets_target_at_best else "충족하지 못한다"
-        text += f" 이 값은 목표 {with_josa(wording_ed4.ed4_plain(metric.threshold), '을/를')} {verb}."
+        text += f" 이 값은 목표 {with_josa(wording_ed4.ed4_target(metric.threshold), '을/를')} {verb}."
     return text
 
 
@@ -1225,10 +1258,10 @@ def _average_gap(ctx: Ctx, kind: str) -> str | None:
     else:
         relation = "두 값이 같다"
     text = (
-        f"매크로 F1 은 {_metric_value(ctx, 'M4', g.macro_f1)}, {other} F1 은 {with_josa(ctx.num(g.other_f1), '으로/로')} {relation}."
+        f"매크로 F1 은 {_metric_value(ctx, 'M4', g.macro_f1)}, {other} F1 은 {with_josa(ctx.same(g.other_f1), '으로/로')} {relation}."
     )
     ref = g.reference_class
-    f1 = f"F1 {ctx.num(ref.f1)}" if ref.f1 is not None else None
+    f1 = f"F1 {ctx.class_f1(ref.label, ref.f1)}" if ref.f1 is not None else None
     if kind == "macro_vs_weighted":
         detail = join_and([x for x in (f"표본 {ref.support}건" if ref.support is not None else None, f1) if x])
         text += f" 표본이 가장 많은 클래스는 {ctx.name(ref.label)}" + (f"이며 {detail}이다." if detail else "이다.")
@@ -1265,7 +1298,7 @@ def _declared_average(ctx: Ctx) -> str | None:
         return None
     name = "가중 평균" if d.average == "weighted" else "마이크로 평균"
     why = "'다수 클래스 우선'으로" if d.class_priority == "larger_first" else "'샘플 단위로 중요'로"
-    return f"의뢰자가 클래스 중요도를 {why} 밝혔으므로, 그에 맞춘 {name} F1 은 {ctx.num(d.f1)}이다."
+    return f"의뢰자가 클래스 중요도를 {why} 밝혔으므로, 그에 맞춘 {name} F1 은 {ctx.same(d.f1)}이다."
 
 
 def _declared_average_values(ctx: Ctx) -> tuple[float, ...]:
@@ -1304,7 +1337,8 @@ def weakest_is_risk(w) -> bool:
 def _weakest_risk_reason(ctx: Ctx, w, subject: str) -> str:
     """판 4 — 최약 클래스를 운영 위험으로 다룰지와 그 까닭(D49 ②). AI 에게 주는 말이다(템플릿은 사실 문장만)."""
     noun = _noun(ctx)
-    small = "작은 표본(30건 미만 또는 전체의 5% 미만)"
+    # 분모 이름은 같은 지시문의 5.2 최약 클래스 문장과 같게(멀티레이블은 '레이블 등장' — S2·S3 검토 T7).
+    small = f"작은 표본(30건 미만 또는 {_share_base(ctx)}의 5% 미만)"
     if weakest_is_risk(w):
         if w.low_support and w.far_below_macro:
             why = f"{small}이고 매크로 F1 보다 0.1 이상 낮아"
@@ -1326,7 +1360,7 @@ def _weakest_risk(ctx: Ctx) -> str | None:
         return None
     purpose = _model_purpose(ctx)
     noun = _noun(ctx)
-    tied, trimmed = weakest_ties(ctx.fs)
+    tied, trimmed = weakest_ties(ctx.fs, edition=ctx.edition)
     # 판 4 — 운영 위험으로 쓰는 것은 D22 최약 클래스 문제 조건에 걸릴 때만(D49 ②). 걸리지 않으면 용도상 위험을 쓰라고 하지 않는다.
     risk = ctx.edition != 4 or weakest_is_risk(w)
     if tied:
@@ -1334,11 +1368,11 @@ def _weakest_risk(ctx: Ctx) -> str | None:
         if ctx.edition == 4:
             tail = _weakest_risk_reason(ctx, w, with_josa(ctx.name(w.label), "은/는")) + tail
         scope = f"표에 실린 {noun} 가운데 " if trimmed else ""
-        return f"{scope}가장 약한 {_topic(ctx)} F1 {with_josa(ctx.num(w.f1), '으로/로')} {_tied_phrase(ctx, tied)}이다.{tail}"
+        return f"{scope}가장 약한 {_topic(ctx)} F1 {with_josa(ctx.weakest_f1(w), '으로/로')} {_tied_phrase(ctx, tied)}이다.{tail}"
     tail = f" 모델 용도('{purpose}')에서 그 {with_josa(noun, '이/가')} 가지는 위험을 쓴다." if purpose and risk else ""
     if ctx.edition == 4:
         tail = _weakest_risk_reason(ctx, w, f"이 {with_josa(noun, '은/는')}") + tail
-    return f"가장 약한 {_topic(ctx)} F1 {ctx.num(w.f1)}인 {ctx.name(w.label)}이다.{tail}"
+    return f"가장 약한 {_topic(ctx)} F1 {ctx.weakest_f1(w)}인 {ctx.name(w.label)}이다.{tail}"
 
 
 def _weakest_risk_fact(ctx: Ctx) -> str | None:
@@ -1508,7 +1542,9 @@ def _latency(ctx: Ctx) -> str | None:
     lat = ctx.fs.latency
     if not lat.available:
         return None
-    parts = [f"{label} {num(getattr(lat, key))}{lat.unit}" for label, key in _LATENCY_NAMES if getattr(lat, key) is not None]
+    # 판 4 는 4.8 표와 같은 둘째 자리(D4 — wording_ed4.ed4_latency), 판 3 은 num 그대로.
+    show = wording_ed4.ed4_latency if ctx.edition == 4 else num
+    parts = [f"{label} {show(getattr(lat, key))}{lat.unit}" for label, key in _LATENCY_NAMES if getattr(lat, key) is not None]
     if not parts:
         return None
     return f"지연시간은 {join_and(parts)}이다."

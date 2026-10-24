@@ -27,6 +27,7 @@ from app.main import app
 from app.narrative import jobs, prompt
 from app.narrative.baselines import SOURCE_NOTE_ED4
 from app.narrative.sections import SECTION_IDS, SECTIONS, SECTIONS_BY_ID, place, title
+from app.narrative.wording_ed4 import ed4_distinct
 from tests.p4_example_ed4 import EXAMPLE_TEMPLATES
 
 TESTS = Path(__file__).parent
@@ -117,11 +118,16 @@ _DECIMAL = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?![\d.])")
 
 
 def _extended_texts(raw: dict) -> set[str]:
-    """요청이 판 4 규칙으로 늘려 찍은 글자(셋째 자리보다 긴 것) — 경계·임계값 표기."""
+    """요청이 판 4 규칙으로 늘려 찍은 글자(셋째 자리보다 긴 것) — 경계·임계값 표기, 최약 클래스 F1(facts.weakest_class.f1_text),
+    그리고 셋째 자리로 최약 클래스와 같아 보이는 다른 클래스 F1 을 늘린 표기(D3 — 공통 대조 표 distinct 규칙, 다중 예시의 5 = 0.9725)."""
     fs = raw["fact_sheet"]
     out = {m[k] for m in fs["metrics"] for k in ("ci_low_text", "ci_high_text") if m.get(k)}
     if fs.get("f1_threshold_gain") and fs["f1_threshold_gain"].get("best_threshold_text"):
         out.add(fs["f1_threshold_gain"]["best_threshold_text"])
+    weakest = (fs.get("facts") or {}).get("weakest_class")
+    if weakest:
+        out.add(weakest["f1_text"])
+        out |= {ed4_distinct(p["f1"], [weakest["f1"]]) for p in fs["per_class"] if p["label"] != weakest["label"]}
     return {t for t in out if len(t.split(".")[-1]) > 3}
 
 

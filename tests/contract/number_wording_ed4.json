@@ -1,6 +1,6 @@
 {
   "name": "판 4 숫자 표기·조사 대조 표",
-  "status": "판 4 라운드 S2 ① 공통 계약(2026-10-24). 같은 바이트 사본이 백엔드 tests/contract/ 와 프론트 src/test/contract/ 에 있다. 두 저장소 시험이 이 표를 읽어 (1) 표가 규칙과 맞는지 시험 안의 기준 구현으로, (2) 자기 저장소 함수가 표와 같은지 본다. 바꾸면 두 저장소를 함께 바꾸고 sha256 을 이유와 함께 고친다.",
+  "status": "판 4 라운드 S2 ① 공통 계약(2026-10-24), S2·S3 검토 반영(target·latency·distinct 규칙, given 의 정수·지수 꼴, 조사 줄). 같은 바이트 사본이 백엔드 tests/contract/ 와 프론트 src/test/contract/ 에 있다. 두 저장소 시험이 이 표를 읽어 (1) 표가 규칙과 맞는지 시험 안의 기준 구현으로, (2) 자기 저장소 함수가 표와 같은지 본다. 바꾸면 두 저장소를 함께 바꾸고 sha256 을 이유와 함께 고친다.",
   "rules": {
     "rounding": "반올림은 이진 값 그대로의 절반에서 0에서 먼 쪽이다(JS Number.prototype.toFixed, 파이썬 Decimal(value).quantize(…, ROUND_HALF_UP)). 파이썬 round()·'%.3f' 는 절반에서 짝수 쪽이라 쓰지 않는다(0.0625 → 0.063).",
     "plain": "판정과 무관한 값 — 셋째 자리, 끝 0 유지(0.950, 1.000, 1.672). 음의 0 은 부호 없이 0.000. 음수는 ASCII '-'.",
@@ -10,7 +10,10 @@
     "percent": "소수 표기 글자를 소수점 두 칸 옮겨 % — 소수 자릿수는 (원래 소수 자릿수 − 2), 최소 1(0.374 → 37.4%, 0.000 → 0.0%, 0.04996 → 4.996%). 숫자로 곱하지 않는다.",
     "percent_point": "percent 와 같이 옮기고 %p — 양수 '+', 음수 U+2212(−), 0 은 부호 없음(4.5 차이 열).",
     "signed_count": "정수 차이 — 양수 '+', 음수 U+2212, 0 은 부호 없음(4.4 예측 편향).",
-    "given": "의뢰자가 준 결정 임계값과 판정 기준값은 늘이지도 끝 0 을 채우지도 않는다(0.5, 0.1, 1.5). F1 최대 임계값은 백엔드 엔진 표기(best_threshold_text)를 옮긴다.",
+    "given": "의뢰자가 준 결정 임계값과 판정 기준값은 늘이지도 끝 0 을 채우지도 않는다(0.5, 0.1, 1.5) — 가장 짧은 십진 표기(round-trip, JS String(Number) 와 같은 숫자), 정수 꼴은 소수점 없이(1, 30), 지수 꼴은 쓰지 않는다(1e-05 → 0.00001, 1e-7 → 0.0000001). F1 최대 임계값은 백엔드 엔진 표기(best_threshold_text — 늘 고정소수)를 옮긴다.",
+    "target": "합격 기준(목표값) — 받은 목표의 가장 짧은 십진 표기(given 과 같은 글자)의 소수 자릿수가 3 이하면 plain(셋째 자리, 끝 0 유지 — 0.950), 4~6 이면 그 글자 그대로(0.8124 — 셋째 자리로 줄이면 넷째 자리 목표와 값의 판정이 어긋나 보인다), 7 이상이면 여섯째 자리로 반올림. 지수 꼴 없이. 4.3 표·3.1·5절 규칙 문장·B20·사실 보기 모두(D1, 2026-10-24 사용자 승인). 값은 진짜 목표와 judged 로 찍는다.",
+    "latency": "지연시간 — 둘째 자리, 끝 0 유지(toFixed(2) — 4.8 표와 같은 글자). 규칙 문장·사실 보기·허용 목록도 같은 글자(D4).",
+    "distinct": "최약 클래스 F1(facts.weakest_class.f1_text 의 ② 갈래, D3) — 셋째 자리부터 여섯째 자리까지 늘려, 다른 클래스 F1(others) 가운데 여섯째 자리로도 같지 않은 것과 모두 달라 보이는 첫 표기. 여섯째 자리로 같은 클래스는 동점이라 늘리는 까닭이 되지 않는다(동점은 서술이 함께 밝힌다). 같은 수가 판정 대상 지표의 원값이면 이 규칙보다 그 지표의 value_text 가 먼저다(D2).",
     "text_fields": "사실 시트의 *_text 칸은 plain·judged·signed_judged·ci_bound 의 결과(숫자 꼴)만 싣는다. percent·percent_point·signed_count 는 그릴 때와 글에서만 쓴다.",
     "allow_list": "판 4 숫자 허용 목록은 이 표의 규칙으로 찍힌 표기(셋째 자리와 늘린 표기, 백분율 첫째 자리)만 받는다 — 판 3 넷째 자리 표기(0.9767)는 판 4 글에서 위반이다. 판 4 절 번호(narrative_slots_ed4.json edition4_section_numbers)는 숫자로 보지 않는다.",
     "copula": "'이다' 는 고르지 않고 글자 그대로 쓴다(예시본 '1.672이다', '0.008이다', '33.3%이다').",
@@ -47,8 +50,20 @@
       "backend": "ed4_signed_count(n)"
     },
     "given": {
-      "frontend": "String(value)",
-      "backend": "repr(float) — 의뢰자가 준 결정 임계값 그대로(늘이지도 채우지도 않음)"
+      "frontend": "ed4Given(value) — String(value) 와 같되 지수 꼴 없이(1e-7 → 0.0000001)",
+      "backend": "ed4_given(value) — 가장 짧은 십진 표기, 정수 꼴은 소수점 없이(1 → '1'), 지수 꼴 없이"
+    },
+    "target": {
+      "frontend": "ed4Target(threshold)",
+      "backend": "ed4_target(threshold)"
+    },
+    "latency": {
+      "frontend": "ed4Latency(value) — 4.8 표의 toFixed(2) 와 같은 함수",
+      "backend": "ed4_latency(value)"
+    },
+    "distinct": {
+      "frontend": "ed4Distinct(value, others) — 최약 클래스 고르기(weakest_class.f1_text)와 같은 함수",
+      "backend": "ed4_distinct(value, others)"
     },
     "josa": {
       "frontend": "josa(word, pair) — koreanJosa.ts 에 새로(공통 규칙 nameFinalSound). 지금 있는 josaWaGwa·josaEunNeun·josaEuroRo·josaEulReul(숫자)은 그대로",
@@ -889,6 +904,251 @@
       "value": 0.9,
       "expected": "0.9",
       "source": "예시본 4.4·5.2 확신 오류 기준 0.9"
+    },
+    {
+      "rule": "given",
+      "value": 1,
+      "expected": "1",
+      "source": "정수 꼴 임계값은 소수점 없이(S2·S3 검토 T15 — 프론트 String(1) 과 같은 글자, '1.0' 아님)"
+    },
+    {
+      "rule": "given",
+      "value": 0,
+      "expected": "0",
+      "source": "정수 0"
+    },
+    {
+      "rule": "given",
+      "value": 30,
+      "expected": "30",
+      "source": "정수 꼴 기준값(30건)"
+    },
+    {
+      "rule": "given",
+      "value": 1e-05,
+      "expected": "0.00001",
+      "source": "지수 꼴 없이(파이썬 repr '1e-05' 아님)"
+    },
+    {
+      "rule": "given",
+      "value": 1e-07,
+      "expected": "0.0000001",
+      "source": "지수 꼴 없이(JS String '1e-7' 아님 — D7)"
+    },
+    {
+      "rule": "given",
+      "value": 0.6166,
+      "expected": "0.6166",
+      "source": "F1 최대 임계값 원값을 그대로 옮길 때"
+    },
+    {
+      "rule": "judged",
+      "value": 0.8122,
+      "threshold": 0.8124,
+      "higher_is_better": true,
+      "meets": false,
+      "expected": "0.812",
+      "source": "D1 사례(2026-10-24 사용자 승인): 목표 0.8124·값 0.8122(미달) — 기준은 '0.8124'(target), 값 0.812 < 0.8124"
+    },
+    {
+      "rule": "judged",
+      "value": 0.81245,
+      "threshold": 0.8124,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.8125",
+      "source": "D1: 목표 0.8124·값 0.81245(충족) — 0.812 는 0.8124 미만으로 읽혀 넷째 자리"
+    },
+    {
+      "rule": "judged",
+      "value": 0.9500044,
+      "threshold": 0.950004,
+      "higher_is_better": true,
+      "meets": true,
+      "expected": "0.950004",
+      "source": "여섯째 자리 반올림이 맞는 경우(셋째~다섯째는 0.950·0.9500·0.95000 이 0.950004 미만으로 읽힘, S2·S3 검토 T13)"
+    },
+    {
+      "rule": "target",
+      "value": 0.95,
+      "expected": "0.950",
+      "source": "예시본 3.1·4.3 합격 기준 Accuracy·F1(≥ 0.950)"
+    },
+    {
+      "rule": "target",
+      "value": 0.97,
+      "expected": "0.970",
+      "source": "예시본 3.1·4.3·5.1·5.6 합격 기준 Recall"
+    },
+    {
+      "rule": "target",
+      "value": 0.1,
+      "expected": "0.100",
+      "source": "예시본 3.1·4.3 합격 기준 Log Loss(≤ 0.100)"
+    },
+    {
+      "rule": "target",
+      "value": 1,
+      "expected": "1.000",
+      "source": "정수 1"
+    },
+    {
+      "rule": "target",
+      "value": 0.005,
+      "expected": "0.005",
+      "source": "셋째 자리 목표는 그대로"
+    },
+    {
+      "rule": "target",
+      "value": 0.8124,
+      "expected": "0.8124",
+      "source": "D1 사례 — 넷째 자리 목표는 받은 글자 그대로(0.812 로 줄이면 미달 0.8122 가 충족으로 읽힘)"
+    },
+    {
+      "rule": "target",
+      "value": 0.0001,
+      "expected": "0.0001",
+      "source": "넷째 자리"
+    },
+    {
+      "rule": "target",
+      "value": 0.81245,
+      "expected": "0.81245",
+      "source": "다섯째 자리"
+    },
+    {
+      "rule": "target",
+      "value": 0.950004,
+      "expected": "0.950004",
+      "source": "여섯째 자리"
+    },
+    {
+      "rule": "target",
+      "value": 0.9500044,
+      "expected": "0.950004",
+      "source": "일곱째 자리 이상은 여섯째 자리로 반올림(최대 여섯째 자리)"
+    },
+    {
+      "rule": "target",
+      "value": 1e-05,
+      "expected": "0.00001",
+      "source": "지수 꼴 없이(파이썬 repr '1e-05')"
+    },
+    {
+      "rule": "latency",
+      "value": 12.345,
+      "expected": "12.35",
+      "source": "이진 값 12.3450000000000006… 이라 올림"
+    },
+    {
+      "rule": "latency",
+      "value": 3,
+      "expected": "3.00",
+      "source": "끝 0 유지"
+    },
+    {
+      "rule": "latency",
+      "value": 0.5,
+      "expected": "0.50",
+      "source": "끝 0 유지"
+    },
+    {
+      "rule": "latency",
+      "value": 125.456,
+      "expected": "125.46",
+      "source": "셋째 자리 6 올림"
+    },
+    {
+      "rule": "latency",
+      "value": 1.005,
+      "expected": "1.00",
+      "source": "1.005 의 이진 값은 1.00499… 라 내림"
+    },
+    {
+      "rule": "latency",
+      "value": 0.125,
+      "expected": "0.13",
+      "source": "절반은 0에서 먼 쪽(파이썬 round(0.125, 2) 는 0.12)"
+    },
+    {
+      "rule": "latency",
+      "value": 1234.5,
+      "expected": "1234.50",
+      "source": "천 단위 쉼표 없음(숫자 꼴)"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.9719626168224299,
+      "others": [
+        1,
+        0.990990990990991,
+        0.9906542056074766,
+        1,
+        1,
+        0.9724770642201835,
+        0.9814814814814815,
+        0.9906542056074766,
+        0.9904761904761905
+      ],
+      "expected": "0.9720",
+      "source": "digits_strong(RPT-2026-0003) 최약 9(0.97196) — 5(0.97248)와 셋째 자리로 0.972 로 같아 보여 넷째 자리(S2·S3 검토 T2)"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.9767441860465116,
+      "others": [
+        0.9859154929577465
+      ],
+      "expected": "0.977",
+      "source": "bc_strong 최약 malignant — benign(0.986)과 달라 셋째 자리"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.047619047619047616,
+      "others": [
+        0.07929515418502203,
+        0.12280701754385964,
+        0.13333333333333333
+      ],
+      "expected": "0.048",
+      "source": "yeast_strong 최약 Class9 — 다음 Class8(0.079)과 달라 셋째 자리"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.97214,
+      "others": [
+        0.97206
+      ],
+      "expected": "0.97214",
+      "source": "넷째 자리(0.9721)로도 같아 보여 다섯째 자리"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.0,
+      "others": [
+        0.0004
+      ],
+      "expected": "0.0000",
+      "source": "0 과 0.0004"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.5,
+      "others": [
+        0.5,
+        0.75
+      ],
+      "expected": "0.500",
+      "source": "원값이 같은 클래스는 동점 — 늘리지 않는다"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.9721004,
+      "others": [
+        0.9721001
+      ],
+      "expected": "0.972",
+      "source": "여섯째 자리로도 같으면(0.972100) 동점 — 늘리지 않는다"
     }
   ],
   "engine_texts": [
@@ -900,6 +1160,62 @@
     }
   ],
   "josa_cases": [
+    {
+      "word": "Σ",
+      "pair": "이/가",
+      "kind": "name",
+      "expected": "이(가)",
+      "source": "끝소리를 모르는 말"
+    },
+    {
+      "word": "Σ",
+      "pair": "을/를",
+      "kind": "name",
+      "expected": "을(를)",
+      "source": "끝소리를 모르는 말"
+    },
+    {
+      "word": "Σ",
+      "pair": "은/는",
+      "kind": "name",
+      "expected": "은(는)",
+      "source": "끝소리를 모르는 말"
+    },
+    {
+      "word": "Σ",
+      "pair": "과/와",
+      "kind": "name",
+      "expected": "와(과)",
+      "source": "끝소리를 모르는 말 — 판 3 josaWaGwa·백엔드 wording.josa 와 같은 '와(과)'"
+    },
+    {
+      "word": "Σ",
+      "pair": "으로/로",
+      "kind": "name",
+      "expected": "(으)로",
+      "source": "끝소리를 모르는 말"
+    },
+    {
+      "word": "1,000",
+      "pair": "이/가",
+      "kind": "number",
+      "expected": "이",
+      "source": "쉼표 든 정수 — 천(ㄴ)"
+    },
+    {
+      "word": "1,000,000",
+      "pair": "이/가",
+      "kind": "number",
+      "expected": "이",
+      "source": "쉼표 든 정수 — 백만(ㄴ)"
+    },
+    {
+      "word": "1,000,000,000,000",
+      "pair": "이/가",
+      "kind": "number",
+      "expected": "가",
+      "source": "쉼표 든 정수 — 일조(받침 없음, 끝 덩어리 '000' 을 따로 읽지 않는다, S2·S3 검토 T14)"
+    },
     {
       "word": "0.005",
       "pair": "으로/로",

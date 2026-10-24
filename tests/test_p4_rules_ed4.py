@@ -163,10 +163,13 @@ def test_edition4_never_falls_into_the_old_request_branch_without_sentence_18():
 
 
 def _tuning(raw: dict) -> dict:
-    """예시의 상승폭을 0.10 이상(엔진 notable)으로 바꾼 사본 — 8.2-06(임계값 조정 여지)이 결론에 들어온다."""
+    """예시의 상승폭을 0.10 이상(엔진 notable)으로 바꾼 사본 — 8.2-06(임계값 조정 여지)이 결론에 들어온다. 그 점의 Precision 도
+    Recall 과 다른 글자(0.912)로 둔다 — 예시는 둘 다 0.984 라 FN·FP 쪽 값을 맞바꿔도 같은 문장이 되기 때문이다(S2·S3 검토 T5)."""
     out = copy.deepcopy(raw)
     g = out["fact_sheet"]["f1_threshold_gain"]
     g.update(gain=0.12, notable=True, gain_text="0.120", max_f1=0.9844, current_f1=0.8644, current_f1_text="0.864")
+    g.update(best_precision=0.9123, best_precision_raw=0.912345, best_precision_text="0.912")
+    assert g["best_recall_text"] != g["best_precision_text"]
     return out
 
 
@@ -177,6 +180,7 @@ def _gain_conclusion(raw: dict) -> str:
 def test_b20_follows_the_threshold_sentence_for_the_example():
     text = _gain_conclusion(_tuning(example_raw()))
     assert text.endswith(" " + EXAMPLE_B20_FN)
+    assert "0.912" not in text  # FN 쪽은 그 점의 Recall(0.984) — Precision(0.912)이 아니다
     g = _tuning(example_raw())["fact_sheet"]["f1_threshold_gain"]
     want = B20_HEAD.format(
         side=B20_SIDE["fn"], name="Recall", josa=_josa("Recall(M3)", "은/는"), t=g["best_threshold_text"], v=g["best_recall_text"],
@@ -199,6 +203,7 @@ def test_b20_not_meeting_and_false_positive_side():
     josa = {"이": "은", "가": "는"}[_josa("Precision(M2)", "이/가")]  # 같은 끝소리 — 표의 '이/가' 줄로 '은/는'을 고른다
     head = B20_HEAD.format(side=B20_SIDE["fp"], name="Precision", josa=josa, t=g["best_threshold_text"], v=g["best_precision_text"])
     assert _gain_conclusion(raw).endswith(head)
+    assert "에서 0.912이다." in head  # FP 쪽은 그 점의 Precision(0.912) — Recall(0.984)이 아니다
 
 
 def test_b20_absent_without_risk_side_and_without_tuning():
@@ -274,11 +279,11 @@ async def test_a11_verdict_sentence_drops_the_pass_rate():
 
 
 @pytest.mark.parametrize("low, far, want", [
-    (False, False, "작은 표본(30건 미만 또는 전체의 5% 미만)이 아니고 매크로 F1 보다 0.1 이상 낮지도 않으므로, 이 클래스를 "
+    (False, False, "작은 표본(30건 미만 또는 전체 표본의 5% 미만)이 아니고 매크로 F1 보다 0.1 이상 낮지도 않으므로, 이 클래스를 "
                    "언급하되 클래스 사이의 성능 차이를 운영 위험으로 쓰지 않는다."),
-    (True, False, "작은 표본(30건 미만 또는 전체의 5% 미만)이어서 운영 위험으로 다룬다."),
+    (True, False, "작은 표본(30건 미만 또는 전체 표본의 5% 미만)이어서 운영 위험으로 다룬다."),
     (False, True, "매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다."),
-    (True, True, "작은 표본(30건 미만 또는 전체의 5% 미만)이고 매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다."),
+    (True, True, "작은 표본(30건 미만 또는 전체 표본의 5% 미만)이고 매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다."),
 ])
 def test_d49_2_weakest_class_is_an_operating_risk_only_under_the_d22_condition(low, far, want):
     raw = example_raw()

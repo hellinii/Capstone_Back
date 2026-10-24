@@ -12,7 +12,8 @@ LLM 출력의 모든 숫자가 fact_sheet/파생값 화이트리스트 안에 �
 판 4(요청의 report_edition 4 — 판 4 라운드 S2 ⑥, 계획 2.7)는 허용 목록과 절 번호 지우기가 따로다:
 - 허용 목록은 판 4 사실 보기(AI 가 읽는 글, app.narrative.fact_view_ed4)에 찍힌 숫자 그대로다 — 셋째 자리와 판정 쪽으로 늘린
   표기(0.9497·0.6166)만 받고, 판 3 처럼 소수 1~4자리 반올림 변형을 넣지 않으므로 넷째 자리 표기(0.9767)는 위반이다.
-  기준값(0.1·1.5·30·5%·10%p·3%·95%)은 판 3 과 같은 조건에서만 더한다. 통과율(score)은 판 4 글에 쓰지 않아 넣지 않는다.
+  기준값(0.1·1.5·30·5%·10%p·95%)은 판 3 과 같은 조건에서만, 3% 는 구간 없이 판정 여유를 정한 판정 대상 지표가 있을 때만 더한다
+  (판정 여유 칸 이름 속 95·3 은 받지 않는다 — S2·S3 검토 D5). 지연시간은 4.8 표와 같은 둘째 자리 글자(D4). 통과율(score)은 넣지 않는다.
 - 절 번호는 판 4 성적서의 번호(sections.EDITION4_SECTION_NUMBERS — 1.1~6.2, '(4.3)', '5.1·5.2절', '부록 1.2')를 지운다.
 - 사용처: app.narrative.legacy·generator·checks(허용 목록·판정 모순 검사), tests
 """
@@ -532,13 +533,9 @@ def _whitelist_ed4(fs: FactSheet, benchmark_refs: list[dict], derived: dict, cli
     # 기준값 — 판 3 과 같은 조건(켜진 판정이 있을 때만). 판 4 글이 쓰는 꼴만: 95%·3%·5%·10%p 는 백분율 숫자.
     if any(m.ci_low is not None and m.ci_high is not None for m in fs.metrics):
         _add_exact(wl, round(CI_LEVEL * 100))
-    if any(m.near_target for m in fs.metrics):
-        _add_exact(wl, round(NEAR_TARGET_SHARE * 100))
-    if any(m.threshold is not None for m in fs.metrics):
-        # 판 4 보기는 판정 대상 지표마다 판정 여유 칸을 싣고, 그 칸 이름이 '작음'의 뜻(95% 신뢰구간·목표값의 3%)을 적는다
-        # (fact_view_ed4.MARGIN_KEY — 고정 문구 19 의 표 아래 문장). AI 가 그 뜻을 옮겨 적을 수 있다.
-        _add_exact(wl, round(CI_LEVEL * 100))
-        _add_exact(wl, round(NEAR_TARGET_SHARE * 100))
+    # 3% 는 따로 더하지 않는다 — 판정 대상 지표 가운데 신뢰구간이 없어 판정 여유를 '목표값의 3%' 로 정한 지표가 있을 때만 사실
+    # 보기의 '판정 여유가 작음의 뜻'(fact_view_ed4.margin_meaning)이 그 숫자를 싣고, 위 보기 값에서 받는다. 칸 이름 속 숫자는 받지
+    # 않는다 — 판정 대상이 있으면 95·3 을 늘 받던 구멍(지어낸 '3건'·'95%')을 막는다(S2·S3 검토 D5).
     facts = fs.facts
     if facts is not None:
         if facts.weakest_class is not None or facts.low_support_classes:
@@ -556,12 +553,11 @@ def _whitelist_ed4(fs: FactSheet, benchmark_refs: list[dict], derived: dict, cli
         _add_exact(wl, IMBALANCE_MILD_BELOW)
         _add_exact(wl, IMBALANCE_F1_GAP)
 
-    # 지연시간 — 4.8 응답시간 표기는 판 4 숫자 규칙의 범위 밖이다(계획 정해진 것 6). 판 3 과 같은 변형으로 받는다.
+    # 지연시간 — 4.8 표와 같은 둘째 자리 글자(D4 — 사실 보기가 ed4_latency 로 싣고 위에서 그 글자를 받았다). 판 3 처럼 반올림
+    # 변형을 넣지 않는다. 백분위 이름 속 숫자(규칙 문장 '95번째 백분위수(p95)')만 더한다.
     if fs.latency and fs.latency.available:
-        for val in (fs.latency.mean, fs.latency.p50, fs.latency.p95, fs.latency.p99):
-            _add(wl, val)
         for pct in (50, 95, 99):
-            _add(wl, pct)
+            _add_exact(wl, pct)
 
     # 고객 입력 — 의뢰자가 적은 숫자 그대로(판 4 는 반올림 변형을 넣지 않는다: 고객 값이 우연히 지표 값과 같으면 그 넷째 자리
     # 표기가 허용되는 구멍을 막는다).

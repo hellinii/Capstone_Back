@@ -35,6 +35,7 @@ from app.narrative.grounding import (
     verify_grounding,
 )
 from app.narrative.required_items import Conclusion
+from app.narrative.wording_ed4 import MAX_DIGITS, _fixed
 from app.narrative.schemas import FactSheet
 
 # 칸마다 AI 응답에서 검사할 글(응답 필드 점 표기). 9칸은 권고표의 글도 본다.
@@ -171,6 +172,9 @@ def d24_present(text: str, values: tuple[float, ...], *, edition: int) -> bool:
     for v in values:
         _add(wanted, v)
         _add(wanted, abs(v))
+        if edition == 4:
+            # 판 4 표기는 절반에서 0에서 먼 쪽 반올림(지연시간 0.125 → '0.13', D4) — 파이썬 round 변형(_add)에 없는 글자도 받는다.
+            wanted.update(_canon(_fixed(abs(float(v)), d)) for d in range(1, MAX_DIGITS + 1))
     stripped = strip_context(text or "", edition=edition)
     return any(_canon(tok) in wanted for tok in _NUMBER_RE.findall(stripped))
 

@@ -156,6 +156,8 @@ def test_ci_without_texts_is_printed_by_the_ci_bound_rule():
 def test_verdict_has_counts_but_no_pass_rate():
     assert VIEW["판정"] == {
         "종합 판정": "최종 합격", "핵심 지표를 정한 쪽": "의뢰자가 지정함", "판정 대상 지표 수": 5, "목표를 충족한 지표 수(참고)": 5,
+        # 이 예시의 판정 대상은 모두 구간이 있다 — '목표값의 3%' 갈래는 싣지 않는다(S2·S3 검토 D5).
+        "판정 여유가 작음의 뜻": "95% 신뢰구간이 목표값을 포함하면 작음",
     }
 
 

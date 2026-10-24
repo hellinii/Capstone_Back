@@ -124,9 +124,56 @@ def ed4_signed_count(n: int) -> str:
     return f"+{n}" if n > 0 else f"{MINUS}{-n}" if n < 0 else "0"
 
 
+def _shortest(value) -> Decimal:
+    """가장 짧은 십진 표기(round-trip — 파이썬 repr·JS String(Number) 와 같은 숫자)의 Decimal."""
+    return Decimal(repr(float(value)))
+
+
+def _plain_decimal(d: Decimal) -> str:
+    """Decimal 을 지수 꼴 없는 고정소수 글자로 — 정수 꼴은 소수점 없이(1.0 → '1')."""
+    if d == d.to_integral_value():
+        return format(d.to_integral_value(), "f")
+    return format(d, "f")
+
+
 def ed4_given(value) -> str:
-    """의뢰자가 준 결정 임계값·판정 기준값 — 늘이지도 끝 0 을 채우지도 않는다(0.5·0.1·1.5)."""
-    return repr(float(value))
+    """의뢰자가 준 결정 임계값·판정 기준값 — 늘이지도 끝 0 을 채우지도 않는다(0.5·0.1·1.5). 가장 짧은 십진 표기이고, 정수 꼴은
+    소수점 없이(1 → '1', 프론트 String(1) 과 같다 — '1.0' 아님), 지수 꼴은 쓰지 않는다(1e-05 → '0.00001')(S2·S3 검토 T15·D7)."""
+    return _plain_decimal(_shortest(value))
+
+
+def ed4_target(threshold) -> str:
+    """합격 기준(목표값) — 받은 목표의 가장 짧은 십진 표기가 셋째 자리 이하면 셋째 자리(끝 0 유지 — 0.950), 넷째~여섯째 자리면
+    그 글자 그대로(0.8124 — 셋째 자리로 줄이면 넷째 자리 목표와 값의 판정이 어긋나 보인다), 일곱째 자리 이상이면 여섯째 자리로
+    반올림. 지수 꼴 없이(D1, 2026-10-24 사용자 승인 — 4.3 표·3.1·5절 규칙 문장·B20·사실 보기가 모두 이 함수)."""
+    d = _shortest(threshold)
+    decimals = max(0, -d.as_tuple().exponent) if d != d.to_integral_value() else 0
+    if decimals <= PLAIN_DIGITS:
+        return ed4_plain(threshold)
+    if decimals <= MAX_DIGITS:
+        return _unneg(format(d, "f"))
+    return _unneg(_fixed(threshold, MAX_DIGITS))
+
+
+LATENCY_DIGITS = 2
+
+
+def ed4_latency(value) -> str:
+    """지연시간 — 둘째 자리, 끝 0 유지(4.8 표의 toFixed(2) 와 같은 글자, D4). 규칙 문장·사실 보기·허용 목록이 함께 쓴다."""
+    return _unneg(_fixed(value, LATENCY_DIGITS))
+
+
+def ed4_distinct(value, others) -> str:
+    """최약 클래스 F1(D3) — 셋째 자리부터 여섯째 자리까지 늘려, 다른 클래스 F1(others) 가운데 여섯째 자리로도 같지 않은 것과
+    모두 달라 보이는 첫 표기. 여섯째 자리로 같은 클래스는 동점이라 늘리는 까닭이 되지 않는다(weakest_ties 판 4 와 같은 기준)."""
+    value = float(value)
+    tie = _fixed(value, MAX_DIGITS)
+    rivals = [float(o) for o in others if o is not None and _fixed(float(o), MAX_DIGITS) != tie]
+    for digits in range(PLAIN_DIGITS, MAX_DIGITS + 1):
+        text = _fixed(value, digits)
+        if all(_fixed(o, digits) != text for o in rivals):
+            return _unneg(text)
+    return _unneg(tie)
 
 
 def ed4_ratio_percent(numerator: int, denominator: int) -> str:
@@ -201,9 +248,43 @@ def metric_value_ed4(m) -> str:
 
 
 def metric_vs_target_ed4(m) -> str:
-    """'지표명(값, 목표 t)' 의 판 4 판 — 값은 metric_value_ed4, 목표는 셋째 자리(plain). 판 3 `wording.metric_vs_target` 와 같은 꼴.
+    """'지표명(값, 목표 t)' 의 판 4 판 — 값은 metric_value_ed4, 목표는 ed4_target(D1). 판 3 `wording.metric_vs_target` 와 같은 꼴.
     8.2 판정 문장과 8.3 목표 미달 문장이 같은 지표를 같은 글자로 찍게 한 곳에 둔다."""
-    return f"{m.display_name}({metric_value_ed4(m)}, 목표 {ed4_plain(m.threshold)})"
+    return f"{m.display_name}({metric_value_ed4(m)}, 목표 {ed4_target(m.threshold)})"
+
+
+# 같은 원값으로 보는 차이(프론트와 같은 기준 — 계약 '판정과 무관한 자리의 값이 판정 대상 지표의 원값과 같을 때').
+SAME_VALUE_EPS = 1e-9
+
+
+def judged_value_text_ed4(metrics, value) -> str | None:
+    """값이 판정 대상 지표(value_text 가 있는 줄)의 원값과 같으면(|차이| < 1e-9) 그 value_text, 아니면 None."""
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    for m in metrics:
+        if m.value_text and m.threshold is not None and abs(float(m.value) - float(value)) < SAME_VALUE_EPS:
+            return m.value_text
+    return None
+
+
+def same_value_text_ed4(metrics, value):
+    """같은 수는 같은 글자(D2, 2026-10-24 사용자 승인) — 판정과 무관한 자리의 값이 판정 대상 지표의 원값과 같으면 그 지표의
+    value_text, 아니면 plain. 판정은 하지 않는다 — 프론트가 찍은 value_text 를 옮길 뿐이다. 정수·글·None 은 그대로."""
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    return judged_value_text_ed4(metrics, value) or ed4_plain(value)
+
+
+def weakest_f1_text_ed4(fs) -> str | None:
+    """최약 클래스 F1 의 판 4 글자 — 프론트가 실은 facts.weakest_class.f1_text 를 읽는다(D2·D3 판단은 프론트 한 곳). 없으면(형식
+    오류로 버려졌거나 그 칸을 싣기 전의 요청) 같은 규칙으로 찍는다: 판정 대상 지표와 같은 원값이면 그 value_text(D2), 아니면
+    distinct(다른 클래스 F1 — D3)."""
+    w = fs.facts.weakest_class if fs.facts is not None else None
+    if w is None:
+        return None
+    if w.f1_text:
+        return w.f1_text
+    return judged_value_text_ed4(fs.metrics, w.f1) or ed4_distinct(w.f1, [p.f1 for p in fs.per_class if p.label != w.label])
 
 
 def same_metric_value_ed4(metrics, metric_id: str, value: float | None) -> str | None:

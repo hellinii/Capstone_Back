@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-from app.narrative import checks, fact_view, generator, grounding
+from app.narrative import checks, fact_view, fact_view_ed4, generator, grounding
 from app.narrative.grounding import _NUMBER_RE, _canon, build_number_whitelist, strip_context, verify_grounding
 from app.narrative.schemas import NarrativeRequest
 from app.narrative.sections import EDITION4_SECTION_NUMBERS, EDITION4_TITLES
@@ -71,6 +71,7 @@ SECTION_TEXTS = [
     ("(4.4, 4.5) 표를 함께 본다.", True),
     ("이 위험은 5.5 운영 위험에서 다시 다룬다.", True),
     ("권고는 6.1 데이터와 6.2 모델과 운영에 나눠 적었다.", True),
+    ("관련 내용은 3.4절 5.1에서 다룬다.", True),  # '절 n.n' 꼴(S2·S3 검토 T12 — 이 줄이 빠지면 5.1 이 숫자로 걸린다)
 ]
 
 
@@ -192,14 +193,11 @@ def test_constants_only_when_their_judgement_is_on():
     """기준값은 판 3 과 같은 조건에서만(95% — 신뢰구간이 있을 때, 10%p — 분포 비교가 있을 때, 30·5% — 최약 클래스가 있을 때)."""
     raw = example_raw()
     assert {"95", "10", "30"} <= _wl(raw)
-    # 95·3 은 판정 대상 지표가 있으면 판정 여유 칸 이름(뜻 — 95% 신뢰구간·목표값의 3%)으로도 보인다. 구간도 판정 대상도 없으면 없다.
+    # 95 는 구간이 있을 때만 — 판정 대상 지표가 있다고 판정 여유 칸 이름 때문에 받지 않는다(S2·S3 검토 D5).
     no_ci = copy.deepcopy(raw)
     for m in no_ci["fact_sheet"]["metrics"]:
         m.update(ci_low=None, ci_high=None, ci_low_text=None, ci_high_text=None, ci_contains_target=None)
     no_ci["fact_sheet"]["ci_method_note"] = None
-    assert "95" in _wl(no_ci)
-    for m in no_ci["fact_sheet"]["metrics"]:
-        m.update(threshold=None, status="info", margin=None, margin_text=None, value_text=None, near_target=False)
     assert "95" not in _wl(no_ci)
     no_shift = copy.deepcopy(raw)
     no_shift["fact_sheet"]["facts"]["distribution_shift"] = []
@@ -316,3 +314,37 @@ def test_inner_checks_have_no_default_edition(fn, args):
     """기본값 3 은 요청 경계(NarrativeRequest)와 legacy 입구뿐 — 안쪽 함수는 판을 받아야 한다."""
     with pytest.raises(TypeError):
         fn(*args)
+
+
+# ── 판정 여유 칸 이름 속 숫자는 허용 목록 원천이 아니다(S2·S3 검토 D5) ──────────────────────────────────────────────
+
+
+def _no_ci(raw: dict) -> dict:
+    out = copy.deepcopy(raw)
+    for m in out["fact_sheet"]["metrics"]:
+        m.update(ci_low=None, ci_high=None, ci_low_text=None, ci_high_text=None, ci_contains_target=None)
+        m.update(near_target=bool(m["threshold"] is not None and m["margin"] is not None
+                                  and abs(m["margin"]) < abs(m["threshold"]) * 0.03))
+    out["fact_sheet"]["ci_method_note"] = None
+    out["fact_sheet"]["facts"] = None
+    return out
+
+
+def test_made_up_3_and_95_are_caught_when_their_branch_is_absent():
+    """판정 대상 지표가 있어도, 이 성적서에 '목표값의 3%' 갈래(구간 없는 판정 대상)가 없으면 지어낸 '3건' 은 위반이고, 구간이
+    하나도 없으면 지어낸 '95%' 는 위반이다. 칸 이름(fact_view_ed4.MARGIN_KEY)에는 숫자가 없고, 뜻은 해당 갈래만 숫자와 함께 싣는다."""
+    assert not any(ch.isdigit() for ch in fact_view_ed4.MARGIN_KEY)
+    raw = dict(CASES)["ed3in_multilabel"]  # 판정 대상 둘 모두 구간이 있고, 데이터에 '3' 이 없는 사례
+    req, prepared = _prepared(raw)
+    assert any(m.threshold is not None for m in req.fact_sheet.metrics)
+    wl = prepared[2]
+    assert not verify_grounding(["경계 오류는 3건이다."], wl, edition=4).passed
+    assert verify_grounding(["95% 신뢰구간이 목표값을 포함한다."], wl, edition=4).passed
+    assert prepared[4].view["판정"]["판정 여유가 작음의 뜻"] == "95% 신뢰구간이 목표값을 포함하면 작음"
+    # 구간을 모두 지운 사본 — 3% 갈래만 있다: '3%' 는 받고 '95%' 는 위반.
+    no_ci = _no_ci(raw)
+    req2, prepared2 = _prepared(no_ci)
+    wl2 = prepared2[2]
+    assert prepared2[4].view["판정"]["판정 여유가 작음의 뜻"] == "신뢰구간이 없는 지표는 목표값과의 차이가 목표값의 3% 미만이면 작음"
+    assert verify_grounding(["목표값과의 차이가 목표값의 3% 미만이다."], wl2, edition=4).passed
+    assert not verify_grounding(["95% 신뢰구간이 목표값을 포함한다."], wl2, edition=4).passed

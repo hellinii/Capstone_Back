@@ -6,8 +6,10 @@
 
 - 숫자는 판 4 표기다(app.narrative.wording_ed4 — 두 저장소 공통 대조 표). 판정과 이어진 값은 프론트가 보낸 *_text 를 그대로
   싣고(value_text·margin_text·ci_*_text·f1_threshold_gain 의 *_text·display·share_text·gap_text·difference_text·
-  evaluation_minus_training_text), 판정과 무관한 값은 셋째 자리 끝 0 유지(plain), 비율은 백분율 첫째 자리(37.4%)로 싣는다.
-  판 3 의 넷째 자리 표기(0.9767)는 싣지 않는다.
+  evaluation_minus_training_text·weakest_class.f1_text), 판정과 무관한 값은 셋째 자리 끝 0 유지(plain), 비율은 백분율 첫째
+  자리(37.4%)로 싣는다. 판 3 의 넷째 자리 표기(0.9767)는 싣지 않는다. S2·S3 검토 결정(공통 대조 표에 줄이 있다):
+  목표값은 ed4_target(넷째 자리 이상 목표는 받은 글자 그대로 — D1), 판정과 무관한 값이 판정 대상 지표와 같은 원값이면 그
+  value_text(D2), 최약 클래스 F1 은 셋째 자리로 다른 클래스와 같아 보이면 늘린 표기(D3), 지연시간은 둘째 자리(D4).
 - 판정 여유: near_target 은 판 4 요청에서 '판정 여유 작음'이다(프론트 judgmentMargin 한 곳 — 구간이 목표를 포함하거나, 구간이
   없으면 3% 엄격 미만). 여기서 다시 계산하지 않는다(계획 9절). 고정 문구 18 은 판 4 요청에 없다 — 이 보기는 18 을 보지 않는다.
 - 통과율(score)은 싣지 않는다(판 4 는 충족 수만 — 부록 A11).
@@ -34,25 +36,36 @@ from app.narrative.sections import place
 from app.narrative.wording_ed4 import (
     POSITION_KO,
     ed4_ci_bound,
+    ed4_distinct,
     ed4_given,
     ed4_judged,
+    ed4_latency,
     ed4_percent,
     ed4_percent_point,
     ed4_plain,
     ed4_range_text,
     ed4_ratio_percent,
     ed4_signed_judged,
+    ed4_target,
     imbalance_texts_ed4,
+    judged_value_text_ed4,
     metric_value_ed4,
     same_metric_value_ed4,
+    same_value_text_ed4,
+    weakest_f1_text_ed4,
 )
 
 EDITION = 4
 
 # 4.3 판정 열의 말(고정 문구 19·부록 A5 — '정보 제공' 대신 '참고 지표').
 STATUS_KO = {"pass": "충족", "fail": "미달", "warning": "경고", "info": "참고 지표"}
-# 판정 여유(고정 문구 19 — 4.3 판정 여유 열의 값과 표 아래 문장의 뜻).
-MARGIN_KEY = "판정 여유(작음: 95% 신뢰구간이 목표값을 포함하거나, 구간이 없으면 목표값과의 차이가 목표값의 3% 미만)"
+# 판정 여유(고정 문구 19 — 4.3 판정 여유 열의 값과 표 아래 문장의 뜻). 칸 이름에는 숫자를 두지 않는다 — 숫자 허용 목록이 보기의
+# 값에서 숫자를 뽑으므로, 칸 이름에 95·3 을 적으면 그 갈래가 없는 성적서에서도 지어낸 '3건'·'95%' 를 받는 구멍이 된다(S2·S3 검토
+# D5). '작음'의 뜻은 판정 칸의 MARGIN_MEANING_KEY 에 그 성적서에 해당하는 갈래만 숫자와 함께 싣는다.
+MARGIN_MEANING_KEY = "판정 여유가 작음의 뜻"
+MARGIN_KEY = f"판정 여유(작음·충분 — 뜻은 판정의 '{MARGIN_MEANING_KEY}')"
+_MARGIN_BY_CI = "95% 신뢰구간이 목표값을 포함하면 작음"
+_MARGIN_BY_SHARE = "신뢰구간이 없는 지표는 목표값과의 차이가 목표값의 3% 미만이면 작음"
 MARGIN_KO = {True: "작음", False: "충분"}
 NO_TARGET = "없음(참고 지표)"
 
@@ -74,9 +87,22 @@ def _same_metric_value(fs: FactSheet, metric_id: str, value: float | None) -> st
     return same_metric_value_ed4(fs.metrics, metric_id, value)
 
 
+def margin_meaning(fs: FactSheet) -> str | None:
+    """판정 여유 '작음'의 뜻 — 이 성적서의 판정 대상 지표에 해당하는 갈래만(구간이 있는 지표 → 95% 신뢰구간, 구간이 없는 지표 →
+    목표값의 3%). 판정은 프론트(near_target)가 했고 여기서는 뜻만 적는다. 판정 대상이 없으면 None."""
+    judged = [m for m in fs.metrics if m.threshold is not None]
+    parts = []
+    if any(m.ci_contains_target is not None for m in judged):
+        parts.append(_MARGIN_BY_CI)
+    if any(m.ci_contains_target is None for m in judged):
+        parts.append(_MARGIN_BY_SHARE)
+    return ", ".join(parts) or None
+
+
 def _verdict(fs: FactSheet, derived: dict) -> dict:
     out = v3._verdict(fs, derived)
     out.pop("통과율(참고, %)", None)  # 판 4 는 충족 수만(A11)
+    out[MARGIN_MEANING_KEY] = margin_meaning(fs)
     return out
 
 
@@ -89,7 +115,7 @@ def _metrics(fs: FactSheet, task_type: str) -> list[dict]:
         row: dict[str, Any] = {
             "지표": m.display_name,
             "값": _metric_value(m),
-            "목표값": ed4_plain(m.threshold) if judged else NO_TARGET,
+            "목표값": ed4_target(m.threshold) if judged else NO_TARGET,
             "결과": STATUS_KO.get(m.status, m.status),
             "핵심 지표": "예" if m.is_core else "아니오",
             "좋은 방향": None if m.higher_is_better is None else ("높을수록 좋음" if m.higher_is_better else "낮을수록 좋음"),
@@ -128,16 +154,35 @@ def _confusion(fs: FactSheet, derived: dict, task_type: str) -> dict | None:
     return out
 
 
+def _same(fs: FactSheet, value: Any) -> Any:
+    """판정과 무관한 자리의 값 — 같은 원값의 판정 대상 지표가 있으면 그 value_text(D2), 아니면 plain. 정수·글·None 은 그대로."""
+    return same_value_text_ed4(fs.metrics, value)
+
+
+def _class_f1(fs: FactSheet, label: str, value: Any) -> Any:
+    """클래스 하나의 F1 — 최약 클래스면 최약 클래스 F1 글자(프론트 facts.weakest_class.f1_text — 같은 수는 같은 글자), 그 밖은
+    같은 원값의 판정 대상 지표 글자(D2)나, 셋째 자리로 최약 클래스와 같아 보이면 서로 달라질 때까지 늘린 표기(D3)."""
+    w = fs.facts.weakest_class if fs.facts is not None else None
+    if w is None or value is None or isinstance(value, bool):
+        return _same(fs, value)
+    if label == w.label:
+        return weakest_f1_text_ed4(fs)
+    return judged_value_text_ed4(fs.metrics, value) or ed4_distinct(value, [w.f1])
+
+
 def _per_class(fs: FactSheet) -> dict | None:
     out: dict[str, Any] = {}
     if fs.per_class:
         out["클래스별"] = [
-            {"클래스": p.label, "Precision": _num(p.precision), "Recall": _num(p.recall), "F1": _num(p.f1), "표본 수": p.support}
+            {
+                "클래스": p.label, "Precision": _same(fs, p.precision), "Recall": _same(fs, p.recall),
+                "F1": _class_f1(fs, p.label, p.f1), "표본 수": p.support,
+            }
             for p in fs.per_class
         ]
     if fs.class_averages:
         out["평균 줄"] = [
-            {"평균": a.label, "Precision": _num(a.precision), "Recall": _num(a.recall), "F1": _num(a.f1), "표본 수": a.support}
+            {"평균": a.label, "Precision": _same(fs, a.precision), "Recall": _same(fs, a.recall), "F1": _same(fs, a.f1), "표본 수": a.support}
             for a in fs.class_averages
         ]
     return out or None
@@ -232,6 +277,14 @@ def _threshold_gain(fs: FactSheet, derived: dict) -> dict | None:
     return out
 
 
+def _latency(fs: FactSheet) -> dict | str:
+    """지연시간 — 4.8 표와 같은 둘째 자리 글자(D4 — wording_ed4.ed4_latency). 측정하지 않았으면 판 3 과 같은 글."""
+    out = v3._latency(fs)
+    if not isinstance(out, dict):
+        return out
+    return {k: ed4_latency(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v for k, v in out.items()}
+
+
 def _facts(fs: FactSheet, task_type: str) -> dict | None:
     facts = fs.facts
     if facts is None:
@@ -242,14 +295,14 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
     if w is not None:
         out[f"F1 이 가장 낮은 {noun}"] = {
             noun: w.label,
-            "F1": ed4_plain(w.f1),
+            "F1": weakest_f1_text_ed4(fs),
             "표본 수": w.support,
             "비율": ed4_percent(w.share_text),
-            "매크로 F1": _num(w.macro_f1),
+            "매크로 F1": _same(fs, w.macro_f1),
             "매크로 F1 과의 차이": w.gap_text,
             "표본이 작음(30건 미만 또는 5% 미만)": v3._yes(w.low_support),
             "매크로 F1 보다 0.1 이상 낮음": v3._yes(w.far_below_macro),
-            f"F1 이 같은 {noun}": weakest_ties(fs)[0] or None,
+            f"F1 이 같은 {noun}": weakest_ties(fs, edition=EDITION)[0] or None,
         }
     if facts.low_support_classes:
         out[f"표본이 작은 {noun}"] = [
@@ -291,12 +344,12 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
         other = "가중 평균" if ag.kind == "macro_vs_weighted" else "마이크로 평균"
         out[f"매크로 평균과 {other}의 F1 차이"] = {
             "매크로 F1": _same_metric_value(fs, "M4", ag.macro_f1),
-            f"{other} F1": ed4_plain(ag.other_f1),
+            f"{other} F1": _same(fs, ag.other_f1),
             "차이": ag.difference_text,
             "기준 클래스" if ag.kind == "macro_vs_weighted" else "F1 이 가장 낮은 레이블": {
                 noun: ag.reference_class.label,
                 "표본 수": ag.reference_class.support,
-                "F1": _num(ag.reference_class.f1),
+                "F1": _class_f1(fs, ag.reference_class.label, ag.reference_class.f1),
             },
         }
     da = facts.declared_average
@@ -304,9 +357,9 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
         out["의뢰자 선언에 맞춘 평균 방식의 결과"] = {
             "선언": v3.PRIORITY_DECL_KO[da.class_priority],
             "평균 방식": "가중 평균" if da.average == "weighted" else "마이크로 평균",
-            "Precision": _num(da.precision),
-            "Recall": _num(da.recall),
-            "F1": _num(da.f1),
+            "Precision": _same(fs, da.precision),
+            "Recall": _same(fs, da.recall),
+            "F1": _same(fs, da.f1),
         }
     out["학습↔평가 분포 비교"] = v3.SHIFT_STATUS_KO[facts.distribution_shift_status]
     if facts.distribution_shift:
@@ -351,7 +404,7 @@ def _benchmarks(benchmark_refs: list[dict], fs: FactSheet) -> dict | None:
                 "참조 범위": ed4_range_text(r["ref_low"], r["ref_high"]),
                 # 수치 위치만(낮을수록 좋은 지표도 수치로 — Hamming Loss 0.03 은 '참조 범위보다 낮음'). 평가 말을 싣지 않는다.
                 "위치": POSITION_KO[r["position"]],
-                "목표값": ed4_plain(r["target_value"]) if r.get("target_value") is not None else None,
+                "목표값": ed4_target(r["target_value"]) if r.get("target_value") is not None else None,
                 "목표값의 위치": v3.TARGET_POSITION_KO.get(r.get("target_position")) if r.get("target_position") else None,
             }
             for r in benchmark_refs
@@ -373,7 +426,7 @@ def _metric_entry(m, entry: dict) -> dict:
     if "value" in out:
         out["value"] = _metric_value(m)
     if "target" in out and m.threshold is not None:
-        out["target"] = ed4_plain(m.threshold)
+        out["target"] = ed4_target(m.threshold)
     if "margin" in out and m.margin is not None:
         out["margin"] = m.margin_text or ed4_judged(m.margin, 0, True, m.status == "pass")
     return out
@@ -397,7 +450,9 @@ def _evidence_ed4(problem, fs: FactSheet) -> dict:
                 if "gap_from_macro" in e and w.gap_text is not None:
                     e["gap_from_macro"] = w.gap_text
                 if "f1" in e:
-                    e["f1"] = ed4_plain(w.f1)
+                    e["f1"] = weakest_f1_text_ed4(fs)
+                if e.get("macro_f1") is not None:
+                    e["macro_f1"] = _same(fs, w.macro_f1)
             out[label] = e
         return out
     if kind == "distribution_shift" and facts is not None:
@@ -490,7 +545,7 @@ def build_fact_view_ed4(
         "오분류의 성격": _error_ratios(fs),
         "임계값 조정 여지": _threshold_gain(fs, derived),
         "예측 파생": v3._derivation(fs),
-        "지연시간": v3._latency(fs),
+        "지연시간": _latency(fs),
         "신뢰구간 방식": (
             v3.name_metric_ids(fs.ci_method_note, v3.metric_names(fs), v3.class_names(fs)) if fs.ci_method_note else None
         ),

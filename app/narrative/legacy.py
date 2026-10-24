@@ -56,7 +56,7 @@ EDITION4_ONLY_SHEET_FIELDS: dict = {
         "best_threshold_text", "max_f1_text", "current_f1_text", "best_recall_text", "best_precision_text",
         "current_recall_text", "current_precision_text", "risk_side",
     },
-    "facts": {"distribution_shift": {"__all__": {"evaluation_minus_training_text"}}},
+    "facts": {"distribution_shift": {"__all__": {"evaluation_minus_training_text"}}, "weakest_class": {"f1_text"}},
 }
 
 

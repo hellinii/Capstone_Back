@@ -53,11 +53,8 @@ MAX_DISPLAY_TEXT_CHARS = 40
 # 표시 문자열은 숫자 하나의 표기다(엔진 judged_text·프론트 judgedText) — 숫자가 아닌 글이 서술에 그대로 찍히거나
 # 폴백이 float 로 읽다 멈추지 않게 숫자 꼴만 받는다(S4b 검토 BE-03). 작업 경로는 이 칸이 틀리면 그 칸만 버린다.
 NumText = Annotated[str, StringConstraints(pattern=r"^-?\d+(\.\d+)?$", max_length=MAX_DISPLAY_TEXT_CHARS)]
-# F1 최대 임계값 표기(판 4, 평가 엔진 binary.threshold_text 를 프론트가 옮긴다). 엔진은 12자리로도 예측을 못 맞추면 repr 로
-# 떨어지는데, 아주 작은 점수(1e-05)면 지수 꼴이다 — 그 꼴도 숫자 하나의 표기라 받는다(판 4 라운드 S2 ②, 계약 not_decided).
-ThresholdText = Annotated[
-    str, StringConstraints(pattern=r"^-?\d+(\.\d+)?([eE][-+]?\d+)?$", max_length=MAX_DISPLAY_TEXT_CHARS)
-]
+# F1 최대 임계값 표기(판 4, 평가 엔진 binary.threshold_text 를 프론트가 옮긴다)도 숫자 꼴(NumText)이다 — 엔진이 12자리로도
+# 예측을 못 맞출 때의 대체 표기도 지수 꼴 없는 고정소수다(S2·S3 검토 D7, 계약 decided). 지수 꼴이 오면 그 칸만 버린다.
 
 # 성적서 양식 판(판 4 라운드). 판 3 이 기본이다 — 기본값은 요청 경계(NarrativeRequest)와 옛 경로 입구(legacy)에만 두고,
 # 안쪽 함수는 기본값 없는 keyword-only edition 으로 받는다(빠뜨리면 바로 오류). 판 결정은 프론트 한 곳이다.
@@ -95,9 +92,15 @@ class MetricFact(BaseModel):
     # 목표값과의 차이(서술 설계 D12). 프론트가 판정 대상 지표에만 싣는다. 높을수록 좋은 지표는
     # value − threshold, 낮을수록 좋은 지표는 threshold − value — 그래서 0 이상이면 충족 쪽이다.
     margin:       float | None = Field(default=None, description="목표값과의 차이(부호 그대로, 0 이상이면 충족 쪽)")
-    # 아슬아슬 — |margin| < |threshold| × 3%(엄격 미만). 판정은 프론트 computeVerdict 한 곳에서 하고
+    # 판 3 — 아슬아슬: |margin| < |threshold| × 3%(엄격 미만). 판정은 프론트 computeVerdict 한 곳에서 하고
     # 서버는 받은 값을 읽기만 한다. 판정 대상이 아니거나 옛 요청이면 False.
-    near_target:  bool         = Field(default=False, description="목표값과의 차이가 목표값의 3% 미만")
+    # 판 4 요청(report_edition 4)에서는 뜻이 '판정 여유 작음'이다(계약 fact_sheet_contract_ed4.json edition4_meaning — 프론트
+    # judgmentMargin 한 곳): 구간이 있으면 반올림 전 95% 신뢰구간이 목표를 포함할 때, 구간이 없으면 3% 엄격 미만. 불변식:
+    # ci_contains_target 이 None 이 아니면 near_target == ci_contains_target. 서버는 판 4 에서도 다시 계산하지 않는다.
+    near_target:  bool         = Field(
+        default=False,
+        description="판 3: 목표값과의 차이가 목표값의 3% 미만. 판 4: 판정 여유 작음(구간이 목표를 포함하거나, 구간이 없으면 3% 미만)",
+    )
     # ── S4a 프론트가 싣는 칸(계약 facts-1). 옛 요청에는 없다 — 모두 선택이고 기본값은 '모름'이다.
     value_text:   NumText | None = Field(
         default=None,
@@ -111,8 +114,14 @@ class MetricFact(BaseModel):
         default=None,
         description="margin 의 서술용 표기 — 0 과 비교한 판정과 같은 쪽으로 읽히게 자릿수를 늘림",
     )
+    # 판 3 은 넷째 자리 경계, 판 4 는 반올림 전 경계(low_raw·high_raw)로 프론트가 판정한다. 판 4 에서는 B22 두 갈래(구간 문장 /
+    # 3% 문장)를 이 칸이 None 인지로 고른다(판정 여유 작음인데 None 이면 구간이 없어 3% 로 정한 지표).
     ci_contains_target: bool | None = Field(
-        default=None, description="구간이 목표값을 포함하는가(프론트가 반올림 전 값으로 판정). None 이면 해당 없음·모름",
+        default=None,
+        description=(
+            "구간이 목표값을 포함하는가(프론트가 반올림 전 값으로 판정). None 이면 해당 없음·모름. "
+            "판 4: 반올림 전 경계로 정하고 near_target(판정 여유 작음)과 같은 값이다"
+        ),
     )
     # ── 판 4 요청에만 있는 칸(계약 fact_sheet_contract_ed4.json). 판 3 요청에는 키가 없다.
     ci_low_text:  NumText | None = Field(
@@ -249,7 +258,7 @@ class F1ThresholdGainFact(BaseModel):
         description="gain 의 표시 문자열 — 판정(notable)과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2)",
     )
     # ── 판 4 요청에만 있는 칸(계약 fact_sheet_contract_ed4.json — 4.4 임계값 표와 5.6 서술). 판 3 요청에는 키가 없다.
-    best_threshold_text:    ThresholdText | None = Field(default=None, description="판 4 — F1 최대 임계값 표기(엔진 값 그대로)")
+    best_threshold_text:    NumText | None = Field(default=None, description="판 4 — F1 최대 임계값 표기(엔진 값 그대로)")
     max_f1_text:            NumText | None = Field(default=None, description="판 4 — 그 임계값의 F1 표기")
     current_f1_text:        NumText | None = Field(default=None, description="판 4 — 지금 예측의 F1 표기")
     best_recall_text:       NumText | None = Field(default=None, description="판 4 — 그 임계값의 Recall 표기")
@@ -375,6 +384,9 @@ class ErrorTotalsFact(BaseModel):
 class WeakestClassFact(BaseModel):
     label:            str
     f1:               float
+    # 판 4 요청에만 있는 칸(계약 edition4_only_keys) — 최약 클래스 F1 의 판 4 글자. 판정 대상 지표와 같은 원값이면 그 value_text(D2),
+    # 아니면 다른 클래스와 달라 보일 때까지 늘린 표기(D3). 판단은 프론트 한 곳이고 서버는 읽기만 한다(wording_ed4.weakest_f1_text_ed4).
+    f1_text:          NumText | None = None
     support:          int
     share:            float
     share_text:       NumText

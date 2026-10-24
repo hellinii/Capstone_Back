@@ -38,7 +38,7 @@ from app.core.concurrency import narrative_slot, run_cpu_bound
 from app.narrative import checks, fallback, prompt
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.derived import compute_derived
-from app.narrative.grounding import _add, build_number_whitelist, find_verdict_contradictions
+from app.narrative.grounding import _add, _add_exact, build_number_whitelist, find_verdict_contradictions
 from app.narrative.llm import EFFORT_LEVELS, call_narrative_llm
 from app.narrative.required_items import benchmark_printed_only, error_breakdown, select_items
 from app.narrative.schemas import (
@@ -117,14 +117,17 @@ def _prepare(req: NarrativeRequest):
         fs, derived, refs, task_type=task, report_purpose=req.report_purpose.value,
         client_inputs=req.client_inputs, conclusions=conclusions, edition=edition,
     )
+    # 판 4 허용 목록은 찍힌 그대로만 받는다(정수 건수에 판 3 의 반올림·×100 백분율 변형을 넣으면 1건이 '100%' 를 허용한다 —
+    # S2·S3 검토 T6). 판 3 은 종전 그대로.
+    add = _add_exact if edition == 4 else _add
     # 지시문에서 덜어 낸 표의 개수('외 k개')도 서술이 쓸 수 있다 — 원본 사실 시트에 없는 수일 수 있어 넣는다.
     for count in (ctx.view.get("덜어 낸 표(일부만 실림)") or {}).values():
-        _add(whitelist, count)
+        add(whitelist, count)
     # 오류 성격 해석 재료의 '둘 다 아닌 오류' 건수(오분류 − 경계 − 확신)도 지시문에 보인다(세션 C) — 문장에 쓰지 말라고 하지만
     # 옮겨 적어도 사실이라 넣는다.
     breakdown = error_breakdown(fs.error_ratios)
     if breakdown is not None and breakdown[2] is not None:
-        _add(whitelist, breakdown[2])
+        add(whitelist, breakdown[2])
     exempt = checks.name_exemptions(fs, req.client_inputs)
     masks = checks.verdict_masks(fs, req.client_inputs)
     return derived, refs, whitelist, conclusions, ctx, exempt, masks

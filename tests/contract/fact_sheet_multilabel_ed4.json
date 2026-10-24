@@ -609,6 +609,7 @@
       "weakest_class": {
         "label": "Class9",
         "f1": 0.047619047619047616,
+        "f1_text": "0.048",
         "support": 80,
         "share": 0.020518082,
         "share_text": "0.021",
