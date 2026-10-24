@@ -13,7 +13,7 @@
     "given": "의뢰자가 준 결정 임계값과 판정 기준값은 늘이지도 끝 0 을 채우지도 않는다(0.5, 0.1, 1.5) — 가장 짧은 십진 표기(round-trip, JS String(Number) 와 같은 숫자), 정수 꼴은 소수점 없이(1, 30), 지수 꼴은 쓰지 않는다(1e-05 → 0.00001, 1e-7 → 0.0000001). F1 최대 임계값은 백엔드 엔진 표기(best_threshold_text — 늘 고정소수)를 옮긴다.",
     "target": "합격 기준(목표값) — 받은 목표의 가장 짧은 십진 표기(given 과 같은 글자)의 소수 자릿수가 3 이하면 plain(셋째 자리, 끝 0 유지 — 0.950), 4~6 이면 그 글자 그대로(0.8124 — 셋째 자리로 줄이면 넷째 자리 목표와 값의 판정이 어긋나 보인다), 7 이상이면 여섯째 자리로 반올림. 지수 꼴 없이. 4.3 표·3.1·5절 규칙 문장·B20·사실 보기 모두(D1, 2026-10-24 사용자 승인). 값은 진짜 목표와 judged 로 찍는다.",
     "latency": "지연시간 — 둘째 자리, 끝 0 유지(toFixed(2) — 4.8 표와 같은 글자). 규칙 문장·사실 보기·허용 목록도 같은 글자(D4).",
-    "distinct": "최약 클래스 F1(facts.weakest_class.f1_text 의 ② 갈래, D3) — 셋째 자리부터 여섯째 자리까지 늘려, 다른 클래스 F1(others) 가운데 여섯째 자리로도 같지 않은 것과 모두 달라 보이는 첫 표기. 여섯째 자리로 같은 클래스는 동점이라 늘리는 까닭이 되지 않는다(동점은 서술이 함께 밝힌다). 같은 수가 판정 대상 지표의 원값이면 이 규칙보다 그 지표의 value_text 가 먼저다(D2).",
+    "distinct": "최약 클래스 F1(facts.weakest_class.f1_text 의 ② 갈래, D3) — 셋째 자리부터 여섯째 자리까지 늘려, 다른 클래스 F1(others) 가운데 여섯째 자리로도 같지 않은 것과 모두 달라 보이는 첫 표기. 여섯째 자리로 같은 클래스는 동점이라 늘리는 까닭이 되지 않는다(동점은 서술이 함께 밝힌다). 같은 수가 판정 대상 지표의 원값이면 이 규칙보다 그 지표의 value_text 가 먼저다(D2). class_table 줄: 클래스별 표에서 최약 클래스가 아닌 클래스의 F1 = distinct(그 값, [최약 F1]) — others 는 최약 클래스 F1 하나다(최약 클래스와 부딪치는 클래스만 늘리고, 다른 클래스끼리 같아 보이는 것은 그대로). 두 저장소의 클래스별 표 함수(function_names.class_f1)가 이 줄을 같은 글자로 찍는다.",
     "text_fields": "사실 시트의 *_text 칸은 plain·judged·signed_judged·ci_bound 의 결과(숫자 꼴)만 싣는다. percent·percent_point·signed_count 는 그릴 때와 글에서만 쓴다.",
     "allow_list": "판 4 숫자 허용 목록은 이 표의 규칙으로 찍힌 표기(셋째 자리와 늘린 표기, 백분율 첫째 자리)만 받는다 — 판 3 넷째 자리 표기(0.9767)는 판 4 글에서 위반이다. 판 4 절 번호(narrative_slots_ed4.json edition4_section_numbers)는 숫자로 보지 않는다.",
     "copula": "'이다' 는 고르지 않고 글자 그대로 쓴다(예시본 '1.672이다', '0.008이다', '33.3%이다').",
@@ -64,6 +64,10 @@
     "distinct": {
       "frontend": "ed4Distinct(value, others) — 최약 클래스 고르기(weakest_class.f1_text)와 같은 함수",
       "backend": "ed4_distinct(value, others)"
+    },
+    "class_f1": {
+      "frontend": "classF1TextEd4 — src/lib/report/edition4/ 의 순수 함수. 클래스별 표 F1 한 칸: 최약 클래스면 weakest_class.f1_text, 그 밖은 같은 원값의 판정 대상 지표 value_text(D2), 아니면 ed4Distinct(그 값, [최약 F1]). S4 렌더러의 M22 클래스별 표·4.4 최약 클래스 표가 쓴다",
+      "backend": "wording_ed4.class_f1_text_ed4(fs, label, value) — 판 4 사실 보기 클래스별 표·평균 차이의 기준 클래스, 규칙 문장 Ctx.class_f1"
     },
     "josa": {
       "frontend": "josa(word, pair) — koreanJosa.ts 에 새로(공통 규칙 nameFinalSound). 지금 있는 josaWaGwa·josaEunNeun·josaEuroRo·josaEulReul(숫자)은 그대로",
@@ -1149,6 +1153,56 @@
       ],
       "expected": "0.972",
       "source": "여섯째 자리로도 같으면(0.972100) 동점 — 늘리지 않는다"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.9724770642201835,
+      "others": [
+        0.9719626168224299
+      ],
+      "class_table": true,
+      "expected": "0.9725",
+      "source": "digits_strong 클래스별 표 5(0.97248) — 최약 9(0.97196)와 셋째 자리로 0.972 로 같아 보여 넷째 자리"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.9859154929577465,
+      "others": [
+        0.9767441860465116
+      ],
+      "class_table": true,
+      "expected": "0.986",
+      "source": "bc_strong 클래스별 표 benign — 최약 malignant(0.977)와 달라 셋째 자리"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.9906542056074766,
+      "others": [
+        0.9719626168224299
+      ],
+      "class_table": true,
+      "expected": "0.991",
+      "source": "digits_strong 클래스별 표 3(0.99065) — 최약과 달라 셋째 자리(1 의 0.99099 와 같아 보여도 다른 클래스끼리는 늘리지 않는다)"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.972144,
+      "others": [
+        0.972141
+      ],
+      "class_table": true,
+      "expected": "0.972144",
+      "source": "최약 0.972141 과 다섯째 자리까지 같아 보여 여섯째 자리"
+    },
+    {
+      "rule": "distinct",
+      "value": 0.9719626178224299,
+      "others": [
+        0.9719626168224299
+      ],
+      "class_table": true,
+      "expected": "0.972",
+      "source": "최약과 여섯째 자리로도 같으면 동점 — 늘리지 않는다"
     }
   ],
   "engine_texts": [

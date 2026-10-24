@@ -506,7 +506,10 @@ class NarrativeFactsFact(BaseModel):
     precision_recall_gap:  PrecisionRecallGapFact | None = None
     average_gap:           AverageGapFact | None = None
     declared_average:      DeclaredAverageFact | None = None
-    distribution_shift_status: Literal["compared", "not_provided", "uncovered"] = "not_provided"
+    # training_samples_not_provided 는 판 4 멀티레이블에만 온다(S2·S3 검토 T3 사용자 답) — 비율의 분모가 표본 수라 학습 분포가
+    # 있어도 학습 표본 수가 없으면 학습 비율을 낼 수 없어 비교하지 않는다(4.5 B16 고객 문장 '학습 클래스 분포가 제공되지 않아'와
+    # 이유가 다르다 — 고객 문장은 아직 없음). 판 3 요청에는 오지 않는다.
+    distribution_shift_status: Literal["compared", "not_provided", "uncovered", "training_samples_not_provided"] = "not_provided"
     distribution_shift:    list[DistributionShiftRowFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES)
     ci_available:          bool = False
     ci_skipped:            list[CiSkippedFact] = Field(default=[], max_length=MAX_METRIC_FACTS)

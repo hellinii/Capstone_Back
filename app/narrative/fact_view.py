@@ -62,6 +62,8 @@ SHIFT_STATUS_KO = {
     "compared": "비교함",
     "not_provided": "학습 분포를 받지 않아 비교하지 않음",
     "uncovered": "학습 분포가 평가 클래스를 모두 덮지 않아 비교하지 않음",
+    # 판 4 멀티레이블에만(판 3 요청에는 오지 않는다 — 판 3 보기 글은 그대로). 판 4 보기가 이 표를 같이 쓴다.
+    "training_samples_not_provided": "학습 표본 수를 받지 않아 비교하지 않음(멀티레이블 비율의 분모는 표본 수)",
 }
 # 프론트가 표를 자른 칸(facts.omitted)·지시문에서 덜어 낸 칸(trim)의 한국어 이름.
 OMITTED_KO = {

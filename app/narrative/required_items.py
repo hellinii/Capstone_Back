@@ -173,10 +173,10 @@ class Ctx:
         return num(w.f1)
 
     def class_f1(self, label, value) -> str:
-        """클래스 하나의 F1 — 판 4 에서 그 클래스가 최약 클래스면 최약 클래스 F1 글자(같은 수는 같은 글자), 아니면 same."""
-        w = self.facts.weakest_class if self.facts is not None else None
-        if self.edition == 4 and w is not None and label == w.label:
-            return self.weakest_f1(w)
+        """클래스 하나의 F1 — 판 4 는 사실 보기 클래스별 표와 같은 한 곳(wording_ed4.class_f1_text_ed4: 최약 클래스면 최약 클래스 F1
+        글자, 그 밖은 D2 → 최약 클래스와 같아 보이면 늘린 표기 D3), 판 3 은 num."""
+        if self.edition == 4:
+            return wording_ed4.class_f1_text_ed4(self.fs, label, value)
         return self.same(value)
 
     def pct(self, ratio: float) -> str:

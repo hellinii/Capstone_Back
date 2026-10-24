@@ -287,6 +287,20 @@ def weakest_f1_text_ed4(fs) -> str | None:
     return judged_value_text_ed4(fs.metrics, w.f1) or ed4_distinct(w.f1, [p.f1 for p in fs.per_class if p.label != w.label])
 
 
+def class_f1_text_ed4(fs, label, value):
+    """클래스별 표의 F1 한 칸(판 4) — 공통 규칙(계약 decided 'D3 클래스별 표', 대조 표 distinct 의 class_table 줄). 최약 클래스면
+    최약 클래스 F1 글자(weakest_f1_text_ed4 — 프론트 facts.weakest_class.f1_text), 그 밖 클래스는 같은 원값의 판정 대상 지표 글자(D2)가
+    먼저이고, 아니면 distinct(그 값, [최약 F1]) — 셋째 자리로 최약 클래스와 같아 보이면 서로 달라질 때까지 늘린다(다른 클래스끼리
+    같아 보이는 것은 그대로). 사실 보기(클래스별 표·평균 차이의 기준 클래스)와 규칙 문장(Ctx.class_f1)이 이 한 곳을 쓴다.
+    프론트 classF1TextEd4 와 같은 결과다(같은 대조 표로 시험)."""
+    w = fs.facts.weakest_class if fs.facts is not None else None
+    if w is None or value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return same_value_text_ed4(fs.metrics, value)
+    if label == w.label:
+        return weakest_f1_text_ed4(fs)
+    return judged_value_text_ed4(fs.metrics, value) or ed4_distinct(value, [w.f1])
+
+
 def same_metric_value_ed4(metrics, metric_id: str, value: float | None) -> str | None:
     """파생값에 실린 값이 판정 대상 지표의 값이면 그 지표의 표기 — 같은 값이 두 자리에 다른 글자로 찍히지 않게(계약 결정 7).
     그 밖은 plain."""

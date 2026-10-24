@@ -35,8 +35,8 @@ from app.narrative.schemas import FactSheet
 from app.narrative.sections import place
 from app.narrative.wording_ed4 import (
     POSITION_KO,
+    class_f1_text_ed4,
     ed4_ci_bound,
-    ed4_distinct,
     ed4_given,
     ed4_judged,
     ed4_latency,
@@ -48,7 +48,6 @@ from app.narrative.wording_ed4 import (
     ed4_signed_judged,
     ed4_target,
     imbalance_texts_ed4,
-    judged_value_text_ed4,
     metric_value_ed4,
     same_metric_value_ed4,
     same_value_text_ed4,
@@ -161,13 +160,9 @@ def _same(fs: FactSheet, value: Any) -> Any:
 
 def _class_f1(fs: FactSheet, label: str, value: Any) -> Any:
     """클래스 하나의 F1 — 최약 클래스면 최약 클래스 F1 글자(프론트 facts.weakest_class.f1_text — 같은 수는 같은 글자), 그 밖은
-    같은 원값의 판정 대상 지표 글자(D2)나, 셋째 자리로 최약 클래스와 같아 보이면 서로 달라질 때까지 늘린 표기(D3)."""
-    w = fs.facts.weakest_class if fs.facts is not None else None
-    if w is None or value is None or isinstance(value, bool):
-        return _same(fs, value)
-    if label == w.label:
-        return weakest_f1_text_ed4(fs)
-    return judged_value_text_ed4(fs.metrics, value) or ed4_distinct(value, [w.f1])
+    같은 원값의 판정 대상 지표 글자(D2)나, 셋째 자리로 최약 클래스와 같아 보이면 서로 달라질 때까지 늘린 표기(D3). 규칙 문장과
+    같은 한 곳(wording_ed4.class_f1_text_ed4 — 공통 대조 표 distinct 의 class_table 줄)."""
+    return class_f1_text_ed4(fs, label, value)
 
 
 def _per_class(fs: FactSheet) -> dict | None:
@@ -377,6 +372,13 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
             }
             for r in facts.distribution_shift
         ]
+        if task_type == "multilabel":
+            # 판 4 멀티레이블 비율의 분모는 표본 수(S2·S3 검토 T3 사용자 답) — 4.5 분포 문장과 같은 숫자다. 허용 목록이 보기 값의
+            # 숫자를 받으므로 이 글에는 숫자를 넣지 않는다('100%' 를 쓰면 100 이 허용된다).
+            out["학습↔평가 비율의 분모"] = (
+                "표본 수 — 평가 비율은 그 레이블이 붙은 평가 표본 / 전체 평가 표본('분포·불균형' 백분율과 같은 숫자), 학습 비율은 그 레이블이 "
+                "붙은 학습 표본 / 의뢰자가 준 학습 표본 수. 한 표본에 레이블이 여럿일 수 있어 백분율을 모두 더하면 전체를 넘을 수 있다."
+            )
     if facts.ci_skipped:
         names, protect = v3.metric_names(fs), v3.class_names(fs)
         out["신뢰구간을 산출하지 않은 지표"] = [

@@ -48,9 +48,12 @@ EXAMPLES = {
 # 0.048). 프론트가 이 칸을 만든 뒤 다시 뜬 f1_text 줄은 손 글자와 같았다. 같은 검토 D6(문제 근거 숫자도 판 4 글자 — 지표 근거
 # value_text·ed4Target·margin_text, 최약 클래스 근거 f1_text·share_text·gap_text·매크로 F1(D2), 불균형 근거 display 판 4)으로
 # 세 예시의 problems[].evidence 가 바뀌어 프론트에서 다시 떠 옮겼다(그 밖 바이트 그대로).
+# 후속(2026-10-24)으로 명세·대조 표만 다시 고침: 명세 — 멀티레이블 4.5 학습·평가 비율의 분모 = 표본 수(T3 사용자 답, edition4_meaning
+# 두 줄·새 상태 training_samples_not_provided), D3 클래스별 표(decided·function_names.class_f1), not_decided 에 B16 이유 질문.
+# 대조 표 — distinct 규칙 글과 class_table 줄 다섯(others = [최약 F1]). 예시 셋·칸 대응표는 그대로.
 SHA256 = {
-    "fact_sheet_contract_ed4.json": "b39895a5377c8d65d01973b5a65e58e0d3739424a509a3d27a0cc6cf4fe775c8",
-    "number_wording_ed4.json": "cd6e6ac860b7458d0922f7d4e8878dc44715e019106f2c9d5fa0a0e86c249338",
+    "fact_sheet_contract_ed4.json": "d36af2ef0c3031213f2ff5de3360e0a76cc62f7b85c1aa23ba4fa4d3869fbb86",
+    "number_wording_ed4.json": "6d4659d849363ceac749108c19b9a41662b18ce6e1f02bdc30586f54142466fb",
     "narrative_slots_ed4.json": "3c43ffa35357c8c7f4c8a30d182482a85dec51caefa872dc9e556ae51d5b7d35",
     EXAMPLE: "0f7da6dfc88870aec7cb18c3a02204319df8487b4a9e058c344ade8dc0d63f69",
     "fact_sheet_multiclass_ed4.json": "68277d563888fdc1fdb1f4c50a0cd373d264394026c0ede9e1c421bc91ef96a5",

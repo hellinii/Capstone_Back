@@ -46,7 +46,8 @@ def run(case: dict) -> str:
 
 RULE_COUNTS = {
     "plain": 35, "judged": 35, "ci_bound": 15, "percent": 11, "signed_judged": 7, "given": 12,
-    "percent_point": 5, "signed_count": 4, "target": 11, "latency": 7, "distinct": 7,
+    # distinct 7 → 12: 후속(2026-10-24) D3 클래스별 표의 class_table 줄 다섯(others = [최약 F1]).
+    "percent_point": 5, "signed_count": 4, "target": 11, "latency": 7, "distinct": 12,
 }
 
 
