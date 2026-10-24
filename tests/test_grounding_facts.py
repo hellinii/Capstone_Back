@@ -23,7 +23,7 @@ def _fs(**over) -> FactSheet:
 
 
 def _passes(fs: FactSheet, text: str) -> bool:
-    return verify_grounding([text], build_number_whitelist(fs, [], {}, edition=3)).passed
+    return verify_grounding([text], build_number_whitelist(fs, [], {}, edition=3), edition=3).passed
 
 
 def _metric(**over) -> MetricFact:

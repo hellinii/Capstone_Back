@@ -93,7 +93,7 @@ def test_benchmark_rule_sentence_passes_its_own_check_with_extended_digits():
     refs = build_benchmark_refs("binary", fs.metrics, edition=3)
     text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs, edition=3) if c.item_id == "8.1-01")
     assert "Precision(0.79996, 참조 범위 0.8~0.92)" in text and "Accuracy(0.84996, 참조 범위 0.85~0.92)" in text
-    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary"), edition=3))
+    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary"), edition=3), edition=3)
     assert result.passed, result
 
 
@@ -123,7 +123,7 @@ def test_benchmark_value_uses_target_judgment_through_fact_sheet(value, threshol
     assert f"Accuracy({expected}, 참조 범위 0.85~0.92)" in text, text
     view = fact_view._benchmarks(refs, fs)
     assert [r["모델 값"] for r in view["지표별"] if r["지표"] == "Accuracy"] == [expected]
-    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary"), edition=3))
+    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary"), edition=3), edition=3)
     assert result.passed, result
 
 

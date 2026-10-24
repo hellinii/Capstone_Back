@@ -50,12 +50,12 @@ DIGIT_LABELS = frozenset({"0", "1", "2", "8", "10"})
     ("클래스 2의 오분류 5건이 사라진다.", ["5"]),
 ])
 def test_class_name_numbers_are_not_predictions(text, expected):
-    assert checks.predicted_numbers(text, DIGIT_LABELS) == expected
+    assert checks.predicted_numbers(text, DIGIT_LABELS, edition=3) == expected
 
 
 def test_class_name_numbers_still_caught_without_labels():
     # 이름 목록을 주지 않으면(옛 호출) 지금처럼 잡는다 — 이름 면제는 사실 시트의 이름에서만 나온다.
-    assert checks.predicted_numbers("클래스 2의 재현율이 회복된다.") == ["2"]
+    assert checks.predicted_numbers("클래스 2의 재현율이 회복된다.", edition=3) == ["2"]
 
 
 def test_numeric_labels_come_from_every_name_list():
@@ -418,7 +418,7 @@ def test_near_templates_pass_their_own_checks(printed, verdict, statuses):
     if t is None:  # 옛 요청은 합격한 근소 지표만 쓴다
         assert not printed and all(s == "fail" for s in statuses)
         return
-    assert verify_grounding([t], build_number_whitelist(fs, [], {}, edition=3)).passed, t
+    assert verify_grounding([t], build_number_whitelist(fs, [], {}, edition=3), edition=3).passed, t
     assert find_verdict_contradictions([t], verdict) == [], t
 
 
@@ -526,7 +526,7 @@ def test_tied_weakest_notes_and_self_check():
         assert "F1 이 같은 최하위 클래스가 여럿이다(cat, bird, 2, 3, 4). 한 클래스만 가장 약한 클래스처럼 쓰지 말고 함께 밝힌다." in notes, sid
     for c in conclusions:
         if c.item_id in ("7.1-10", "8.3-01"):
-            assert verify_grounding([c.template_text], whitelist).passed, c.template_text
+            assert verify_grounding([c.template_text], whitelist, edition=3).passed, c.template_text
             assert checks.code_words([c.template_text], exempt) == []
 
 
@@ -637,7 +637,7 @@ def test_benchmark_rule_sentence_and_fact_view_use_position_consistent_values():
     assert (rows["AUROC"]["모델 값"], rows["AUROC"]["평가(방향 반영)"]) == ("0.950001", "우수")
     assert rows["Accuracy"]["모델 값"] == "0.84996"
     # 규칙 문장이 자기 검문(숫자 허용 목록)을 통과한다.
-    assert verify_grounding([text], build_number_whitelist(fs, refs, derived, edition=3)).passed, text
+    assert verify_grounding([text], build_number_whitelist(fs, refs, derived, edition=3), edition=3).passed, text
     # 응답의 벤치마크 표(계약)는 그대로 — model_value 는 넷째 자리 숫자다.
     assert [r["model_value"] for r in refs] == [0.8, 0.95, 0.85]
 

@@ -334,7 +334,7 @@ def test_fallback_with_problems_passes_grounding():
     refs = build_benchmark_refs("binary", fs.metrics, edition=3)
     resp = build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
     texts = _collect_grounding_texts(resp.model_dump(exclude={"meta", "benchmark_refs"}))
-    g = verify_grounding(texts, build_number_whitelist(fs, refs, derived, edition=3))
+    g = verify_grounding(texts, build_number_whitelist(fs, refs, derived, edition=3), edition=3)
     assert g.passed, g.violations
 
 

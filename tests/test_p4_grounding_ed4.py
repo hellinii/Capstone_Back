@@ -254,3 +254,65 @@ def test_check_section_flags_fourth_digit_in_edition4_text():
     assert bad.numbers == ["0.9767"]
     good = checks.check_section("8.2", {"conclusion.narrative": "F1 Score 는 0.977로 목표를 충족하였다."}, **kw)
     assert good.numbers == []
+
+
+# ── 칸 검사(check_section)가 하위 검사 셋(7.3 인용·기대 효과·D24)에 판을 넘기는가 (S2·S3 검토 T1) ─────────────────────
+# 세 하위 함수(_cites_allowed_number·predicted_numbers·d24_present)는 기본값 없는 edition 을 받는다. 판 4 갈래에서 판을 빼먹으면
+# '부록 1'·'부록 1.2'·'(4.4)' 같은 판 4 절 번호가 숫자로 남는다 — 아래는 판마다 결과가 갈리는 글로 세 줄을 하나씩 본다.
+
+
+def _check_kw(raw: dict) -> tuple[dict, list]:
+    req = NarrativeRequest.model_validate(raw)
+    _, _, wl, conclusions, _, exempt, masks = generator._prepare(req)
+    kw = dict(whitelist=wl, verdict="PASS", problem_ids=[], exempt=exempt, masks=masks)
+    return kw, conclusions
+
+
+def test_check_section_passes_edition_to_expected_impact_numbers():
+    kw, _ = _check_kw(example_raw())
+    rec = {"problem_id": "P1", "action": "평가 데이터를 따로 모은다.", "expected_impact": "부록 1.2 의 기준에 따라 재평가한다(4.4 참조)."}
+    parts = {"recommendation_narrative.data_quality": "데이터 쪽 권고.", "recommendation_narrative.model_ops": "모델 쪽 권고.",
+             "recommendations": [rec]}
+    ok = checks.check_section("9", parts, conclusions=[], edition=4, **kw)
+    assert ok.impact_numbers == [], ok
+    # 판 3 은 판 4 절 번호를 모른다 — 같은 글이 예측 수치로 걸린다(판을 넘기는 줄이 빠지면 판 4 권고가 폴백으로 떨어진다).
+    bad = checks.check_section("9", parts, conclusions=[], edition=3, **kw)
+    assert "1.2" in bad.impact_numbers, bad
+
+
+def test_check_section_passes_edition_to_the_7_3_citation_check():
+    kw, _ = _check_kw(example_raw())
+    assert "1" in kw["whitelist"]  # 이 예시의 거짓 음성 1건 — '부록 1' 의 1 이 허용 숫자와 겹친다
+    field = "interpretation.additional_observations"
+    # 판 4 절 번호와 허용 숫자 하나 — 인용이 있다.
+    cited = checks.check_section("7.3", {field: "임계값 표(4.4)에서 Recall 은 0.984이다(부록 1.2 참조)."}, conclusions=[], edition=4, **kw)
+    assert "no_citation" not in cited.format and cited.numbers == [], cited
+    # 판 4 절 번호뿐 — 인용이 없다. 판 3 으로 보면 '부록 1' 의 1 을 허용 숫자로 읽어 인용이 있다고 잘못 본다.
+    text = "자세한 점검 결과는 부록 1에서 다룬다."
+    assert "no_citation" in checks.check_section("7.3", {field: text}, conclusions=[], edition=4, **kw).format
+    assert "no_citation" not in checks.check_section("7.3", {field: text}, conclusions=[], edition=3, **kw).format
+
+
+def test_check_section_passes_edition_to_the_d24_check():
+    kw, conclusions = _check_kw(example_raw())
+    d24 = [c for c in conclusions if c.item_id == "7.1-03"]
+    assert d24 and d24[0].d24_values == (1.0, 0.333333333)
+    field = "interpretation.confusion_analysis"
+    # 선언 숫자(1건)가 판 4 절 번호와 붙어 있어도 있다.
+    present = checks.check_section("7.1", {field: "놓친 오류는 1건이다(4.4). 그 뜻은 5.5절에서 다룬다."}, conclusions=d24, edition=4, **kw)
+    assert present.d24_missing is False, present
+    # 판 4 절 번호 속 숫자뿐 — 선언 숫자는 없다. 판 3 으로 보면 '부록 1' 의 1 을 선언 숫자로 읽는다.
+    text = "의뢰자가 밝힌 위험 방향은 부록 1에 정리하였다."
+    assert checks.check_section("7.1", {field: text}, conclusions=d24, edition=4, **kw).d24_missing is True
+    assert checks.check_section("7.1", {field: text}, conclusions=d24, edition=3, **kw).d24_missing is False
+
+
+@pytest.mark.parametrize("fn, args", [
+    (checks.predicted_numbers, ("부록 1.2",)),
+    (checks.d24_present, ("부록 1", (1.0,))),
+    (verify_grounding, (["부록 1.2"], set())),
+])
+def test_inner_checks_have_no_default_edition(fn, args):
+    """기본값 3 은 요청 경계(NarrativeRequest)와 legacy 입구뿐 — 안쪽 함수는 판을 받아야 한다."""
+    with pytest.raises(TypeError):
+        fn(*args)

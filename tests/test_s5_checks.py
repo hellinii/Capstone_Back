@@ -135,7 +135,7 @@ from app.narrative.schemas import FactSheet, MetricFact, PerClassFact  # noqa: E
     ("오분류 5회 감소", ["5"]),
 ])
 def test_predicted_numbers(text, expected):
-    assert checks.predicted_numbers(text) == expected
+    assert checks.predicted_numbers(text, edition=3) == expected
 
 
 def _fs(**kw):
@@ -248,7 +248,7 @@ def test_thousands_separator_numbers():
     """checks-12: '1,234.5' 는 숫자 하나, 붙여 쓴 '43,52' 는 숫자 둘."""
     from app.narrative.grounding import verify_grounding
 
-    assert checks.d24_present("p95 응답 시간은 1,234.5ms 이다", (1234.5,))
-    assert verify_grounding(["행렬은 43,52 이다"], {"43", "52"}).passed
-    assert not verify_grounding(["행렬은 43,52 이다"], {"4352"}).passed
-    assert verify_grounding(["재표집 2,000회"], {"2000"}).passed
+    assert checks.d24_present("p95 응답 시간은 1,234.5ms 이다", (1234.5,), edition=3)
+    assert verify_grounding(["행렬은 43,52 이다"], {"43", "52"}, edition=3).passed
+    assert not verify_grounding(["행렬은 43,52 이다"], {"4352"}, edition=3).passed
+    assert verify_grounding(["재표집 2,000회"], {"2000"}, edition=3).passed

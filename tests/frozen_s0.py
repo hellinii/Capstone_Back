@@ -323,7 +323,7 @@ def _check_one(sid: str, parts: dict, req: NarrativeRequest, prepared) -> dict:
         problem_ids=problem_ids, exempt=exempt, masks=masks, labels=checks.numeric_labels(fs), edition=3,
     )
     texts = [t for t in checks.section_texts(sid, rec_parts) if isinstance(t, str)]
-    grounding = verify_grounding(texts, whitelist)
+    grounding = verify_grounding(texts, whitelist, edition=3)
     return {
         "check": result.as_record(),
         "hard_failures": result.hard_failures,

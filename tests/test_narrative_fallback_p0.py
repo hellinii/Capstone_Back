@@ -37,7 +37,7 @@ def _run(fs: FactSheet, task_type: str | None = None):
     resp = build_fallback_narrative(fs, [], derived, reason="no_key", edition=3)
     texts = [resp.interpretation.confusion_analysis, resp.interpretation.distribution_analysis,
              resp.conclusion.narrative, resp.conclusion.risks]
-    grounding = verify_grounding(texts, build_number_whitelist(fs, [], derived, edition=3))
+    grounding = verify_grounding(texts, build_number_whitelist(fs, [], derived, edition=3), edition=3)
     assert grounding.passed, grounding.violations
     return resp, texts
 

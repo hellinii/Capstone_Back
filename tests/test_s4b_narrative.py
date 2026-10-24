@@ -154,7 +154,7 @@ def test_fallback_on_contract_examples_passes_its_own_checks(name):
     refs = build_benchmark_refs(req.task_type.value, fs.metrics, edition=3)
     out = build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
     data = out.model_dump(exclude={"meta", "benchmark_refs"})
-    grounding = verify_grounding(_collect_grounding_texts(data), build_number_whitelist(fs, refs, derived, edition=3))
+    grounding = verify_grounding(_collect_grounding_texts(data), build_number_whitelist(fs, refs, derived, edition=3), edition=3)
     assert grounding.passed, grounding.violations
     assert find_verdict_contradictions(_collect_grounding_texts(data), fs.verdict) == []
     # M21 을 고르지 않은 새 요청도 혼동행렬 문장이 있다(S4a — 늘 계산하는 표).

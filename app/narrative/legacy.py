@@ -441,7 +441,7 @@ def _prepare_facts(fs, task_type_value: str, client_inputs: dict | None = None):
 
 def _verify_llm_output(data: dict, whitelist):
     """LLM 출력 전수 수집 + grounding 검증 — 순수 CPU 구간."""
-    return verify_grounding(_collect_grounding_texts(data), whitelist)
+    return verify_grounding(_collect_grounding_texts(data), whitelist, edition=EDITION)
 
 
 class _ImpactNumber(Exception):

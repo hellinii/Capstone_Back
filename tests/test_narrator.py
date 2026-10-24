@@ -69,7 +69,7 @@ def test_fallback_passes_own_grounding():
     wl = build_number_whitelist(fs, refs, derived, edition=3)
 
     resp = build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
-    grounding = verify_grounding(_all_texts(resp), wl)
+    grounding = verify_grounding(_all_texts(resp), wl, edition=3)
 
     assert grounding.passed, f"폴백이 화이트리스트 밖 숫자 사용: {grounding.violations}"
     assert grounding.checked > 0, "검사된 숫자가 없음(템플릿이 비었는지 확인)"
@@ -85,7 +85,7 @@ def test_grounding_catches_hallucination():
     wl = build_number_whitelist(fs, refs, derived, edition=3)
 
     hallucinated = ["정확도는 무려 99.7%에 달하며 P99 지연시간은 41.2ms이다."]
-    grounding = verify_grounding(hallucinated, wl)
+    grounding = verify_grounding(hallucinated, wl, edition=3)
 
     assert not grounding.passed
     assert any("99.7" in v for v in grounding.violations)
@@ -97,7 +97,7 @@ def test_exempt_tokens_not_flagged():
     fs = _sample_fact_sheet()
     derived = compute_derived(fs)
     wl = build_number_whitelist(fs, [], derived, edition=3)
-    g = verify_grounding(["본 시험은 ISO/IEC TS 4213:2022 기준으로 7절·8절·9절을 구성한다."], wl)
+    g = verify_grounding(["본 시험은 ISO/IEC TS 4213:2022 기준으로 7절·8절·9절을 구성한다."], wl, edition=3)
     assert g.passed, f"면제 토큰 오탐: {g.violations}"
 
 
@@ -163,7 +163,7 @@ def test_bare_special_numbers_flagged():
     """근거 없는 0/1/100/2022 는 더 이상 면제되지 않고 위반으로 잡힌다(D3a)."""
     fs = _no_special_fact_sheet()
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
-    g = verify_grounding(["정확도는 100%이며 제외 0건, 신뢰도 1.0, 총 2,022건이다."], wl)
+    g = verify_grounding(["정확도는 100%이며 제외 0건, 신뢰도 1.0, 총 2,022건이다."], wl, edition=3)
     assert not g.passed
     assert "100%" in g.violations and "0" in g.violations and "2,022" in g.violations
 
@@ -175,7 +175,7 @@ def test_genuine_perfect_and_zero_pass():
         metrics=[MetricFact(metric_id="M1", display_name="Accuracy", value=1.0, threshold=0.9, status="pass")],
     )
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
-    g = verify_grounding(["정확도 100%, 제외 0건, 점수 1.0"], wl)
+    g = verify_grounding(["정확도 100%, 제외 0건, 점수 1.0"], wl, edition=3)
     assert g.passed, g.violations
 
 
@@ -183,7 +183,7 @@ def test_metric_name_and_ordinal_not_flagged():
     """F1·P99 식별자와 제N종·N절 문맥 토큰은 오탐하지 않는다(D3a)."""
     fs = _no_special_fact_sheet()
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
-    g = verify_grounding(["F1 Score와 P99 지연, 제1종·제2종 오류, 7절 참조."], wl)
+    g = verify_grounding(["F1 Score와 P99 지연, 제1종·제2종 오류, 7절 참조."], wl, edition=3)
     assert g.passed, g.violations
 
 
@@ -199,7 +199,7 @@ def test_grounding_covers_recommendation_category():
             {"priority": "HIGH", "category": "재현율 0.777 보강", "action": "", "expected_impact": ""}
         ],
     }
-    g = verify_grounding(_collect_grounding_texts(data), wl)
+    g = verify_grounding(_collect_grounding_texts(data), wl, edition=3)
     assert not g.passed
     assert any("0.777" in v for v in g.violations)
 
@@ -223,7 +223,7 @@ async def test_internal_grounding_violation_falls_back(make_fake_anthropic_clien
     assert resp.meta.grounding.passed is False
     # 폴백 산문은 fact_sheet 근거만 사용하므로 자체 grounding 통과
     wl = build_number_whitelist(fs, build_benchmark_refs("binary", fs.metrics, edition=3), compute_derived(fs), edition=3)
-    assert verify_grounding(_all_texts(resp), wl).passed
+    assert verify_grounding(_all_texts(resp), wl, edition=3).passed
 
 
 async def test_clean_llm_response_source_llm(make_fake_anthropic_client):
@@ -322,11 +322,11 @@ def test_client_input_numbers_are_allowed():
     }
     text = ["학습 데이터 12,000개, 라벨러 3명, 카파 0.71 로 보고되었다."]
 
-    without = verify_grounding(text, build_number_whitelist(fs, benchmark_refs, derived, edition=3))
+    without = verify_grounding(text, build_number_whitelist(fs, benchmark_refs, derived, edition=3), edition=3)
     assert not without.passed
 
     with_inputs = build_number_whitelist(fs, benchmark_refs, derived, client_inputs, edition=3)
-    assert verify_grounding(text, with_inputs).passed
+    assert verify_grounding(text, with_inputs, edition=3).passed
 
 
 def test_client_inputs_size_limited():
@@ -398,7 +398,7 @@ def test_class_average_rows_reach_the_fact_sheet_and_whitelist():
     derived = compute_derived(fs)
     wl = build_number_whitelist(fs, [], derived, edition=3)
 
-    g = verify_grounding(["매크로 평균 F1 은 0.705, 가중 평균 F1 은 0.786 이다."], wl)
+    g = verify_grounding(["매크로 평균 F1 은 0.705, 가중 평균 F1 은 0.786 이다."], wl, edition=3)
     assert g.passed, g.violations
 
 
@@ -456,7 +456,7 @@ def test_derived_prediction_threshold_is_allowed_in_narrative():
     )
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
 
-    assert verify_grounding(["예측값은 확률에 임계값 0.35 를 적용해 만들었다."], wl).passed
+    assert verify_grounding(["예측값은 확률에 임계값 0.35 를 적용해 만들었다."], wl, edition=3).passed
 
 
 def test_per_label_thresholds_are_allowed_in_narrative():
@@ -471,7 +471,7 @@ def test_per_label_thresholds_are_allowed_in_narrative():
     )
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
 
-    assert verify_grounding(["레이블 a 는 0.4, b 는 0.65 로 판정했다."], wl).passed
+    assert verify_grounding(["레이블 a 는 0.4, b 는 0.65 로 판정했다."], wl, edition=3).passed
 
 
 async def test_benchmark_refs_come_back_with_the_narrative():
@@ -497,7 +497,7 @@ def test_confusion_counts_reach_the_fact_sheet_and_whitelist():
     )
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
 
-    assert verify_grounding(["양성 기준 TP 52건, FN 43건이다."], wl).passed
+    assert verify_grounding(["양성 기준 TP 52건, FN 43건이다."], wl, edition=3).passed
 
 
 @pytest.mark.parametrize("target", [0.0, -0.1])
@@ -618,7 +618,7 @@ def test_fallback_states_target_level_and_passes_grounding():
     # S6: 8.1 은 개조식(';' 나열)이 아니라 같은 위치끼리 묶은 서술체 한 문장이다(작성 규칙 D37).
     assert "목표값이 참조 범위보다 낮은 지표는 Accuracy(목표 0), Recall(목표 -0.1)이다." in benchmark
     assert "AUROC(목표" not in benchmark  # 목표 없는 지표는 목표값 수준에 넣지 않는다
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, refs, derived, edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, refs, derived, edition=3), edition=3).passed
 
 
 def test_fallback_without_targets_has_no_target_sentence():
@@ -714,7 +714,7 @@ def test_fallback_states_boundary_and_confident_errors():
         "오분류 12건 중 결정 경계와의 거리가 0.1 미만인 경계 오류는 5건(41.7%), "
         "틀린 쪽 확률이 0.9 이상인 확신 오류는 2건(16.7%)이다." in text
     )
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_says_boundary_not_computed_when_threshold_unknown():
@@ -726,7 +726,7 @@ def test_fallback_says_boundary_not_computed_when_threshold_unknown():
     assert "결정 임계값을 알 수 없으므로 경계 오류는 계산하지 않았고" in text
     assert "확신 오류는 2건(16.7%)이다." in text
     assert "경계 오류는 5건" not in text
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_error_sentence_for_label_cells_and_zero_errors():
@@ -865,7 +865,7 @@ def test_fallback_states_metrics_whose_interval_contains_target():
         "표본 변동에 따라 해당 지표의 판정이 달라질 수 있다." in text
     )
     assert "Accuracy(구간" not in text
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_without_contained_targets_has_no_interval_sentence():
@@ -1024,7 +1024,7 @@ def test_fallback_risks_mention_near_target_pass_metrics():
     )
     assert "Accuracy(" not in risks
     assert "식별된 목표 미달 위험은 없다" not in risks
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
     # 합격 성적서의 이 서술이 판정 모순으로 걸리지 않는다.
     from app.narrative.grounding import find_verdict_contradictions
     assert find_verdict_contradictions(_all_texts(resp), "PASS") == []
@@ -1050,7 +1050,7 @@ def test_fallback_metric_numbers_use_report_digits():
     resp = build_fallback_narrative(failed, [], compute_derived(failed), "no_key", edition=3)
     assert "Recall(0.547, 목표 0.8)" in resp.conclusion.risks
     assert "0.5473" not in " ".join(_all_texts(resp))
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed), edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed), edition=3), edition=3).passed
 
     near = _bare_fact_sheet(metrics=[_near_metric(value=0.80789, threshold=0.8, margin=0.00789)])
     near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key", edition=3).conclusion.risks
@@ -1092,7 +1092,7 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
     assert "결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있다." in narrative
     assert "이 데이터의 최대폭이므로 별도 데이터에서 확인해야 한다." in narrative
     assert "현재 결정 임계값이 최적이 아닐 수 있어" in risks and "0.37" not in risks
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
     small = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain(gain=0.0999)})
     small_resp = build_fallback_narrative(small, [], compute_derived(small), "no_key", edition=3)
@@ -1122,7 +1122,7 @@ def test_fallback_distribution_follows_imbalance_level(level, values, expected, 
     assert expected in text
     assert absent not in text
     assert "1.857" not in text
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_distribution_multilabel_uses_label_gap_only():
@@ -1209,7 +1209,7 @@ def test_dotted_section_references_are_not_numbers(text):
 
     fs = _no_special_fact_sheet()
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
-    g = verify_grounding([text], wl)
+    g = verify_grounding([text], wl, edition=3)
     assert g.passed, g.violations
     assert has_number_token(text) is False
 
@@ -1240,7 +1240,7 @@ def test_dotted_section_rule_does_not_whitelist_fake_values(text, fake):
 
     fs = _no_special_fact_sheet()
     wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
-    g = verify_grounding([text], wl)
+    g = verify_grounding([text], wl, edition=3)
     assert not g.passed
     assert any(fake.strip("()") in v for v in g.violations), g.violations
     assert has_number_token(text) is True
@@ -1250,10 +1250,10 @@ def test_whitelist_includes_numbers_in_ci_method_note():
     """6.0 신뢰구간 방식 한 줄의 숫자("2,000회")를 서술이 옮겨 적어도 환각이 아니다."""
     text = ["신뢰구간은 재표집 2,000회로 구했다."]
     bare = build_number_whitelist(_bare_fact_sheet(), [], {}, edition=3)
-    assert not verify_grounding(text, bare).passed
+    assert not verify_grounding(text, bare, edition=3).passed
 
     fs = _bare_fact_sheet(ci_method_note="정확도는 Wilson 구간, 그 밖의 지표는 재표집(2,000회)으로 구했다.")
-    assert verify_grounding(text, build_number_whitelist(fs, [], {}, edition=3)).passed
+    assert verify_grounding(text, build_number_whitelist(fs, [], {}, edition=3), edition=3).passed
     # 없으면(None) 건너뛴다.
     build_number_whitelist(_bare_fact_sheet(ci_method_note=None), [], {}, edition=3)
 
@@ -1264,4 +1264,4 @@ def test_whitelist_includes_absolute_margin():
                                                  near=False, status="fail")])
     wl = build_number_whitelist(fs, [], {}, edition=3)
     assert "-0.0288" in wl and "0.0288" in wl
-    assert verify_grounding(["Recall 은 목표값보다 0.0288 낮다."], wl).passed
+    assert verify_grounding(["Recall 은 목표값보다 0.0288 낮다."], wl, edition=3).passed

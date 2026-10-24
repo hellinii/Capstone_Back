@@ -160,7 +160,7 @@ def test_templates_pass_their_own_checks(task, verdict):
         texts = checks.section_texts(sid, parts)
         if sid == "9" and not fs.problems:
             # 문제가 0개면 9칸은 AI 를 부르지 않고 검사하지 않는다(출처 fixed) — 숫자만 본다.
-            assert verify_grounding(texts, whitelist).passed, texts
+            assert verify_grounding(texts, whitelist, edition=3).passed, texts
             continue
         result = checks.check_section(
             sid, parts, whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
@@ -171,7 +171,7 @@ def test_templates_pass_their_own_checks(task, verdict):
     texts = _all_texts(by_section)
     assert find_verdict_contradictions(texts, fs.verdict) == []
     # 이빨 — 검사가 실제로 숫자를 봤고, 판정 문장이 이 판정 이름을 쓴다(판정을 바꾼 픽스처가 그 판정이다).
-    assert verify_grounding(texts, whitelist).checked > 20
+    assert verify_grounding(texts, whitelist, edition=3).checked > 20
     assert f"'{VERDICT_LABEL[verdict]}'" in by_section["8.2"]["conclusion.narrative"]
 
 
@@ -375,7 +375,7 @@ def test_old_requests_without_facts_or_task_type_do_not_break():
              resp.conclusion.narrative, resp.conclusion.risks, resp.recommendation_narrative.data_quality,
              resp.recommendation_narrative.model_ops]
     assert all(t.strip() for t in texts)
-    assert verify_grounding(texts, build_number_whitelist(fs, refs, derived, edition=3)).passed
+    assert verify_grounding(texts, build_number_whitelist(fs, refs, derived, edition=3), edition=3).passed
     assert find_verdict_contradictions(texts, fs.verdict) == []
     bare = fallback.build_fallback_narrative(FactSheet(verdict="PASS", score=0.0), [], {}, "no_key", edition=3)
     assert bare.interpretation.confusion_analysis == "혼동 행렬 데이터가 제공되지 않아 클래스 간 오분류 분석을 생략한다."
@@ -399,7 +399,7 @@ def test_engine_counts_give_totals_when_the_matrix_is_missing(task, rows, expect
     derived = compute_derived(fs, task_type=task)
     text = fallback.build_fallback_narrative(fs, [], derived, "no_key", task_type=task, edition=3).interpretation.confusion_analysis
     assert text.startswith(expected), text
-    assert verify_grounding([text], build_number_whitelist(fs, [], derived, edition=3)).passed
+    assert verify_grounding([text], build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_engine_counts_without_task_type_are_not_guessed_for_many_classes():
@@ -578,7 +578,7 @@ def test_average_gap_direction_follows_the_sign(other, expected):
     text = next(c.template_text for c in select_items(fs, {"class_label_descriptions": {"dog": "개"}}, "multiclass", edition=3)
                 if c.item_id == "8.2-07")
     assert expected in text and "표본이 가장 많은 클래스는 dog(개)이며 표본 74건, F1 0.41이다." in text
-    assert verify_grounding([text], build_number_whitelist(fs, [], compute_derived(fs, task_type="multiclass"), edition=3)).passed
+    assert verify_grounding([text], build_number_whitelist(fs, [], compute_derived(fs, task_type="multiclass"), edition=3), edition=3).passed
 
 
 @pytest.mark.parametrize("word, pair, expected", [
@@ -646,7 +646,7 @@ def test_large_latency_values_are_plain_decimals_that_pass_the_number_check():
     fs, task, ci, derived, refs = _materials(req)
     risks = _sections(req)["8.3"]["conclusion.risks"]
     assert "1234567.5ms" in risks and "e+" not in risks and "0.00001ms" in risks
-    assert verify_grounding([risks], build_number_whitelist(fs, refs, derived, ci, edition=3)).passed
+    assert verify_grounding([risks], build_number_whitelist(fs, refs, derived, ci, edition=3), edition=3).passed
 
 
 def test_labels_only_in_facts_lists_are_names_not_code_words():

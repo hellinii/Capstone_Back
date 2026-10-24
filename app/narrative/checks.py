@@ -115,9 +115,10 @@ _IMPROVEMENT_AFTER = re.compile(r"\s*(?:을|를|이|가|만큼|씩|정도)?\s*(?
 _LABEL_AS_AMOUNT = re.compile(r"\s*(?:건|개|칸|배|%p?)")
 
 
-def predicted_numbers(text: str, labels: frozenset[str] | set[str] = frozenset(), *, edition: int = 3) -> list[str]:
+def predicted_numbers(text: str, labels: frozenset[str] | set[str] = frozenset(), *, edition: int) -> list[str]:
     """기대 효과 글의 예측 수치. labels 는 사실 시트의 숫자 꼴 클래스·레이블 이름(numeric_labels — 정규 표기).
-    edition 은 지울 절 번호의 판(grounding.context_tokens — 판 4 는 '6.2절' 등)."""
+    edition 은 지울 절 번호의 판(grounding.context_tokens — 판 4 는 '6.2절'·'부록 1.2' 등). 기본값을 두지 않는다 — 판 4 갈래에서
+    빠뜨리면 판 4 절 번호가 예측 수치로 남는다(S2·S3 검토 T1)."""
     if not isinstance(text, str):
         return []
     stripped = strip_context(text, edition=edition)
@@ -163,8 +164,9 @@ def numeric_labels(fs: FactSheet) -> frozenset[str]:
 # ── ④ D24 선언 숫자 ─────────────────────────────────────────────────────────────
 
 
-def d24_present(text: str, values: tuple[float, ...], *, edition: int = 3) -> bool:
-    """글에 확인 숫자 중 하나가 허용 목록과 같은 표기 변형(소수 1~4자리·백분율)으로 있는가. edition 은 지울 절 번호의 판."""
+def d24_present(text: str, values: tuple[float, ...], *, edition: int) -> bool:
+    """글에 확인 숫자 중 하나가 허용 목록과 같은 표기 변형(소수 1~4자리·백분율)으로 있는가. edition 은 지울 절 번호의 판(기본값
+    없음 — S2·S3 검토 T1)."""
     wanted: set = set()
     for v in values:
         _add(wanted, v)

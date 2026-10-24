@@ -582,10 +582,11 @@ def _add_client_exact(wl: set, obj: Any) -> None:
         _add_exact(wl, obj)
 
 
-def verify_grounding(texts: list[str], whitelist: set, *, edition: int = 3) -> GroundingInfo:
+def verify_grounding(texts: list[str], whitelist: set, *, edition: int) -> GroundingInfo:
     """텍스트들에서 숫자 토큰을 추출해 화이트리스트와 대조. 위반 = 환각 수치.
 
-    edition 은 지울 절 번호의 판(context_tokens). 기본 3 은 옛 경로·판 3 그대로 — 작업 경로의 칸 검사는 요청의 판을 넘긴다."""
+    edition 은 지울 절 번호의 판(context_tokens). 기본값을 두지 않는다(기본 3 은 요청 경계와 legacy 입구뿐 — S2·S3 검토 T1):
+    작업 경로의 칸 검사는 요청의 판을, 옛 경로(legacy)는 legacy.EDITION 을 넘긴다."""
     violations: list[str] = []
     checked = 0
     for t in texts:

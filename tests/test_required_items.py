@@ -95,7 +95,7 @@ def test_conclusion_numbers_are_grounded(name):
         if c.author in ("ai", "ai_fact") and not c.open_ended
     ]
     assert texts
-    result = verify_grounding(texts, wl)
+    result = verify_grounding(texts, wl, edition=3)
     assert result.passed, result.violations
 
 
