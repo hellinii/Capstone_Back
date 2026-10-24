@@ -51,8 +51,10 @@ EXAMPLES = {
 # 후속(2026-10-24)으로 명세·대조 표만 다시 고침: 명세 — 멀티레이블 4.5 학습·평가 비율의 분모 = 표본 수(T3 사용자 답, edition4_meaning
 # 두 줄·새 상태 training_samples_not_provided), D3 클래스별 표(decided·function_names.class_f1), not_decided 에 B16 이유 질문.
 # 대조 표 — distinct 규칙 글과 class_table 줄 다섯(others = [최약 F1]). 예시 셋·칸 대응표는 그대로.
+# 후속 검토(2026-10-24)로 명세만 다시 고침: B33(초안) 사용자 승인 — not_decided 의 B16 이유 질문을 decided 로 옮기고 승인 글자를
+# 옮겨 적음, edition4_meaning 의 distribution_shift_status 줄도 같이. 대조 표·칸 대응표·예시 셋은 그대로.
 SHA256 = {
-    "fact_sheet_contract_ed4.json": "d36af2ef0c3031213f2ff5de3360e0a76cc62f7b85c1aa23ba4fa4d3869fbb86",
+    "fact_sheet_contract_ed4.json": "15fb4c3e4d507850c4594ed510cd29b34cbdaeadece9945a6ee1c171f16b5148",
     "number_wording_ed4.json": "6d4659d849363ceac749108c19b9a41662b18ce6e1f02bdc30586f54142466fb",
     "narrative_slots_ed4.json": "3c43ffa35357c8c7f4c8a30d182482a85dec51caefa872dc9e556ae51d5b7d35",
     EXAMPLE: "0f7da6dfc88870aec7cb18c3a02204319df8487b4a9e058c344ade8dc0d63f69",

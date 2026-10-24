@@ -123,7 +123,7 @@ def test_u1_denominator_note_is_multilabel_only_and_absent_without_rows():
 
 def test_u1_training_samples_not_provided_is_a_different_reason_from_no_training_distribution():
     """학습 분포는 있으나 학습 표본 수가 없으면(멀티 판 4) 비교를 생략한 이유가 'B16 학습 분포 없음' 과 다르다 — 사실 보기가
-    다른 이유로 읽고, 7.2-03 결론은 없다(비교하지 않음). 고객 문장은 아직 없다(계약 not_decided)."""
+    다른 이유로 읽고, 7.2-03 결론은 없다(비교하지 않음). 4.5 문장은 B33(초안, 계약 decided)이고 S5 렌더러 몫이다."""
     raw = _load("multilabel")
     raw["fact_sheet"]["facts"]["distribution_shift_status"] = "training_samples_not_provided"
     view = _view(raw)["서술용 파생값"]

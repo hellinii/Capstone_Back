@@ -187,7 +187,7 @@
     "fact_sheet.metrics[].ci_contains_target": "뜻은 판 3 과 같다(판정 대상이고 구간이 있을 때만, ci_low ≤ 목표 ≤ ci_high). 판 4 는 반올림 전 경계(low_raw·high_raw)로 정한다(판 3 은 넷째 자리 경계)",
     "fact_sheet.problems[].kind": "판 4 요청에만 \"same_source\" 가 나올 수 있다(problems 참조)",
     "fact_sheet.facts.distribution_shift[].training_ratio·evaluation_ratio": "판 4 멀티레이블은 분모가 표본 수다(S2·S3 검토 T3, 2026-10-24 사용자 답): 평가 비율 = 그 레이블이 붙은 평가 표본 / 전체 평가 표본(n_samples — 4.5 분포 문장·백엔드 사실 보기 '분포·불균형' 백분율과 같은 숫자, 합이 100% 를 넘을 수 있다), 학습 비율 = 그 레이블이 붙은 학습 표본 / 의뢰자가 준 학습 표본 수(입력 재료 '학습 표본 수'). difference·difference_text·flagged·evaluation_minus_training_text 도 이 두 비율에서 낸다. 이진·다중은 판 3 과 같다(원래 표본 수 분모). 판 3 멀티레이블 요청은 그대로(레이블 등장 합 분모). 백엔드는 읽기만 한다(다시 계산하지 않는다)",
-    "fact_sheet.facts.distribution_shift_status": "판 4 멀티레이블에만 \"training_samples_not_provided\" 가 나올 수 있다 — 학습 클래스 분포는 있으나 학습 표본 수가 없어(모름·빈 칸) 학습 비율을 낼 수 없으므로 비교하지 않는다(distribution_shift 는 빈 목록). not_provided(학습 분포 없음)와 이유가 달라 따로 둔다 — 4.5 고객 문장은 아직 없다(not_decided). 판 3 요청에는 오지 않는다. 백엔드 판 4 사실 보기 '학습↔평가 분포 비교' = '학습 표본 수를 받지 않아 비교하지 않음(멀티레이블 비율의 분모는 표본 수)'"
+    "fact_sheet.facts.distribution_shift_status": "판 4 멀티레이블에만 \"training_samples_not_provided\" 가 나올 수 있다 — 학습 클래스 분포는 있으나 학습 표본 수가 없어(모름·빈 칸) 학습 비율을 낼 수 없으므로 비교하지 않는다(distribution_shift 는 빈 목록). not_provided(학습 분포 없음)와 이유가 달라 따로 둔다 — 4.5 고객 문장은 부록 B33(초안, 2026-10-24 사용자 승인 — decided 참조)이고 S5 렌더러가 그린다(run 에는 이유 코드만 저장). 판 3 요청에는 오지 않는다. 백엔드 판 4 사실 보기 '학습↔평가 분포 비교' = '학습 표본 수를 받지 않아 비교하지 않음(멀티레이블 비율의 분모는 표본 수)'"
   },
   "problems": {
     "same_source": {
@@ -285,8 +285,7 @@
   },
   "not_decided": [
     "facts.fixed_sentences 9번 판 4 글에 3.3 의 '(점수 컬럼: score_malignant)' 를 붙일지 — 임시 예시는 붙이지 않았다(S3 ⑦ 이 정함)",
-    "평가 응답에 *_raw 가 없는 옛 백엔드 응답으로 판 4 run 을 만들면 넷째 자리 값에서 다시 반올림한다(이중 반올림) — 켜는 라운드는 백엔드 먼저 배포가 전제",
-    "멀티레이블에서 학습 표본 수가 없어 비교를 생략할 때(distribution_shift_status = training_samples_not_provided)의 4.5 고객 문장 — B16 '학습 클래스 분포가 제공되지 않아'는 이유가 틀려 쓰지 않는다. 사용자에게 물음(그때까지 고객 문장을 지어내지 않는다)"
+    "평가 응답에 *_raw 가 없는 옛 백엔드 응답으로 판 4 run 을 만들면 넷째 자리 값에서 다시 반올림한다(이중 반올림) — 켜는 라운드는 백엔드 먼저 배포가 전제"
   ],
   "decided": {
     "$comment": "S2·S3 검토(2026-10-24) — 사용자 답변·오케스트레이터 결정. 두 저장소 같은 규칙이고 number_wording_ed4 에 사례 줄이 있다.",
@@ -295,6 +294,7 @@
     "D3 최약 클래스 동점처럼 보일 때": "distinct 규칙 — 셋째 자리로 다른 클래스와 같아 보이면 서로 달라질 때까지 여섯째 자리까지 늘린다. 여섯째 자리로도 같으면 동점(함께 밝힌다)",
     "D3 클래스별 표의 다른 클래스": "클래스별 표에서 최약 클래스와 셋째 자리로 같아 보이는 다른 클래스의 F1 = distinct(그 값, [최약 F1])(오케스트레이터 결정, 후속 U2) — 최약 클래스와 부딪치는 클래스만 늘리고, 다른 클래스끼리 같아 보이는 것은 그대로. 같은 원값의 판정 대상 지표가 있으면 그 value_text 가 먼저(D2). 두 저장소 같은 함수(function_names.class_f1), 대조 표 distinct 의 class_table 줄",
     "T3 멀티레이블 4.5 학습·평가 비율의 분모": "표본 수(2026-10-24 사용자 답) — edition4_meaning 의 distribution_shift[].training_ratio·evaluation_ratio 와 distribution_shift_status 줄",
+    "B33 학습 표본 수가 없을 때의 4.5 문장(초안)": "멀티레이블에서 학습 분포는 있으나 학습 표본 수가 없을 때(distribution_shift_status = training_samples_not_provided) 4.5 비율 표 자리 \"제공되지 않음 — 학습 표본 수가 제공되지 않아 학습·평가 비율을 비교하지 않았다.\"(2026-10-24 사용자 승인, 초안 — 판 4 켜기 전 확인 목록). B16 '학습 클래스 분포가 제공되지 않아'는 이유가 틀려 쓰지 않는다. 사실 시트·run 에는 이유 코드만 싣고 문장은 S5 렌더러가 찍는다",
     "D4 지연시간": "latency 규칙(둘째 자리, toFixed(2)) — 4.8 표·규칙 문장·사실 보기·허용 목록이 같은 글자",
     "D6 문제 근거": "edition4_notation 의 fact_sheet.problems[].evidence 참조",
     "D7 best_threshold_text": "늘 고정소수 표기(지수 꼴 없음) — 백엔드 엔진 threshold_text 가 12자리로도 안 되면 지수 꼴 없는 가장 짧은 십진 표기. 요청 스키마도 숫자 꼴(NumText)"
