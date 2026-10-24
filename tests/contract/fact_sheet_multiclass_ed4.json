@@ -513,14 +513,14 @@
         "recommend_section": "9.2",
         "evidence": {
           "Accuracy": {
-            "value": 0.9888888888888889,
-            "target": 0.98,
-            "margin": 0.0089
+            "value": "0.989",
+            "target": "0.980",
+            "margin": "0.009"
           },
           "F1 Score": {
-            "value": 0.9888696755206228,
-            "target": 0.98,
-            "margin": 0.0089
+            "value": "0.989",
+            "target": "0.980",
+            "margin": "0.009"
           }
         },
         "note": null

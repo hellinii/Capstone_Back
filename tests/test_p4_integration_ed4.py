@@ -274,7 +274,12 @@ def test_imbalance_evidence_uses_the_edition4_display_of_the_fact_sheet():
 
     raw = _ed4("multilabel")
     [problem] = [p for p in raw["fact_sheet"]["problems"] if p["kind"] == "imbalance_effect"]
-    assert problem["evidence"]["display"]["minority_f1"] == "0.1333"  # 프론트가 싣는 근거는 판 3 표기(계약 not_decided)
+    # 프론트는 S2·S3 검토 D6 부터 근거에도 판 4 display 를 싣는다(예시 0.133). 백엔드가 근거 글자가 아니라 사실 시트 판 4 칸을 다시
+    # 읽는지 보려고, 근거 display 를 그 전의 판 3 표기(52.9231·0.7016·0.1333 — 옛 프론트·옛 run)로 되돌려 넣는다.
+    assert problem["evidence"]["display"]["minority_f1"] == "0.133"
+    problem["evidence"]["display"].update(
+        {"imbalance_ratio": "52.9231", "majority_minus_minority_f1": "0.7016", "minority_f1": "0.1333"}
+    )
     fs = NarrativeRequest.model_validate(raw).fact_sheet
     [p2] = [p for p in fact_view_ed4._problems(fs) if p["번호"] == problem["id"]]
     ev = p2["근거"]

@@ -471,8 +471,8 @@
         "recommend_section": "9.2",
         "evidence": {
           "F1 Score": {
-            "value": 0.39928109092676245,
-            "target": 0.45
+            "value": "0.399",
+            "target": "0.450"
           }
         },
         "note": null
@@ -494,11 +494,11 @@
           "majority_f1": 0.835,
           "minority_f1": 0.1333,
           "display": {
-            "imbalance_ratio": "52.9231",
+            "imbalance_ratio": "52.923",
             "accuracy_minus_macro_f1": null,
-            "majority_minus_minority_f1": "0.7016",
+            "majority_minus_minority_f1": "0.702",
             "majority_f1": "0.835",
-            "minority_f1": "0.1333"
+            "minority_f1": "0.133"
           }
         },
         "note": "의뢰자가 편향 감소 노력을 '수행 안 함'으로 밝혔다."
@@ -512,11 +512,11 @@
         "recommend_section": "9.1",
         "evidence": {
           "Class9": {
-            "f1": 0.047619047619047616,
+            "f1": "0.048",
             "support": 80,
-            "share": 0.020518082,
-            "macro_f1": 0.39928109092676245,
-            "gap_from_macro": 0.351662043,
+            "share": "0.021",
+            "macro_f1": "0.399",
+            "gap_from_macro": "0.352",
             "low_support": true
           }
         },

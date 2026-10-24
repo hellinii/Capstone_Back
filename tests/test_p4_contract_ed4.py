@@ -45,14 +45,16 @@ EXAMPLES = {
 # S2·S3 검토(2026-10-24)로 고침: 명세 — D1·D2·D3·D4·D6·D7 결정(decided), 판 4 전용 새 키 facts.weakest_class.f1_text, '임시' 글(D8)
 # 걷음. 대조 표 — target·latency·distinct 규칙과 줄, given 정수·지수 꼴(T15), judged D1·여섯째 자리(T13) 줄, 조사 줄(T14).
 # 예시 셋 — weakest_class 에 f1_text 한 줄(f1 바로 다음: 이진 0.977 = M4 value_text, 다중 0.9720 = 5 와 달라 보이게 늘림, 멀티
-# 0.048). 다른 바이트는 그대로다(프론트가 이 칸을 만들면 다시 떠서 같은 바이트가 되어야 한다).
+# 0.048). 프론트가 이 칸을 만든 뒤 다시 뜬 f1_text 줄은 손 글자와 같았다. 같은 검토 D6(문제 근거 숫자도 판 4 글자 — 지표 근거
+# value_text·ed4Target·margin_text, 최약 클래스 근거 f1_text·share_text·gap_text·매크로 F1(D2), 불균형 근거 display 판 4)으로
+# 세 예시의 problems[].evidence 가 바뀌어 프론트에서 다시 떠 옮겼다(그 밖 바이트 그대로).
 SHA256 = {
     "fact_sheet_contract_ed4.json": "b39895a5377c8d65d01973b5a65e58e0d3739424a509a3d27a0cc6cf4fe775c8",
     "number_wording_ed4.json": "cd6e6ac860b7458d0922f7d4e8878dc44715e019106f2c9d5fa0a0e86c249338",
     "narrative_slots_ed4.json": "3c43ffa35357c8c7f4c8a30d182482a85dec51caefa872dc9e556ae51d5b7d35",
-    EXAMPLE: "55f98135ccbb95b028668a5fbd97c5b6f7616c9af800396f1f596ace79adac54",
-    "fact_sheet_multiclass_ed4.json": "8b6eff4fd54f1d9a20261f969f9eb36483d353ed505cf928914fda9f41997359",
-    "fact_sheet_multilabel_ed4.json": "226d4950d84f5aeb34182072021b8ef516be0c5aeb7b49a7c884dc0b767f385a",
+    EXAMPLE: "0f7da6dfc88870aec7cb18c3a02204319df8487b4a9e058c344ade8dc0d63f69",
+    "fact_sheet_multiclass_ed4.json": "68277d563888fdc1fdb1f4c50a0cd373d264394026c0ede9e1c421bc91ef96a5",
+    "fact_sheet_multilabel_ed4.json": "260783d76d0cc4d876a2c7b22f18d2303977223ca32e55c58bc51c35d03d2d26",
 }
 
 

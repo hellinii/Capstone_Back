@@ -294,9 +294,9 @@
         "recommend_section": "9.2",
         "evidence": {
           "Recall": {
-            "value": 0.984375,
-            "target": 0.97,
-            "margin": 0.0144
+            "value": "0.984",
+            "target": "0.970",
+            "margin": "0.014"
           }
         },
         "note": null
