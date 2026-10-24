@@ -1,0 +1,312 @@
+{
+  "contract": "facts-1",
+  "edition": 4,
+  "status": "판 4 라운드 S2 ① 공통 계약(2026-10-24), S2·S3 검토 반영(decided 참조). 판 3 명세(fact_sheet_contract.json)는 바이트 그대로 두고, 판 4 요청에만 달라지는 것을 이 파일에 적는다. 같은 바이트 사본이 백엔드 tests/contract/, 프론트 src/test/contract/, 라운드 폴더 NARRATIVE_ROUND/사실시트_계약_ed4.json 에 있다(두 저장소 시험이 바이트 대조·sha256 고정). 고치면 세 곳을 함께 고치고 두 저장소 시험의 sha256 도 이유와 함께 고친다.",
+  "files": {
+    "spec": "fact_sheet_contract_ed4.json — 이 파일(판 4 요청 명세)",
+    "number_wording": "number_wording_ed4.json — 판 4 숫자 표기·조사 대조 표(두 저장소 시험이 같은 표로 자기 함수를 본다)",
+    "slots": "narrative_slots_ed4.json — 서술 칸 → 판 4 자리 대응표, 판 4 제목, 작성 기록 줄(B25·B26)",
+    "example_binary": "fact_sheet_binary_ed4.json — 판 4 요청 예시(bc_strong = RPT-2026-0001 입력). 프론트 시험(src/test/edition4/contractExamplesEd4.test.tsx)이 앱이 실제로 보낸 판 4 서술 요청 본문을 뜬 것이고(UPDATE_CONTRACT=1, 이름에 ed4 든 파일만 씀), 같은 바이트 사본이 백엔드 tests/contract/ 에 있다(두 저장소 시험이 sha256 고정·바이트 대조). 다중(fact_sheet_multiclass_ed4.json — digits_strong = RPT-2026-0003)·멀티레이블(fact_sheet_multilabel_ed4.json — yeast_strong = RPT-2026-0005)도 같은 방식이다. 다시 뜨면 백엔드로 옮기고 두 시험의 sha256 을 이유와 함께 고친다."
+  },
+  "principles": [
+    "계약 이름은 facts-1 그대로다. 판 신호는 NarrativeRequest 최상위 report_edition 하나다(facts 안에 두지 않는다 — facts 는 형식 오류면 통째로 버려질 수 있다).",
+    "판 결정은 프론트 newRunContentSchema() 한 곳이고, 요청의 report_edition 은 usesSchema4(baseReport) 로만 정한다. 백엔드는 report_edition 하나만 본다.",
+    "판 3 요청은 지금 바이트 그대로다: report_edition 키가 없고(백엔드 기본 3), 아래 edition4_only_keys 의 키도 하나도 없다(null 키 금지). 판 3 표기 칸의 값도 판 3 표기다.",
+    "판 4 요청의 키 집합 = 판 3 요청의 키 집합 + edition4_only_keys. 같은 이름의 칸 가운데 edition4_notation 에 적은 칸만 판 4 표기로 찍고, edition4_meaning 에 적은 칸만 뜻이 판 4로 바뀐다. 그 밖의 칸은 판 3과 같은 값이다.",
+    "판정(목표 충족·포함·0.10 기준·판정 여유)은 반올림 전 값으로 한 곳에서 정하고, *_text 는 그 판정과 같은 쪽으로 읽히게 찍는다. 판정 지점을 둘로 만들지 않는다(같은 요청 안 자기모순 금지).",
+    "판정과 이어진 표기(기준과 비교되는 값, 신뢰구간 경계)는 프론트가 *_text 로 만들어 보낸다. 판정과 무관한 값은 두 저장소가 각자 plain 규칙으로 찍되, number_wording_ed4.json 의 같은 대조 표로 시험한다.",
+    "*_text 칸은 모두 숫자 꼴(^-?\\d+(\\.\\d+)?$, 판 3 NumText 와 같음)이다. 백분율(%)·%p·U+2212(−)·+ 부호는 문자열 칸에 싣지 않고, 그릴 때·글을 쓸 때 percent·percent_point·signed_count 규칙으로 바꾼다.",
+    "새 칸은 되도록 facts 밖(metrics[]·f1_threshold_gain)에 둔다. facts 안에 더한 칸은 facts.distribution_shift[].evaluation_minus_training_text 와 facts.weakest_class.f1_text(S2·S3 검토 D2·D3) 둘이고 '판 4 전용'이다 — facts 형식 오류면 facts 째 버려지는 것은 판 3 facts 칸과 같다.",
+    "서술 칸 이름(7.1·7.2·7.3·8.1·8.2·8.3·9, 9.1/9.2)은 판 4에서도 그대로다. 판 4에서 찍히는 자리만 바뀐다(narrative_slots_ed4.json). 문제의 source_section·recommend_section, fixed_sentences 의 section 도 칸 이름이다."
+  ],
+  "edition_signal": {
+    "report_edition": {
+      "where": "NarrativeRequest 최상위(task_type·report_purpose 와 같은 층)",
+      "type": "int, 3|4",
+      "edition3_request": "키 없음 — 백엔드 기본값 3(요청 경계 NarrativeRequest 와 옛 경로 입구에만 기본값)",
+      "edition4_request": 4,
+      "producer": "프론트 buildNarrativeRequest(S3 ⑦) — usesSchema4(baseReport) 가 참일 때만 4를 싣는다",
+      "reader": "백엔드 schemas.NarrativeRequest.report_edition(S2 ②) → 하위 함수의 keyword-only edition",
+      "old_backend": "pydantic extra=ignore 라 오류 없이 버린다 — 켜는 라운드에 백엔드를 먼저 배포한다. 새 문제 종류 same_source 는 옛 백엔드에서 422 다"
+    }
+  },
+  "edition4_only_keys": [
+    {
+      "path": "report_edition",
+      "type": "int (4)",
+      "producer": "프론트 S3 ⑦ buildNarrativeRequest",
+      "reader": "백엔드 S2 ② schemas·jobs·generator",
+      "bc_strong": 4,
+      "rule": "edition_signal 참조"
+    },
+    {
+      "path": "fact_sheet.metrics[].ci_low_text",
+      "type": "NumText|null",
+      "producer": "프론트 S3 ② ed4CiBound(반올림 전 경계 low_raw, 목표값) — 평가 응답 confidence_intervals[*].low_raw(S1). low_raw 가 없는 옛 응답이면 low(넷째 자리)를 원값 대신 쓴다",
+      "reader": "백엔드 S2 ④ 사실 보기·⑥ 숫자 허용 목록·⑦ 5.1 규칙 문장(B22 신뢰구간 갈래)",
+      "bc_strong": {
+        "M1": "0.9497",
+        "M3": "0.917",
+        "M4": "0.946",
+        "M9": "0.997",
+        "M19": "0.033",
+        "그 밖": null
+      },
+      "rule": "판정 대상이고 구간이 있는 지표만 number_wording_ed4 의 ci_bound 규칙으로 찍는다(4.3 표와 같은 글자). 판정 대상이 아니거나 구간이 없으면 null(키는 있음 — 판 4 요청에는 모든 지표 줄에 이 키가 있다)"
+    },
+    {
+      "path": "fact_sheet.metrics[].ci_high_text",
+      "type": "NumText|null",
+      "producer": "ci_low_text 와 같음(high_raw)",
+      "reader": "ci_low_text 와 같음",
+      "bc_strong": {
+        "M1": "0.994",
+        "M3": "0.997",
+        "M4": "1.000",
+        "M9": "1.000",
+        "M19": "0.079",
+        "그 밖": null
+      },
+      "rule": "ci_low_text 와 같음"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.best_threshold_text",
+      "type": "string(숫자 꼴)",
+      "producer": "백엔드 평가 엔진 S1(binary.threshold_text) → 프론트 판 4 전용 파서가 그대로 옮긴다",
+      "reader": "백엔드 S2 ④·⑥·⑦(B20 의 {t})",
+      "bc_strong": "0.6166",
+      "rule": "셋째 자리부터 늘려 '점수 ≥ 표기' 예측이 '점수 ≥ 원값'과 같은 가장 짧은 표기, 끝 0 유지(0.350). 프론트는 다시 계산하지 않는다"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.max_f1_text",
+      "type": "NumText",
+      "producer": "프론트 S3 ② — max_f1_raw(S1). F1 Score(M4)가 판정 대상이면 judged(값, M4 목표, 충족은 원값으로), 아니면 plain",
+      "reader": "백엔드 S2 ④·⑥(5.6·5.1 임계값 서술)",
+      "bc_strong": "0.984",
+      "rule": "4.4 임계값 표의 F1 칸과 같은 글자"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.current_f1_text",
+      "type": "NumText",
+      "producer": "프론트 S3 ② — current_f1_raw, max_f1_text 와 같은 규칙",
+      "reader": "max_f1_text 와 같음",
+      "bc_strong": "0.977",
+      "rule": "M4 가 판정 대상이고 지금 예측으로 낸 값이면 metrics[M4].value_text 와 같아야 한다(같은 값 두 자리)"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.best_recall_text",
+      "type": "NumText",
+      "producer": "프론트 S3 ② — best_recall_raw. Recall(M3)이 판정 대상이면 judged(값, M3 목표), 아니면 plain",
+      "reader": "백엔드 S2 ④·⑥·⑦(B20 의 {v}, FN 쪽)",
+      "bc_strong": "0.984",
+      "rule": "4.4 임계값 표 Recall 칸"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.best_precision_text",
+      "type": "NumText",
+      "producer": "프론트 S3 ② — best_precision_raw. Precision(M2)이 판정 대상이면 judged, 아니면 plain",
+      "reader": "백엔드 S2 ④·⑥·⑦(B20 의 {v}, FP 쪽)",
+      "bc_strong": "0.984",
+      "rule": "4.4 임계값 표 Precision 칸"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.current_recall_text",
+      "type": "NumText",
+      "producer": "프론트 S3 ② — current_recall_raw, best_recall_text 와 같은 규칙",
+      "reader": "백엔드 S2 ④·⑥",
+      "bc_strong": "0.984",
+      "rule": "M3 가 판정 대상이면 metrics[M3].value_text 와 같아야 한다"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.current_precision_text",
+      "type": "NumText",
+      "producer": "프론트 S3 ② — current_precision_raw, best_precision_text 와 같은 규칙",
+      "reader": "백엔드 S2 ④·⑥",
+      "bc_strong": "0.969",
+      "rule": "M2 가 판정 대상이면 metrics[M2].value_text 와 같아야 한다(bc_strong 은 M2 가 참고 지표라 plain)"
+    },
+    {
+      "path": "fact_sheet.f1_threshold_gain.risk_side",
+      "type": "{side: \"fn\"|\"fp\", metric_id: \"M3\"|\"M2\", display_name: \"Recall\"|\"Precision\", meets_target_now: bool|null, meets_target_at_best: bool|null}|null",
+      "producer": "프론트 S3 ⑦ — facts.declarations.risk_direction 이 fn(→ M3 Recall)·fp(→ M2 Precision)이고 f1_threshold_gain 이 있을 때. 충족은 그 지표가 판정 대상일 때만 반올림 전 값(current_*_raw·best_*_raw)과 그 지표 목표로 meetsTarget(1e-10 보정). 판정 대상이 아니면 둘 다 null",
+      "reader": "백엔드 S2 ⑤(D49 ③ 지시)·⑦(B20 '이 값은 목표 {목표}을(를) 충족한다/충족하지 못한다')",
+      "bc_strong": {
+        "side": "fn",
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "meets_target_now": true,
+        "meets_target_at_best": true
+      },
+      "rule": "similar·null(선언 없음)·다중·멀티면 null. 값 글자는 best_*_text·current_*_text 를 쓴다(따로 싣지 않는다). 목표 글자는 metrics[] 의 threshold 를 plain 으로"
+    },
+    {
+      "path": "fact_sheet.facts.distribution_shift[].evaluation_minus_training_text",
+      "type": "NumText",
+      "producer": "프론트 S3 ②⑦ — evaluation_ratio − training_ratio 를 signed_judged(기준 0.1, 충족 = flagged)로",
+      "reader": "백엔드 S2 ④(판 4 사실 보기는 이 칸을 쓴다)·⑥",
+      "bc_strong": {
+        "benign": "-0.002",
+        "malignant": "0.002"
+      },
+      "rule": "**판 4 전용 — facts 안.** 4.5 학습·평가 클래스 비율 표의 차이 열(평가 − 학습)과 같은 값이다(그릴 때 percent_point 로 −0.2%p). difference_text(학습 − 평가)는 판 3 칸이라 그대로 남고 판 4 표기로 찍힌다 — 부호만 반대인 같은 크기다. 두 비율의 분모는 edition4_meaning 의 training_ratio·evaluation_ratio 줄(멀티레이블은 표본 수)"
+    },
+    {
+      "path": "fact_sheet.facts.weakest_class.f1_text",
+      "type": "NumText",
+      "producer": "프론트 — 최약 클래스 고르기와 같은 한 곳에서 찍는다(4.4 최약 클래스 표 F1 칸과 같은 글자). ① 같은 수는 같은 글자(D2): weakest_class.f1 이 판정 대상 지표(metrics[] 의 value_text 가 있는 줄)의 원값과 같으면(|차이| < 1e-9) 그 지표의 value_text — 이진에서 양성 클래스 F1 = F1 Score(M4)이면 M4 value_text 그대로(0.9696 이면 0.9696). ② 아니면 number_wording_ed4 의 distinct(f1, 다른 클래스들의 F1) — 셋째 자리로 찍어 다른 클래스와 같아 보이면 서로 달라질 때까지 여섯째 자리까지 늘린다(D3)",
+      "reader": "백엔드 — 판 4 사실 보기(최약 클래스 F1·클래스별 표의 그 클래스 F1·문제 근거)와 판 4 규칙 문장(5.2·5.5 최약 클래스 문장). 읽기만 한다(없으면 같은 규칙으로 찍는다)",
+      "bc_strong": "0.977",
+      "rule": "**판 4 전용 — facts 안.** 최약 클래스 동점은 여섯째 자리까지 늘려도 같은 F1 일 때만이다(백엔드 weakest_ties 판 4 와 같은 기준). digits_strong 은 9(0.97196)와 5(0.97248)가 셋째 자리로 0.972 로 같아 보여 '0.9720'(9 하나가 최약)"
+    }
+  ],
+  "edition4_notation": {
+    "$comment": "판 3 요청에도 있는 칸인데 판 4 요청에서는 판 4 표기(number_wording_ed4.json)로 찍는 칸. 판 3 요청은 판 3 표기 그대로다.",
+    "fact_sheet.metrics[].value_text": "그대로 — 판 3부터 이미 셋째 자리 judged(formatJudgedValue)다. 판 4 judged 규칙과 같다",
+    "fact_sheet.metrics[].margin_text": "judged(margin, 0, 높을수록 좋음, 충족 = status pass). bc_strong M1 \"0.032\"(판 3 \"0.0325\")",
+    "fact_sheet.f1_threshold_gain.gain_text": "judged(gain_raw, 0.1, 높을수록 좋음, 충족 = notable — 엔진 판정을 그대로 따른다). bc_strong \"0.008\"(판 3 \"0.0076\")",
+    "fact_sheet.imbalance_effect.display.imbalance_ratio": "judged(imbalance_ratio_raw, 1.5, 충족 = level ≠ mild). bc_strong \"1.672\"(판 3 \"1.6719\")",
+    "fact_sheet.imbalance_effect.display.accuracy_minus_macro_f1": "judged(accuracy_minus_macro_f1_raw, 0.1, 충족 = 원값 ≥ 0.1, 부호 그대로) — 멀티레이블은 null 그대로. bc_strong \"0.001\"",
+    "fact_sheet.imbalance_effect.display.majority_minus_minority_f1": "judged(majority_minus_minority_f1_raw, 0.1, 충족 = 원값 ≥ 0.1, 부호 그대로). bc_strong \"0.009\"",
+    "fact_sheet.imbalance_effect.display.accuracy": "plain(accuracy_raw). bc_strong \"0.982\"",
+    "fact_sheet.imbalance_effect.display.macro_f1": "plain(macro_f1_raw). bc_strong \"0.981\"",
+    "fact_sheet.imbalance_effect.display.majority_f1": "plain(majority_f1_raw). bc_strong \"0.986\"",
+    "fact_sheet.imbalance_effect.display.minority_f1": "plain(minority_f1_raw). bc_strong \"0.977\"",
+    "fact_sheet.facts.weakest_class.share_text": "judged(share, 0.05, 충족 = 작은 몫 아님). bc_strong \"0.374\"(→ 37.4%)",
+    "fact_sheet.facts.weakest_class.gap_text": "judged(gap_from_macro, 0.1, 충족 = far_below_macro). bc_strong \"0.005\"(판 3 \"0.0046\" — 조사도 '0.005로')",
+    "fact_sheet.facts.low_support_classes[].share_text": "judged(share, 0.05, 충족 = 작은 몫 아님)",
+    "fact_sheet.facts.declared_risk_errors.share_text": "plain(share). bc_strong \"0.333\"(→ 33.3%)",
+    "fact_sheet.facts.precision_recall_gap.difference_text": "signed_judged(precision − recall, 0.1, 충족 = flagged). bc_strong \"-0.015\"",
+    "fact_sheet.facts.average_gap.difference_text": "plain(other − macro, 부호 그대로)",
+    "fact_sheet.facts.distribution_shift[].difference_text": "signed_judged(training − evaluation, 0.1, 충족 = flagged). bc_strong benign \"0.002\"",
+    "fact_sheet.facts.fixed_sentences": "판 4 는 18번을 싣지 않는다(4.3 판정 여유 열이 대신한다). 9번은 판 4 합니다체 글(…산출하였습니다.)로 싣는다. 16·7·17·11a·11b·12·6 은 판 3 글과 같다. section 은 칸 이름 그대로",
+    "fact_sheet.problems[].title": "core_near_target 의 이름이 '핵심 지표 근소 합격 (…)'이다(판 3 '아슬아슬'). 우선순위 저장 코드값 HIGH/MEDIUM/LOW 는 그대로",
+    "fact_sheet.problems[].evidence": "근거 안의 숫자도 판 4 표기 글자로 싣는다(D6) — 지표 근거(core_fail·noncore_fail·core_near_target)는 value = 그 지표 value_text, target = target 규칙, margin = margin_text. threshold_tuning 은 판 3 엔진 칸 다섯(max_f1·current_f1·gain·best_threshold·notable)만 골라 판 4 글자(max_f1_text·current_f1_text·gain_text·best_threshold_text, notable 은 그대로)로 — 판 4 파서 결과를 펼치지 않는다(*_raw·best_recall 같은 새 칸이 섞이지 않게). 최약 클래스·분포 차·불균형 근거는 같은 사실 시트의 판 4 글자 칸과 같은 글자. 백엔드는 근거 숫자를 사실 시트의 판 4 칸으로 다시 맞춰 읽으므로(fact_view_ed4.translate_evidence_ed4) 두 쪽 글자가 같아야 한다"
+  },
+  "edition4_meaning": {
+    "fact_sheet.facts.class_share_basis": "판 4 멀티레이블은 \"samples\"(S6 질문 4, 2026-10-24 사용자 답 \"추천대로\" — 4.5 와 같은 표본 수 분모): 최약 레이블·작은 표본 비율의 분모가 레이블 등장 합이 아니라 평가 표본 수(n_samples)다. 평가 표본 수가 0 이하(없음)면 4.5 처럼 등장 합으로 대신하고 그때만 \"label_occurrences\". 판 3 멀티레이블 요청은 그대로(\"label_occurrences\"). 이진·다중은 판 3 과 같다. 백엔드는 이 칸으로 분모 이름('전체 표본'/'레이블 등장')만 고르고 다시 계산하지 않는다 — 판 4 멀티레이블 문장은 '전체 표본의 8.7%'",
+    "fact_sheet.facts.weakest_class.share": "분모는 class_share_basis 줄(판 4 멀티레이블 = 평가 표본 수). yeast_strong Class9 = 80/917 = 0.087241003(판 3 은 80/3899 = 0.020518082). share_text 는 edition4_notation 그대로 judged(share, 0.05) — \"0.087\"",
+    "fact_sheet.facts.weakest_class.low_support": "뜻은 판 3 과 같다(표본 30건 미만 또는 비율 5% 미만) — 비율의 분모만 class_share_basis 줄을 따른다. yeast_strong Class9 는 판 4 에서 false(80건, 8.7%), 판 3 은 true(2.1%)",
+    "fact_sheet.facts.low_support_classes": "고르는 규칙은 판 3 과 같다(정답 레이블 중 표본 30건 미만 또는 비율 5% 미만) — 비율(share·share_text)의 분모만 class_share_basis 줄을 따른다. yeast_strong 판 4 = Class14(13건, 1.4%) 하나(판 3 은 등장 합 분모라 Class10·11·14·7·8·9 여섯)",
+    "fact_sheet.metrics[].near_target": "판 4 = 판정 여유 '작음'(프론트 judgmentMargin === \"small\" 한 곳, S3 ③). 판정 대상이고 구간이 있으면 반올림 전 구간이 목표를 포함할 때(경계 포함), 구간이 없으면 |마진| < |목표| × 3%(엄격 미만). 충족·미달 모두에 적용. 판정 대상이 아니면 false. 판 3 의 3% 뜻은 판 4 요청에 싣지 않는다 — 같은 요청에 판정 여유가 두 벌이 되지 않게 새 키를 두지 않고 이 칸의 뜻을 판 4로 쓴다. 불변식: ci_contains_target 이 null 이 아니면 near_target == ci_contains_target. 백엔드는 판 4 요청에서 근소를 다시 계산하지 않고, 갈래(B22 신뢰구간 문장 / 3% 문장)는 ci_contains_target 이 null 인지로 고른다. bc_strong: M1·M3·M4 true, M9·M19 false(판 3 은 M3·M4·M9 true)",
+    "fact_sheet.metrics[].ci_contains_target": "뜻은 판 3 과 같다(판정 대상이고 구간이 있을 때만, ci_low ≤ 목표 ≤ ci_high). 판 4 는 반올림 전 경계(low_raw·high_raw)로 정한다(판 3 은 넷째 자리 경계)",
+    "fact_sheet.problems[].kind": "판 4 요청에만 \"same_source\" 가 나올 수 있다(problems 참조)",
+    "fact_sheet.facts.distribution_shift[].training_ratio·evaluation_ratio": "판 4 멀티레이블은 분모가 표본 수다(S2·S3 검토 T3, 2026-10-24 사용자 답): 평가 비율 = 그 레이블이 붙은 평가 표본 / 전체 평가 표본(n_samples — 4.5 분포 문장·백엔드 사실 보기 '분포·불균형' 백분율과 같은 숫자, 합이 100% 를 넘을 수 있다), 학습 비율 = 그 레이블이 붙은 학습 표본 / 의뢰자가 준 학습 표본 수(입력 재료 '학습 표본 수'). difference·difference_text·flagged·evaluation_minus_training_text 도 이 두 비율에서 낸다. 이진·다중은 판 3 과 같다(원래 표본 수 분모). 판 3 멀티레이블 요청은 그대로(레이블 등장 합 분모). 백엔드는 읽기만 한다(다시 계산하지 않는다)",
+    "fact_sheet.facts.distribution_shift_status": "판 4 멀티레이블에만 \"training_samples_not_provided\" 가 나올 수 있다 — 학습 클래스 분포는 있으나 학습 표본 수가 없어(모름·빈 칸) 학습 비율을 낼 수 없으므로 비교하지 않는다(distribution_shift 는 빈 목록). not_provided(학습 분포 없음)와 이유가 달라 따로 둔다 — 4.5 고객 문장은 부록 B33(초안, 2026-10-24 사용자 승인 — decided 참조)이고 S5 렌더러가 그린다(run 에는 이유 코드만 저장). 판 3 요청에는 오지 않는다. 백엔드 판 4 사실 보기 '학습↔평가 분포 비교' = '학습 표본 수를 받지 않아 비교하지 않음(멀티레이블 비율의 분모는 표본 수)'"
+  },
+  "problems": {
+    "same_source": {
+      "edition": "판 4 요청에만. 판 3 요청에는 이 종류가 없다",
+      "when": "client 입력 '학습 데이터와의 관계'(⑦)가 같은 출처일 때 — 고정 문구 11a 와 같은 판정(프론트 problemList 안의 판정 함수 하나, S3 ④)",
+      "shape": {
+        "id": "P{n}",
+        "kind": "same_source",
+        "priority": "LOW",
+        "title": "평가 데이터가 학습과 같은 출처",
+        "source_section": "8.2",
+        "recommend_section": "9.1",
+        "evidence": {
+          "학습 데이터와의 관계": "같은 출처"
+        },
+        "note": null
+      },
+      "order": "우선순위 LOW 의 맨 끝(label_caution 다음) — 번호는 우선순위 순",
+      "backend": "백엔드 S2 ③: schemas.ProblemKind 에 같은 커밋으로 종류와 폴백 권고(B23)를 함께 더한다(모든 종류에 템플릿 시험)",
+      "bc_strong": "P2(P1 은 core_near_target '핵심 지표 근소 합격 (Recall)')"
+    }
+  },
+  "unchanged_but_not_used_in_edition4": {
+    "fact_sheet.score": "판 3 과 같은 값(통과율)으로 남지만 판 4 지시문·규칙 문장·허용 목록은 쓰지 않는다(판 4 는 충족 수 verdict_detail 만, A11)",
+    "fact_sheet.metrics[].ci_low·ci_high": "엔진 넷째 자리 숫자 그대로. 판 4 글은 ci_low_text·ci_high_text 만 쓴다",
+    "fact_sheet.f1_threshold_gain.max_f1·current_f1·gain·best_threshold": "엔진 넷째 자리 숫자 그대로. 판 4 글은 *_text 만 쓴다",
+    "fact_sheet.imbalance_effect.imbalance_ratio 등 숫자 칸": "엔진 넷째 자리 그대로. 판 4 글은 display 만 쓴다",
+    "판정과 무관한 숫자(metrics[].value 의 참고 지표, per_class, class_averages, weakest_class.macro_f1, precision_recall_gap.precision·recall, training_ratio·evaluation_ratio, error_totals 비율)": "글자 칸을 따로 보내지 않는다 — 두 저장소가 plain·percent 규칙으로 찍는다(대조 표로 같음을 시험). 판정 대상 지표와 같은 원값이면 그 value_text(위 D2 줄). 최약 클래스 F1 만 판 4 전용 글자 칸(facts.weakest_class.f1_text)이 있다",
+    "fact_sheet.latency": "숫자 그대로 보낸다. 판 4 글·사실 보기·허용 목록의 지연시간 표기는 4.8 표와 같은 latency 규칙(둘째 자리, 끝 0 유지 — toFixed(2))이다(D4)",
+    "목표값(metrics[].threshold)": "글자 칸을 따로 보내지 않는다 — 두 저장소가 number_wording_ed4 의 target 규칙으로 찍는다(D1, 2026-10-24 사용자 승인): 받은 목표의 가장 짧은 십진 표기가 셋째 자리 이하면 셋째 자리(끝 0 유지 — '≥ 0.970'), 넷째 자리 이상이면 받은 글자 그대로(최대 여섯째 자리, 지수 꼴 없이 — '≥ 0.8124'). 4.3 표·3.1·5절 규칙 문장·B20·사실 보기 모두 같은 규칙. 값은 그 목표와 judged 로 찍는다(0.8122 → 0.812)",
+    "판정과 무관한 자리의 값이 판정 대상 지표의 원값과 같을 때": "같은 수는 같은 글자(D2, 2026-10-24 사용자 승인) — 원값이 판정 대상 지표(value_text 가 있는 줄)의 원값과 같으면(|차이| < 1e-9) 그 value_text 를 쓴다. 최약 클래스 F1 은 프론트가 facts.weakest_class.f1_text 로 싣고 백엔드는 읽기만 한다. 클래스별 표·평균 줄·Precision − Recall 의 P·R·최약 클래스의 매크로 F1·평균 차이의 F1·선언 평균의 P·R·F1 은 각 저장소가 같은 규칙으로 찍는다. 클래스별 표의 F1 칸은 function_names.class_f1(최약 클래스 = f1_text, 그 밖 = D2 → distinct(그 값, [최약 F1]))"
+  },
+  "function_names": {
+    "$comment": "두 저장소가 같은 일을 하는 함수는 같은 이름(파이썬 snake_case ↔ TS camelCase)으로 둔다. 시험은 number_wording_ed4.json 의 표를 읽어 자기 함수를 본다.",
+    "plain": {
+      "frontend": "ed4Plain(value)",
+      "backend": "ed4_plain(value)"
+    },
+    "judged": {
+      "frontend": "ed4Judged(value, threshold, higherIsBetter, meets) — formatJudgedValue 와 같은 규칙",
+      "backend": "ed4_judged(value, threshold, higher_is_better, meets)"
+    },
+    "signed_judged": {
+      "frontend": "ed4SignedJudged(value, threshold, meets)",
+      "backend": "ed4_signed_judged(value, threshold, meets)"
+    },
+    "ci_bound": {
+      "frontend": "ed4CiBound(raw, target)",
+      "backend": "ed4_ci_bound(raw, target)"
+    },
+    "percent": {
+      "frontend": "ed4Percent(fractionText)",
+      "backend": "ed4_percent(fraction_text)"
+    },
+    "percent_point": {
+      "frontend": "ed4PercentPoint(fractionText)",
+      "backend": "ed4_percent_point(fraction_text)"
+    },
+    "signed_count": {
+      "frontend": "ed4SignedCount(n)",
+      "backend": "ed4_signed_count(n)"
+    },
+    "given": {
+      "frontend": "ed4Given(value) — String(value) 와 같되 지수 꼴 없이(1e-7 → 0.0000001)",
+      "backend": "ed4_given(value) — 가장 짧은 십진 표기, 정수 꼴은 소수점 없이(1 → '1'), 지수 꼴 없이"
+    },
+    "target": {
+      "frontend": "ed4Target(threshold)",
+      "backend": "ed4_target(threshold)"
+    },
+    "latency": {
+      "frontend": "ed4Latency(value) — 4.8 표의 toFixed(2) 와 같은 함수",
+      "backend": "ed4_latency(value)"
+    },
+    "distinct": {
+      "frontend": "ed4Distinct(value, others) — 최약 클래스 고르기(weakest_class.f1_text)와 같은 함수",
+      "backend": "ed4_distinct(value, others)"
+    },
+    "class_f1": {
+      "frontend": "classF1TextEd4 — src/lib/report/edition4/ 의 순수 함수. 클래스별 표 F1 한 칸: 최약 클래스면 weakest_class.f1_text, 그 밖은 같은 원값의 판정 대상 지표 value_text(D2), 아니면 ed4Distinct(그 값, [최약 F1]). S4 렌더러의 M22 클래스별 표·4.4 최약 클래스 표가 쓴다",
+      "backend": "wording_ed4.class_f1_text_ed4(fs, label, value) — 판 4 사실 보기 클래스별 표·평균 차이의 기준 클래스, 규칙 문장 Ctx.class_f1"
+    },
+    "josa": {
+      "frontend": "josa(word, pair) — koreanJosa.ts 에 새로(공통 규칙 nameFinalSound). 지금 있는 josaWaGwa·josaEunNeun·josaEuroRo·josaEulReul(숫자)은 그대로",
+      "backend": "wording.josa(word, pair) — 이미 있음"
+    },
+    "judgment_margin": {
+      "frontend": "judgmentMargin(...) → \"small\"|\"ample\"|null (src/lib/report/edition4/, KpiResult.judgmentMargin 에 저장)",
+      "backend": "없음 — 요청의 near_target 을 읽는다(다시 계산하지 않음)"
+    },
+    "file_places": {
+      "frontend": "src/lib/report/edition4/edition4Number.ts (숫자), koreanJosa.ts (josa)",
+      "backend": "app/narrative/wording.py 의 판 4 절(또는 wording_ed4.py) — S2 ⑥ 이 정함"
+    }
+  },
+  "not_decided": [
+    "facts.fixed_sentences 9번 판 4 글에 3.3 의 '(점수 컬럼: score_malignant)' 를 붙일지 — 임시 예시는 붙이지 않았다(S3 ⑦ 이 정함)",
+    "평가 응답에 *_raw 가 없는 옛 백엔드 응답으로 판 4 run 을 만들면 넷째 자리 값에서 다시 반올림한다(이중 반올림) — 켜는 라운드는 백엔드 먼저 배포가 전제"
+  ],
+  "decided": {
+    "$comment": "S2·S3 검토(2026-10-24) — 사용자 답변·오케스트레이터 결정. 두 저장소 같은 규칙이고 number_wording_ed4 에 사례 줄이 있다.",
+    "D1 목표값 표기": "target 규칙 — 셋째 자리 이하면 셋째 자리, 넷째 자리 이상이면 받은 글자 그대로(최대 여섯째 자리). 목표 0.8124·값 0.8122(미달) → 기준 '0.8124', 값 '0.812'",
+    "D2 같은 수는 같은 글자": "판정과 무관한 자리의 값이 판정 대상 지표의 원값과 같으면 그 value_text. 최약 클래스 F1 은 프론트가 facts.weakest_class.f1_text 로 싣는다",
+    "D3 최약 클래스 동점처럼 보일 때": "distinct 규칙 — 셋째 자리로 다른 클래스와 같아 보이면 서로 달라질 때까지 여섯째 자리까지 늘린다. 여섯째 자리로도 같으면 동점(함께 밝힌다)",
+    "D3 클래스별 표의 다른 클래스": "클래스별 표에서 최약 클래스와 셋째 자리로 같아 보이는 다른 클래스의 F1 = distinct(그 값, [최약 F1])(오케스트레이터 결정, 후속 U2) — 최약 클래스와 부딪치는 클래스만 늘리고, 다른 클래스끼리 같아 보이는 것은 그대로. 같은 원값의 판정 대상 지표가 있으면 그 value_text 가 먼저(D2). 두 저장소 같은 함수(function_names.class_f1), 대조 표 distinct 의 class_table 줄",
+    "T3 멀티레이블 4.5 학습·평가 비율의 분모": "표본 수(2026-10-24 사용자 답) — edition4_meaning 의 distribution_shift[].training_ratio·evaluation_ratio 와 distribution_shift_status 줄",
+    "S6 질문 4 멀티레이블 최약 레이블·작은 표본 비율의 분모": "표본 수(2026-10-24 사용자 답 \"추천대로\" — 4.5 와 같은 분모) — edition4_meaning 의 class_share_basis·weakest_class.share·weakest_class.low_support·low_support_classes 줄. 4.4 최약 레이블 표의 비율·5.2 최약 레이블 문장·5.5 작은 표본 까닭이 같은 분모",
+    "B33 학습 표본 수가 없을 때의 4.5 문장(초안)": "멀티레이블에서 학습 분포는 있으나 학습 표본 수가 없을 때(distribution_shift_status = training_samples_not_provided) 4.5 비율 표 자리 \"제공되지 않음 — 학습 표본 수가 제공되지 않아 학습·평가 비율을 비교하지 않았다.\"(2026-10-24 사용자 승인, 초안 — 판 4 켜기 전 확인 목록). B16 '학습 클래스 분포가 제공되지 않아'는 이유가 틀려 쓰지 않는다. 사실 시트·run 에는 이유 코드만 싣고 문장은 S5 렌더러가 찍는다",
+    "D4 지연시간": "latency 규칙(둘째 자리, toFixed(2)) — 4.8 표·규칙 문장·사실 보기·허용 목록이 같은 글자",
+    "D6 문제 근거": "edition4_notation 의 fact_sheet.problems[].evidence 참조",
+    "D7 best_threshold_text": "늘 고정소수 표기(지수 꼴 없음) — 백엔드 엔진 threshold_text 가 12자리로도 안 되면 지수 꼴 없는 가장 짧은 십진 표기. 요청 스키마도 숫자 꼴(NumText)"
+  },
+  "examples": {
+    "binary": "fact_sheet_binary_ed4.json(bc_strong = RPT-2026-0001, 프론트가 앱 조립으로 뜬 것 — files.example_binary 참조)",
+    "multiclass": "fact_sheet_multiclass_ed4.json(digits_strong = RPT-2026-0003)",
+    "multilabel": "fact_sheet_multilabel_ed4.json(yeast_strong = RPT-2026-0005)"
+  }
+}

@@ -1,0 +1,58 @@
+{
+ "task_type": "binary",
+ "column_mappings": [
+  {
+   "column": "sample_id",
+   "role": "sample_id",
+   "sample_values": [
+    "BC0000",
+    "BC0001",
+    "BC0002"
+   ]
+  },
+  {
+   "column": "diagnosis",
+   "role": "y_true",
+   "sample_values": [
+    "benign",
+    "benign",
+    "benign"
+   ]
+  },
+  {
+   "column": "score_malignant",
+   "role": "score_positive",
+   "sample_values": [
+    "0.0087",
+    "0.0007",
+    "0.0109"
+   ]
+  }
+ ],
+ "selected_metric_ids": [
+  "M1",
+  "M2",
+  "M3",
+  "M4",
+  "M9",
+  "M10",
+  "M19",
+  "M23"
+ ],
+ "metadata": {
+  "positive_class": "malignant",
+  "negative_class": "benign",
+  "positive_class_ambiguous": false,
+  "detected_classes": [
+   "benign",
+   "malignant"
+  ],
+  "detected_labels": [],
+  "class_distribution": {
+   "benign": 107,
+   "malignant": 64
+  }
+ },
+ "beta": 1,
+ "decision_threshold": 0.5
+}

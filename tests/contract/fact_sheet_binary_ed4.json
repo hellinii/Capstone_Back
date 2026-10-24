@@ -1,0 +1,516 @@
+{
+  "task_type": "binary",
+  "report_purpose": "external",
+  "report_edition": 4,
+  "fact_sheet": {
+    "n_samples": 171,
+    "dropped_rows": 0,
+    "metrics": [
+      {
+        "metric_id": "M1",
+        "display_name": "Accuracy",
+        "value": 0.9824561403508771,
+        "threshold": 0.95,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.9497,
+        "ci_high": 0.994,
+        "margin": 0.03245614,
+        "near_target": true,
+        "value_text": "0.982",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "0.032",
+        "ci_contains_target": true,
+        "ci_low_text": "0.9497",
+        "ci_high_text": "0.994"
+      },
+      {
+        "metric_id": "M2",
+        "display_name": "Precision",
+        "value": 0.9692307692307692,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "value": 0.984375,
+        "threshold": 0.97,
+        "status": "pass",
+        "is_core": true,
+        "ci_low": 0.9167,
+        "ci_high": 0.9972,
+        "margin": 0.014375,
+        "near_target": true,
+        "value_text": "0.984",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "0.014",
+        "ci_contains_target": true,
+        "ci_low_text": "0.917",
+        "ci_high_text": "0.997"
+      },
+      {
+        "metric_id": "M4",
+        "display_name": "F1 Score",
+        "value": 0.9767441860465116,
+        "threshold": 0.95,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.9457,
+        "ci_high": 1,
+        "margin": 0.026744186,
+        "near_target": true,
+        "value_text": "0.977",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "0.027",
+        "ci_contains_target": true,
+        "ci_low_text": "0.946",
+        "ci_high_text": "1.000"
+      },
+      {
+        "metric_id": "M9",
+        "display_name": "AUROC",
+        "value": 0.999269859813084,
+        "threshold": 0.98,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.9973,
+        "ci_high": 1,
+        "margin": 0.01926986,
+        "near_target": false,
+        "value_text": "0.999",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "0.019",
+        "ci_contains_target": false,
+        "ci_low_text": "0.997",
+        "ci_high_text": "1.000"
+      },
+      {
+        "metric_id": "M10",
+        "display_name": "AUPRC",
+        "value": 0.9988367417279411,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M19",
+        "display_name": "Log Loss",
+        "value": 0.05349956773981483,
+        "threshold": 0.1,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.0326,
+        "ci_high": 0.0791,
+        "margin": 0.046500432,
+        "near_target": false,
+        "value_text": "0.053",
+        "higher_is_better": false,
+        "beta": null,
+        "margin_text": "0.047",
+        "ci_contains_target": false,
+        "ci_low_text": "0.033",
+        "ci_high_text": "0.079"
+      },
+      {
+        "metric_id": "M23",
+        "display_name": "Imbalance Ratio",
+        "value": 1.671875,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": false,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      }
+    ],
+    "per_class": [
+      {
+        "label": "benign",
+        "precision": 0.9905660377358491,
+        "recall": 0.9813084112149533,
+        "f1": 0.9859154929577465,
+        "support": 107
+      },
+      {
+        "label": "malignant",
+        "precision": 0.9692307692307692,
+        "recall": 0.984375,
+        "f1": 0.9767441860465116,
+        "support": 64
+      }
+    ],
+    "class_averages": [
+      {
+        "label": "매크로 평균",
+        "precision": 0.9798984034833091,
+        "recall": 0.9828417056074766,
+        "f1": 0.981329839502129,
+        "support": 171
+      },
+      {
+        "label": "가중 평균",
+        "precision": 0.9825809080029537,
+        "recall": 0.9824561403508771,
+        "f1": 0.9824829570377521,
+        "support": 171
+      }
+    ],
+    "confusion": {
+      "labels": [
+        "benign",
+        "malignant"
+      ],
+      "matrix": [
+        [
+          105,
+          2
+        ],
+        [
+          1,
+          63
+        ]
+      ],
+      "positive_class": "malignant"
+    },
+    "confusion_counts": [
+      {
+        "label": "malignant",
+        "tp": 63,
+        "fp": 2,
+        "fn": 1,
+        "tn": 105
+      }
+    ],
+    "derived_prediction": {
+      "method": "threshold",
+      "threshold": 0.5,
+      "source_columns": [
+        "score_malignant"
+      ]
+    },
+    "error_ratios": {
+      "unit": "sample",
+      "misclassified": 3,
+      "boundary": {
+        "count": 1,
+        "ratio": 0.3333
+      },
+      "boundary_note": null,
+      "confident": {
+        "count": 0,
+        "ratio": 0
+      },
+      "boundary_margin": 0.1,
+      "confident_level": 0.9,
+      "threshold": 0.5
+    },
+    "ci_method_note": "판정 대상 지표의 95% 신뢰구간은 Wilson 점수 구간(M1, M3), 다항 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4), 행 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M9, M19)으로 산출하였습니다.",
+    "f1_threshold_gain": {
+      "max_f1": 0.9844,
+      "current_f1": 0.9767,
+      "gain": 0.0076,
+      "best_threshold": 0.6166,
+      "notable": false,
+      "gain_text": "0.008",
+      "best_threshold_text": "0.6166",
+      "max_f1_text": "0.984",
+      "current_f1_text": "0.977",
+      "best_recall_text": "0.984",
+      "best_precision_text": "0.984",
+      "current_recall_text": "0.984",
+      "current_precision_text": "0.969",
+      "risk_side": {
+        "side": "fn",
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "meets_target_now": true,
+        "meets_target_at_best": true
+      }
+    },
+    "imbalance_effect": {
+      "level": "no_distortion",
+      "imbalance_ratio": 1.6719,
+      "accuracy_minus_macro_f1": 0.0011,
+      "majority_minus_minority_f1": 0.0092,
+      "majority_class": "benign",
+      "minority_class": "malignant",
+      "accuracy": 0.9825,
+      "macro_f1": 0.9813,
+      "majority_f1": 0.9859,
+      "minority_f1": 0.9767,
+      "display": {
+        "imbalance_ratio": "1.672",
+        "accuracy_minus_macro_f1": "0.001",
+        "majority_minus_minority_f1": "0.009",
+        "accuracy": "0.982",
+        "macro_f1": "0.981",
+        "majority_f1": "0.986",
+        "minority_f1": "0.977"
+      }
+    },
+    "problems": [
+      {
+        "id": "P1",
+        "kind": "core_near_target",
+        "priority": "MEDIUM",
+        "title": "핵심 지표 근소 합격 (Recall)",
+        "source_section": "8.3",
+        "recommend_section": "9.2",
+        "evidence": {
+          "Recall": {
+            "value": "0.984",
+            "target": "0.970",
+            "margin": "0.014"
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P2",
+        "kind": "same_source",
+        "priority": "LOW",
+        "title": "평가 데이터가 학습과 같은 출처",
+        "source_section": "8.2",
+        "recommend_section": "9.1",
+        "evidence": {
+          "학습 데이터와의 관계": "같은 출처"
+        },
+        "note": null
+      }
+    ],
+    "distribution": {
+      "class_distribution": {
+        "benign": 107,
+        "malignant": 64
+      },
+      "imbalance_ratio": 1.671875
+    },
+    "verdict": "PASS",
+    "score": 100,
+    "latency": {
+      "available": false,
+      "mean": null,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "unit": "ms"
+    },
+    "facts": {
+      "contract": "facts-1",
+      "positive_class": "malignant",
+      "n_classes": 2,
+      "class_share_basis": "samples",
+      "report_purpose_label": "외부 제출",
+      "core_metrics_source": "client",
+      "selected_metrics": [
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M9",
+        "M10",
+        "M19",
+        "M23"
+      ],
+      "declarations": {
+        "risk_direction": "fn",
+        "class_priority": null,
+        "usage_mode": "batch"
+      },
+      "verdict_detail": {
+        "verdict": "PASS",
+        "judged_count": 5,
+        "passed_count": 5,
+        "failed_core": [],
+        "failed_noncore": [],
+        "unavailable_core": [],
+        "inconclusive_cause": null,
+        "inconclusive_metrics": []
+      },
+      "error_totals": {
+        "unit": "sample",
+        "total": 171,
+        "misclassified": 3
+      },
+      "weakest_class": {
+        "label": "malignant",
+        "f1": 0.9767441860465116,
+        "f1_text": "0.977",
+        "support": 64,
+        "share": 0.374269006,
+        "share_text": "0.374",
+        "macro_f1": 0.981329839502129,
+        "gap_from_macro": 0.004585654,
+        "gap_text": "0.005",
+        "low_support": false,
+        "far_below_macro": false
+      },
+      "low_support_classes": [],
+      "top_confusion_pairs": [],
+      "prediction_bias": {
+        "unit": "positive_class",
+        "rows": [
+          {
+            "label": "malignant",
+            "predicted": 65,
+            "actual": 64,
+            "difference": 1
+          }
+        ]
+      },
+      "declared_risk_errors": {
+        "side": "fn",
+        "count": 1,
+        "total_errors": 3,
+        "share": 0.333333333,
+        "share_text": "0.333"
+      },
+      "precision_recall_gap": {
+        "precision": 0.9692307692307692,
+        "recall": 0.984375,
+        "difference": -0.015144231,
+        "difference_text": "-0.015",
+        "flagged": false
+      },
+      "average_gap": null,
+      "declared_average": null,
+      "distribution_shift_status": "compared",
+      "distribution_shift": [
+        {
+          "label": "benign",
+          "training_ratio": 0.628140704,
+          "evaluation_ratio": 0.625730994,
+          "difference": 0.002409709,
+          "difference_text": "0.002",
+          "flagged": false,
+          "evaluation_minus_training_text": "-0.002"
+        },
+        {
+          "label": "malignant",
+          "training_ratio": 0.371859296,
+          "evaluation_ratio": 0.374269006,
+          "difference": -0.002409709,
+          "difference_text": "-0.002",
+          "flagged": false,
+          "evaluation_minus_training_text": "0.002"
+        }
+      ],
+      "ci_available": true,
+      "ci_skipped": [],
+      "fixed_sentences": [
+        {
+          "id": "9",
+          "section": "7.1",
+          "text": "본 평가의 예측값은 제출된 확률값에 결정 임계값 0.5를 적용하여 산출하였습니다."
+        },
+        {
+          "id": "17",
+          "section": "7.1",
+          "text": "확률이 있는 오분류 3건 중 경계 오류(확률과 결정 임계값 0.5의 차가 0.1 미만)는 1건(33.3%), 확신 오류(틀린 쪽 확률 0.9 이상)는 0건(0.0%)이다."
+        },
+        {
+          "id": "16",
+          "section": "8.1",
+          "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: Log Loss, Imbalance Ratio."
+        },
+        {
+          "id": "11a",
+          "section": "8.2",
+          "text": "평가 데이터는 학습 데이터와 동일한 출처에서 수집되었다. 본 결과는 동일 분포 내 성능을 나타내며, 다른 운영 환경에서의 일반화 성능을 보증하지 않는다."
+        }
+      ],
+      "omitted": {}
+    }
+  },
+  "client_inputs": {
+    "model": {
+      "모델명": "BreastScreen-LR",
+      "버전": "v2.1",
+      "모델 용도": "유방 종괴 세침흡인(FNA) 영상에서 뽑은 세포핵 특징으로 악성 여부를 가려, 판독 대기열의 우선순위를 정하는 데 쓴다.",
+      "모델 분류": "의료 영상 보조 분류"
+    },
+    "report_purpose_note": "의료기기 소프트웨어 사전 상담 자료로 제출",
+    "declarations": {
+      "위험 방향": "FN이 더 위험 (의뢰자 제공: 악성을 놓치면 추가 검사와 치료가 늦어진다. 잘못 잡은 경우는 재판독으로 걸러진다.)",
+      "사용 방식": "배치 (의뢰자 제공: 하루 판독분을 밤에 한 번에 돌린다.)"
+    },
+    "core_metrics": [
+      "Recall"
+    ],
+    "training_data": {
+      "학습 데이터셋명": "Wisconsin Diagnostic Breast Cancer(WDBC) 학습 분할",
+      "학습 데이터 출처": "위스콘신 대학 병원 FNA 판독 기록(공개 데이터)",
+      "학습 샘플 수": "398개",
+      "검증 샘플 수": "0개",
+      "학습 클래스 분포": "malignant 148 / benign 250",
+      "채널 효과": "알려진 것 없음",
+      "편향 감소 노력": "수행 안 함 (의뢰자 제공: 클래스 비율(약 4:6)이 크게 기울지 않아 따로 맞추지 않았다.)",
+      "학습·평가 전처리 일치": "같음"
+    },
+    "test_data": {
+      "평가 데이터 출처": "같은 데이터의 30% 층화 분할(학습에 쓰지 않음)",
+      "학습 데이터와의 관계": "같은 출처 (의뢰자 제공: 같은 병원·같은 장비에서 나온 기록이다.)"
+    },
+    "ground_truth": {
+      "정답 라벨 구축 방법": "전문가 수동 (의뢰자 제공: 조직검사로 확진한 병리 진단 결과)",
+      "정답 라벨 신뢰성": "복수 라벨러 합의",
+      "라벨러 수": "2명",
+      "라벨 일치도": "Cohen의 카파 0.92"
+    },
+    "environment": {
+      "운영체제": "Ubuntu 22.04",
+      "CPU": "Intel Xeon 8핵",
+      "GPU": "없음",
+      "메모리": "32GB",
+      "소프트웨어": "Python 3.11, scikit-learn 1.5",
+      "학습 가속": "아니오",
+      "추론 가속": "아니오",
+      "알고리즘": "로지스틱 회귀(입력 표준화)",
+      "하이퍼파라미터": {
+        "C": "0.5",
+        "max_iter": "2000",
+        "solver": "lbfgs"
+      }
+    },
+    "class_label_descriptions": {
+      "malignant": "악성 종양",
+      "benign": "양성 종양"
+    }
+  }
+}

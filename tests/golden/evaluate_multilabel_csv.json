@@ -6,6 +6,7 @@
     "tech": 102
   },
   "dropped_rows": 0,
+  "engine_version": "1.0.0",
   "environment": {
     "evaluated_at": "<비결정적 값 — 존재만 고정>",
     "libraries": "<비결정적 값 — 존재만 고정>"
@@ -177,70 +178,88 @@
       "confidence_intervals": {
         "M15": {
           "high": 0.5563,
+          "high_raw": 0.55625,
           "level": 0.95,
           "low": 0.485,
+          "low_raw": 0.485,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M16": {
           "high": 0.108,
+          "high_raw": 0.10801907929906893,
           "level": 0.95,
           "low": 0.0384,
+          "low_raw": 0.03837635464915299,
           "method": "wilson"
         },
         "M17": {
           "high": 0.3733,
+          "high_raw": 0.37333333333333335,
           "level": 0.95,
           "low": 0.2979,
+          "low_raw": 0.29791666666666666,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M18": {
           "high": 0.0208,
+          "high_raw": 0.020797834146530646,
           "level": 0.95,
           "low": 0.0005,
+          "low_raw": 0.0004531128887523023,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M2": {
           "high": 0.5345,
+          "high_raw": 0.5345406869776258,
           "level": 0.95,
           "low": 0.4448,
+          "low_raw": 0.4448361720704749,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M23": {
           "high": 1.5116,
+          "high_raw": 1.5116348283499446,
           "level": 0.95,
           "low": 1.0606,
+          "low_raw": 1.0606060606060606,
           "method": "bootstrap_multinomial",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M3": {
           "high": 0.5147,
+          "high_raw": 0.5146513915695113,
           "level": 0.95,
           "low": 0.4276,
+          "low_raw": 0.42757506948598545,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M4": {
           "high": 0.5168,
+          "high_raw": 0.5167618571614647,
           "level": 0.95,
           "low": 0.4369,
+          "low_raw": 0.43694119794455055,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M5": {
           "high": 0.5168,
+          "high_raw": 0.5167618571614647,
           "level": 0.95,
           "low": 0.4369,
+          "low_raw": 0.43694119794455055,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
@@ -349,6 +368,8 @@
       "imbalance_effect": {
         "accuracy": null,
         "accuracy_minus_macro_f1": null,
+        "accuracy_minus_macro_f1_raw": null,
+        "accuracy_raw": null,
         "display": {
           "accuracy": null,
           "accuracy_minus_macro_f1": null,
@@ -359,15 +380,24 @@
           "minority_f1": "0.4322"
         },
         "imbalance_ratio": 1.1031,
+        "imbalance_ratio_raw": 1.1030927835051547,
         "level": "mild",
         "macro_f1": null,
+        "macro_f1_raw": null,
         "majority_class": "finance",
         "majority_f1": 0.4455,
+        "majority_f1_raw": 0.44554455445544555,
         "majority_minus_minority_f1": 0.0134,
+        "majority_minus_minority_f1_raw": 0.013383750435345065,
         "minority_class": "sports",
-        "minority_f1": 0.4322
+        "minority_f1": 0.4322,
+        "minority_f1_raw": 0.4321608040201005
       }
     }
+  },
+  "source_file": {
+    "sha256": "9ea5b889a2406e561e155a5a008d9683d831d70f8777acccd3b698c06540fdfe",
+    "size_bytes": 10009
   },
   "warnings": []
 }

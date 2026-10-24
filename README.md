@@ -5,7 +5,7 @@ KS X ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험성적서 자동 
 > - 코드 구조·설계 규칙: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 > - 지표·컬럼·검증 규칙(프론트/백 공통 단일 진실 문서): 프론트 저장소(Capstone_Front)의 `SPEC.md` — https://github.com/hwanginyong02/Capstone_Front/blob/main/SPEC.md
 > - 프로젝트 전체(프론트+백) 지도: [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md)
-> - 서술·발급·배포의 자세한 규칙과 이유: `docs/ARCHITECTURE.md` §10(서술) · §11(발급) · §12(배포·운영)
+> - 서술·발급·배포의 자세한 규칙과 이유: `docs/ARCHITECTURE.md` §10(서술) · §11(발급) · §12(배포·운영) · §13(성적서 판 4 — 서술 요청의 `report_edition`, 평가 엔진 버전, 정답 폴더)
 
 ## 기술 스택
 Python 3.12 · FastAPI · pandas · scikit-learn · Anthropic(서술 `claude-sonnet-5-5`) · OpenAI(컬럼 매핑 `gpt-6-luna`) · SQLAlchemy(로컬 SQLite / 배포 Neon PostgreSQL) · Pydantic
@@ -36,7 +36,7 @@ venv/bin/python -m pytest            # 테스트 (pytest.ini: asyncio_mode=auto)
 첫 부팅 시 `init_db()` + `seed_organization()` 이 자동 실행됩니다(발급 표·서술 작업 표, 기관 표가 비어 있으면 기관 행 "리트머스" — 운영 DB 의 기관 이름 바꾸기는 `docs/ARCHITECTURE.md` §12). 키 없이도 기동되며 LLM 기능은 규칙 기반으로 대체됩니다.
 
 ## 배포
-Render web service(`https://capstone-back-59z8.onrender.com`) + Neon PostgreSQL. 팀 저장소 `main` 에 push 하면 CI(`.github/workflows/ci.yml`)가 테스트·기동 스모크를 돌리고, 통과하면 포크(`hellinii/Capstone_Back`) `main` 으로 복사한 뒤 Render Deploy Hook 을 불러 배포하고 `/health` 의 커밋이 바뀔 때까지 확인합니다. 이것이 유일한 배포 경로입니다. 자세히는 `docs/ARCHITECTURE.md` §12.
+Render web service(`https://capstone-back-59z8.onrender.com`) + Neon PostgreSQL. 성적서 판 4 를 켤 때는 이 저장소를 **먼저** 배포하고 `/health` 의 `commit` 을 확인한 뒤 프론트 플래그를 켠다(§13). 팀 저장소 `main` 에 push 하면 CI(`.github/workflows/ci.yml`)가 테스트·기동 스모크를 돌리고, 통과하면 포크(`hellinii/Capstone_Back`) `main` 으로 복사한 뒤 Render Deploy Hook 을 불러 배포하고 `/health` 의 커밋이 바뀔 때까지 확인합니다. 이것이 유일한 배포 경로입니다. 자세히는 `docs/ARCHITECTURE.md` §12.
 
 ## 라이선스
 © 2026 Kim Minseo, Hwang Inyong (서울과학기술대학교 졸업과제)

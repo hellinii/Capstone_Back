@@ -1,0 +1,193 @@
+{
+  "name": "서술 칸 → 판 4 자리 대응표",
+  "status": "판 4 라운드 S2 ① 공통 계약(2026-10-24). 대응표 29, 계획 4절(5절 배치)·5절. 같은 바이트 사본이 두 저장소 계약 폴더에 있다. 칸 이름(판 3 절 번호)은 그대로이고 판 4 에서 찍히는 자리만 바뀐다(서술 설계 D47).",
+  "slots": [
+    {
+      "slot": "8.2",
+      "edition4_place": "5.1",
+      "edition4_title": "판정과 불확실성",
+      "fixed_before_narrative": [],
+      "fixed_after_narrative": [
+        "11a",
+        "11b"
+      ],
+      "empty": null
+    },
+    {
+      "slot": "7.1",
+      "edition4_place": "5.2",
+      "edition4_title": "오분류",
+      "fixed_before_narrative": [],
+      "fixed_after_narrative": [],
+      "empty": null
+    },
+    {
+      "slot": "7.2",
+      "edition4_place": "5.3",
+      "edition4_title": "데이터 분포",
+      "fixed_before_narrative": [
+        "12"
+      ],
+      "fixed_after_narrative": [],
+      "empty": null
+    },
+    {
+      "slot": "8.1",
+      "edition4_place": "5.4",
+      "edition4_title": "참조 범위",
+      "fixed_before_narrative": [],
+      "fixed_after_narrative": [],
+      "empty": "B18 '해당 없음'(모든 지표가 기준표 밖)"
+    },
+    {
+      "slot": "8.3",
+      "edition4_place": "5.5",
+      "edition4_title": "운영 위험",
+      "fixed_before_narrative": [],
+      "fixed_after_narrative": [],
+      "empty": null
+    },
+    {
+      "slot": "7.3",
+      "edition4_place": "5.6",
+      "edition4_title": "추가 관찰",
+      "fixed_before_narrative": [],
+      "fixed_after_narrative": [],
+      "empty": "고정 문구 15 '해당 없음'(빈 글)"
+    },
+    {
+      "slot": "9",
+      "edition4_place": "6",
+      "edition4_title": "개선 권고",
+      "fixed_before_narrative": [],
+      "fixed_after_narrative": [],
+      "empty": "고정 문구 6(문제 0개)"
+    }
+  ],
+  "recommend_sections": [
+    {
+      "slot": "9.1",
+      "edition4_place": "6.1",
+      "edition4_title": "데이터",
+      "one_side_empty": "B19 — 소제목은 두고 그 칸의 서술만 찍고 표는 그리지 않는다"
+    },
+    {
+      "slot": "9.2",
+      "edition4_place": "6.2",
+      "edition4_title": "모델과 운영",
+      "one_side_empty": "B19"
+    }
+  ],
+  "order_edition4": [
+    "8.2",
+    "7.1",
+    "7.2",
+    "8.1",
+    "8.3",
+    "7.3",
+    "9"
+  ],
+  "order_edition3": [
+    "7.1",
+    "7.2",
+    "7.3",
+    "8.1",
+    "8.2",
+    "8.3",
+    "9"
+  ],
+  "fixed_sentence_places": {
+    "$comment": "사실 시트 fixed_sentences 의 id → 판 4 에서 찍히는 자리(고정 문구 1절 위치 칸). section 값(칸 이름)은 판 3 그대로 보낸다.",
+    "9": "3.3 산출 기준 첫 항목(판 4 합니다체)",
+    "17": "4.4 혼동 행렬 건수 표 아래",
+    "7": "4.5 불균형 비율 문장 앞",
+    "16": "4.6 참조 범위 표 아래",
+    "11a": "5.1 서술 뒤",
+    "11b": "5.1 서술 뒤",
+    "12": "5.3 서술 앞",
+    "15": "5.6(빈 글일 때)",
+    "6": "6절(문제 0개일 때 이 문장만)",
+    "18": null
+  },
+  "edition4_titles": {
+    "5": "분석 소견",
+    "5_note": "※ 5절은 4절의 시험 결과를 해석한 참고 의견이며, 시험 결과에 해당하지 않습니다.",
+    "6": "개선 권고"
+  },
+  "record_panel": {
+    "$comment": "화면 작성 기록(인쇄 없음) — 부록 B25·B26 승인 글. 줄 뒤 이름표(AI 작성(모델) / 규칙 기반 문장 / 고정 문구)는 판 3 그대로.",
+    "header": "작성 기록",
+    "header_note": " · 5·6절 칸마다 쓴 방식(화면에만 보이며 인쇄본에는 없습니다)",
+    "lines": [
+      {
+        "slot": "8.2",
+        "text": "5.1 판정과 불확실성(8.2 칸)"
+      },
+      {
+        "slot": "7.1",
+        "text": "5.2 오분류(7.1 칸)"
+      },
+      {
+        "slot": "7.2",
+        "text": "5.3 데이터 분포(7.2 칸)"
+      },
+      {
+        "slot": "8.1",
+        "text": "5.4 참조 범위(8.1 칸)"
+      },
+      {
+        "slot": "8.3",
+        "text": "5.5 운영 위험(8.3 칸)"
+      },
+      {
+        "slot": "7.3",
+        "text": "5.6 추가 관찰(7.3 칸)"
+      },
+      {
+        "slot": "9",
+        "text": "6 개선 권고(9 칸)"
+      }
+    ]
+  },
+  "section_reference_rewrites": {
+    "$comment": "판 3 글을 판 4 로 옮길 때의 절 번호 치환(부록 A4) 중 지금 아는 것. 지시문·규칙 문장의 칸 번호 언급은 위 slots 대응을 따른다.",
+    "(1.4 참조)": "(1.3 참조)",
+    "9절 권고표": "6절 권고표"
+  },
+  "edition4_section_numbers": [
+    "1",
+    "1.1",
+    "1.2",
+    "1.3",
+    "2",
+    "2.1",
+    "2.2",
+    "2.3",
+    "3",
+    "3.1",
+    "3.2",
+    "3.3",
+    "3.4",
+    "3.5",
+    "4",
+    "4.1",
+    "4.2",
+    "4.3",
+    "4.4",
+    "4.5",
+    "4.6",
+    "4.7",
+    "4.8",
+    "5",
+    "5.1",
+    "5.2",
+    "5.3",
+    "5.4",
+    "5.5",
+    "5.6",
+    "6",
+    "6.1",
+    "6.2"
+  ],
+  "edition4_section_numbers_note": "판 4 절 번호(1.1~6.2, '(4.3)', '5.1·5.2절')는 숫자 검문에서 숫자로 보지 않는다(계획 2.7). 부록 1 의 1.1~1.4 는 '부록 1.2' 처럼 '부록' 이 앞에 붙는다."
+}

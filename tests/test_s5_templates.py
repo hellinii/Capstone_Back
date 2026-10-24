@@ -26,10 +26,10 @@ def test_templates_cover_exactly_the_seven_sections():
 def test_each_template_writes_only_its_own_fields():
     for name, req in _requests():
         fs = req.fact_sheet
-        refs = build_benchmark_refs(req.task_type.value, fs.metrics)
+        refs = build_benchmark_refs(req.task_type.value, fs.metrics, edition=3)
         derived = compute_derived(fs, task_type=req.task_type.value)
         for section in sections.SECTIONS:
-            parts = fallback.section_template(section.id, fs, refs, derived)
+            parts = fallback.section_template(section.id, fs, refs, derived, edition=3)
             assert set(parts) == set(section.response_paths), (name, section.id)
 
 
@@ -37,12 +37,12 @@ def test_seven_templates_rebuild_the_old_fallback_exactly():
     """쪼개기 전 응답(골든 파일이 고정)과 같다 — 여기서는 칸별 조립 = build_fallback_narrative 를 본다."""
     for name, req in _requests():
         fs = req.fact_sheet
-        refs = build_benchmark_refs(req.task_type.value, fs.metrics)
+        refs = build_benchmark_refs(req.task_type.value, fs.metrics, edition=3)
         derived = compute_derived(fs, task_type=req.task_type.value)
-        whole = fallback.build_fallback_narrative(fs, refs, derived, reason="no_key")
+        whole = fallback.build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
         parts: dict = {}
         for sid in sections.SECTION_IDS:
-            parts.update(fallback.section_template(sid, fs, refs, derived))
+            parts.update(fallback.section_template(sid, fs, refs, derived, edition=3))
         rebuilt = fallback.assemble_response(parts, fs, whole.meta)
         assert rebuilt == whole, name
         assert whole.interpretation.additional_observations == ""  # 7.3 은 규칙 문장이 없다(고정 문구 15)

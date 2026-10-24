@@ -1,0 +1,109 @@
+{
+  "class_distribution": {
+    "finance": 107,
+    "news": 102,
+    "sports": 97,
+    "tech": 102
+  },
+  "error_count": 0,
+  "execution_summary": [
+    {
+      "label": "Total validated rows",
+      "note": "업로드된 파일의 전체 행 수",
+      "value": "200 rows"
+    },
+    {
+      "label": "Valid prediction rows",
+      "note": "결측치 제거 후 평가에 사용될 행 수",
+      "value": "200 rows"
+    },
+    {
+      "label": "Excluded samples",
+      "note": "결측치·오류로 인해 제외된 행 수",
+      "value": "0 rows"
+    },
+    {
+      "label": "Selected metric count",
+      "note": "선택된 메트릭: M2, M3, M4, M5, M15, M16, M17, M18, M21, M22, M23",
+      "value": "11 items"
+    },
+    {
+      "label": "Validation result",
+      "note": "아래 상세 테이블 참조",
+      "value": "Errors 0 / Warnings 0"
+    }
+  ],
+  "selected_metric_ids": [
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M15",
+    "M16",
+    "M17",
+    "M18",
+    "M21",
+    "M22",
+    "M23"
+  ],
+  "task_type": "multilabel",
+  "validation_details": [
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
+      "name": "Empty dataset (no data rows)",
+      "result": "200 rows",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Stop evaluation",
+      "name": "Missing required column",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Rows with missing values are excluded from evaluation",
+      "name": "Missing value",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Reported only — duplicate rows are still evaluated",
+      "name": "Duplicate ID",
+      "result": "None",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Counted as a misclassification of the true class (rows are kept)",
+      "name": "Class mismatch",
+      "result": "N/A",
+      "status": "pass"
+    },
+    {
+      "group": "common",
+      "handling": "Exclude only rows with missing or invalid values",
+      "name": "Excluded samples",
+      "result": "0 rows",
+      "status": "pass"
+    },
+    {
+      "group": "multilabel",
+      "handling": "All score values within [0.0, 1.0]",
+      "name": "Score range error",
+      "result": "0 rows",
+      "status": "pass"
+    },
+    {
+      "group": "multilabel",
+      "handling": "Reported only — the row is parsed as having no labels",
+      "name": "Label format mismatch",
+      "result": "None",
+      "status": "pass"
+    }
+  ],
+  "warning_count": 0
+}

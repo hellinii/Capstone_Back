@@ -62,6 +62,8 @@ SHIFT_STATUS_KO = {
     "compared": "비교함",
     "not_provided": "학습 분포를 받지 않아 비교하지 않음",
     "uncovered": "학습 분포가 평가 클래스를 모두 덮지 않아 비교하지 않음",
+    # 판 4 멀티레이블에만(판 3 요청에는 오지 않는다 — 판 3 보기 글은 그대로). 판 4 보기가 이 표를 같이 쓴다.
+    "training_samples_not_provided": "학습 표본 수를 받지 않아 비교하지 않음(멀티레이블 비율의 분모는 표본 수)",
 }
 # 프론트가 표를 자른 칸(facts.omitted)·지시문에서 덜어 낸 칸(trim)의 한국어 이름.
 OMITTED_KO = {
@@ -416,7 +418,7 @@ def _facts(fs: FactSheet, task_type: str) -> dict | None:
             "표본이 작음(30건 미만 또는 5% 미만)": _yes(w.low_support),
             "매크로 F1 보다 0.1 이상 낮음": _yes(w.far_below_macro),
             # F1 이 같은 최하위 클래스(세션 C — 하나만 단독 최약처럼 쓰지 않게). 표가 잘렸으면 실린 클래스 가운데.
-            f"F1 이 같은 {noun}": weakest_ties(fs)[0] or None,
+            f"F1 이 같은 {noun}": weakest_ties(fs, edition=3)[0] or None,
         }
     if facts.low_support_classes:
         out[f"표본이 작은 {noun}"] = [
@@ -571,8 +573,19 @@ def omitted_counts(fs: FactSheet) -> dict[str, int]:
 
 def build_fact_view(
     fs: FactSheet, derived: dict, benchmark_refs: list[dict], *, task_type: str, task_label: str, report_purpose: str,
+    edition: int,
 ) -> dict:
-    """AI 가 읽는 사실 시트(한국어 이름). None·빈 칸은 뺀다."""
+    """AI 가 읽는 사실 시트(한국어 이름). None·빈 칸은 뺀다. edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition).
+
+    판 4 요청은 판 4 보기(app.narrative.fact_view_ed4 — 판 4 표기·판정 여유·중립 위치 말)로 간다. 아래 판 3 보기는 그대로다."""
+    if edition == 4:
+        from app.narrative.fact_view_ed4 import build_fact_view_ed4  # 판 4 모듈이 이 모듈의 도구를 쓴다(순환 import 피함)
+
+        return build_fact_view_ed4(
+            fs, derived, benchmark_refs, task_type=task_type, task_label=task_label, report_purpose=report_purpose,
+        )
+    if edition != 3:
+        raise ValueError(f"모르는 성적서 판: {edition!r}")
     view = {
         "평가 개요": _overview(fs, task_label, report_purpose),
         "판정": _verdict(fs, derived),

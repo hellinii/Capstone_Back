@@ -34,7 +34,7 @@ def client_inputs_length(v: dict[str, Any]) -> int:
 
 # 6.0 신뢰구간 방식 한 줄(ci_method_note)의 길이 상한. 방식 종류를 나열한 한 문장이라 수백 자를 넘지 않는다.
 MAX_CI_METHOD_NOTE_CHARS = 500
-# 9절 문제 목록(problems)의 상한(서술 설계 D22). 문제는 종류(9종)마다 많아야 하나라 9개를 넘지 않는다 —
+# 9절 문제 목록(problems)의 상한(서술 설계 D22). 문제는 종류(10종)마다 많아야 하나라 10개를 넘지 않는다 —
 # 여유를 두되 무인증 과금 경로라 막는다(G-03). 근거 수치(evidence)는 자유 dict 라 직렬화 길이로 잰다:
 # 가장 큰 것은 클래스마다 학습·평가 비율을 싣는 분포 차이로, 클래스 256개에서도 수만 자를 넘지 않는다.
 MAX_PROBLEMS = 16
@@ -53,8 +53,16 @@ MAX_DISPLAY_TEXT_CHARS = 40
 # 표시 문자열은 숫자 하나의 표기다(엔진 judged_text·프론트 judgedText) — 숫자가 아닌 글이 서술에 그대로 찍히거나
 # 폴백이 float 로 읽다 멈추지 않게 숫자 꼴만 받는다(S4b 검토 BE-03). 작업 경로는 이 칸이 틀리면 그 칸만 버린다.
 NumText = Annotated[str, StringConstraints(pattern=r"^-?\d+(\.\d+)?$", max_length=MAX_DISPLAY_TEXT_CHARS)]
+# F1 최대 임계값 표기(판 4, 평가 엔진 binary.threshold_text 를 프론트가 옮긴다)도 숫자 꼴(NumText)이다 — 엔진이 12자리로도
+# 예측을 못 맞출 때의 대체 표기도 지수 꼴 없는 고정소수다(S2·S3 검토 D7, 계약 decided). 지수 꼴이 오면 그 칸만 버린다.
 
-# 문제 종류 9종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
+# 성적서 양식 판(판 4 라운드). 판 3 이 기본이다 — 기본값은 요청 경계(NarrativeRequest)와 옛 경로 입구(legacy)에만 두고,
+# 안쪽 함수는 기본값 없는 keyword-only edition 으로 받는다(빠뜨리면 바로 오류). 판 결정은 프론트 한 곳이다.
+ReportEdition = Literal[3, 4]
+
+# 문제 종류 10종(서술 설계 D22). 순서가 우선순위 순서다(프론트 problemList.ts 의 KINDS 와 같다).
+# same_source(평가 데이터가 학습과 같은 출처, J8)는 판 4 요청에만 온다(판 4 라운드 S2 ③) — 판 3 프론트는 만들지 않는다.
+# 옛 백엔드는 이 종류를 422 로 돌려보낸다 — 판 4 를 켤 때 백엔드를 먼저 배포한다.
 ProblemKind = Literal[
     "core_fail",
     "inconclusive",
@@ -65,6 +73,7 @@ ProblemKind = Literal[
     "weakest_class",
     "distribution_shift",
     "label_caution",
+    "same_source",
 ]
 
 
@@ -83,9 +92,15 @@ class MetricFact(BaseModel):
     # 목표값과의 차이(서술 설계 D12). 프론트가 판정 대상 지표에만 싣는다. 높을수록 좋은 지표는
     # value − threshold, 낮을수록 좋은 지표는 threshold − value — 그래서 0 이상이면 충족 쪽이다.
     margin:       float | None = Field(default=None, description="목표값과의 차이(부호 그대로, 0 이상이면 충족 쪽)")
-    # 아슬아슬 — |margin| < |threshold| × 3%(엄격 미만). 판정은 프론트 computeVerdict 한 곳에서 하고
+    # 판 3 — 아슬아슬: |margin| < |threshold| × 3%(엄격 미만). 판정은 프론트 computeVerdict 한 곳에서 하고
     # 서버는 받은 값을 읽기만 한다. 판정 대상이 아니거나 옛 요청이면 False.
-    near_target:  bool         = Field(default=False, description="목표값과의 차이가 목표값의 3% 미만")
+    # 판 4 요청(report_edition 4)에서는 뜻이 '판정 여유 작음'이다(계약 fact_sheet_contract_ed4.json edition4_meaning — 프론트
+    # judgmentMargin 한 곳): 구간이 있으면 반올림 전 95% 신뢰구간이 목표를 포함할 때, 구간이 없으면 3% 엄격 미만. 불변식:
+    # ci_contains_target 이 None 이 아니면 near_target == ci_contains_target. 서버는 판 4 에서도 다시 계산하지 않는다.
+    near_target:  bool         = Field(
+        default=False,
+        description="판 3: 목표값과의 차이가 목표값의 3% 미만. 판 4: 판정 여유 작음(구간이 목표를 포함하거나, 구간이 없으면 3% 미만)",
+    )
     # ── S4a 프론트가 싣는 칸(계약 facts-1). 옛 요청에는 없다 — 모두 선택이고 기본값은 '모름'이다.
     value_text:   NumText | None = Field(
         default=None,
@@ -99,9 +114,20 @@ class MetricFact(BaseModel):
         default=None,
         description="margin 의 서술용 표기 — 0 과 비교한 판정과 같은 쪽으로 읽히게 자릿수를 늘림",
     )
+    # 판 3 은 넷째 자리 경계, 판 4 는 반올림 전 경계(low_raw·high_raw)로 프론트가 판정한다. 판 4 에서는 B22 두 갈래(구간 문장 /
+    # 3% 문장)를 이 칸이 None 인지로 고른다(판정 여유 작음인데 None 이면 구간이 없어 3% 로 정한 지표).
     ci_contains_target: bool | None = Field(
-        default=None, description="구간이 목표값을 포함하는가(프론트가 반올림 전 값으로 판정). None 이면 해당 없음·모름",
+        default=None,
+        description=(
+            "구간이 목표값을 포함하는가(프론트가 반올림 전 값으로 판정). None 이면 해당 없음·모름. "
+            "판 4: 반올림 전 경계로 정하고 near_target(판정 여유 작음)과 같은 값이다"
+        ),
     )
+    # ── 판 4 요청에만 있는 칸(계약 fact_sheet_contract_ed4.json). 판 3 요청에는 키가 없다.
+    ci_low_text:  NumText | None = Field(
+        default=None, description="판 4 — 신뢰구간 하한의 표기(반올림 전 경계로, 목표와의 대소가 원값과 같게 자릿수를 늘림)",
+    )
+    ci_high_text: NumText | None = Field(default=None, description="판 4 — 신뢰구간 상한의 표기(ci_low_text 와 같은 규칙)")
 
 
 class PerClassFact(BaseModel):
@@ -231,6 +257,29 @@ class F1ThresholdGainFact(BaseModel):
         default=None,
         description="gain 의 표시 문자열 — 판정(notable)과 같은 쪽으로 읽히게 자릿수를 늘린 엔진 값(S2)",
     )
+    # ── 판 4 요청에만 있는 칸(계약 fact_sheet_contract_ed4.json — 4.4 임계값 표와 5.6 서술). 판 3 요청에는 키가 없다.
+    best_threshold_text:    NumText | None = Field(default=None, description="판 4 — F1 최대 임계값 표기(엔진 값 그대로)")
+    max_f1_text:            NumText | None = Field(default=None, description="판 4 — 그 임계값의 F1 표기")
+    current_f1_text:        NumText | None = Field(default=None, description="판 4 — 지금 예측의 F1 표기")
+    best_recall_text:       NumText | None = Field(default=None, description="판 4 — 그 임계값의 Recall 표기")
+    best_precision_text:    NumText | None = Field(default=None, description="판 4 — 그 임계값의 Precision 표기")
+    current_recall_text:    NumText | None = Field(default=None, description="판 4 — 지금 예측의 Recall 표기")
+    current_precision_text: NumText | None = Field(default=None, description="판 4 — 지금 예측의 Precision 표기")
+    risk_side:              "RiskSideFact | None" = Field(
+        default=None, description="판 4 — 의뢰자가 더 위험하다고 밝힌 쪽 지표와 그 목표 충족(지금·최대 임계값)",
+    )
+
+
+class RiskSideFact(BaseModel):
+    """판 4 — 의뢰자가 밝힌 위험 방향 쪽 지표(FN → Recall, FP → Precision)의 목표 충족. 프론트가 반올림 전 값으로 정했다."""
+    side:                 Literal["fn", "fp"]
+    metric_id:            str = Field(max_length=8)
+    display_name:         str = Field(max_length=MAX_PROBLEM_TEXT_CHARS)
+    meets_target_now:     bool | None = Field(default=None, description="지금 예측이 그 지표 목표를 충족하는가. 판정 대상이 아니면 None")
+    meets_target_at_best: bool | None = Field(default=None, description="F1 최대 임계값에서 충족하는가. 판정 대상이 아니면 None")
+
+
+F1ThresholdGainFact.model_rebuild()
 
 
 class ImbalanceEffectFact(BaseModel):
@@ -335,6 +384,9 @@ class ErrorTotalsFact(BaseModel):
 class WeakestClassFact(BaseModel):
     label:            str
     f1:               float
+    # 판 4 요청에만 있는 칸(계약 edition4_only_keys) — 최약 클래스 F1 의 판 4 글자. 판정 대상 지표와 같은 원값이면 그 value_text(D2),
+    # 아니면 다른 클래스와 달라 보일 때까지 늘린 표기(D3). 판단은 프론트 한 곳이고 서버는 읽기만 한다(wording_ed4.weakest_f1_text_ed4).
+    f1_text:          NumText | None = None
     support:          int
     share:            float
     share_text:       NumText
@@ -417,6 +469,8 @@ class DistributionShiftRowFact(BaseModel):
     difference:       float
     difference_text:  NumText
     flagged:          bool
+    # 판 4 전용(facts 안 유일) — 평가 − 학습 표기(4.5 차이 열과 같은 값). 판 3 요청에는 키가 없다.
+    evaluation_minus_training_text: NumText | None = None
 
 
 class CiSkippedFact(BaseModel):
@@ -452,7 +506,11 @@ class NarrativeFactsFact(BaseModel):
     precision_recall_gap:  PrecisionRecallGapFact | None = None
     average_gap:           AverageGapFact | None = None
     declared_average:      DeclaredAverageFact | None = None
-    distribution_shift_status: Literal["compared", "not_provided", "uncovered"] = "not_provided"
+    # training_samples_not_provided 는 판 4 멀티레이블에만 온다(S2·S3 검토 T3 사용자 답) — 비율의 분모가 표본 수라 학습 분포가
+    # 있어도 학습 표본 수가 없으면 학습 비율을 낼 수 없어 비교하지 않는다(4.5 B16 고객 문장 '학습 클래스 분포가 제공되지 않아'와
+    # 이유가 다르다 — 4.5 고객 문장은 부록 B33(초안, 2026-10-24 사용자 승인)이고 S5 렌더러가 그린다. 여기·run 에는 이유 코드만).
+    # 판 3 요청에는 오지 않는다.
+    distribution_shift_status: Literal["compared", "not_provided", "uncovered", "training_samples_not_provided"] = "not_provided"
     distribution_shift:    list[DistributionShiftRowFact] = Field(default=[], max_length=MAX_CLASS_ENTRIES)
     ci_available:          bool = False
     ci_skipped:            list[CiSkippedFact] = Field(default=[], max_length=MAX_METRIC_FACTS)
@@ -536,6 +594,9 @@ class FactSheet(BaseModel):
 class NarrativeRequest(BaseModel):
     """[Step 4] LLM 서술 생성 요청"""
     task_type:      TaskType      = Field(description="분류 모델 유형")
+    # 판 신호는 이것 하나다(facts 안에 두지 않는다 — facts 는 형식이 틀리면 통째로 버려질 수 있다). 선택 칸이다 — 판 3 요청에는
+    # 키가 없고(기본 3), 판 4 프론트만 4 를 싣는다. 3·4 밖의 값은 422.
+    report_edition: ReportEdition = Field(default=3, description="성적서 양식 판(3 | 4). 판 3 요청은 싣지 않는다")
     report_purpose: ReportPurpose = Field(default=ReportPurpose.external, description="internal | external | project")
     fact_sheet:     FactSheet     = Field(description="평가 결과 사실 시트")
     client_inputs:  dict[str, Any] | None = Field(

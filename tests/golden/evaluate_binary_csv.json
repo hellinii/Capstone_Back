@@ -4,6 +4,7 @@
     "1": 95
   },
   "dropped_rows": 0,
+  "engine_version": "1.0.0",
   "environment": {
     "evaluated_at": "<비결정적 값 — 존재만 고정>",
     "libraries": "<비결정적 값 — 존재만 고정>"
@@ -99,94 +100,120 @@
       "confidence_intervals": {
         "M1": {
           "high": 0.5735,
+          "high_raw": 0.5735415464009526,
           "level": 0.95,
           "low": 0.4363,
+          "low_raw": 0.43627000033527485,
           "method": "wilson"
         },
         "M10": {
           "high": 0.5978,
+          "high_raw": 0.5977707225780837,
           "level": 0.95,
           "low": 0.4075,
+          "low_raw": 0.4075046204382681,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M19": {
           "high": 1.6508,
+          "high_raw": 1.6508233185429353,
           "level": 0.95,
           "low": 0.9193,
+          "low_raw": 0.9192591326015995,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M2": {
           "high": 0.5747,
+          "high_raw": 0.5747213534577322,
           "level": 0.95,
           "low": 0.3895,
+          "low_raw": 0.3895137339402882,
           "method": "wilson"
         },
         "M20": {
           "high": 0.1503,
+          "high_raw": 0.15025360601072396,
           "level": 0.95,
           "low": -0.1272,
+          "low_raw": -0.12722624840633961,
           "method": "bootstrap_multinomial",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M23": {
           "high": 1.439,
+          "high_raw": 1.4390243902439024,
           "level": 0.95,
           "low": 1.0,
+          "low_raw": 1.0,
           "method": "bootstrap_multinomial",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M3": {
           "high": 0.6437,
+          "high_raw": 0.6436722394728039,
           "level": 0.95,
           "low": 0.4474,
+          "low_raw": 0.44738266913924607,
           "method": "wilson"
         },
         "M4": {
           "high": 0.5909,
+          "high_raw": 0.5909146887595164,
           "level": 0.95,
           "low": 0.4271,
+          "low_raw": 0.42706614847715735,
           "method": "bootstrap_multinomial",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M5": {
           "high": 0.5909,
+          "high_raw": 0.5909146887595164,
           "level": 0.95,
           "low": 0.4271,
+          "low_raw": 0.42706614847715735,
           "method": "bootstrap_multinomial",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M6": {
           "high": 0.0524,
+          "high_raw": 0.052448084156701436,
           "level": 0.95,
           "low": 0.0001,
+          "low_raw": 5.001404590798714e-05,
           "method": "bootstrap_multinomial",
           "n_resamples": 2000,
           "seed": 4213
         },
         "M7": {
           "high": 0.5616,
+          "high_raw": 0.5615751350819953,
           "level": 0.95,
           "low": 0.3741,
+          "low_raw": 0.37411113671327867,
           "method": "wilson"
         },
         "M8": {
           "high": 0.6259,
+          "high_raw": 0.6258888632867212,
           "level": 0.95,
           "low": 0.4384,
+          "low_raw": 0.4384248649180047,
           "method": "wilson"
         },
         "M9": {
           "high": 0.5923,
+          "high_raw": 0.5922669360030681,
           "level": 0.95,
           "low": 0.4329,
+          "low_raw": 0.43287738588790065,
           "method": "bootstrap",
           "n_resamples": 2000,
           "seed": 4213
@@ -232,16 +259,31 @@
         "unit": "sample"
       },
       "f1_threshold_gain": {
+        "best_precision": 0.4821,
+        "best_precision_raw": 0.48205128205128206,
+        "best_recall": 0.9895,
+        "best_recall_raw": 0.9894736842105263,
         "best_threshold": 0.03,
+        "best_threshold_raw": 0.03,
+        "best_threshold_text": "0.030",
         "current_f1": 0.5123,
+        "current_f1_raw": 0.5123152709359606,
+        "current_precision": 0.4815,
+        "current_precision_raw": 0.48148148148148145,
+        "current_recall": 0.5474,
+        "current_recall_raw": 0.5473684210526316,
         "gain": 0.136,
+        "gain_raw": 0.13596059113300485,
         "gain_text": "0.136",
         "max_f1": 0.6483,
+        "max_f1_raw": 0.6482758620689655,
         "notable": true
       },
       "imbalance_effect": {
         "accuracy": 0.505,
         "accuracy_minus_macro_f1": 0.0001,
+        "accuracy_minus_macro_f1_raw": 0.00011140006501464406,
+        "accuracy_raw": 0.505,
         "display": {
           "accuracy": "0.505",
           "accuracy_minus_macro_f1": "0.0001",
@@ -252,13 +294,18 @@
           "minority_f1": "0.5123"
         },
         "imbalance_ratio": 1.1053,
+        "imbalance_ratio_raw": 1.105263157894737,
         "level": "mild",
         "macro_f1": 0.5049,
+        "macro_f1_raw": 0.5048885999349854,
         "majority_class": "0",
         "majority_f1": 0.4975,
+        "majority_f1_raw": 0.49746192893401014,
         "majority_minus_minority_f1": -0.0149,
+        "majority_minus_minority_f1_raw": -0.014853342001950487,
         "minority_class": "1",
-        "minority_f1": 0.5123
+        "minority_f1": 0.5123,
+        "minority_f1_raw": 0.5123152709359606
       },
       "pr_curve": {
         "precision": [
@@ -513,6 +560,10 @@
         ]
       }
     }
+  },
+  "source_file": {
+    "sha256": "58580086a1c6173120449862ac0f203a8d32122a23faf88833aa7df284207433",
+    "size_bytes": 4434
   },
   "warnings": []
 }

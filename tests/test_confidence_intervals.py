@@ -76,7 +76,9 @@ def test_engine_accuracy_eight_of_ten_is_wilson():
     rows = [(1, 1)] * 4 + [(0, 0)] * 4 + [(1, 0), (0, 1)]
     cis = _binary(rows, ["M1"])["confidence_intervals"]
 
-    assert cis == {"M1": {"low": 0.4902, "high": 0.9433, "method": "wilson", "level": 0.95}}
+    # low_raw·high_raw: 반올림 전 경계(판 4 라운드 S1).
+    assert cis == {"M1": {"low": 0.4902, "high": 0.9433, "method": "wilson", "level": 0.95,
+                          "low_raw": 0.49016247153664183, "high_raw": 0.9433178485456247}}
 
 
 def test_engine_binary_wilson_denominators_follow_the_metric():
@@ -87,7 +89,8 @@ def test_engine_binary_wilson_denominators_follow_the_metric():
 
     def wilson(k, n):
         low, high = intervals.wilson_interval(k, n)
-        return {"low": round(low, 4), "high": round(high, 4), "method": "wilson", "level": 0.95}
+        return {"low": round(low, 4), "high": round(high, 4), "method": "wilson", "level": 0.95,
+                "low_raw": low, "high_raw": high}
 
     assert cis == {"M2": wilson(4, 6), "M3": wilson(4, 5), "M7": wilson(3, 5), "M8": wilson(2, 5)}
 
@@ -172,7 +175,8 @@ def test_point_estimate_mismatch_is_skipped():
     results = {"M1": 0.5, "M4": 0.1234}  # 일부러 틀린 지표 값
     cis = intervals.calculate_confidence_intervals(df, mapping, ["M1", "M4"], results)
 
-    assert cis["M1"] == {"low": None, "high": None, "method": "skipped", "level": 0.95, "reason": "점추정 불일치"}
+    assert cis["M1"] == {"low": None, "high": None, "method": "skipped", "level": 0.95, "reason": "점추정 불일치",
+                         "low_raw": None, "high_raw": None}
     assert cis["M4"]["reason"] == "점추정 불일치"
 
 

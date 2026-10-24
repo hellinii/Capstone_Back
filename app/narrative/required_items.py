@@ -29,9 +29,14 @@ text 가운데 fixed·form·7.3(open_ended) 항목은 AI 용 설명이라 템플
   생략이면 생략 사유를 쓴다.
 - 7.1 오류 성격·8.3 근소 차이는 고정 문구 17·18 + 해석. 8.2 평균 방식·지표 선택 기준은 양식.
 
+판 4(Ctx.edition 4 — 요청의 report_edition, 판 4 라운드 S2 ⑦): 같은 표·같은 문장 틀에 숫자만 판 4 표기(wording_ed4 — 셋째 자리,
+판정과 이어진 값은 프론트 *_text, 비율은 첫째 자리 %)로 넣고, 판 4 에서 글이 다른 문장만 갈래를 둔다 — 판정 문장의 통과율(A11),
+신뢰구간 경계(*_text), 임계값 조정의 위험 쪽 지표(B20), 참조 범위 위치(B21), 판정 여유 작음(B22 — 고정 문구 18 을 보지 않는다),
+최약 클래스의 운영 위험 조건(D49 ②), 양식 설명의 절 번호(A4). 판 3 글은 그대로다(얼린 정답).
+
 상호작용
 - 의존(import): app.narrative.schemas, app.narrative.derived(compute_derived), app.narrative.baselines, app.narrative.sections,
-  app.narrative.wording
+  app.narrative.wording, app.narrative.wording_ed4
 - 사용처: (S5) 지시문의 칸별 "반드시 다룰 결론", (S6) 규칙 템플릿(app.narrative.fallback), (S5) D24 생성 뒤 확인, tests
 """
 from __future__ import annotations
@@ -41,7 +46,8 @@ from typing import Any, Callable, Literal
 
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.derived import compute_derived
-from app.narrative.schemas import FactSheet
+from app.narrative.schemas import FactSheet, ImbalanceDisplayFact
+from app.narrative import wording_ed4
 from app.narrative.sections import SECTION_IDS
 from app.narrative.wording import (
     KOREAN_COUNT,
@@ -125,6 +131,8 @@ class Ctx:
     client_inputs: dict[str, Any]
     derived: dict
     benchmark_refs: list[dict]
+    # 성적서 양식 판(3 | 4 — 요청의 report_edition). 기본값을 두지 않는다 — 빠뜨리면 바로 오류(판 4 라운드 S2 ②).
+    edition: int
     selected: set[str] = field(default_factory=set)
     descriptions: dict[str, str] = field(default_factory=dict)
 
@@ -138,11 +146,66 @@ class Ctx:
         return next((s for s in self.facts.fixed_sentences if s.id == sentence_id), None)
 
     def name(self, label) -> str:
-        """클래스·레이블을 부르는 꼴 — 이름(설명)(D37)."""
+        """클래스·레이블을 부르는 꼴 — 이름(설명)(D37). 판 4 는 설명에 괄호가 있으면 이름[설명](wording_ed4.class_name_ed4 —
+        S6 뒤 사용자 결정 5), 판 3 은 wording.class_name 그대로."""
+        if self.edition == 4:
+            return wording_ed4.class_name_ed4(label, self.descriptions.get(str(label).strip()))
         return class_name(label, self.descriptions)
+
+    def with_josa(self, word: str, pair: str) -> str:
+        """말 + 조사 — 판 4 는 '이름[설명]'의 대괄호 앞 이름으로 고르는 wording_ed4.with_josa, 판 3 은 wording.with_josa."""
+        return wording_ed4.with_josa(word, pair) if self.edition == 4 else with_josa(word, pair)
+
+    def cnt(self, n) -> str:
+        """정수 건수 — 판 4 는 1,000 이상이면 천 단위 쉼표(wording_ed4.ed4_count — S6 뒤 사용자 결정 4), 판 3 은 그대로(str)."""
+        return wording_ed4.ed4_count(n) if self.edition == 4 else str(n)
+
+    def name_count(self, label, count_with_unit: str) -> str:
+        """이름 바로 뒤 건수 — 판 4 는 이름이 숫자로 끝나면 '{이름}: {n}건'(wording_ed4.name_count_ed4), 판 3 은 '{이름} {n}건'."""
+        shown = self.name(label)
+        return wording_ed4.name_count_ed4(shown, count_with_unit) if self.edition == 4 else f"{shown} {count_with_unit}"
 
     def prints(self, sentence_id: str) -> bool:
         return code_prints(self.fs, sentence_id)
+
+    # ── 숫자 표기(판마다 — 판 4 는 wording_ed4, 판 3 은 wording 그대로) ──
+    def num(self, value) -> str:
+        """판정과 무관한 실수 — 판 3 은 넷째 자리(wording.num), 판 4 는 셋째 자리 끝 0 유지(ed4_plain). 정수·글은 그대로."""
+        if self.edition == 4 and isinstance(value, float):
+            return wording_ed4.ed4_plain(value)
+        return num(value)
+
+    def same(self, value) -> str:
+        """판정과 무관한 자리의 값 — 판 4 는 같은 원값의 판정 대상 지표가 있으면 그 value_text(D2 — wording_ed4.same_value_text_ed4),
+        아니면 plain. 판 3 은 num 그대로."""
+        if self.edition == 4:
+            return wording_ed4.same_value_text_ed4(self.fs.metrics, value)
+        return num(value)
+
+    def weakest_f1(self, w) -> str:
+        """최약 클래스 F1 — 판 4 는 프론트가 실은 글자(facts.weakest_class.f1_text, D2·D3 — wording_ed4.weakest_f1_text_ed4), 판 3 은 num."""
+        if self.edition == 4:
+            return wording_ed4.weakest_f1_text_ed4(self.fs)
+        return num(w.f1)
+
+    def class_f1(self, label, value) -> str:
+        """클래스 하나의 F1 — 판 4 는 사실 보기 클래스별 표와 같은 한 곳(wording_ed4.class_f1_text_ed4: 최약 클래스면 최약 클래스 F1
+        글자, 그 밖은 D2 → 최약 클래스와 같아 보이면 늘린 표기 D3), 판 3 은 num."""
+        if self.edition == 4:
+            return wording_ed4.class_f1_text_ed4(self.fs, label, value)
+        return self.same(value)
+
+    def pct(self, ratio: float) -> str:
+        """비율(0~1)의 백분율 — 판 4 는 plain 글자를 옮긴 첫째 자리(ed4_percent(ed4_plain)), 판 3 은 wording.pct."""
+        if self.edition == 4:
+            return wording_ed4.ed4_percent(wording_ed4.ed4_plain(ratio))
+        return pct(ratio)
+
+    def pct_text(self, fraction_text: str) -> str:
+        """판정 쪽으로 늘린 비율 표기(0~1)의 백분율 — 판 4 는 ed4_percent, 판 3 은 wording.pct_text."""
+        if self.edition == 4:
+            return wording_ed4.ed4_percent(fraction_text)
+        return pct_text(fraction_text)
 
 
 @dataclass(frozen=True)
@@ -188,15 +251,19 @@ def _misclassified(ctx: Ctx) -> str | None:
     conf = ctx.derived.get("confusion")
     if not conf:
         return None
-    share = f"({conf['misclassified_pct']:g}%)" if "misclassified_pct" in conf else ""
+    if ctx.edition == 4:
+        # 판 4 — 건수 비율을 셋째 자리 글자에서 옮긴 첫째 자리(사실 보기 '틀림 비율'과 같은 함수).
+        share = f"({wording_ed4.ed4_ratio_percent(conf['misclassified'], conf['total'])})" if conf.get("total") else ""
+    else:
+        share = f"({conf['misclassified_pct']:g}%)" if "misclassified_pct" in conf else ""
     if conf.get("unit") == "label_cell":
         # 멀티레이블 — 합계는 표본이 아니라 레이블 칸(표본 수 × 레이블 수)이다. '전체 N건'이라 쓰면 7.2 의 표본 수와
         # 어긋난다(점검 BE-09). 경계·확신 오류 문장(D30)과 같은 '레이블 칸' 단위로 쓴다.
-        text = f"레이블별 혼동행렬을 합친 레이블 칸 {conf['total']}칸 중 {conf['misclassified']}칸{share}이 틀렸다."
+        text = f"레이블별 혼동행렬을 합친 레이블 칸 {ctx.cnt(conf['total'])}칸 중 {ctx.cnt(conf['misclassified'])}칸{share}이 틀렸다."
         if "fn" in conf and "fp" in conf:
-            text += f" 있어야 할 레이블을 놓친 칸(FN)은 {conf['fn']}칸, 없는 레이블을 붙인 칸(FP)은 {conf['fp']}칸이다."
+            text += f" 있어야 할 레이블을 놓친 칸(FN)은 {ctx.cnt(conf['fn'])}칸, 없는 레이블을 붙인 칸(FP)은 {ctx.cnt(conf['fp'])}칸이다."
         return text
-    return f"혼동행렬 기준 전체 {conf['total']}건 중 {conf['misclassified']}건{share}이 오분류되었다."
+    return f"혼동행렬 기준 전체 {ctx.cnt(conf['total'])}건 중 {ctx.cnt(conf['misclassified'])}건{share}이 오분류되었다."
 
 
 def _binary_counts(ctx: Ctx):
@@ -219,7 +286,7 @@ def _fp_fn(ctx: Ctx) -> str | None:
         return None
     label, fp, fn = got
     who = f"양성 클래스 {ctx.name(label)} 기준으로 " if label else ""
-    return f"{who}거짓 양성(FP)은 {fp}건, 거짓 음성(FN)은 {fn}건이다."
+    return f"{who}거짓 양성(FP)은 {ctx.cnt(fp)}건, 거짓 음성(FN)은 {ctx.cnt(fn)}건이다."
 
 
 _RISK_SIDE = {"fn": "거짓 음성(FN, 놓침)", "fp": "거짓 양성(FP, 잘못 잡음)"}
@@ -231,8 +298,9 @@ def _declared_risk(ctx: Ctx) -> str | None:
         return None
     side = _RISK_SIDE[dr.side]
     if dr.share is None:
-        return f"오분류가 없어 의뢰자가 더 위험하다고 밝힌 {side}도 {dr.count}건이다."
-    return f"의뢰자가 더 위험하다고 밝힌 {side}은 {dr.count}건으로 전체 오류 {dr.total_errors}건의 {pct(dr.share)}이다."
+        return f"오분류가 없어 의뢰자가 더 위험하다고 밝힌 {side}도 {ctx.cnt(dr.count)}건이다."
+    share = ctx.pct_text(dr.share_text) if ctx.edition == 4 and dr.share_text else ctx.pct(dr.share)
+    return f"의뢰자가 더 위험하다고 밝힌 {side}은 {ctx.cnt(dr.count)}건으로 전체 오류 {ctx.cnt(dr.total_errors)}건의 {share}이다."
 
 
 def _declared_risk_values(ctx: Ctx) -> tuple[float, ...]:
@@ -254,7 +322,7 @@ def _per_class_errors(ctx: Ctx) -> str | None:
         return None
     top = sorted(rows, key=lambda r: -(r.fp + r.fn))[:3]
     unit = "칸" if ctx.task_type == "multilabel" else "건"  # 멀티레이블은 레이블 칸 단위(7.1 의 합계·17 과 같은 단위)
-    items = join_and([f"{ctx.name(r.label)} FP {r.fp}{unit}·FN {r.fn}{unit}" for r in top])
+    items = join_and([f"{ctx.name(r.label)} FP {ctx.cnt(r.fp)}{unit}·FN {ctx.cnt(r.fn)}{unit}" for r in top])
     noun = _noun(ctx)
     if _trimmed(ctx, "confusion_counts"):
         # 클래스가 많아 프론트가 표본 수 순으로 줄을 잘랐다 — 빠진 클래스의 오류가 더 많을 수 있다(세션 A 검토 P1).
@@ -273,7 +341,8 @@ def _top_pairs(ctx: Ctx) -> str | None:
     if not pairs:
         return None
     items = join_and([
-        f"{ctx.name(p.actual)}→{ctx.name(p.predicted)} {p.count}건(전체 오분류의 {pct(p.share_of_errors)})" for p in pairs
+        f"{ctx.name(p.actual)}→{ctx.name_count(p.predicted, f'{ctx.cnt(p.count)}건(전체 오분류의 {ctx.pct(p.share_of_errors)})')}"
+        for p in pairs
     ])
     return f"가장 많이 헷갈린 쌍(실제→예측)은 {items}이다."
 
@@ -286,42 +355,49 @@ def _bias(ctx: Ctx, unit: str) -> str | None:
         r = bias.rows[0]
         pos = f"양성 클래스 {ctx.name(r.label)}" if r.label else "양성"
         if not r.difference:
-            return f"{with_josa(pos, '으로/로')} 예측한 것과 실제 양성이 {r.actual}건으로 같다."
+            return f"{ctx.with_josa(pos, '으로/로')} 예측한 것과 실제 양성이 {ctx.cnt(r.actual)}건으로 같다."
         lean = "많이" if r.difference > 0 else "적게"
         return (
-            f"{with_josa(pos, '으로/로')} 예측한 것은 {r.predicted}건, 실제 양성은 {r.actual}건으로, "
-            f"양성을 실제보다 {abs(r.difference)}건 {lean} 예측했다."
+            f"{ctx.with_josa(pos, '으로/로')} 예측한 것은 {ctx.cnt(r.predicted)}건, 실제 양성은 {ctx.cnt(r.actual)}건으로, "
+            f"양성을 실제보다 {ctx.cnt(abs(r.difference))}건 {lean} 예측했다."
         )
     if unit == "label_total":
         r = bias.rows[0]
         if not r.difference:
-            return f"예측한 레이블 수와 실제 레이블 수가 {r.actual}개로 같다."
+            return f"예측한 레이블 수와 실제 레이블 수가 {ctx.cnt(r.actual)}개로 같다."
         lean = "많이" if r.difference > 0 else "적게"
         return (
-            f"예측한 레이블은 모두 {r.predicted}개, 실제 레이블은 {r.actual}개로, "
-            f"레이블을 실제보다 {abs(r.difference)}개 {lean} 붙였다."
+            f"예측한 레이블은 모두 {ctx.cnt(r.predicted)}개, 실제 레이블은 {ctx.cnt(r.actual)}개로, "
+            f"레이블을 실제보다 {ctx.cnt(abs(r.difference))}개 {lean} 붙였다."
         )
     top = sorted(bias.rows, key=lambda r: -abs(r.difference))[:3]
     if all(r.difference == 0 for r in top):
         return "클래스마다 예측한 수와 실제 수가 같다."
-    items = join_and([f"{ctx.name(r.label)} 예측 {r.predicted}건·실제 {r.actual}건" for r in top if r.difference])
+    items = join_and([f"{ctx.name(r.label)} 예측 {ctx.cnt(r.predicted)}건·실제 {ctx.cnt(r.actual)}건" for r in top if r.difference])
     return f"예측 수와 실제 수의 차이가 큰 클래스는 {items}이다."
 
 
 # 최약 클래스 동점(세션 C 실호출 — Digits 는 2·8, yeast 는 아홉 레이블이 F1 0 인데 facts.weakest_class 하나만 단독 최약처럼
-# 썼다). 동점은 인쇄 자릿수(num — 넷째 자리)로 같은 F1 이다. 이름은 다섯까지만 싣는다.
+# 썼다). 판 3 의 동점은 인쇄 자릿수(num — 넷째 자리)로 같은 F1 이다. 판 4 는 셋째 자리로 같아 보이면 서로 달라질 때까지 여섯째
+# 자리까지 늘려 찍으므로(D3 — wording_ed4.ed4_distinct, 프론트 최약 클래스 고르기와 같은 기준) 여섯째 자리로도 같을 때만 동점이다.
+# 이름은 다섯까지만 싣는다.
 _TIE_NAMES_SHOWN = 5
 
 
-def weakest_ties(fs: FactSheet) -> tuple[list[str], bool]:
+def _tie_key(value: float, edition: int) -> str:
+    return wording_ed4._fixed(float(value), wording_ed4.MAX_DIGITS) if edition == 4 else num(float(value))
+
+
+def weakest_ties(fs: FactSheet, *, edition: int) -> tuple[list[str], bool]:
     """(F1 이 최약 클래스와 같은 클래스 이름 — 최약 클래스가 맨 앞, 클래스별 표가 잘렸는가). 동점이 없으면 빈 목록.
 
-    클래스별 표(per_class)로 본다. 프론트가 표를 잘랐으면(facts.omitted.per_class) 실린 클래스 가운데의 동점이다."""
+    클래스별 표(per_class)로 본다. 프론트가 표를 잘랐으면(facts.omitted.per_class) 실린 클래스 가운데의 동점이다.
+    edition 은 동점을 가르는 자릿수의 판(판 3 넷째 자리, 판 4 여섯째 자리 — 위 주석)."""
     w = fs.facts.weakest_class if fs.facts is not None else None
     if w is None or not fs.per_class:
         return [], False
-    key = num(float(w.f1))
-    tied = [p.label for p in fs.per_class if p.f1 is not None and p.label != w.label and num(float(p.f1)) == key]
+    key = _tie_key(w.f1, edition)
+    tied = [p.label for p in fs.per_class if p.f1 is not None and p.label != w.label and _tie_key(p.f1, edition) == key]
     trimmed = bool(fs.facts.omitted.get("per_class"))
     return ([w.label] + tied if tied else []), trimmed
 
@@ -336,11 +412,16 @@ def _tied_phrase(ctx: Ctx, tied: list[str]) -> str:
 
 def _weakest_head(ctx: Ctx, w, tail: str) -> str:
     """최약 클래스 첫머리 — 동점이면 함께 부른다. tail 은 동점이 없을 때 이름 뒤에 붙는 말('이며'·'이다')."""
-    tied, trimmed = weakest_ties(ctx.fs)
+    tied, trimmed = weakest_ties(ctx.fs, edition=ctx.edition)
     if not tied:
-        return f"F1 이 가장 낮은 {_topic(ctx)} F1 {num(w.f1)}인 {ctx.name(w.label)}{tail}"
+        return f"F1 이 가장 낮은 {_topic(ctx)} F1 {ctx.weakest_f1(w)}인 {ctx.name(w.label)}{tail}"
     scope = f"표에 실린 {_noun(ctx)} 가운데 " if trimmed else ""
-    return f"{scope}F1 이 가장 낮은 {_topic(ctx)} F1 {with_josa(num(w.f1), '으로/로')} {_tied_phrase(ctx, tied)}{tail}"
+    return f"{scope}F1 이 가장 낮은 {_topic(ctx)} F1 {with_josa(ctx.weakest_f1(w), '으로/로')} {_tied_phrase(ctx, tied)}{tail}"
+
+
+def _share_base(ctx: Ctx) -> str:
+    """최약 클래스 비율의 분모 이름 — 멀티레이블은 레이블 등장 횟수, 그 밖은 전체 표본(facts.class_share_basis)."""
+    return "레이블 등장" if ctx.facts.class_share_basis == "label_occurrences" else "전체 표본"
 
 
 def _weakest(ctx: Ctx) -> str | None:
@@ -348,16 +429,16 @@ def _weakest(ctx: Ctx) -> str | None:
     if w is None:
         return None
     noun = _noun(ctx)
-    base = "레이블 등장" if ctx.facts.class_share_basis == "label_occurrences" else "전체 표본"
-    tied, _ = weakest_ties(ctx.fs)
+    base = _share_base(ctx)
+    tied, _ = weakest_ties(ctx.fs, edition=ctx.edition)
     if tied:
         # 표본·비율·매크로 F1 과의 차이는 facts 가 고른 한 클래스의 값이다 — 그 클래스를 이름으로 밝힌다.
         text = (
             _weakest_head(ctx, w, "이며, ")
-            + f"그 가운데 {ctx.name(w.label)}의 표본은 {w.support}건으로 {base}의 {pct_text(w.share_text)}이다."
+            + f"그 가운데 {ctx.name(w.label)}의 표본은 {ctx.cnt(w.support)}건으로 {base}의 {ctx.pct_text(w.share_text)}이다."
         )
     else:
-        text = _weakest_head(ctx, w, "이며, ") + f"표본은 {w.support}건으로 {base}의 {pct_text(w.share_text)}이다."
+        text = _weakest_head(ctx, w, "이며, ") + f"표본은 {ctx.cnt(w.support)}건으로 {base}의 {ctx.pct_text(w.share_text)}이다."
     if w.gap_text is not None:
         text += f" 매크로 F1 과의 차이는 {w.gap_text}이다."
     # 사유별로 따로 쓴다 — 'A 또는 B' 로 쓰면 걸리지 않은 쪽까지 주장하게 된다.
@@ -369,11 +450,11 @@ def _weakest(ctx: Ctx) -> str | None:
     if w.far_below_macro:
         stems.append("매크로 F1 보다 0.1 이상 낮")
     if stems:
-        subject = with_josa(ctx.name(w.label), "은/는") if tied else f"이 {with_josa(noun, '은/는')}"
+        subject = ctx.with_josa(ctx.name(w.label), "은/는") if tied else f"이 {with_josa(noun, '은/는')}"
         text += f" {subject} " + _clauses(stems)
     small = [r for r in ctx.facts.low_support_classes if r.label != w.label]
     if small:
-        listed = join_and([f"{ctx.name(r.label)} {r.support}건" for r in small[:5]])
+        listed = join_and([ctx.name_count(r.label, f"{ctx.cnt(r.support)}건") for r in small[:5]])
         more = len(small) > 5 or _trimmed(ctx, "low_support_classes", "facts_class_lists")
         text += f" 그 밖에 표본이 작은 {with_josa(noun, '은/는')} {listed}{' 등' if more else ''}이다."
     return text
@@ -518,29 +599,34 @@ def _error_interpretation(er) -> str | None:
     return "경계 오류와 확신 오류가 같은 수로 나타나 어느 한쪽 성격의 오류가 우세하지 않다."
 
 
-def error_ratio_sentence(er) -> str:
-    """7.1 오류의 성격 숫자 문장(서술 설계 D30) — 성적서가 고정 문구 17 을 찍지 않는 옛 요청에서만 템플릿이 쓴다.
-    숫자는 error_ratios 의 값과 두 기준뿐이다."""
+def error_ratio_sentence(er, *, edition: int) -> str:
+    """7.1 오류의 성격 숫자 문장(서술 설계 D30) — 성적서가 고정 문구 17 을 찍지 않는 요청에서만 템플릿이 쓴다.
+    숫자는 error_ratios 의 값과 두 기준뿐이다. 판 4(edition 4)는 비율을 건수에서 판 4 표기로(고정 문구 17 의 '1건(33.3%)')."""
     cell = er.unit == "label_cell"
     unit, counter = ("틀린 레이블 칸", "칸") if cell else ("오분류", "건")
     if er.misclassified == 0:
         subject = "틀린 레이블 칸이" if cell else "오분류가"
         return f"확률이 있는 {subject} 없어 경계 오류·확신 오류 비율은 산출하지 않았다."
 
+    # 판 4 건수는 1,000 이상이면 천 단위 쉼표(S6 뒤 사용자 결정 4 — 고정 문구 17 과 같은 '2,687개' 꼴).
+    n = wording_ed4.ed4_count if edition == 4 else str
+
     def seg(part) -> str:
+        if edition == 4:
+            return f"{n(part.count)}{counter}({wording_ed4.ed4_ratio_percent(part.count, er.misclassified)})"
         return f"{part.count}{counter}({pct(part.ratio)})" if part.ratio is not None else f"{part.count}{counter}"
 
     confident = f"틀린 쪽 확률이 {er.confident_level:g} 이상인 확신 오류는 {seg(er.confident)}이다."
     if er.boundary is not None:
         return (
-            f"{unit} {er.misclassified}{counter} 중 결정 경계와의 거리가 {er.boundary_margin:g} 미만인 "
+            f"{unit} {n(er.misclassified)}{counter} 중 결정 경계와의 거리가 {er.boundary_margin:g} 미만인 "
             f"경계 오류는 {seg(er.boundary)}, {confident}"
         )
     if er.boundary_note == "threshold_unknown":
         reason = "예측값을 직접 제출해 결정 임계값을 알 수 없으므로 경계 오류는 계산하지 않았고, "
     else:
         reason = "경계 오류는 계산하지 않았고, "
-    return f"{unit} {er.misclassified}{counter} 중 {reason}{confident}"
+    return f"{unit} {n(er.misclassified)}{counter} 중 {reason}{confident}"
 
 
 def _error_nature_template(ctx: Ctx) -> str | None:
@@ -550,7 +636,7 @@ def _error_nature_template(ctx: Ctx) -> str | None:
     interpretation = _error_interpretation(er)
     if ctx.prints("17"):
         return interpretation  # 숫자는 성적서가 7.1 옆에 찍는다
-    return error_ratio_sentence(er) + (f" {interpretation}" if interpretation else "")
+    return error_ratio_sentence(er, edition=ctx.edition) + (f" {interpretation}" if interpretation else "")
 
 
 def _derivation(ctx: Ctx) -> str | None:
@@ -566,10 +652,13 @@ def _derivation(ctx: Ctx) -> str | None:
 def _imbalance_ratio(ctx: Ctx) -> str | None:
     ie = ctx.fs.imbalance_effect
     if ie is not None:
-        shown = ie.display.imbalance_ratio if ie.display else num(ie.imbalance_ratio)
+        if ctx.edition == 4:
+            shown = wording_ed4.imbalance_texts_ed4(ie)["imbalance_ratio"]
+        else:
+            shown = ie.display.imbalance_ratio if ie.display else num(ie.imbalance_ratio)
         text = f"불균형 비율은 {shown}이다."
     elif ctx.fs.distribution is not None and ctx.fs.distribution.imbalance_ratio is not None:
-        text = f"불균형 비율은 {num(ctx.fs.distribution.imbalance_ratio)}이다."
+        text = f"불균형 비율은 {ctx.num(ctx.fs.distribution.imbalance_ratio)}이다."
     else:
         return None
     if ctx.task_type == "multilabel":
@@ -583,7 +672,7 @@ def _imbalance_ratio_template(ctx: Ctx) -> str | None:
     if ctx.fs.imbalance_effect is not None:
         return None
     if ctx.fs.distribution is not None and ctx.fs.distribution.imbalance_ratio is not None:
-        return f"불균형 비율은 {num(ctx.fs.distribution.imbalance_ratio)}이다."
+        return f"불균형 비율은 {ctx.num(ctx.fs.distribution.imbalance_ratio)}이다."
     return None
 
 
@@ -597,11 +686,18 @@ _IMBALANCE_LEVEL = {
 }
 
 
+def _imbalance_display(ctx: Ctx, ie):
+    """불균형 영향의 표시 문자열 — 판 4 는 늘 판 4 표기(프론트 display, 없으면 wording_ed4 가 찍은 것), 판 3 은 받은 display."""
+    if ctx.edition != 4:
+        return ie.display
+    return ImbalanceDisplayFact(**{k: v for k, v in wording_ed4.imbalance_texts_ed4(ie).items()})
+
+
 def _imbalance_effect(ctx: Ctx) -> str | None:
     ie = ctx.fs.imbalance_effect
     if ie is None:
         return None
-    shown = ie.display
+    shown = _imbalance_display(ctx, ie)
     gap = shown.majority_minus_minority_f1 if shown else num(ie.majority_minus_minority_f1)
     if ie.accuracy_minus_macro_f1 is None:
         gaps = gaps_all = "다수·소수 레이블 F1 차이가"
@@ -609,7 +705,7 @@ def _imbalance_effect(ctx: Ctx) -> str | None:
         gaps, gaps_all = "정확도 − 매크로 F1 과 다수 − 소수 F1 차이 중 하나가", "정확도 − 매크로 F1 과 다수 − 소수 F1 차이가 모두"
     rule = _IMBALANCE_LEVEL[ie.level].format(gaps=gaps, gaps_all=gaps_all)
     text = (
-        f"{rule}. 다수 {_noun(ctx)} {with_josa(ctx.name(ie.majority_class), '과/와')} 소수 {_noun(ctx)} "
+        f"{rule}. 다수 {_noun(ctx)} {ctx.with_josa(ctx.name(ie.majority_class), '과/와')} 소수 {_noun(ctx)} "
         f"{ctx.name(ie.minority_class)}의 F1 차이는 {gap}"
     )
     if ie.accuracy_minus_macro_f1 is not None:
@@ -731,7 +827,12 @@ def imbalance_sentence(ie, name: Callable[[str], str] = str, *, minority_small: 
 
 def _imbalance_effect_template(ctx: Ctx) -> str | None:
     ie = ctx.fs.imbalance_effect
-    return imbalance_sentence(ie, ctx.name, minority_small=minority_is_small(ctx.fs)) if ie is not None else None
+    if ie is None:
+        return None
+    if ctx.edition == 4:
+        # 판 4 — 같은 문장에 판 4 표기를 넣는다(display 가 없으면 wording_ed4 가 찍은 표기를 채운다).
+        ie = ie.model_copy(update={"display": _imbalance_display(ctx, ie)})
+    return imbalance_sentence(ie, ctx.name, minority_small=minority_is_small(ctx.fs))
 
 
 def _distribution_shift(ctx: Ctx) -> str | None:
@@ -743,7 +844,7 @@ def _distribution_shift(ctx: Ctx) -> str | None:
     if not flagged:
         return f"학습 분포와 평가 분포의 {noun} 비율 차는 모두 10%p 미만이다."
     items = join_and([
-        f"{ctx.name(r.label)} 학습 {pct(r.training_ratio)}·평가 {pct(r.evaluation_ratio)}" for r in flagged
+        f"{ctx.name(r.label)} 학습 {ctx.pct(r.training_ratio)}·평가 {ctx.pct(r.evaluation_ratio)}" for r in flagged
     ])
     return f"학습 분포와 평가 분포의 비율 차가 10%p 이상인 {with_josa(noun, '은/는')} {items}이다."
 
@@ -765,6 +866,13 @@ _QUALITY_GROUP = (
     ("within", "참조 범위 안에 드는 지표"),
     ("worse", "참조 범위에 비해 미흡한 지표"),
 )
+# 판 4(대응표 22, 부록 A10·B21) — 방향을 반영한 우열(우수/미흡) 대신 수치 위치(position)로 묶는다. 낮을수록 좋은 지표도
+# 수치로만 말한다(Hamming Loss 0.03 은 '참조 범위보다 낮은 지표'). 평가 말을 쓰지 않는다.
+_POSITION_GROUP_ED4 = (
+    ("above", "참조 범위보다 높은 지표"),
+    ("within", "참조 범위 안에 드는 지표"),
+    ("below", "참조 범위보다 낮은 지표"),
+)
 # 목표값 수준(D31) — 단순 수치 위치라 방향(우수/미흡)으로 바꾸지 않는다.
 _TARGET_GROUP = (
     ("below", "목표값이 참조 범위보다 낮은 지표"),
@@ -782,6 +890,18 @@ def benchmark_value_text(metrics: list, ref: dict) -> str:
     if metric is None:
         return range_value_text(float(ref["model_value"]), low, high)
     return range_value_text(float(metric.value), low, high, shown_value(metric), _target_of(metric))
+
+
+def benchmark_value_text_ed4(metrics: list, ref: dict) -> str:
+    """판 4 참조 범위 비교(4.6·5.4)의 모델 값 — KPI 원값을 판 4 표기로(판정 대상이면 value_text, 아니면 셋째 자리 끝 0 유지).
+    기준표의 model_value(넷째 자리 반올림 — 0.9825 → 0.983 이 된다)는 쓰지 않는다(계획 2.7). 범위 끝과 같아 보여 위치와
+    반대로 읽히면 자릿수를 늘린다(wording_ed4.ed4_range_value_text). 판 4 사실 보기·규칙 문장이 이 함수 하나를 쓴다."""
+    metric = next((m for m in metrics if m.display_name == ref["metric"]), None)
+    low, high = float(ref["ref_low"]), float(ref["ref_high"])
+    if metric is None:
+        return wording_ed4.ed4_range_value_text(float(ref["model_value"]), low, high)
+    base = metric.value_text if metric.threshold is not None and metric.value_text else None
+    return wording_ed4.ed4_range_value_text(float(metric.value), low, high, base, _target_of(metric))
 
 
 def _target_of(metric) -> tuple[float, bool, bool] | None:
@@ -811,9 +931,33 @@ def _grouped(groups, refs: list[dict], key: str, item) -> str:
     return _clauses(stems)
 
 
+def _clauses_ed4(stems: list[str]) -> str:
+    """'…이고, …이며, …이다.' — 부록 B21 의 이음(첫 이음 '고', 그다음 '며'). 없는 갈래는 호출부가 뺀다."""
+    out = stems[0]
+    for i, stem in enumerate(stems[1:]):
+        out += ("고, " if i == 0 else "며, ") + stem
+    return out + "다."
+
+
+def _benchmark_ed4(ctx: Ctx) -> str:
+    """판 4 참조 범위 위치 문장(부록 B21) — 수치 위치로 묶고, 값은 KPI 원값의 판 4 표기, 범위 끝은 둘째 자리."""
+    stems = []
+    for code, head in _POSITION_GROUP_ED4:
+        listed = [
+            f"{r['metric']}({benchmark_value_text_ed4(ctx.fs.metrics, r)}, "
+            f"참조 범위 {wording_ed4.ed4_range_text(r['ref_low'], r['ref_high'])})"
+            for r in ctx.benchmark_refs if r.get("position") == code
+        ]
+        if listed:
+            stems.append(f"{head}는 {join_and(listed)}이")
+    return "내부 참조 기준과 비교하면 " + _clauses_ed4(stems)
+
+
 def _benchmark(ctx: Ctx) -> str | None:
     if not ctx.benchmark_refs:
         return None
+    if ctx.edition == 4:
+        return _benchmark_ed4(ctx)
     return "내부 참조 기준과 비교하면 " + _grouped(
         _QUALITY_GROUP, ctx.benchmark_refs, "quality",
         lambda r: f"{r['metric']}({_ref_value(ctx, r)}, 참조 범위 {num(float(r['ref_low']))}~{num(float(r['ref_high']))})",
@@ -824,7 +968,10 @@ def _target_level(ctx: Ctx) -> str | None:
     refs = [r for r in ctx.benchmark_refs if r.get("target_value") is not None]
     if not refs:
         return None
-    return _grouped(_TARGET_GROUP, refs, "target_position", lambda r: f"{r['metric']}(목표 {target_text(r['target_value'])})")
+    # 목표값 표기 — 판 4 는 합격 기준과 같은 글자(ed4_target — 셋째 자리 끝 0 유지 0.950, 넷째 자리 이상 목표는 받은 글자 그대로,
+    # D1), 판 3 은 반올림하지 않은 값.
+    target = wording_ed4.ed4_target if ctx.edition == 4 else target_text
+    return _grouped(_TARGET_GROUP, refs, "target_position", lambda r: f"{r['metric']}(목표 {target(r['target_value'])})")
 
 
 def _no_benchmark(ctx: Ctx) -> str | None:
@@ -845,6 +992,8 @@ _CAUSE = {
 
 
 def _verdict_rule(ctx: Ctx) -> str | None:
+    if ctx.edition == 4:
+        return "판정 규칙(핵심 지표 미달 → 불합격, 산출 실패·판정 대상 없음 → 판정 불가 …)은 3.4절에 고정 문구 10 으로 찍힌다."
     return "판정 규칙(핵심 지표 미달 → 불합격, 산출 실패·판정 대상 없음 → 판정 불가 …)은 6.1 표에 고정 문구 10 으로 찍힌다."
 
 
@@ -868,7 +1017,9 @@ def _verdict_reason(ctx: Ctx) -> str | None:
     if vd.failed_noncore:
         parts.append(f"목표에 미달한 비핵심 지표는 {_names(vd.failed_noncore)}이다.")
     if vd.judged_count:
-        parts.append(f"참고로 판정 대상 {vd.judged_count}개 중 {vd.passed_count}개가 목표를 충족했다(통과율은 판정 근거가 아니다).")
+        # 판 4 는 통과율을 쓰지 않는다 — 충족 수만(부록 A11).
+        why = "이 수는 참고이며 판정의 근거가 아니다" if ctx.edition == 4 else "통과율은 판정 근거가 아니다"
+        parts.append(f"참고로 판정 대상 {vd.judged_count}개 중 {vd.passed_count}개가 목표를 충족했다({why}).")
     return " ".join(parts)
 
 
@@ -882,7 +1033,7 @@ def failed_metrics(fs: FactSheet) -> list:
     return [m for m in fs.metrics if m.status == "fail" and m.threshold is not None]
 
 
-def verdict_sentence(fs: FactSheet, derived: dict) -> str:
+def verdict_sentence(fs: FactSheet, derived: dict, *, edition: int) -> str:
     """8.2 판정 문장(규칙 템플릿) — 판정 규칙(서술 설계 D19)의 사유로 쓴다. 통과율은 판정 근거가 아니라 참고다.
 
     종전에는 'N개 중 M개가 기준을 충족하여(통과율 x%), 종합 판정은 …'이라 써서, 불합격이 '대부분 충족해서
@@ -894,14 +1045,20 @@ def verdict_sentence(fs: FactSheet, derived: dict) -> str:
       그것도 없으면(옛 프론트) 규칙의 두 경우.
     - PASS: 판정 대상 지표가 모두 목표 충족.
     통과율은 판정 대상(목표가 설정된 지표)이 있을 때만 '참고로' 덧붙인다.
+    판 4(edition 4)는 통과율 괄호를 빼고 충족 수만 쓰며(부록 A11), 지표 값·목표는 판 4 표기다(값 value_text, 목표 셋째 자리).
     """
     vlabel = VERDICT_LABEL.get(fs.verdict, fs.verdict)
     failed = failed_metrics(fs)
     has_core_info = any(m.is_core for m in fs.metrics)
 
+    def vs_target(m) -> str:
+        if edition == 4:
+            return wording_ed4.metric_vs_target_ed4(m)
+        return metric_vs_target(m)
+
     def listing(label: str, metrics: list) -> str:
         # 지표 목록은 문장 끝 괄호에 둔다 — 이름 뒤 조사(가/이)를 이름 받침에 맞출 일이 없게.
-        return f"({label}: {', '.join(metric_vs_target(m) for m in metrics)})" if metrics else ""
+        return f"({label}: {', '.join(vs_target(m) for m in metrics)})" if metrics else ""
 
     if fs.verdict == "FAIL":
         core_failed = [m for m in failed if m.is_core] if has_core_info else []
@@ -952,12 +1109,13 @@ def verdict_sentence(fs: FactSheet, derived: dict) -> str:
     counts = derived.get("counts", {})
     target, passed = counts.get("target", 0), counts.get("passed", 0)
     if target > 0:
-        text += f" 참고로 목표값이 설정된 지표 {target}개 중 {passed}개가 목표를 충족하였다(통과율 {fs.score}%)."
+        text += f" 참고로 목표값이 설정된 지표 {target}개 중 {passed}개가 목표를 충족하였다"
+        text += "." if edition == 4 else f"(통과율 {fs.score}%)."
     return text
 
 
 def _verdict_template(ctx: Ctx) -> str | None:
-    return verdict_sentence(ctx.fs, ctx.derived)
+    return verdict_sentence(ctx.fs, ctx.derived, edition=ctx.edition)
 
 
 def _ci_end(value: float, target: str) -> str:
@@ -988,6 +1146,11 @@ def _ci(ctx: Ctx) -> str | None:
         sentences = []
         if inside:
             def item(m) -> str:
+                if ctx.edition == 4:
+                    # 판 4 — 경계는 프론트 판 4 표기(반올림 전 경계로 목표와의 대소를 지킨 표기 — 0.9497), 목표는 셋째 자리.
+                    low = m.ci_low_text or wording_ed4.ed4_ci_bound(m.ci_low, m.threshold)
+                    high = m.ci_high_text or wording_ed4.ed4_ci_bound(m.ci_high, m.threshold)
+                    return f"{m.display_name}(구간 {low}~{high}, 목표 {wording_ed4.ed4_target(m.threshold)})"
                 # 목표값 — 새 요청(value_text 가 있음)은 반올림하지 않은 값, 옛 요청은 성적서처럼 셋째 자리(S10).
                 target = target_text(m.threshold) if m.value_text else metric_num(m.threshold)
                 return f"{m.display_name}(구간 {_ci_end(m.ci_low, target)}~{_ci_end(m.ci_high, target)}, 목표 {target})"
@@ -1027,6 +1190,8 @@ def _generalization(ctx: Ctx) -> str | None:
 def _metric_value(ctx: Ctx, metric_id: str, value: float) -> str:
     """파생값에 실린 값이 판정 대상 지표의 값이면 성적서 표기(value_text)로 — 넷째 자리로 줄이면 미달 값 0.69996 이 목표 0.7
     처럼 찍힌다(세션 A 검토). 그 밖에는 넷째 자리."""
+    if ctx.edition == 4:
+        return wording_ed4.same_metric_value_ed4(ctx.fs.metrics, metric_id, float(value))
     m = next((m for m in ctx.fs.metrics if m.metric_id == metric_id), None)
     if m is not None and m.threshold is not None and abs(float(m.value) - float(value)) < 1e-9:
         return shown_value(m)
@@ -1048,10 +1213,49 @@ def _pr_gap(ctx: Ctx) -> str | None:
     )
 
 
+# 부록 B20 — 의뢰자가 밝힌 위험 방향 쪽 오류의 이름(5.1 규칙 문장, D49 ③).
+_RISK_ERROR_ED4 = {"fn": "거짓 음성(FN)", "fp": "거짓 양성(FP)"}
+
+
+def _risk_side_sentence(ctx: Ctx, g) -> str | None:
+    """부록 B20 — '의뢰자가 더 위험하다고 밝힌 {거짓 음성(FN)} 쪽 지표인 {Recall}은 F1이 가장 높은 결정 임계값 {t}에서 {v}이다.'
+    목표가 있으면(프론트가 반올림 전 값으로 정한 충족이 있으면) '이 값은 목표 {목표}을(를) {충족한다/충족하지 못한다}.'
+    값은 프론트 판 4 표기(best_recall_text·best_precision_text), 임계값은 엔진 표기(best_threshold_text)."""
+    rs = g.risk_side
+    if rs is None:
+        return None
+    value = g.best_recall_text if rs.side == "fn" else g.best_precision_text
+    threshold = g.best_threshold_text or wording_ed4.ed4_given(g.best_threshold)
+    if value is None:
+        return None
+    text = (
+        f"의뢰자가 더 위험하다고 밝힌 {_RISK_ERROR_ED4[rs.side]} 쪽 지표인 {with_josa(rs.display_name, '은/는')} "
+        f"F1이 가장 높은 결정 임계값 {threshold}에서 {value}이다."
+    )
+    metric = next((m for m in ctx.fs.metrics if m.metric_id == rs.metric_id), None)
+    if metric is not None and metric.threshold is not None and rs.meets_target_at_best is not None:
+        verb = "충족한다" if rs.meets_target_at_best else "충족하지 못한다"
+        text += f" 이 값은 목표 {with_josa(wording_ed4.ed4_target(metric.threshold), '을/를')} {verb}."
+    return text
+
+
 def _threshold_gain(ctx: Ctx) -> str | None:
     g = ctx.fs.f1_threshold_gain
     if g is None or not ctx.derived.get("threshold_tuning"):
         return None
+    if ctx.edition == 4:
+        # 판 4 — 같은 문장에 판 4 표기(임계값은 엔진 표기, F1·향상폭은 프론트 판 4 표기) + 위험 쪽 지표 문장(부록 B20).
+        best = g.best_threshold_text or wording_ed4.ed4_given(g.best_threshold)
+        current = g.current_f1_text or wording_ed4.same_metric_value_ed4(ctx.fs.metrics, "M4", g.current_f1)
+        top = g.max_f1_text or wording_ed4.ed4_plain(g.max_f1)
+        gain = g.gain_text or wording_ed4.ed4_judged(g.gain, 0.1, True, True)
+        text = (
+            f"결정 임계값을 {with_josa(best, '으로/로')} 바꾸면 F1 이 {current}에서 {top}까지 오를 수 있다. "
+            f"다만 이 향상폭({gain})은 같은 평가 데이터로 고른 임계값에서 나온 이 데이터의 최대폭이므로 "
+            "별도 데이터에서 확인해야 한다."
+        )
+        risk = _risk_side_sentence(ctx, g)
+        return f"{text} {risk}" if risk else text
     best = num(g.best_threshold)
     return (
         f"결정 임계값을 {with_josa(best, '으로/로')} 바꾸면 F1 이 {num(g.current_f1)}에서 {num(g.max_f1)}까지 오를 수 있다. "
@@ -1074,15 +1278,15 @@ def _average_gap(ctx: Ctx, kind: str) -> str | None:
     else:
         relation = "두 값이 같다"
     text = (
-        f"매크로 F1 은 {_metric_value(ctx, 'M4', g.macro_f1)}, {other} F1 은 {with_josa(num(g.other_f1), '으로/로')} {relation}."
+        f"매크로 F1 은 {_metric_value(ctx, 'M4', g.macro_f1)}, {other} F1 은 {with_josa(ctx.same(g.other_f1), '으로/로')} {relation}."
     )
     ref = g.reference_class
-    f1 = f"F1 {num(ref.f1)}" if ref.f1 is not None else None
+    f1 = f"F1 {ctx.class_f1(ref.label, ref.f1)}" if ref.f1 is not None else None
     if kind == "macro_vs_weighted":
-        detail = join_and([x for x in (f"표본 {ref.support}건" if ref.support is not None else None, f1) if x])
+        detail = join_and([x for x in (f"표본 {ctx.cnt(ref.support)}건" if ref.support is not None else None, f1) if x])
         text += f" 표본이 가장 많은 클래스는 {ctx.name(ref.label)}" + (f"이며 {detail}이다." if detail else "이다.")
     else:
-        detail = join_and([x for x in (f1, f"표본 {ref.support}건" if ref.support is not None else None) if x])
+        detail = join_and([x for x in (f1, f"표본 {ctx.cnt(ref.support)}건" if ref.support is not None else None) if x])
         text += f" F1 이 가장 낮은 레이블은 {ctx.name(ref.label)}" + (f"이며 {detail}이다." if detail else "이다.")
     return text
 
@@ -1092,8 +1296,9 @@ def _hamming_exact(ctx: Ctx) -> str | None:
     if "M15" not in by_id or "M16" not in by_id:
         return None
     h, e = by_id["M15"], by_id["M16"]
+    shown = wording_ed4.metric_value_ed4 if ctx.edition == 4 else shown_value
     return (
-        f"{h.display_name}의 값은 {shown_value(h)}, {e.display_name}의 값은 {shown_value(e)}이다. "
+        f"{h.display_name}의 값은 {shown(h)}, {e.display_name}의 값은 {shown(e)}이다. "
         f"{with_josa(h.display_name, '은/는')} 레이블 칸 단위로 틀린 비율이고 {with_josa(e.display_name, '은/는')} 모든 레이블을 "
         "맞힌 표본의 비율이어서, 두 값으로 칸 단위 오류와 표본 단위 완전 일치를 나누어 볼 수 있다."
     )
@@ -1103,7 +1308,8 @@ def _averaging_form(ctx: Ctx) -> str | None:
     decl = ctx.facts.declarations if ctx.facts else None
     if decl is None or decl.class_priority is None:
         return None
-    return "평균 방식 선택 기준은 의뢰자 선언(클래스 중요도)으로 5절에 고정 문구 4 로 찍힌다."
+    where = "3.3절" if ctx.edition == 4 else "5절"
+    return f"평균 방식 선택 기준은 의뢰자 선언(클래스 중요도)으로 {where}에 고정 문구 4 로 찍힌다."
 
 
 def _declared_average(ctx: Ctx) -> str | None:
@@ -1112,7 +1318,7 @@ def _declared_average(ctx: Ctx) -> str | None:
         return None
     name = "가중 평균" if d.average == "weighted" else "마이크로 평균"
     why = "'다수 클래스 우선'으로" if d.class_priority == "larger_first" else "'샘플 단위로 중요'로"
-    return f"의뢰자가 클래스 중요도를 {why} 밝혔으므로, 그에 맞춘 {name} F1 은 {num(d.f1)}이다."
+    return f"의뢰자가 클래스 중요도를 {why} 밝혔으므로, 그에 맞춘 {name} F1 은 {ctx.same(d.f1)}이다."
 
 
 def _declared_average_values(ctx: Ctx) -> tuple[float, ...]:
@@ -1125,7 +1331,7 @@ def _metric_rationale(ctx: Ctx) -> str | None:
     rationale = ctx.client_inputs.get("metric_rationale")
     if is_not_provided(rationale):
         return None
-    return "지표 선택 기준은 의뢰자가 고른 이유로 5절에 찍힌다."
+    return f"지표 선택 기준은 의뢰자가 고른 이유로 {'3.1절' if ctx.edition == 4 else '5절'}에 찍힌다."
 
 
 def _purpose_reading(ctx: Ctx) -> str | None:
@@ -1142,19 +1348,51 @@ def _purpose_fact(ctx: Ctx) -> str | None:
 # ── 8.3 리스크 ───────────────────────────────────────────────────────────────
 
 
+def weakest_is_risk(w) -> bool:
+    """판 4 — 최약 클래스를 운영 위험으로 쓰는가(서술 설계 D49 ②): D22 최약 클래스 문제 조건(작은 표본 = 30건 미만 또는 전체의
+    5% 미만, 또는 매크로 F1 보다 0.10 이상 낮음)에 걸릴 때만. 조건 판정은 프론트가 했다(low_support·far_below_macro)."""
+    return bool(w.low_support or w.far_below_macro)
+
+
+def _weakest_risk_reason(ctx: Ctx, w, subject: str) -> str:
+    """판 4 — 최약 클래스를 운영 위험으로 다룰지와 그 까닭(D49 ②). AI 에게 주는 말이다(템플릿은 사실 문장만)."""
+    noun = _noun(ctx)
+    # 분모 이름은 같은 지시문의 5.2 최약 클래스 문장과 같게(멀티레이블은 '레이블 등장' — S2·S3 검토 T7).
+    small = f"작은 표본(30건 미만 또는 {_share_base(ctx)}의 5% 미만)"
+    if weakest_is_risk(w):
+        if w.low_support and w.far_below_macro:
+            why = f"{small}이고 매크로 F1 보다 0.1 이상 낮아"
+        elif w.low_support:
+            why = f"{small}이어서"
+        else:
+            why = "매크로 F1 보다 0.1 이상 낮아"
+        return f" {subject} {why} 운영 위험으로 다룬다."
+    if w.gap_from_macro is not None:
+        why = f"{small}이 아니고 매크로 F1 보다 0.1 이상 낮지도 않으므로"
+    else:
+        why = f"{small}이 아니므로"
+    return f" {subject} {why}, 이 {with_josa(noun, '을/를')} 언급하되 {noun} 사이의 성능 차이를 운영 위험으로 쓰지 않는다."
+
+
 def _weakest_risk(ctx: Ctx) -> str | None:
     w = ctx.facts.weakest_class if ctx.facts else None
     if w is None:
         return None
     purpose = _model_purpose(ctx)
     noun = _noun(ctx)
-    tied, trimmed = weakest_ties(ctx.fs)
+    tied, trimmed = weakest_ties(ctx.fs, edition=ctx.edition)
+    # 판 4 — 운영 위험으로 쓰는 것은 D22 최약 클래스 문제 조건에 걸릴 때만(D49 ②). 걸리지 않으면 용도상 위험을 쓰라고 하지 않는다.
+    risk = ctx.edition != 4 or weakest_is_risk(w)
     if tied:
-        tail = f" 모델 용도('{purpose}')에서 이 {noun}들이 가지는 위험을 쓴다." if purpose else ""
+        tail = f" 모델 용도('{purpose}')에서 이 {noun}들이 가지는 위험을 쓴다." if purpose and risk else ""
+        if ctx.edition == 4:
+            tail = _weakest_risk_reason(ctx, w, ctx.with_josa(ctx.name(w.label), "은/는")) + tail
         scope = f"표에 실린 {noun} 가운데 " if trimmed else ""
-        return f"{scope}가장 약한 {_topic(ctx)} F1 {with_josa(num(w.f1), '으로/로')} {_tied_phrase(ctx, tied)}이다.{tail}"
-    tail = f" 모델 용도('{purpose}')에서 그 {with_josa(noun, '이/가')} 가지는 위험을 쓴다." if purpose else ""
-    return f"가장 약한 {_topic(ctx)} F1 {num(w.f1)}인 {ctx.name(w.label)}이다.{tail}"
+        return f"{scope}가장 약한 {_topic(ctx)} F1 {with_josa(ctx.weakest_f1(w), '으로/로')} {_tied_phrase(ctx, tied)}이다.{tail}"
+    tail = f" 모델 용도('{purpose}')에서 그 {with_josa(noun, '이/가')} 가지는 위험을 쓴다." if purpose and risk else ""
+    if ctx.edition == 4:
+        tail = _weakest_risk_reason(ctx, w, f"이 {with_josa(noun, '은/는')}") + tail
+    return f"가장 약한 {_topic(ctx)} F1 {ctx.weakest_f1(w)}인 {ctx.name(w.label)}이다.{tail}"
 
 
 def _weakest_risk_fact(ctx: Ctx) -> str | None:
@@ -1169,11 +1407,56 @@ def _near(ctx: Ctx) -> list:
     return [m for m in _narrative_metrics(ctx.fs) if m.near_target and m.threshold is not None]
 
 
+def _near_target_ed4(ctx: Ctx, near: list) -> str:
+    """판 4 — 판정 여유가 작은 지표(near_target 의 판 4 뜻, 프론트 judgmentMargin)의 해석 재료(숫자 없음 — 값·구간은 성적서가
+    4.3 표에 찍는다). 구간이 목표를 포함하는 무리와 구간이 없는 무리를 가른다(부록 B22 의 두 갈래, ci_contains_target 이 None 인지)."""
+    passed = [m.display_name for m in near if m.status == "pass"]
+    failed = [m.display_name for m in near if m.status == "fail"]
+    stems = []
+    if passed:
+        stems.append(f"목표를 충족한 지표는 {join_and(passed)}이")
+    if failed:
+        stems.append(f"목표에 미달한 지표는 {join_and(failed)}이")
+    text = "판정 여유가 작은 지표 가운데 " + _clauses(stems) if stems else "판정 여유가 작은 지표가 있다."
+    inside = [m.display_name for m in near if m.ci_contains_target is not None]
+    no_ci = [m.display_name for m in near if m.ci_contains_target is None]
+    ci_stems = []
+    if inside:
+        ci_stems.append(f"95% 신뢰구간이 목표값을 포함하는 지표는 {join_and(inside)}이")
+    if no_ci:
+        ci_stems.append(f"신뢰구간이 없어 목표값과의 차이가 목표값의 3% 미만인 지표는 {join_and(no_ci)}이")
+    if ci_stems:
+        text += " " + _clauses(ci_stems)
+    if no_ci:
+        text += " 신뢰구간이 없는 지표는 표본이 달라지면 판정이 뒤집힐 수 있다고 쓰지 말고 판정의 여유가 작다는 사실만 쓴다."
+    return text + " 판정 여유가 작은 지표는 이 지표들뿐이다. 다른 지표를 여유가 작다거나 판정이 뒤집힐 수 있다고 해석하지 않는다."
+
+
+def _near_template_ed4(ctx: Ctx, near: list) -> str | None:
+    """판 4 규칙 문장 — 부록 B22 두 문장(숫자 없음 — 값·구간은 4.3 표). 구간이 있는 지표(near_target 이면 구간이 목표를 포함한다
+    — 계약 불변식)와 구간이 없는 지표(3% 엄격 미만)로 가르고, 없는 갈래는 뺀다. 이름은 쉼표로 잇고 조사는 마지막 이름으로."""
+    inside = [m.display_name for m in near if m.ci_contains_target is not None]
+    no_ci = [m.display_name for m in near if m.ci_contains_target is None]
+    sentences = []
+    if inside:
+        sentences.append(
+            f"95% 신뢰구간이 목표값을 포함하는 {with_josa(join_and(inside), '은/는')} 판정의 여유가 작아, "
+            "표본이 달라지면 판정이 뒤집힐 수 있다."
+        )
+    if no_ci:
+        sentences.append(
+            f"신뢰구간이 없는 {with_josa(join_and(no_ci), '은/는')} 목표값과의 차이가 목표값의 3% 미만이라 판정의 여유가 작다."
+        )
+    return " ".join(sentences) or None
+
+
 def _near_target(ctx: Ctx) -> str | None:
     """AI 에게 주는 해석 재료(숫자 없음 — 숫자는 고정 문구 18 이 찍는다): 근소 지표가 충족했는지 미달했는지."""
     near = _near(ctx)
     if not near:
         return None
+    if ctx.edition == 4:
+        return _near_target_ed4(ctx, near)
     passed = [m.display_name for m in near if m.status == "pass"]
     failed = [m.display_name for m in near if m.status == "fail"]
     stems = []
@@ -1212,6 +1495,9 @@ def _near_template(ctx: Ctx) -> str | None:
     """근소 지표의 해석. 신뢰구간이 목표값을 포함하지 않는 지표(ci_contains_target 거짓)는 '표본이 달라지면 판정이 바뀔 수 있다'를
     쓰지 않고 여유가 작다는 사실만 쓴다(세션 C — 8.2 의 '구간이 목표와 떨어져 있다'와 부딪치지 않게). 구간이 없으면 종전대로."""
     near = _near(ctx)
+    if ctx.edition == 4:
+        # 판 4 프론트는 고정 문구 18 을 보내지 않는다 — 18 이 없다고 옛 요청 갈래('아슬아슬 합격')로 빠지지 않게 먼저 가른다.
+        return _near_template_ed4(ctx, near)
     risky = [m for m in near if m.ci_contains_target is not False]
     steady = [m for m in near if m.ci_contains_target is False]
     passed = [m for m in risky if m.status == "pass"]
@@ -1276,7 +1562,9 @@ def _latency(ctx: Ctx) -> str | None:
     lat = ctx.fs.latency
     if not lat.available:
         return None
-    parts = [f"{label} {num(getattr(lat, key))}{lat.unit}" for label, key in _LATENCY_NAMES if getattr(lat, key) is not None]
+    # 판 4 는 4.8 표와 같은 둘째 자리(D4 — wording_ed4.ed4_latency), 판 3 은 num 그대로.
+    show = wording_ed4.ed4_latency if ctx.edition == 4 else num
+    parts = [f"{label} {show(getattr(lat, key))}{lat.unit}" for label, key in _LATENCY_NAMES if getattr(lat, key) is not None]
     if not parts:
         return None
     return f"지연시간은 {join_and(parts)}이다."
@@ -1305,7 +1593,7 @@ def _realtime_values(ctx: Ctx) -> tuple[float, ...]:
 
 
 def _problem_table(ctx: Ctx) -> str | None:
-    return "9절 문제 목록(번호·우선순위·원천 절)은 코드가 표로 찍는다."
+    return f"{'6절' if ctx.edition == 4 else '9절'} 문제 목록(번호·우선순위·원천 절)은 코드가 표로 찍는다."
 
 
 def _recommendations(ctx: Ctx) -> str | None:
@@ -1426,6 +1714,7 @@ def select_items(
     client_inputs: dict | None,
     task_type: str | None,
     *,
+    edition: int,
     derived: dict | None = None,
     benchmark_refs: list[dict] | None = None,
 ) -> list[Conclusion]:
@@ -1433,7 +1722,8 @@ def select_items(
 
     작업 유형이 맞지 않거나 재료가 없으면(결론 함수가 None) 뺀다. D24 항목은 확인할 숫자(d24_values)를 함께 싣는다.
     facts 가 없는 옛 요청에서도 깨지지 않고 받은 것만으로 고른다. task_type 이 없으면 infer_task_type 으로 짐작한다.
-    derived·benchmark_refs 를 주면(규칙 템플릿 — 호출부가 이미 만든 값) 그것을 쓴다 — 칸 머리 문장과 같은 값을 읽게.
+    derived·benchmark_refs 를 주면(규칙 템플릿·작업 경로 — 호출부가 이미 만든 값) 그것을 쓴다 — 칸 머리 문장과 같은 값을
+    읽게. edition 은 성적서 양식 판(3 | 4) — 기준표를 여기서 만들 때도 같은 판으로 만든다.
     """
     task = task_type or infer_task_type(fs, derived)
     ctx = Ctx(
@@ -1441,7 +1731,10 @@ def select_items(
         task_type=task,
         client_inputs=client_inputs if isinstance(client_inputs, dict) else {},
         derived=derived if derived is not None else compute_derived(fs, task_type=task),
-        benchmark_refs=benchmark_refs if benchmark_refs is not None else build_benchmark_refs(task, fs.metrics),
+        benchmark_refs=(
+            benchmark_refs if benchmark_refs is not None else build_benchmark_refs(task, fs.metrics, edition=edition)
+        ),
+        edition=edition,
         selected=_selected_metrics(fs),
         descriptions=class_descriptions(client_inputs),
     )

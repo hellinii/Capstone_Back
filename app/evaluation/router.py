@@ -18,6 +18,7 @@ from app.core.parsing import parse_file_content
 from app.core.upload import read_upload_guarded
 from app.core.concurrency import run_cpu_bound
 from app.evaluation.service import run_evaluation_pipeline, EvaluationError
+from app.evaluation.environment import source_file_info
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,8 @@ async def evaluate_dataset(
 ) -> EvaluateResponse:
     # 1. 파일 읽기 (HTTP 경계) — 확장자·크기·빈 파일은 공용 가드가 검사한다(G-04a·G-08).
     filename, file_content = await read_upload_guarded(file)
+    # 판 4 2.2 '파일 해시·크기' — 평가할 원본 바이트 그대로. 해시는 CPU 일이라 오프로드한다(G-04b).
+    source_file = await run_cpu_bound(source_file_info, file_content)
 
     # 2. 파일 파싱
     try:
@@ -58,7 +61,7 @@ async def evaluate_dataset(
 
     # 4. 평가 파이프라인은 서비스에 위임 (도메인 오류 → 상태코드 매핑)
     try:
-        return await run_cpu_bound(run_evaluation_pipeline, df, request_data)
+        return await run_cpu_bound(run_evaluation_pipeline, df, request_data, source_file)
     except EvaluationError as e:
         logger.warning("평가 파이프라인 실패 (code=%s): %s", e.code, e.message)
         status_code = 500 if e.code == "compute_error" else 400

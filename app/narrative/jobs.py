@@ -266,9 +266,16 @@ def _clear_or_trim(raw: dict, err: dict) -> str:
 # facts 안의 형식 오류(모르는 선언 코드 등) → facts 를 버린다(프론트가 자른 수 omitted 는 남긴다).
 FACTS_DROPPED = "fact_sheet.facts(invalid)"
 # 표시 문자열(value_text·margin_text·gain_text·imbalance_effect.display)이 숫자 꼴이 아님 → 그 칸만 버린다.
+# 판 4 표기 칸(ci_*_text·f1_threshold_gain 의 *_text)과 위험 쪽 묶음(risk_side)도 같다(판 4 라운드 S2 ②).
 DISPLAY_DROPPED = "display_text(invalid)"
 SOFT_REPAIRS = (FACTS_DROPPED, DISPLAY_DROPPED)
-_DISPLAY_FIELDS = ("value_text", "margin_text", "gain_text")
+_DISPLAY_FIELDS = (
+    "value_text", "margin_text", "gain_text",
+    "ci_low_text", "ci_high_text", "best_threshold_text", "max_f1_text", "current_f1_text",
+    "best_recall_text", "best_precision_text", "current_recall_text", "current_precision_text",
+)
+# 이 이름이 자리에 있으면 그 묶음을 통째로 버린다(display 는 엔진 표시값 한 묶음, risk_side 는 위험 쪽 판정 한 묶음).
+_DISPLAY_GROUPS = ("display", "risk_side")
 
 
 def _soft_kind(err: dict) -> str | None:
@@ -277,7 +284,7 @@ def _soft_kind(err: dict) -> str | None:
     loc = tuple(err["loc"])
     if loc[:2] == _FACTS:
         return FACTS_DROPPED
-    if loc and (loc[-1] in _DISPLAY_FIELDS or "display" in loc):
+    if loc and (loc[-1] in _DISPLAY_FIELDS or any(g in loc for g in _DISPLAY_GROUPS)):
         return DISPLAY_DROPPED
     return None
 
@@ -309,8 +316,9 @@ def _repair_soft(raw, exc: ValidationError):
                 _drop_facts_keep_omitted(fixed)
         elif kind == DISPLAY_DROPPED:
             loc = tuple(err["loc"])
-            # display 의 세 칸 중 하나라도 틀리면 display 통째로(엔진 표시값은 셋이 한 묶음이다).
-            target = loc[: loc.index("display") + 1] if "display" in loc else loc
+            # display 의 세 칸 중 하나라도 틀리면 display 통째로(엔진 표시값은 셋이 한 묶음이다). risk_side 도 묶음으로.
+            group = next((g for g in _DISPLAY_GROUPS if g in loc), None)
+            target = loc[: loc.index(group) + 1] if group else loc
             _set_path(fixed, target, None)
         else:
             continue
@@ -460,9 +468,12 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
     429 로 막으면 한 사람이 상한을 다 썼을 때 다른 모든 사용자가 1시간 동안 서술도 8.1 표도 받지 못한다(S3a 검토).
     """
     request, trimmed = await run_cpu_bound(parse_request, raw)
+    # 8.1(판 4 는 4.6) 표 — 생성기(generator._prepare)와 같은 판으로 만든다. 출처 글이 지시문과 응답에서 갈리지 않게.
     benchmark_refs = [
         BenchmarkRefOut(**ref).model_dump(mode="json")
-        for ref in build_benchmark_refs(request.task_type.value, request.fact_sheet.metrics)
+        for ref in build_benchmark_refs(
+            request.task_type.value, request.fact_sheet.metrics, edition=request.report_edition,
+        )
     ]
     if not llm_budget.narrative_jobs.try_consume():
         logger.warning(
