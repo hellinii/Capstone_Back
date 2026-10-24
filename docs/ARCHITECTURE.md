@@ -42,7 +42,7 @@ app/
 │   ├── engine.py        지표 → 계산함수로 분배          preprocessor.py  계산 전 데이터 정리
 │   ├── report.py        결과 성공/실패 정리           schemas.py
 │   ├── frame.py         평가에 들어갈 행을 정하는 규칙 한 곳   labels.py  클래스 표기·양성 기본값(§9.2·§9.4)
-│   ├── errors.py        지표 계산 실패 표시 키 한 곳   environment.py  평가 환경(도구 버전·일시) 실측
+│   ├── errors.py        지표 계산 실패 표시 키 한 곳   environment.py  평가 환경(도구 버전·일시) 실측 + 평가 엔진 버전 ENGINE_VERSION(§13)
 │   └── metrics/         실제 지표 계산(sklearn): common·binary·multiclass·multilabel
 │                        + counts(TP·FP 등 건수) · intervals(95% 신뢰구간) · misclassification(경계·확신 오류)
 │                        · display(판정과 같은 쪽으로 읽히게 자릿수를 늘린 표시 문자열)
@@ -56,6 +56,7 @@ app/
 │   ├── prompt.py        장별 지시문·칸 스키마        fact_view.py  AI 가 읽는 한국어 사실 시트
 │   ├── checks.py        칸별 검사                   grounding.py  숫자 허용 목록·판정 모순
 │   ├── fallback.py      규칙 템플릿(칸 함수 7개)     wording.py  조사·숫자 표기·클래스 이름(설명)
+│   ├── fact_view_ed4.py 판 4 사실 시트 보기(§13)     wording_ed4.py  판 4 숫자 표기(§13)
 │   └── derived.py       서버 파생 계산    baselines.py  지표 참조 기준치    schemas.py
 │
 └── issuance/          ④ 발급 — 성적서 번호 채번·발급 (DB: 발급 표 — 서술 작업 표와 함께 DB 를 쓰는 곳)
@@ -316,6 +317,7 @@ Precision·Recall·F1 만 정렬 뒤쪽 값을 쓰던 예외도 없앴다(fraud/
 | `POST /api/generate-narrative` (옛) | 옛 클라이언트(운영 프론트는 더 이상 부르지 않음) | 한 번 호출로 일곱 칸을 받는다(`legacy.py` 에 그대로 얼림, effort `low`, 서버 마감 120초 — 넘으면 200 + 규칙 문장). 다음 라운드에 지운다 |
 
 두 경로는 같은 사실 시트(`FactSheet`)·같은 숫자 허용 목록·같은 규칙 템플릿을 쓴다. 판정(verdict)은 늘 사실 시트 값이다(AI 가 정하지 않는다).
+이 절의 칸 이름(7.1~9)은 판 3 성적서의 번호다. 판 4 성적서용 요청(`report_edition: 4`)은 같은 일곱 칸을 판 4 자리(5.x·6.x)로 옮겨 쓴다 — §13. 옛 경로는 늘 판 3 이다.
 
 ### 10.2 소절 7칸 (`sections.py`)
 
@@ -598,5 +600,70 @@ Render 는 포크 main 을 따라가지만 자동 배포가 꺼져 있어(`autoD
   `issuance.issuer`(발급 당시 발급자 문자열)와 보관본은 바꾸지 않는다 — 발급 당시 그대로가 맞다.
 - **새 표**: `narrative_jobs` 처럼 새 표는 기동 때 `create_all` 이 알아서 만든다. 이미 있는 표에 열을 더하는 것은 하지 못하므로
   (마이그레이션 도구 없음, §7 규칙 4) 스키마를 늘릴 때는 새 표로 한다.
+- **판 4 를 켤 때는 백엔드가 먼저**: 프론트가 판 4 를 켜기(Vercel 환경변수) 전에 판 4 를 아는 백엔드가 운영에 떠 있어야 한다. `/health` 의 `commit` 으로 확인한다. 이유는 §13.
 - **콜드 스타트**: Render 무료는 한동안 요청이 없으면 잠들고, 깨어나는 데 30~60초쯤 걸린다. 시연 전에 `/health` 를 한 번 불러 깨운다.
 - **Neon 연결 문자열**: `sslmode=require` 를 둔다. 연결 때 `channel_binding` 옵션 오류가 나면 그 옵션만 빼면 된다.
+
+---
+
+## 13. 성적서 판 4 — 서술 요청의 판 신호 · 평가 엔진 버전 · 정답 폴더 (2026-10, 판 4 구현 라운드)
+
+한 줄 요약: **판은 프론트가 정하고, 백엔드는 서술 요청에 실린 `report_edition` 하나만 본다.** 평가 API 는 판을 모르고, 판 4 에 필요한 새 값을 늘 응답에 더해 보낸다.
+
+### 13.1 성적서 판
+
+판(contentSchema)은 프론트가 성적서 데이터에 찍는 번호다. 발급 보관본(`report_snapshot.content_json`)에도 그대로 들어 있고, 번호로 열 때 프론트가 찍힌 판의 모양으로 다시 그린다.
+
+| 판 | 무엇 |
+|---|---|
+| 1 | 판 표시가 없는 옛 발급본 |
+| 2 | 서술 라운드 앞 dev 의 모양(운영에는 배포되지 않음) |
+| 3 | 지금 기본값. 7·8·9절 서술(§10 의 칸 이름이 이 판의 번호다) |
+| 4 | 목차를 1 시험 개요 · 2 시험 대상 · 3 시험 방법 · 4 시험 결과 · 5 분석 소견 · 6 개선 권고로 다시 묶은 판. 프론트 빌드 플래그로 켠다. 운영에서는 아직 켜지 않았다 |
+
+- 판은 프론트가 run 을 만들 때 한 곳(`newRunContentSchema()`)에서 정한다. 켜는 법·켜기 전 확인 목록은 프론트 저장소 `docs/ARCHITECTURE.md` §6.6.
+- 백엔드에는 판 플래그(환경변수)가 없다.
+
+### 13.2 서술 요청의 판 신호 `report_edition`
+
+- `NarrativeRequest`(`narrative/schemas.py`) 최상위 칸 `report_edition: Literal[3, 4] = 3`. 판 3 요청에는 이 키가 없고(기본 3), 판 4 run 의 요청에만 `4` 가 실린다. 3·4 밖의 값은 422. `fact_sheet.facts` 안에 두지 않는 이유는, facts 는 형식이 틀리면 통째로 버려질 수 있어서다(`jobs._soft_kind`).
+- 기본값 3 은 요청 경계(`NarrativeRequest`)와 옛 경로 입구(`legacy.py` 의 `EDITION = 3`)에만 있다. 안쪽 함수(`build_fact_view`·`build_number_whitelist`·`select_items`·지시문·`checks`·`fallback`·`baselines` 등)는 기본값 없는 keyword-only `edition` 으로 받는다 — 한 곳을 빠뜨리면 바로 오류가 난다. 작업 경로에서는 `jobs.create_job`(바로 돌려주는 참조 범위 표)과 `generator` 가 요청의 값을 읽어 하위 호출에 넘긴다.
+- 판 4 에서 달라지는 것:
+  - 사실 시트 보기 `fact_view_ed4.py`(판 3 보기 `fact_view.py` 는 그대로) — 숫자는 판 4 표기, 판정 여유, 통과율 없음, 참조 범위는 위치만.
+  - 숫자 표기 `wording_ed4.py` — 셋째 자리·끝 0 유지, 판정과 어긋나 보이면 여섯째 자리까지 늘림. 규칙은 두 저장소 공통 대조 표 `tests/contract/number_wording_ed4.json`(프론트 `src/test/contract/` 와 같은 바이트)에 있다.
+  - 지시문(`prompt.py` 판 4 system)·숫자 검문(`grounding.py` 판 4 허용 목록과 판 4 절 번호)·규칙 문장(`required_items.py`·`fallback.py`)·출처 글(`baselines.py`). 칸은 같은 일곱 칸이고 자리만 판 4 번호(8.2 → 5.1, 9.1 → 6.1 등, `sections.place`)다.
+  - 문제 종류 `same_source`(평가 데이터가 학습과 같은 출처)와 그 규칙 권고 — 판 4 요청에만 온다.
+- 옛 경로(`/api/generate-narrative`, `legacy.py`)는 `report_edition` 을 읽지 않고 늘 판 3 이다. 사실 시트를 통째로 지시문에 넣으므로 판 4 전용 칸은 빼고 넣는다(`EDITION4_ONLY_SHEET_FIELDS`).
+- 계약 사본: 판 4 명세 `tests/contract/fact_sheet_contract_ed4.json`, 칸→자리 대응표 `narrative_slots_ed4.json`, 이진·다중·멀티 예시 `fact_sheet_{binary,multiclass,multilabel}_ed4.json`. 예시는 프론트가 앱이 실제로 보낸 요청을 떠서 만든다. 프론트 사본과 같은 바이트여야 하고(옆 저장소가 있을 때만 대조 — CI 는 이 저장소만 받는다), 고칠 때는 두 저장소와 sha256 을 함께 고친다.
+
+**왜 백엔드를 먼저 배포하나** — 옛 백엔드가 판 4 요청을 받으면:
+- `report_edition` 을 모르는 칸이라 오류 없이 버린다(pydantic 기본 동작) → 판 4 성적서에 판 3 절 번호·표기의 서술이 들어간다.
+- 문제 종류 `same_source` 를 몰라 요청을 422 로 돌려보낸다(`problems` 는 facts 밖이라 버려지지 않는다).
+- 멀티레이블 `facts.distribution_shift_status` 의 새 값 `training_samples_not_provided` 를 몰라 facts 를 통째로 버린다.
+
+그래서 판 4 를 켜는 라운드에는 이 저장소를 먼저 배포하고 `/health` 의 `commit` 을 확인한 뒤 프론트 플래그를 켠다.
+
+### 13.3 평가 응답에 더한 값
+
+평가 API(`/api/evaluate`)는 판을 모른다. 아래 값은 늘 계산해 보내고, 판 3 프론트는 읽지 않는다. 기존 칸의 값과 반올림(넷째 자리)은 그대로다.
+- `EvaluateResponse` 최상위: `source_file{sha256, size_bytes}`(업로드 파일 해시·크기, `environment.source_file_info`), `engine_version`.
+- 프론트가 아는 키만 골라 읽는 객체 안: 신뢰구간 `low_raw`·`high_raw`(반올림 전 경계), F1 최대 임계값(`f1_threshold_gain`)의 그 점·지금의 Recall·Precision과 반올림 전 값(`*_raw`), 임계값 표기 `best_threshold_text`(셋째 자리부터 늘려 가며, 그 표기를 실제로 적용해도 예측이 같은 가장 짧은 자릿수 — 예: 0.6166), 불균형 영향의 반올림 전 값.
+- `environment`·`derived_prediction`·클래스 리포트(M22)·분포·`warnings` 안에는 새 키를 두지 않는다 — 프론트가 이 객체들을 통째로 저장해 판 3 데이터에 키가 생기기 때문이다.
+
+### 13.4 평가 엔진 버전 올림 규칙
+
+- 위치: `app/evaluation/environment.py` 의 상수 `ENGINE_VERSION`(첫 값 `"1.0.0"`). 평가 응답 `engine_version` 으로 나가고, 판 4 성적서 3.5 "평가 엔진 버전" 칸에 그대로 찍힌다. 환경변수로 받지 않는다 — 배포 설정 없이 부팅되고 로컬·CI·운영이 같은 값을 낸다.
+- **올린다**: 같은 입력 파일·요청이 다른 평가 값을 낼 수 있게 되는 변경. 예: 지표 계산식, 반올림·표시 자릿수 규칙, 신뢰구간 방법, F1 최대 임계값·임계값 표기를 고르는 규칙, 불균형 영향 계산, 평가에 들어갈 행을 정하는 규칙(`frame.py`)·클래스 표기·파싱이 바뀌어 값이 달라지는 경우. 라이브러리를 올려 `tests/golden_ed4` 정답 값이 바뀌었다면 이것도 계산이 바뀐 것으로 본다.
+- **그대로 둔다**: 주석·문서, 기존 값을 바꾸지 않는 응답 칸 추가, 서술·발급 쪽 변경.
+- 함께 고칠 것: 버전을 박아 둔 시험(`tests/test_p4_evaluate_trace.py`·`tests/test_p4_bc_strong.py`), 평가 골든(`UPDATE_GOLDEN=1 venv/bin/python -m pytest tests/test_evaluate_router.py` 로 좁혀 다시 뜸)과 `tests/golden_ed4`(아래), 프론트의 평가 응답 사본·판 4 렌더 픽스처(프론트 §6.6).
+- 자리를 어떻게 올릴지(1.0.1 / 1.1.0 / 2.0.0)는 아직 정하지 않았다.
+
+### 13.5 정답 폴더
+
+| 폴더 | 무엇 | 규칙 |
+|---|---|---|
+| `tests/golden_frozen/`, `tests/data/edition3_issued/` | 판 3 정답 — 판 3 지시문·규칙 문장·사실 시트 보기·허용 목록·옛 경로 지시문, 실제 판 3 발급본 6건의 칸별 검문 판정, 서술·검증 골든 사본, DB 열 집합 | **고치지 않는다.** 갱신 경로가 없고(파일이 없으면 실패), 목록·sha256 이 `MANIFEST.sha256` 에 박혀 있다. 시험 코드(`tests/frozen_s0.py`·`tests/test_frozen_*.py`·`tests/test_edition3_frozen.py`·`tests/test_db_columns.py`)도 얼린다. 실패하면 코드를 고친다. 예외 절차는 [`tests/golden_frozen/README.md`](../tests/golden_frozen/README.md) |
+| `tests/golden_ed4/` | 판 4 라운드 평가 정답 — `bc_strong`(RPT-2026-0001 원본 CSV, 3,727바이트)의 평가·검증 응답과 판 3 발급 때 평가 응답 원문 | 갱신 경로가 없다. 평가 계산을 바꾸기로 했을 때만 `ENGINE_VERSION` 을 올리고 [`tests/golden_ed4/README.md`](../tests/golden_ed4/README.md) 의 "다시 뜨는 법"으로 뜬 뒤 diff 를 눈으로 본다 |
+| `tests/contract/*_ed4.json` | 판 4 서술 요청 계약(13.2) | 프론트가 다시 뜨고 두 저장소를 같이 고친다 |
+
+판 4 서술 시험은 `tests/test_p4_*.py` 다(판 4 예시를 실제 앱에 넣어 끝까지 도는 통합 시험 `test_p4_integration_ed4.py` 포함). 판 3 정답은 위 판 3 폴더가 지킨다.
