@@ -329,3 +329,17 @@ def test_trim_steps_find_tables_in_edition4_view():
         trial = copy.deepcopy(VIEW)
         assert step(trial), name
         assert trial != VIEW and trial["덜어 낸 표(일부만 실림)"], name
+
+
+def test_evidence_floats_not_rewritten_by_fact_sheet_get_plain_third_digit():
+    """S6 독립 검증 L1(변이 B07 생존): 사실 시트의 판 4 칸으로 다시 맞추지 않는 근거 실수도 판 4 plain(셋째 자리, 끝 0 유지)으로
+    싣는다 — 계약 예시 세 건의 근거는 이 갈래(_num)까지 실수가 오지 않아, 넷째 자리로 바꿔도 아무 시험이 잡지 못했다."""
+    from types import SimpleNamespace
+
+    fs = NarrativeRequest.model_validate(_raw()).fact_sheet
+    problem = SimpleNamespace(
+        kind="distribution_shift",
+        evidence={"사실 시트에 없는 클래스": {"training_ratio": 0.123456, "evaluation_ratio": 0.5, "count": 7}},
+    )
+    out = fact_view_ed4.translate_evidence_ed4(problem, fs)
+    assert out == {"사실 시트에 없는 클래스": {"학습 비율": "0.123", "평가 비율": "0.500", "count": 7}}
