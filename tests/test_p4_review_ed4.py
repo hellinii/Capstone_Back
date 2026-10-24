@@ -379,3 +379,17 @@ async def test_t11_rescued_recommendation_is_the_edition4_template(make_section_
     assert gen.trace["recommendations_from_template"] == ["P1"]
     p1 = next(r for r in gen.response.recommendations if r.problem_id == "P1")
     assert p1.action.startswith("판정 여유가 작은 채 합격한 핵심 지표를")  # B24 — 판 3 글은 '목표값에 근접해 합격한'
+
+
+def test_d2_average_gap_reference_class_uses_the_weakest_text():
+    """멀티 평균 차이(8.2-08)의 'F1 이 가장 낮은 레이블'은 최약 레이블과 같은 클래스 — 같은 글자(f1_text)를 쓴다. 사실 보기도 같다."""
+    from app.narrative import required_items as ri
+
+    ml = _load("multilabel")
+    ml["fact_sheet"]["facts"]["weakest_class"]["f1_text"] = "0.0476"  # 다른 규칙이 낼 수 없는 글자로 '읽기'를 본다
+    req = parse_request(copy.deepcopy(ml))[0]
+    ctx = ri.Ctx(fs=req.fact_sheet, task_type="multilabel", client_inputs={}, derived={}, benchmark_refs=[], edition=4,
+                 selected={"M22"})
+    assert "Class9" in ri._average_gap(ctx, "macro_vs_micro") and "F1 0.0476" in ri._average_gap(ctx, "macro_vs_micro")
+    gap = _view(ml)["서술용 파생값"]["매크로 평균과 마이크로 평균의 F1 차이"]
+    assert gap["F1 이 가장 낮은 레이블"]["F1"] == "0.0476"
