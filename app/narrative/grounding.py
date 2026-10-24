@@ -6,7 +6,15 @@ LLM 출력의 모든 숫자가 fact_sheet/파생값 화이트리스트 안에 �
 상호작용
 - 의존(import): re, typing.Any, app.narrative.schemas(FactSheet, GroundingInfo),
   app.narrative.derived(THRESHOLD_GAIN_NOTABLE), app.narrative.required_items(benchmark_value_text — 8.1 모델 값 표기),
-  app.evaluation.metrics.counts(불균형 기준값)
+  app.evaluation.metrics.counts(불균형 기준값), app.narrative.fact_view(판 4 허용 목록 — 판 4 사실 보기의 숫자),
+  app.narrative.sections(판 4 절 번호)
+
+판 4(요청의 report_edition 4 — 판 4 라운드 S2 ⑥, 계획 2.7)는 허용 목록과 절 번호 지우기가 따로다:
+- 허용 목록은 판 4 사실 보기(AI 가 읽는 글, app.narrative.fact_view_ed4)에 찍힌 숫자 그대로다 — 셋째 자리와 판정 쪽으로 늘린
+  표기(0.9497·0.6166)만 받고, 판 3 처럼 소수 1~4자리 반올림 변형을 넣지 않으므로 넷째 자리 표기(0.9767)는 위반이다.
+  기준값(0.1·1.5·30·5%·10%p·95%)은 판 3 과 같은 조건에서만, 3% 는 구간 없이 판정 여유를 정한 판정 대상 지표가 있을 때만 더한다
+  (판정 여유 칸 이름 속 95·3 은 받지 않는다 — S2·S3 검토 D5). 지연시간은 4.8 표와 같은 둘째 자리 글자(D4). 통과율(score)은 넣지 않는다.
+- 절 번호는 판 4 성적서의 번호(sections.EDITION4_SECTION_NUMBERS — 1.1~6.2, '(4.3)', '5.1·5.2절', '부록 1.2')를 지운다.
 - 사용처: app.narrative.legacy·generator·checks(허용 목록·판정 모순 검사), tests
 """
 import re
@@ -15,8 +23,10 @@ from typing import Any
 # 불균형 영향 기준(D20)은 평가 엔진이 판정에 쓴 값을 그대로 가져온다(값마다 한 곳).
 from app.evaluation.metrics.counts import IMBALANCE_F1_GAP, IMBALANCE_MILD_BELOW
 from app.narrative.derived import THRESHOLD_GAIN_NOTABLE
-from app.narrative.required_items import benchmark_value_text
+from app.narrative import fact_view
+from app.narrative.required_items import benchmark_value_text, infer_task_type
 from app.narrative.schemas import FactSheet, GroundingInfo
+from app.narrative.sections import EDITION4_PLACES, EDITION4_SECTION_NUMBERS, EDITION4_TITLES
 
 
 # 문맥상 '수치'가 아닌 고정 토큰(표준 표기·절 번호·오류 유형 서수)은 검증 전에 제거한다.
@@ -45,6 +55,42 @@ _CTX_TOKEN_RE = re.compile(
     rf"|^\s*{_SECTION_IDS}(?=\s+[가-힣]|에서|에는|에|의|은|는)"
     r"|제\s*\d+\s*종"
 )
+
+# 판 4 — 같은 꼴을 판 4 절 번호(1.1~6.2)로. 판 4 글은 '(1.3 참조)'·'5.1~5.6절'·'부록 1.2' 꼴도 쓴다(예시본). 판 3 절 번호
+# ('(8.2)')는 판 4 글에서 지우지 않는다 — 판 4 성적서에 없는 번호다('8.3절'처럼 '절'이 붙은 꼴은 위 일반 규칙대로 지운다).
+_SECTION_IDS_ED4 = "(?:" + "|".join(re.escape(n) for n in EDITION4_SECTION_NUMBERS if "." in n) + ")"
+_SECTION_SEP_ED4 = r"\s*(?:[·,/~]|및|와|과)\s*"
+_PLACE_TITLE_ED4 = "|".join(
+    rf"{re.escape(EDITION4_PLACES[slot])}(?=\s+{re.escape(name)})" for slot, name in EDITION4_TITLES.items()
+    if "." in EDITION4_PLACES[slot]
+)
+_CTX_TOKEN_RE_ED4 = re.compile(
+    r"ISO/?IEC\s+TS\s*4213(?:\s*:\s*2022)?|4213\s*:\s*2022"
+    r"|부록\s*\d(?:\.\d)?(?!\d|\.\d)"
+    rf"|(?<![\d.]){_SECTION_IDS_ED4}(?:{_SECTION_SEP_ED4}{_SECTION_IDS_ED4})+\s*절{_NOT_SECTION_WORD}"
+    rf"|(?<![\d.])(?:[1-9]\.\d|\d+)\s*절{_NOT_SECTION_WORD}"
+    rf"|\(\s*{_SECTION_IDS_ED4}(?:{_SECTION_SEP_ED4}{_SECTION_IDS_ED4})*(?:\s*참조)?\s*\)"
+    rf"|(?<=절)\s+{_SECTION_IDS_ED4}(?!\d|[.,]\d|%)"
+    rf"|^\s*{_SECTION_IDS_ED4}(?=\s+[가-힣]|에서|에는|에|의|은|는)"
+    # 글 가운데서 판 4 소절 번호를 그 소절의 이름과 함께 부른 꼴('5.5 운영 위험에서', '6.1 데이터') — 지시문이 칸을 이렇게 부른다.
+    # 번호와 이름이 짝일 때만(5.5 데이터 분포는 짝이 아니라 숫자로 본다).
+    rf"|(?<![\d.])(?:{_PLACE_TITLE_ED4})"
+    r"|제\s*\d+\s*종"
+)
+
+
+def context_tokens(edition: int) -> "re.Pattern[str]":
+    """숫자 검문 전에 지우는 문맥 토큰(표준 표기·절 번호) — 그 판의 절 번호로. 판 3 은 _CTX_TOKEN_RE 그대로."""
+    if edition == 4:
+        return _CTX_TOKEN_RE_ED4
+    if edition != 3:
+        raise ValueError(f"모르는 성적서 판: {edition!r}")
+    return _CTX_TOKEN_RE
+
+
+def strip_context(text: str, *, edition: int) -> str:
+    """유니코드 마이너스를 '-' 로 맞추고 그 판의 문맥 토큰을 지운 글 — 숫자를 뽑기 전에."""
+    return context_tokens(edition).sub(" ", _normalize_minus(text))
 
 # 신뢰구간의 신뢰수준(서술 설계 D29). 평가 응답 confidence_intervals 의 level 과 같다.
 CI_LEVEL = 0.95
@@ -210,8 +256,16 @@ def build_number_whitelist(
     benchmark_refs: list[dict],
     derived: dict,
     client_inputs: dict | None = None,
+    *,
+    edition: int,
 ) -> set:
-    """출력 검증용 허용 숫자 집합 (fact_sheet + 파생값 + 고객 입력의 다중 표기)."""
+    """출력 검증용 허용 숫자 집합 (fact_sheet + 파생값 + 고객 입력의 다중 표기).
+
+    edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition). 판 4 는 _whitelist_ed4(판 4 사실 보기에 찍힌 표기 그대로)."""
+    if edition == 4:
+        return _whitelist_ed4(fs, benchmark_refs, derived, client_inputs)
+    if edition != 3:
+        raise ValueError(f"모르는 성적서 판: {edition!r}")
     wl: set = set()
 
     _add(wl, fs.n_samples)
@@ -389,15 +443,153 @@ def build_number_whitelist(
     return wl
 
 
-def verify_grounding(texts: list[str], whitelist: set) -> GroundingInfo:
-    """텍스트들에서 숫자 토큰을 추출해 화이트리스트와 대조. 위반 = 환각 수치."""
+# ── 판 4 허용 목록(S2 ⑥) ───────────────────────────────────────────────────────────
+
+
+def _canon_tokens(text: str) -> list[str]:
+    """판 4 글 한 조각의 숫자 토큰(정규 표기) — 판 4 문맥 토큰('5.5절' 등)을 지운 뒤. 음수면 크기도."""
+    out: list[str] = []
+    for tok in _NUMBER_RE.findall(strip_context(text, edition=4)):
+        c = _canon(tok)
+        if c is None:
+            continue
+        out.append(c)
+        if c.startswith("-"):
+            out.append(c[1:])
+    return out
+
+
+def _add_exact(wl: set, value: Any) -> None:
+    """찍힌 그대로 한 표기만 — 실수·정수는 정규 표기('0.95'), 글은 그 안의 숫자 토큰. 반올림 변형은 넣지 않는다."""
+    if value is None or isinstance(value, bool):
+        return
+    if isinstance(value, (int, float)):
+        c = _canon(repr(float(value)) if isinstance(value, float) else str(value))
+        if c is not None:
+            wl.add(c)
+            if c.startswith("-"):
+                wl.add(c[1:])
+        return
+    if isinstance(value, str):
+        wl.update(_canon_tokens(value))
+
+
+def _add_view_values(wl: set, obj: Any) -> None:
+    """판 4 사실 보기의 값(키가 아니라 값)에 찍힌 숫자. 키는 고정 이름표라('95% 신뢰구간'·'30건 미만') 넣지 않는다 — 기준값은
+    아래에서 판 3 과 같은 조건으로만 더한다."""
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _add_view_values(wl, v)
+    elif isinstance(obj, list):
+        for v in obj:
+            _add_view_values(wl, v)
+    else:
+        _add_exact(wl, obj)
+
+
+def _class_labels(fs: FactSheet) -> list[str]:
+    """사실 시트의 클래스·레이블 이름(숫자 꼴 이름 '2'·'class_3' 의 숫자를 옮겨 적는 것은 수치 주장이 아니다)."""
+    labels: list[str] = [p.label for p in fs.per_class] + [r.label for r in fs.confusion_counts]
+    if fs.confusion:
+        labels += list(fs.confusion.labels)
+    if fs.distribution:
+        labels += list(fs.distribution.class_distribution)
+    if fs.imbalance_effect:
+        labels += [fs.imbalance_effect.majority_class, fs.imbalance_effect.minority_class]
+    return labels + fact_class_labels(fs)
+
+
+def fact_class_labels(fs: FactSheet) -> list[str]:
+    """facts 안의 클래스 이름 — 프론트가 표를 잘라도 facts 의 목록(편향·헷갈린 쪽·작은 표본·평균 비교 기준)에는 남아
+    템플릿·AI 가 부를 수 있다(세션 A 검토 — 잘린 표 밖 'tiger_shark' 가 영어 코드로 걸렸다). 칸 검사(checks)도 이 함수를 쓴다."""
+    facts = fs.facts
+    if facts is None:
+        return []
+    labels = [r.label for r in facts.distribution_shift] + [r.label for r in facts.low_support_classes]
+    if facts.weakest_class:
+        labels.append(facts.weakest_class.label)
+    if facts.prediction_bias:
+        labels += [r.label for r in facts.prediction_bias.rows if r.label]
+    for p in facts.top_confusion_pairs:
+        labels += [p.actual, p.predicted]
+    if facts.average_gap:
+        labels.append(facts.average_gap.reference_class.label)
+    return labels
+
+
+def _whitelist_ed4(fs: FactSheet, benchmark_refs: list[dict], derived: dict, client_inputs: dict | None) -> set:
+    """판 4 허용 목록 — 판 4 사실 보기(지시문이 AI 에 보이는 것과 같은 함수·같은 재료, 덜어 내기 전)에 찍힌 숫자 그대로 +
+    켜진 판정의 기준값 + 이름 속 숫자 + 고객 입력의 숫자(적힌 그대로). 규칙 문장(fallback·required_items 판 4 갈래)도 같은
+    표기 함수(wording_ed4)를 쓰므로 그 숫자는 모두 여기 있다(시험이 본다)."""
+    wl: set = set()
+    task = infer_task_type(fs, derived)
+    view = fact_view.build_fact_view(fs, derived, benchmark_refs, task_type=task, task_label="", report_purpose="", edition=4)
+    _add_view_values(wl, view)
+    for label in _class_labels(fs):
+        _add_exact(wl, str(label))
+    for m in fs.metrics:
+        _add_exact(wl, m.display_name)  # 이름 속 숫자('Top-5' 등)
+
+    # 기준값 — 판 3 과 같은 조건(켜진 판정이 있을 때만). 판 4 글이 쓰는 꼴만: 95%·3%·5%·10%p 는 백분율 숫자.
+    if any(m.ci_low is not None and m.ci_high is not None for m in fs.metrics):
+        _add_exact(wl, round(CI_LEVEL * 100))
+    # 3% 는 따로 더하지 않는다 — 판정 대상 지표 가운데 신뢰구간이 없어 판정 여유를 '목표값의 3%' 로 정한 지표가 있을 때만 사실
+    # 보기의 '판정 여유가 작음의 뜻'(fact_view_ed4.margin_meaning)이 그 숫자를 싣고, 위 보기 값에서 받는다. 칸 이름 속 숫자는 받지
+    # 않는다 — 판정 대상이 있으면 95·3 을 늘 받던 구멍(지어낸 '3건'·'95%')을 막는다(S2·S3 검토 D5).
+    facts = fs.facts
+    if facts is not None:
+        if facts.weakest_class is not None or facts.low_support_classes:
+            _add_exact(wl, LOW_SUPPORT_MIN)
+            _add_exact(wl, round(LOW_SHARE_MIN * 100))
+        if facts.weakest_class is not None and facts.weakest_class.gap_from_macro is not None:
+            _add_exact(wl, WEAKEST_F1_GAP)
+        if facts.precision_recall_gap is not None:
+            _add_exact(wl, PR_GAP_MIN)
+        if facts.distribution_shift:
+            _add_exact(wl, round(DISTRIBUTION_SHIFT_MIN * 100))
+    if fs.f1_threshold_gain:
+        _add_exact(wl, THRESHOLD_GAIN_NOTABLE)
+    if fs.imbalance_effect:
+        _add_exact(wl, IMBALANCE_MILD_BELOW)
+        _add_exact(wl, IMBALANCE_F1_GAP)
+
+    # 지연시간 — 4.8 표와 같은 둘째 자리 글자(D4 — 사실 보기가 ed4_latency 로 싣고 위에서 그 글자를 받았다). 판 3 처럼 반올림
+    # 변형을 넣지 않는다. 백분위 이름 속 숫자(규칙 문장 '95번째 백분위수(p95)')만 더한다.
+    if fs.latency and fs.latency.available:
+        for pct in (50, 95, 99):
+            _add_exact(wl, pct)
+
+    # 고객 입력 — 의뢰자가 적은 숫자 그대로(판 4 는 반올림 변형을 넣지 않는다: 고객 값이 우연히 지표 값과 같으면 그 넷째 자리
+    # 표기가 허용되는 구멍을 막는다).
+    if client_inputs:
+        _add_client_exact(wl, client_inputs)
+    return wl
+
+
+def _add_client_exact(wl: set, obj: Any) -> None:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _add_client_exact(wl, k)
+            _add_client_exact(wl, v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _add_client_exact(wl, item)
+    else:
+        _add_exact(wl, obj)
+
+
+def verify_grounding(texts: list[str], whitelist: set, *, edition: int) -> GroundingInfo:
+    """텍스트들에서 숫자 토큰을 추출해 화이트리스트와 대조. 위반 = 환각 수치.
+
+    edition 은 지울 절 번호의 판(context_tokens). 기본값을 두지 않는다(기본 3 은 요청 경계와 legacy 입구뿐 — S2·S3 검토 T1):
+    작업 경로의 칸 검사는 요청의 판을, 옛 경로(legacy)는 legacy.EDITION 을 넘긴다."""
     violations: list[str] = []
     checked = 0
     for t in texts:
         if not t:
             continue
         # 표준 표기·절/서수 등 문맥 토큰을 먼저 제거한 뒤 숫자만 검증(오탐 방지, D3a). 유니코드 마이너스는 '-' 로.
-        stripped = _CTX_TOKEN_RE.sub(" ", _normalize_minus(t))
+        stripped = strip_context(t, edition=edition)
         for tok in _NUMBER_RE.findall(stripped):
             c = _canon(tok)
             if c is None:

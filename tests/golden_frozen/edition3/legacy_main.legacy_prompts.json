@@ -1,0 +1,286 @@
+{
+  "dropped": [],
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "conclusion": {
+        "additionalProperties": false,
+        "properties": {
+          "benchmark": {
+            "type": "string"
+          },
+          "narrative": {
+            "type": "string"
+          },
+          "risks": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "benchmark",
+          "narrative",
+          "risks"
+        ],
+        "type": "object"
+      },
+      "interpretation": {
+        "additionalProperties": false,
+        "properties": {
+          "confusion_analysis": {
+            "type": "string"
+          },
+          "distribution_analysis": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confusion_analysis",
+          "distribution_analysis"
+        ],
+        "type": "object"
+      },
+      "recommendation_narrative": {
+        "additionalProperties": false,
+        "properties": {
+          "data_quality": {
+            "type": "string"
+          },
+          "model_ops": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_quality",
+          "model_ops"
+        ],
+        "type": "object"
+      },
+      "recommendations": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "expected_impact": {
+              "type": "string"
+            },
+            "priority": {
+              "enum": [
+                "HIGH",
+                "MEDIUM",
+                "LOW"
+              ],
+              "type": "string"
+            },
+            "problem_id": {
+              "enum": [
+                "P1",
+                "P2",
+                "P3"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "problem_id",
+            "priority",
+            "category",
+            "action",
+            "expected_impact"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "interpretation",
+      "conclusion",
+      "recommendation_narrative",
+      "recommendations"
+    ],
+    "type": "object"
+  },
+  "system": "너는 ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험 성적서의 서술 작성 전문가다.\n주어진 JSON 사실 시트(fact_sheet)와 파생값(derived)·벤치마크(benchmark_refs)만을 근거로 한국어 성적서 서술을 작성한다.\n\n[필수 규칙]\n1. JSON 안에 명시된 숫자만 사용한다. 새로운 숫자를 계산·반올림·백분율 환산·추정하지 마라.\n2. JSON 에 없는 지표·수치(특히 지연시간/latency 가 available=false 인 경우 어떤 지연 수치도) 언급 금지.\n3. conclusion.verdict 는 fact_sheet.verdict 값을 그대로 사용한다. 값은 PASS(합격), CONDITIONAL_PASS(조건부 합격), FAIL(불합격), INCONCLUSIVE(판정 불가: 핵심 지표가 산출되지 않았거나 판정 대상 지표가 없음) 중 하나다. 판정 불가면 합격이나 불합격으로 단정하지 마라. metrics 의 is_core=true 는 판정에 쓰는 핵심 지표다(의뢰자가 정했거나 분류 유형의 기본값).\n4. benchmark 서술에는 benchmark_refs 의 source_note(기준의 출처·성격)를 반드시 포함하고, '공개 벤치마크 평균'처럼 단정하지 마라. benchmark_refs 가 비어 있으면 비교를 주장하지 마라.\n5. 과장 없이 사실 기반으로, 평가기관 성적서 문체(객관적·간결)로 작성한다.\n6. 이 성적서의 용도는 'external' 이다.\n7. 반드시 지정된 JSON 스키마로만 응답한다. 설명 문장을 덧붙이지 마라.\n8. client_inputs 는 의뢰자가 제공한 정보다(선언, 학습·평가 데이터, 정답 라벨, 실행 환경 등). 서술에 자유롭게 반영하되, 값이 '제공되지 않음'인 항목은 그 사실만 적고 내용을 지어내지 마라. client_inputs 의 숫자는 적힌 그대로만 쓴다.\n9. 평가한 모델의 분류 유형은 '이진 분류' 이다.\n11. fact_sheet.error_ratios 가 있으므로 interpretation.confusion_analysis(7.1)에서 오류의 성격을 서술하라. 오분류(misclassified) 중 결정 경계 근처에서 틀린 경계 오류(boundary: 경계와의 거리가 boundary_margin 미만)와 높은 확신으로 틀린 확신 오류(confident: 틀린 쪽 확률이 confident_level 이상)의 count 와 ratio 를 적힌 그대로 써라. boundary 가 null 이고 boundary_note 가 threshold_unknown 이다 — 예측값을 직접 제출해 결정 임계값을 알 수 없으므로 경계 오류는 계산하지 않았다고 적고, 경계 오류 수치를 지어내지 마라.\n12. fact_sheet.metrics 의 ci_low·ci_high 는 지표마다의 95% 신뢰구간이다. conclusion.narrative(8.2)에서 derived.ci_contains_target 에 이름이 있는 지표는 구간이 목표값을 포함하므로 표본 변동에 따라 그 지표의 판정이 달라질 수 있다고 적어라. 목록에 없는 지표에 이 말을 붙이지 말고, 구간 폭·차이 같은 새 숫자를 계산하지 마라. 단일 모델 평가라 통계적 유의성 검정은 하지 않았다 — 유의하다·유의미한 차이 같은 검정 결과를 주장하지 마라.\n13. fact_sheet.metrics 에서 near_target=true 이고 status=pass 인 지표는 목표값과의 차이(margin)가 목표값의 3% 미만인 아슬아슬 합격이다. conclusion.risks(8.3)에 그 지표와 margin 을 적힌 그대로 적고, 표본이 달라지면 기준에 미달할 위험이 있다고 써라. 합격한 지표이므로 미달했다고 쓰지 마라.\n14. fact_sheet.f1_threshold_gain 의 gain 이 0.1 이상이다. conclusion.narrative(8.2)와 conclusion.risks(8.3)에서 결정 임계값을 best_threshold 로 바꾸면 F1 이 current_f1 에서 max_f1 까지 오를 수 있다고 적되, gain 은 '이 데이터에서 오를 수 있는 최대폭'이고 같은 평가 데이터로 고른 임계값이라 별도 데이터에서 확인해야 한다고 반드시 덧붙여라. 성능 향상을 보장한다고 쓰지 마라.\n15. fact_sheet.imbalance_effect 의 level 이 mild 이므로 interpretation.distribution_analysis(7.2)의 결론은 불균형이 경미하다 — 불균형 비율(imbalance_ratio)이 1.5 미만이다. 불균형 때문에 성능이 왜곡되었다고 쓰지 마라. 수치는 imbalance_effect 에 적힌 그대로 써라.\n",
+  "user": "다음 사실 시트를 근거로 성적서 7·8·9절 서술을 작성하라.\n각 필드 의미: interpretation(7절 정밀분석: confusion_analysis=혼동행렬 기반 오분류 해석, distribution_analysis=클래스 분포/불균형 해석), conclusion(8절: benchmark=벤치마크 비교, narrative=종합 총평, risks=리스크), recommendation_narrative(9절 서술: data_quality, model_ops), recommendations(9절 권고표 항목들).\nbenchmark_refs 의 각 항목은 direction(higher/lower=높을수록/낮을수록 좋음)과 quality(better/within/worse=우수/기준 범위 내/미흡)를 포함한다. 벤치마크 우열은 position(단순 수치 위치)이 아니라 quality 로 서술하라(낮을수록 좋은 지표는 범위 아래가 오히려 우수).\ntarget_value 는 그 지표의 목표값(없으면 null)이고, target_position 은 목표값이 참조 범위보다 낮음(below)/범위 안(within)/높음(above)인지를 나타내는 단순 수치 위치다. 목표 설정 수준을 8.1(conclusion.benchmark)에서 해석하되, 높을수록/낮을수록 좋은지 방향 해석은 하지 말고 위치만 말하라.\nfact_sheet.problems 는 9절 권고가 대응할 문제 목록이다(id 순서가 우선순위 순서). recommendations 의 각 항목은 반드시 problems 의 id 하나를 problem_id 로 가지며 그 문제에 대응해야 한다. 모든 문제에 권고를 하나 이상 달고, 목록에 없는 문제에 대한 권고는 쓰지 마라. priority 는 그 문제의 priority 를 쓴다. expected_impact(기대 효과)에는 숫자나 예상 수치(개선 폭·목표 달성값 등)를 쓰지 말고 무엇이 나아지는지만 말로 적어라. recommendation_narrative.data_quality(9.1)는 recommend_section 이 9.1 인 데이터 쪽 문제를, model_ops(9.2)는 9.2 인 모델 쪽 문제를 다룬다. 어느 쪽에 문제가 없으면 지목된 문제가 없다고만 적고, problems 에 없는 문제를 지어내지 마라. note 가 있으면 그 사실을 권고에 반영하라.\n\n{\"fact_sheet\": {\"n_samples\": 200, \"dropped_rows\": 0, \"metrics\": [{\"metric_id\": \"M1\", \"display_name\": \"Accuracy\", \"value\": 0.505, \"threshold\": 0.51, \"status\": \"fail\", \"is_core\": true, \"ci_low\": 0.4363, \"ci_high\": 0.5735, \"margin\": -0.005, \"near_target\": true, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}, {\"metric_id\": \"M2\", \"display_name\": \"Precision\", \"value\": 0.48148148148148145, \"threshold\": null, \"status\": \"info\", \"is_core\": false, \"ci_low\": null, \"ci_high\": null, \"margin\": null, \"near_target\": false, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}, {\"metric_id\": \"M3\", \"display_name\": \"Recall\", \"value\": 0.5473684210526316, \"threshold\": null, \"status\": \"info\", \"is_core\": false, \"ci_low\": null, \"ci_high\": null, \"margin\": null, \"near_target\": false, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}, {\"metric_id\": \"M4\", \"display_name\": \"F1 Score\", \"value\": 0.5123152709359606, \"threshold\": 0.5, \"status\": \"pass\", \"is_core\": true, \"ci_low\": 0.4271, \"ci_high\": 0.5909, \"margin\": 0.012315271, \"near_target\": true, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}, {\"metric_id\": \"M5\", \"display_name\": \"F-beta Score\", \"value\": 0.5123152709359606, \"threshold\": 0.5, \"status\": \"pass\", \"is_core\": false, \"ci_low\": 0.4271, \"ci_high\": 0.5909, \"margin\": 0.012315271, \"near_target\": true, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}, {\"metric_id\": \"M9\", \"display_name\": \"AUROC\", \"value\": 0.5111779448621554, \"threshold\": null, \"status\": \"info\", \"is_core\": false, \"ci_low\": null, \"ci_high\": null, \"margin\": null, \"near_target\": false, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}, {\"metric_id\": \"M21\", \"display_name\": \"Confusion Matrix\", \"value\": 0.0, \"threshold\": null, \"status\": \"info\", \"is_core\": false, \"ci_low\": null, \"ci_high\": null, \"margin\": null, \"near_target\": false, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}, {\"metric_id\": \"M22\", \"display_name\": \"Classification Report\", \"value\": 0.0, \"threshold\": null, \"status\": \"info\", \"is_core\": false, \"ci_low\": null, \"ci_high\": null, \"margin\": null, \"near_target\": false, \"value_text\": null, \"higher_is_better\": null, \"beta\": null, \"margin_text\": null, \"ci_contains_target\": null}], \"per_class\": [{\"label\": \"0\", \"precision\": 0.532608695652174, \"recall\": 0.4666666666666667, \"f1\": 0.49746192893401014, \"support\": 105}, {\"label\": \"1\", \"precision\": 0.48148148148148145, \"recall\": 0.5473684210526316, \"f1\": 0.5123152709359606, \"support\": 95}], \"class_averages\": [{\"label\": \"매크로 평균\", \"precision\": 0.5070450885668277, \"recall\": 0.5070175438596491, \"f1\": 0.5048885999349854, \"support\": 200}, {\"label\": \"가중 평균\", \"precision\": 0.508323268921095, \"recall\": 0.505, \"f1\": 0.5045172663849367, \"support\": 200}], \"confusion\": {\"labels\": [\"0\", \"1\"], \"matrix\": [[49, 56], [43, 52]], \"positive_class\": \"1\"}, \"confusion_counts\": [{\"label\": \"1\", \"tp\": 52, \"fp\": 56, \"fn\": 43, \"tn\": 49}], \"distribution\": {\"class_distribution\": {\"0\": 105, \"1\": 95}, \"imbalance_ratio\": 1.105263157894737}, \"verdict\": \"FAIL\", \"score\": 66.7, \"latency\": {\"available\": false, \"mean\": null, \"p50\": null, \"p95\": null, \"p99\": null, \"unit\": \"ms\"}, \"derived_prediction\": null, \"error_ratios\": {\"unit\": \"sample\", \"misclassified\": 99, \"boundary\": null, \"boundary_note\": \"threshold_unknown\", \"confident\": {\"count\": 31, \"ratio\": 0.3131}, \"boundary_margin\": 0.1, \"confident_level\": 0.9, \"threshold\": null}, \"f1_threshold_gain\": {\"max_f1\": 0.6483, \"current_f1\": 0.5123, \"gain\": 0.136, \"best_threshold\": 0.03, \"notable\": null, \"gain_text\": null}, \"imbalance_effect\": {\"level\": \"mild\", \"imbalance_ratio\": 1.1053, \"accuracy_minus_macro_f1\": 0.0001, \"majority_minus_minority_f1\": -0.0149, \"majority_class\": \"0\", \"minority_class\": \"1\", \"accuracy\": null, \"macro_f1\": null, \"majority_f1\": null, \"minority_f1\": null, \"display\": null}, \"ci_method_note\": \"판정 대상 지표의 95% 신뢰구간은 Wilson 점수 구간(M1), 다항 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4, M5)으로 산출하였습니다.\", \"problems\": [{\"id\": \"P1\", \"kind\": \"core_fail\", \"priority\": \"HIGH\", \"title\": \"핵심 지표 미달 (Accuracy)\", \"source_section\": \"8.2\", \"recommend_section\": \"9.2\", \"evidence\": {\"Accuracy\": {\"value\": 0.505, \"target\": 0.51}}, \"note\": null}, {\"id\": \"P2\", \"kind\": \"core_near_target\", \"priority\": \"MEDIUM\", \"title\": \"핵심 지표 아슬아슬 합격 (F1 Score)\", \"source_section\": \"8.3\", \"recommend_section\": \"9.2\", \"evidence\": {\"F1 Score\": {\"value\": 0.5123152709359606, \"target\": 0.5, \"margin\": 0.0123}}, \"note\": null}, {\"id\": \"P3\", \"kind\": \"threshold_tuning\", \"priority\": \"MEDIUM\", \"title\": \"임계값 부적합\", \"source_section\": \"8.3\", \"recommend_section\": \"9.2\", \"evidence\": {\"max_f1\": 0.6483, \"current_f1\": 0.5123, \"gain\": 0.136, \"best_threshold\": 0.03, \"notable\": true, \"gain_text\": \"0.136\"}, \"note\": null}], \"facts\": null}, \"derived\": {\"confusion\": {\"total\": 200, \"correct\": 101, \"misclassified\": 99, \"correct_pct\": 50.5, \"misclassified_pct\": 49.5, \"tn\": 49, \"fp\": 56, \"fn\": 43, \"tp\": 52, \"tn_pct\": 24.5, \"fp_pct\": 28.0, \"fn_pct\": 21.5, \"tp_pct\": 26.0}, \"distribution\": {\"total\": 200, \"percentages\": {\"0\": 52.5, \"1\": 47.5}}, \"counts\": {\"target\": 3, \"passed\": 2, \"n_metrics\": 8}, \"ci_contains_target\": [\"Accuracy\", \"F1 Score\", \"F-beta Score\"], \"threshold_tuning\": true}, \"benchmark_refs\": [{\"metric\": \"Accuracy\", \"model_value\": 0.505, \"ref_low\": 0.85, \"ref_high\": 0.92, \"position\": \"below\", \"direction\": \"higher\", \"quality\": \"worse\", \"target_value\": 0.51, \"target_position\": \"below\", \"source_note\": \"내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)\"}, {\"metric\": \"Precision\", \"model_value\": 0.4815, \"ref_low\": 0.8, \"ref_high\": 0.92, \"position\": \"below\", \"direction\": \"higher\", \"quality\": \"worse\", \"target_value\": null, \"target_position\": null, \"source_note\": \"내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)\"}, {\"metric\": \"Recall\", \"model_value\": 0.5474, \"ref_low\": 0.8, \"ref_high\": 0.92, \"position\": \"below\", \"direction\": \"higher\", \"quality\": \"worse\", \"target_value\": null, \"target_position\": null, \"source_note\": \"내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)\"}, {\"metric\": \"F1 Score\", \"model_value\": 0.5123, \"ref_low\": 0.83, \"ref_high\": 0.91, \"position\": \"below\", \"direction\": \"higher\", \"quality\": \"worse\", \"target_value\": 0.5, \"target_position\": \"below\", \"source_note\": \"내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)\"}, {\"metric\": \"AUROC\", \"model_value\": 0.5112, \"ref_low\": 0.85, \"ref_high\": 0.95, \"position\": \"below\", \"direction\": \"higher\", \"quality\": \"worse\", \"target_value\": null, \"target_position\": null, \"source_note\": \"내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)\"}]}",
+  "whitelist": [
+    "-0",
+    "-0.005",
+    "-0.01",
+    "-0.0149",
+    "-0.015",
+    "0",
+    "0.0001",
+    "0.005",
+    "0.01",
+    "0.012",
+    "0.0123",
+    "0.0123153",
+    "0.0149",
+    "0.015",
+    "0.03",
+    "0.1",
+    "0.136",
+    "0.14",
+    "0.3",
+    "0.31",
+    "0.313",
+    "0.3131",
+    "0.4",
+    "0.427",
+    "0.4271",
+    "0.43",
+    "0.436",
+    "0.4363",
+    "0.44",
+    "0.466667",
+    "0.4667",
+    "0.467",
+    "0.47",
+    "0.48",
+    "0.481",
+    "0.481481",
+    "0.4815",
+    "0.497",
+    "0.497462",
+    "0.4975",
+    "0.5",
+    "0.5045",
+    "0.504517",
+    "0.504889",
+    "0.5049",
+    "0.505",
+    "0.507",
+    "0.507018",
+    "0.507045",
+    "0.508",
+    "0.5083",
+    "0.508323",
+    "0.51",
+    "0.511",
+    "0.511178",
+    "0.5112",
+    "0.512",
+    "0.5123",
+    "0.512315",
+    "0.53",
+    "0.5326",
+    "0.532609",
+    "0.533",
+    "0.547",
+    "0.547368",
+    "0.5474",
+    "0.55",
+    "0.57",
+    "0.5735",
+    "0.574",
+    "0.59",
+    "0.5909",
+    "0.591",
+    "0.6",
+    "0.648",
+    "0.6483",
+    "0.65",
+    "0.8",
+    "0.83",
+    "0.85",
+    "0.9",
+    "0.91",
+    "0.92",
+    "0.95",
+    "1",
+    "1.1",
+    "1.105",
+    "1.10526",
+    "1.1053",
+    "1.11",
+    "1.2",
+    "1.23",
+    "1.49",
+    "1.5",
+    "10",
+    "100",
+    "101",
+    "105",
+    "108",
+    "13.6",
+    "14",
+    "2",
+    "200",
+    "2000",
+    "21.5",
+    "24.5",
+    "26",
+    "28",
+    "3",
+    "31",
+    "31.3",
+    "31.31",
+    "42.7",
+    "42.71",
+    "4213",
+    "43",
+    "43.6",
+    "43.63",
+    "44",
+    "46.67",
+    "46.7",
+    "47",
+    "47.5",
+    "48",
+    "48.1",
+    "48.15",
+    "49",
+    "49.5",
+    "49.7",
+    "49.75",
+    "50",
+    "50.45",
+    "50.49",
+    "50.5",
+    "50.7",
+    "50.8",
+    "50.83",
+    "51",
+    "51.1",
+    "51.12",
+    "51.2",
+    "51.23",
+    "52",
+    "52.5",
+    "53",
+    "53.26",
+    "53.3",
+    "54.7",
+    "54.74",
+    "55",
+    "56",
+    "57",
+    "57.35",
+    "57.4",
+    "59",
+    "59.09",
+    "59.1",
+    "64.8",
+    "64.83",
+    "65",
+    "66.7",
+    "8",
+    "80",
+    "83",
+    "85",
+    "90",
+    "91",
+    "92",
+    "95",
+    "99"
+  ]
+}

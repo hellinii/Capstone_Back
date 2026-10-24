@@ -54,9 +54,9 @@ def _req(raw: dict) -> NarrativeRequest:
 
 def _parts(req: NarrativeRequest):
     fs, task = req.fact_sheet, req.task_type.value
-    refs = build_benchmark_refs(task, fs.metrics)
+    refs = build_benchmark_refs(task, fs.metrics, edition=3)
     derived = compute_derived(fs, task_type=task)
-    return fs, refs, derived, select_items(fs, req.client_inputs, task, derived=derived, benchmark_refs=refs)
+    return fs, refs, derived, select_items(fs, req.client_inputs, task, derived=derived, benchmark_refs=refs, edition=3)
 
 
 def _printed(req: NarrativeRequest) -> bool:
@@ -135,14 +135,14 @@ def test_trimmed_list_without_facts_omission_is_not_printed():
 def test_job_template_8_1_is_empty_when_printed_only():
     req = _req(_all_lack())
     fs, refs, derived, conclusions = _parts(req)
-    out = fallback.section_template("8.1", fs, refs, derived, task_type="binary", conclusions=conclusions)
+    out = fallback.section_template("8.1", fs, refs, derived, task_type="binary", conclusions=conclusions, edition=3)
     assert out == {"conclusion.benchmark": ""}
 
 
 def test_job_template_8_1_keeps_old_sentence_when_not_printed():
     req = _req(_all_lack(sentence=False))
     fs, refs, derived, conclusions = _parts(req)
-    out = fallback.section_template("8.1", fs, refs, derived, task_type="binary", conclusions=conclusions)
+    out = fallback.section_template("8.1", fs, refs, derived, task_type="binary", conclusions=conclusions, edition=3)
     assert out == {"conclusion.benchmark": OLD_SENTENCE}
 
 
@@ -150,7 +150,7 @@ def test_legacy_fallback_keeps_old_sentence_even_with_sentence_16():
     """옛 경로(build_fallback_narrative)는 16 이 실려도 지금 문장 그대로."""
     req = _req(_all_lack())
     fs, refs, derived, _ = _parts(req)
-    resp = fallback.build_fallback_narrative(fs, refs, derived, "no_key", task_type="binary")
+    resp = fallback.build_fallback_narrative(fs, refs, derived, "no_key", task_type="binary", edition=3)
     assert resp.conclusion.benchmark == OLD_SENTENCE
 
 
@@ -160,7 +160,7 @@ def test_empty_8_1_is_still_rejected_by_the_check():
     _, _, whitelist, conclusions, *_ = generator._prepare(req)
     result = checks.check_section(
         "8.1", {"conclusion.benchmark": ""}, whitelist=whitelist, verdict=req.fact_sheet.verdict,
-        conclusions=conclusions, problem_ids=[], exempt=set(),
+        conclusions=conclusions, problem_ids=[], exempt=set(), edition=3,
     )
     assert result.format == ["empty"]
 

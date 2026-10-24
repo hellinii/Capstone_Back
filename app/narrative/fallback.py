@@ -16,6 +16,9 @@ app/narrative/fallback.py — 규칙 기반 문장(규칙 템플릿).
   required_items.benchmark_printed_only). 옛 경로(build_fallback_narrative)는 지금 문장 그대로.
 - 해석형 항목(모델 용도·최약 클래스의 용도상 위험)은 사실 문장만.
 - 작성 규칙(D37): 클래스는 '이름(설명)', 영어 코드값·필드명 없음, 서술체.
+- 판 4(edition 4, 판 4 라운드 S2 ⑦): 결론 문장은 required_items 판 4 갈래 그대로, 칸 앞뒤 문장만 판 4 글 — 9절 권고표 → 6절
+  권고표(A4), 근소 합격 폴백 권고(B24), 분포 나열의 백분율(판 4 표기), 기준표에 지표가 없는 5.4 는 '해당 없음'(B18).
+  데이터/모델 가름은 저장값(recommend_section 9.1/9.2) 그대로다.
 """
 from app.narrative.required_items import (
     Conclusion,
@@ -25,6 +28,7 @@ from app.narrative.required_items import (
     select_items,
 )
 from app.narrative.schemas import ConclusionOut, FactSheet, GroundingInfo, InterpretationOut, NarrativeMeta, NarrativeResponse, ProblemFact, RecommendationNarrativeOut, RecommendationOut
+from app.narrative import wording_ed4
 from app.narrative.wording import VERDICT_LABEL, class_descriptions, class_name, metric_vs_target
 
 # 판정 이름 — 성적서 8.2 판정 상자와 같은 이름 한 벌(app.narrative.wording). 옛 이름으로도 읽힌다.
@@ -82,19 +86,40 @@ _PROBLEM_TEMPLATES: dict[str, tuple[str, str, str]] = {
         "정답 라벨 일부를 표본 추출해 사람이 검토하고 라벨 오류 비율을 확인한다",
         "정답 오류가 성능 수치에 주는 영향 파악",
     ),
+    # 판 4 에만 오는 종류(J8) — 계획 부록 B23 승인 글 그대로.
+    "same_source": (
+        "다른 출처 데이터로 재평가",
+        "학습 데이터와 다른 출처(다른 기간·장비·기관 등)에서 얻은 평가 데이터로 재평가한다",
+        "다른 운영 조건에서도 판정이 유지되는지 확인할 근거 확보",
+    ),
 }
+
+# 판 4 에서 글이 다른 종류(계획 부록 B24 — 판 4 근소 합격은 판정 여유(신뢰구간 기준)라 '목표값에 근접해'가 맞지 않는다).
+# 승인 글: "목표값에 근접해 합격한" → "판정 여유가 작은 채 합격한"(나머지 글 그대로).
+_PROBLEM_TEMPLATES_ED4: dict[str, tuple[str, str, str]] = {
+    "core_near_target": (
+        _PROBLEM_TEMPLATES["core_near_target"][0],
+        _PROBLEM_TEMPLATES["core_near_target"][1].replace("목표값에 근접해 합격한", "판정 여유가 작은 채 합격한"),
+        _PROBLEM_TEMPLATES["core_near_target"][2],
+    ),
+}
+assert _PROBLEM_TEMPLATES_ED4["core_near_target"][1] != _PROBLEM_TEMPLATES["core_near_target"][1], "B24 치환이 빠졌다"
+
+# 판 4 5.4 칸이 비었을 때의 글(계획 부록 B18 승인 글 — 모든 지표가 기준표 밖).
+B18_NONE = "해당 없음"
 
 # 편향 감소 노력을 "수행 안 함"으로 밝힌 불균형 영향(note 가 있음) — 권고 앞에 그 사실을 붙인다.
 _IMBALANCE_NOTE_PREFIX = "의뢰자가 편향 감소 노력을 수행하지 않았다고 밝혔으므로, "
 
 
-def problem_recommendation(problem: ProblemFact) -> RecommendationOut:
+def problem_recommendation(problem: ProblemFact, *, edition: int) -> RecommendationOut:
     """문제 하나의 폴백 권고(종류별 템플릿). 우선순위·번호는 문제의 것을 그대로 쓴다.
 
     LLM 이 권고를 하나도 달지 않은 문제를 채울 때도(service) 이 함수를 쓴다 — 문제마다 권고가 하나 이상
-    있어야 9절 표가 문제 목록과 맞는다.
+    있어야 9절 표가 문제 목록과 맞는다. edition 은 성적서 양식 판(판 4 는 _PROBLEM_TEMPLATES_ED4 가 덮는 종류만 다르다).
     """
-    category, action, impact = _PROBLEM_TEMPLATES[problem.kind]
+    table = _PROBLEM_TEMPLATES_ED4 if edition == 4 else {}
+    category, action, impact = table.get(problem.kind) or _PROBLEM_TEMPLATES[problem.kind]
     if problem.kind == "imbalance_effect" and problem.note:
         action = _IMBALANCE_NOTE_PREFIX + action
     return RecommendationOut(
@@ -110,7 +135,7 @@ def _problem_names(problems: list[ProblemFact]) -> str:
     return ", ".join(f"{p.id}({p.title})" for p in problems)
 
 
-def _recommendations(fs: FactSheet):
+def _recommendations(fs: FactSheet, *, edition: int):
     """9절 — 권고는 문제 목록(problems)에만 묶는다(서술 설계 D22).
 
     종전에는 문제와 무관하게 권고를 지어냈다: 아무 문제가 없어도 '운영 모니터링'을 넣고, 제외 행·
@@ -119,29 +144,33 @@ def _recommendations(fs: FactSheet):
 
     9.1(data_quality)은 데이터 쪽 문제(recommend_section 9.1), 9.2(model_ops)는 모델 쪽 문제만 말한다.
     제외 행 수는 사실로만 적는다 — 문제 목록에 없으니 권고하지 않는다.
+    가름은 저장값(칸 이름 9.1/9.2) 그대로다 — 판 4 에서도 recommend_section 은 '9.1'(찍히는 자리만 6.1). 판 4 는 권고표가
+    6절에 찍힌다(부록 A4 — '9절 권고표' → '6절 권고표').
     """
+    table = "6절 권고표" if edition == 4 else "9절 권고표"
     data_side = [p for p in fs.problems if p.recommend_section == "9.1"]
     model_side = [p for p in fs.problems if p.recommend_section != "9.1"]
 
     if data_side:
         data_quality = (
             f"데이터 측면에서 지목된 문제는 {_problem_names(data_side)}이며, "
-            "9절 권고표의 해당 항목에 따른 보완 후 재평가를 권고한다."
+            f"{table}의 해당 항목에 따른 보완 후 재평가를 권고한다."
         )
     else:
         data_quality = "데이터 측면에서 권고 대상으로 지목된 문제는 없다."
     if fs.dropped_rows > 0:
-        data_quality += f" 전처리에서 {fs.dropped_rows}건이 평가에서 제외되었다."
+        dropped = wording_ed4.ed4_count(fs.dropped_rows) if edition == 4 else fs.dropped_rows
+        data_quality += f" 전처리에서 {dropped}건이 평가에서 제외되었다."
 
     if model_side:
         model_ops = (
             f"모델 측면에서 지목된 문제는 {_problem_names(model_side)}이며, "
-            "9절 권고표의 해당 항목에 따른 개선 후 재평가를 권고한다."
+            f"{table}의 해당 항목에 따른 개선 후 재평가를 권고한다."
         )
     else:
         model_ops = "모델 측면에서 권고 대상으로 지목된 문제는 없다."
 
-    recs = [problem_recommendation(p) for p in fs.problems]
+    recs = [problem_recommendation(p, edition=edition) for p in fs.problems]
     return RecommendationNarrativeOut(data_quality=data_quality, model_ops=model_ops), recs
 
 
@@ -156,9 +185,11 @@ class _Input:
 
     def __init__(
         self, fs: FactSheet, refs: list[dict], derived: dict, conclusions: list[Conclusion], descriptions: dict,
-        *, benchmark_fixed: bool = False,
+        *, edition: int, benchmark_fixed: bool = False,
     ):
         self.fs, self.refs, self.derived, self.conclusions, self.descriptions = fs, refs, derived, conclusions, descriptions
+        # 성적서 양식 판(3 | 4 — 요청의 report_edition). 기본값 없음(판 4 라운드 S2 ②).
+        self.edition = edition
         # 8.1 이 성적서 고정 문구 16 뿐(작업 경로만 — required_items.benchmark_printed_only).
         self.benchmark_fixed = benchmark_fixed
 
@@ -169,7 +200,19 @@ class _Input:
         return any(c.item_id == item_id and c.template_text for c in self.conclusions)
 
     def name(self, label) -> str:
+        """이름(설명) — 판 4 는 설명에 괄호가 있으면 이름[설명](wording_ed4.class_name_ed4 — S6 뒤 사용자 결정 5)."""
+        if self.edition == 4:
+            return wording_ed4.class_name_ed4(label, self.descriptions.get(str(label).strip()))
         return class_name(label, self.descriptions)
+
+    def cnt(self, n) -> str:
+        """정수 건수 — 판 4 는 1,000 이상이면 천 단위 쉼표(wording_ed4.ed4_count — S6 뒤 사용자 결정 4), 판 3 은 그대로."""
+        return wording_ed4.ed4_count(n) if self.edition == 4 else str(n)
+
+    def name_count(self, label, count_with_unit: str) -> str:
+        """이름 바로 뒤 건수 — 판 4 는 이름이 숫자로 끝나면 '{이름}: {n}건'(wording_ed4.name_count_ed4)."""
+        shown = self.name(label)
+        return wording_ed4.name_count_ed4(shown, count_with_unit) if self.edition == 4 else f"{shown} {count_with_unit}"
 
 
 def _section_7_1(inp: _Input) -> dict:
@@ -185,23 +228,28 @@ def _distribution_intro(inp: _Input) -> str | None:
     fs, dist = inp.fs, inp.derived.get("distribution")
     if dist and fs.distribution:
         pct = dist["percentages"]
-        items = ", ".join(f"{inp.name(k)} {v}건({pct.get(k, 0)}%)" for k, v in fs.distribution.class_distribution.items())
+        if inp.edition == 4:
+            # 판 4 — 건수 비율을 셋째 자리 글자에서 옮긴 첫째 자리(4.5·사실 보기와 같은 함수 — 62.6%).
+            share = {k: wording_ed4.ed4_ratio_percent(v, dist["total"]) for k, v in fs.distribution.class_distribution.items()}
+        else:
+            share = {k: f"{pct.get(k, 0)}%" for k in fs.distribution.class_distribution}
+        items = ", ".join(inp.name_count(k, f"{inp.cnt(v)}건({share[k]})") for k, v in fs.distribution.class_distribution.items())
         # 프론트가 클래스 상한(256)에 맞춰 분포를 잘랐으면 잘린 목록을 전체처럼 쓰지 않는다(S4a 미리 자르기).
         cut = fs.facts.omitted.get("class_distribution", 0) if fs.facts is not None else 0
         if cut:
             items += f" 외 {cut}개 {'레이블' if dist.get('unit') == 'label' else '클래스'}"
         if dist.get("unit") == "label":
             return (
-                f"평가 데이터셋은 총 {dist['total']}건이며, 레이블별 등장 분포는 {items}이다"
+                f"평가 데이터셋은 총 {inp.cnt(dist['total'])}건이며, 레이블별 등장 분포는 {items}이다"
                 "(한 표본에 레이블이 여럿일 수 있어 비율을 모두 더하면 전체를 넘을 수 있다)."
             )
-        return f"평가 데이터셋은 총 {dist['total']}건이며, 클래스 분포는 {items}이다."
+        return f"평가 데이터셋은 총 {inp.cnt(dist['total'])}건이며, 클래스 분포는 {items}이다."
     if fs.imbalance_effect is not None:
         # 클래스가 많아 프론트가 분포 표를 비웠어도(본문 예산) 엔진의 불균형 결론은 남는다 — 9절에 불균형 문제가 있는데
         # 7.2 가 분포를 모른다고 쓰지 않게(S4b 검토 FB-02).
         cut = fs.facts.omitted.get("class_distribution", 0) if fs.facts is not None else 0
         head = f"클래스가 많아 클래스별 건수({cut}개)는 생략했다." if cut else "클래스별 건수는 싣지 않았다."
-        return f"평가 데이터셋은 총 {fs.n_samples}건이며, {head}"
+        return f"평가 데이터셋은 총 {inp.cnt(fs.n_samples)}건이며, {head}"
     return None
 
 
@@ -221,6 +269,10 @@ def _section_8_1(inp: _Input) -> dict:
     if inp.benchmark_fixed:
         return {"conclusion.benchmark": ""}  # 성적서가 8.1 표 아래에 고정 문구 16 을 찍는다 — 되풀이하지 않는다
     if not inp.refs:
+        if inp.edition == 4:
+            # 판 4 — 기준표에 있는 지표가 없으면 5.4 는 '해당 없음'(부록 B18). 빈 글로 돌려주면 프론트가 서술 대기 자리표시로
+            # 읽을 수 있어 글자로 둔다(성적서가 고정 문구 16 을 찍는 경우는 위 benchmark_fixed — 빈 글·출처 fixed).
+            return {"conclusion.benchmark": B18_NONE}
         return {"conclusion.benchmark": "비교 가능한 내부 참조 기준치가 없어 벤치마크 비교를 생략한다."}
     lines = inp.lines("8.1")
     lines.insert(1 if lines else 0, f"비교 기준은 {inp.refs[0]['source_note']}이다.")
@@ -232,21 +284,24 @@ def _section_8_2(inp: _Input) -> dict:
     return {"conclusion.narrative": " ".join(inp.lines("8.2"))}
 
 
-def _risks_lead(fs: FactSheet) -> str:
+def _risks_lead(fs: FactSheet, *, edition: int) -> str:
     """8.3 첫 문장 — 목표 미달·판정 불가에 따른 위험(결론 목록 밖의 사실 문장).
+
+    판 4(edition 4)는 목표 미달 지표 목록을 판 4 표기로 찍는다(값 value_text, 목표 셋째 자리 — 8.2 판정 문장과 같은 글자).
 
     판정 불가에 '모든 시험항목이 기준을 충족'이라 쓰면 확인하지 못한 것을 확인한 것처럼 읽히고 판정 모순
     검사에도 걸린다(점검 BE-03) — 판정 불가는 미달이 없어도 '위험을 확인하지 못했다'로 쓴다.
     '임계값이 설정된'은 '목표값이 설정된'으로 쓴다 — 같은 8.3 에 결정 임계값 문장이 함께 나온다.
     """
     failed = failed_metrics(fs)
+    vs_target = wording_ed4.metric_vs_target_ed4 if edition == 4 else metric_vs_target
     judged = [m for m in fs.metrics if m.threshold is not None]
     # 아슬아슬 합격(D12) — near_target 판정은 프론트가 했고 여기서는 합격한 지표만 골라 읽는다.
     near = [m for m in fs.metrics if m.near_target and m.status == "pass"]
     if failed:
         risks = (
             "목표에 미달한 지표가 있어 해당 영역의 성능 저하 위험이 존재한다"
-            f"(목표 미달 지표: {', '.join(metric_vs_target(m) for m in failed)})."
+            f"(목표 미달 지표: {', '.join(vs_target(m) for m in failed)})."
         )
         if fs.verdict == "INCONCLUSIVE":
             risks += " 다만 종합 판정이 '판정 불가'여서 판정에 따른 위험은 확인하지 못했다."
@@ -267,11 +322,11 @@ def _risks_lead(fs: FactSheet) -> str:
 
 def _section_8_3(inp: _Input) -> dict:
     """8.3 리스크 — 목표 미달 위험 + 최약 클래스(사실 문장만)·근소 차이(17·18 규칙)·임계값 부적합·지연시간·대화형 응답 시간."""
-    return {"conclusion.risks": " ".join([_risks_lead(inp.fs)] + inp.lines("8.3"))}
+    return {"conclusion.risks": " ".join([_risks_lead(inp.fs, edition=inp.edition)] + inp.lines("8.3"))}
 
 
 def _section_9(inp: _Input) -> dict:
-    rec_narrative, recs = _recommendations(inp.fs)
+    rec_narrative, recs = _recommendations(inp.fs, edition=inp.edition)
     return {
         "recommendation_narrative.data_quality": rec_narrative.data_quality,
         "recommendation_narrative.model_ops": rec_narrative.model_ops,
@@ -290,14 +345,15 @@ SECTION_TEMPLATES = {
 }
 
 
-def _input(fs, benchmark_refs, derived, *, task_type, client_inputs, conclusions, job: bool = False) -> _Input:
+def _input(fs, benchmark_refs, derived, *, task_type, client_inputs, conclusions, edition: int, job: bool = False) -> _Input:
     if conclusions is None:
         conclusions = select_items(
-            fs, client_inputs, task_type or infer_task_type(fs, derived), derived=derived, benchmark_refs=benchmark_refs,
+            fs, client_inputs, task_type or infer_task_type(fs, derived),
+            edition=edition, derived=derived, benchmark_refs=benchmark_refs,
         )
     return _Input(
         fs, benchmark_refs, derived, conclusions, class_descriptions(client_inputs),
-        benchmark_fixed=job and benchmark_printed_only(fs, benchmark_refs, conclusions),
+        edition=edition, benchmark_fixed=job and benchmark_printed_only(fs, benchmark_refs, conclusions),
     )
 
 
@@ -310,14 +366,16 @@ def section_template(
     task_type: str | None = None,
     client_inputs: dict | None = None,
     conclusions: list[Conclusion] | None = None,
+    edition: int,
 ) -> dict:
-    """칸 하나의 규칙 문장 — {응답 필드(점 표기): 값}.
+    """칸 하나의 규칙 문장 — {응답 필드(점 표기): 값}. edition 은 성적서 양식 판(3 | 4 — 요청의 report_edition).
 
     conclusions 를 주면(작업 경로 — 지시문과 같은 목록) 그것을 읽고, 없으면 select_items 로 만든다. task_type 이 없는 옛
     호출은 사실 시트로 짐작한다(required_items.infer_task_type). client_inputs 의 클래스 설명으로 클래스를 부른다(D37).
     작업 경로 전용이다 — 8.1 이 고정 문구 16 뿐이면 빈 글(옛 경로 build_fallback_narrative 는 지금 문장)."""
     inp = _input(
-        fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=conclusions, job=True,
+        fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=conclusions,
+        edition=edition, job=True,
     )
     return SECTION_TEMPLATES[section_id](inp)
 
@@ -353,11 +411,15 @@ def build_fallback_narrative(
     *,
     task_type: str | None = None,
     client_inputs: dict | None = None,
+    edition: int,
 ) -> NarrativeResponse:
     """규칙 기반 폴백 서술 — 일곱 칸의 템플릿을 모은다. reason: no_key | api_error | grounding_failed …
 
-    옛 경로(legacy)는 요청의 task_type·client_inputs 를 넘긴다. 둘 없이 부르면(옛 호출) 작업 유형을 짐작하고 클래스 설명 없이 쓴다."""
-    inp = _input(fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=None)
+    옛 경로(legacy)는 요청의 task_type·client_inputs 를 넘긴다. 둘 없이 부르면(옛 호출) 작업 유형을 짐작하고 클래스 설명 없이 쓴다.
+    edition 은 성적서 양식 판 — 옛 경로는 늘 판 3 을 넘긴다(legacy.EDITION)."""
+    inp = _input(
+        fs, benchmark_refs, derived, task_type=task_type, client_inputs=client_inputs, conclusions=None, edition=edition,
+    )
     parts: dict = {}
     for section_id, fn in SECTION_TEMPLATES.items():
         parts.update(fn(inp))

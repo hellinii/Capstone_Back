@@ -1,0 +1,140 @@
+{
+  "parse_trimmed": [],
+  "report_no": "RPT-2026-0002",
+  "request": "bc_weak",
+  "sections": {
+    "7.1": {
+      "check": {
+        "code_words": [],
+        "d24_missing": false,
+        "format": [],
+        "impact_numbers": [],
+        "missing_recommendations": [],
+        "numbers": [],
+        "verdict_contradiction": false
+      },
+      "final_verdict_contradictions": [],
+      "grounding": {
+        "checked": 16,
+        "passed": true,
+        "violations": []
+      },
+      "hard_failures": [],
+      "passed": true
+    },
+    "7.2": {
+      "check": {
+        "code_words": [],
+        "d24_missing": false,
+        "format": [],
+        "impact_numbers": [],
+        "missing_recommendations": [],
+        "numbers": [],
+        "verdict_contradiction": false
+      },
+      "final_verdict_contradictions": [],
+      "grounding": {
+        "checked": 5,
+        "passed": true,
+        "violations": []
+      },
+      "hard_failures": [],
+      "passed": true
+    },
+    "7.3": {
+      "check": {
+        "code_words": [],
+        "d24_missing": false,
+        "format": [],
+        "impact_numbers": [],
+        "missing_recommendations": [],
+        "numbers": [],
+        "verdict_contradiction": false
+      },
+      "final_verdict_contradictions": [],
+      "grounding": {
+        "checked": 3,
+        "passed": true,
+        "violations": []
+      },
+      "hard_failures": [],
+      "passed": true
+    },
+    "8.1": {
+      "check": {
+        "code_words": [],
+        "d24_missing": false,
+        "format": [],
+        "impact_numbers": [],
+        "missing_recommendations": [],
+        "numbers": [],
+        "verdict_contradiction": false
+      },
+      "final_verdict_contradictions": [],
+      "grounding": {
+        "checked": 22,
+        "passed": true,
+        "violations": []
+      },
+      "hard_failures": [],
+      "passed": true
+    },
+    "8.2": {
+      "check": {
+        "code_words": [],
+        "d24_missing": false,
+        "format": [],
+        "impact_numbers": [],
+        "missing_recommendations": [],
+        "numbers": [],
+        "verdict_contradiction": false
+      },
+      "final_verdict_contradictions": [],
+      "grounding": {
+        "checked": 11,
+        "passed": true,
+        "violations": []
+      },
+      "hard_failures": [],
+      "passed": true
+    },
+    "8.3": {
+      "check": {
+        "code_words": [],
+        "d24_missing": false,
+        "format": [],
+        "impact_numbers": [],
+        "missing_recommendations": [],
+        "numbers": [],
+        "verdict_contradiction": false
+      },
+      "final_verdict_contradictions": [],
+      "grounding": {
+        "checked": 2,
+        "passed": true,
+        "violations": []
+      },
+      "hard_failures": [],
+      "passed": true
+    },
+    "9": {
+      "check": {
+        "code_words": [],
+        "d24_missing": false,
+        "format": [],
+        "impact_numbers": [],
+        "missing_recommendations": [],
+        "numbers": [],
+        "verdict_contradiction": false
+      },
+      "final_verdict_contradictions": [],
+      "grounding": {
+        "checked": 6,
+        "passed": true,
+        "violations": []
+      },
+      "hard_failures": [],
+      "passed": true
+    }
+  }
+}

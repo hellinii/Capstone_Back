@@ -1,0 +1,366 @@
+{
+  "task_type": "multilabel",
+  "report_purpose": "external",
+  "fact_sheet": {
+    "n_samples": 200,
+    "dropped_rows": 0,
+    "metrics": [
+      {
+        "metric_id": "M4",
+        "display_name": "F1 Score",
+        "value": 0.48007025235639533,
+        "threshold": 0.5,
+        "status": "fail",
+        "is_core": true,
+        "ci_low": 0.4369,
+        "ci_high": 0.5168,
+        "margin": -0.019929748,
+        "near_target": false,
+        "value_text": "0.480",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.0199",
+        "ci_contains_target": true
+      },
+      {
+        "metric_id": "M15",
+        "display_name": "Hamming Loss",
+        "value": 0.52,
+        "threshold": 0.6,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.485,
+        "ci_high": 0.5563,
+        "margin": 0.08,
+        "near_target": false,
+        "value_text": "0.520",
+        "higher_is_better": false,
+        "beta": null,
+        "margin_text": "0.08",
+        "ci_contains_target": false
+      },
+      {
+        "metric_id": "M16",
+        "display_name": "Exact Match Ratio",
+        "value": 0.065,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null
+      },
+      {
+        "metric_id": "M17",
+        "display_name": "Jaccard Index",
+        "value": 0.33625,
+        "threshold": null,
+        "status": "info",
+        "is_core": true,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null
+      }
+    ],
+    "per_class": [
+      {
+        "label": "finance",
+        "precision": 0.47368421052631576,
+        "recall": 0.4205607476635514,
+        "f1": 0.44554455445544555,
+        "support": 107
+      },
+      {
+        "label": "news",
+        "precision": 0.5425531914893617,
+        "recall": 0.5,
+        "f1": 0.5204081632653061,
+        "support": 102
+      },
+      {
+        "label": "sports",
+        "precision": 0.4215686274509804,
+        "recall": 0.44329896907216493,
+        "f1": 0.4321608040201005,
+        "support": 97
+      },
+      {
+        "label": "tech",
+        "precision": 0.5247524752475248,
+        "recall": 0.5196078431372549,
+        "f1": 0.5221674876847291,
+        "support": 102
+      }
+    ],
+    "class_averages": [
+      {
+        "label": "매크로 평균",
+        "precision": 0.4906396261785457,
+        "recall": 0.4708668899682428,
+        "f1": 0.48007025235639533,
+        "support": 408
+      },
+      {
+        "label": "가중 평균",
+        "precision": 0.4912782975397629,
+        "recall": 0.47058823529411764,
+        "f1": 0.480234268905848,
+        "support": 408
+      },
+      {
+        "label": "마이크로 평균",
+        "precision": 0.4897959183673469,
+        "recall": 0.47058823529411764,
+        "f1": 0.48,
+        "support": 408
+      },
+      {
+        "label": "샘플 평균",
+        "precision": 0.495,
+        "recall": 0.48,
+        "f1": 0.44433333333333336,
+        "support": 408
+      }
+    ],
+    "confusion": {
+      "labels": [
+        "Negative (전체 레이블 합계)",
+        "Positive (전체 레이블 합계)"
+      ],
+      "matrix": [
+        [
+          192,
+          200
+        ],
+        [
+          216,
+          192
+        ]
+      ],
+      "positive_class": null
+    },
+    "confusion_counts": [
+      {
+        "label": "finance",
+        "tp": 45,
+        "fp": 50,
+        "fn": 62,
+        "tn": 43
+      },
+      {
+        "label": "news",
+        "tp": 51,
+        "fp": 43,
+        "fn": 51,
+        "tn": 55
+      },
+      {
+        "label": "sports",
+        "tp": 43,
+        "fp": 59,
+        "fn": 54,
+        "tn": 44
+      },
+      {
+        "label": "tech",
+        "tp": 53,
+        "fp": 48,
+        "fn": 49,
+        "tn": 50
+      }
+    ],
+    "derived_prediction": null,
+    "error_ratios": {
+      "unit": "label_cell",
+      "misclassified": 416,
+      "boundary": null,
+      "boundary_note": "threshold_unknown",
+      "confident": {
+        "count": 46,
+        "ratio": 0.1106
+      },
+      "boundary_margin": 0.1,
+      "confident_level": 0.9,
+      "threshold": null
+    },
+    "ci_method_note": "판정 대상 지표의 95% 신뢰구간은 행 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4, M15)으로 산출하였습니다.",
+    "f1_threshold_gain": null,
+    "imbalance_effect": {
+      "level": "mild",
+      "imbalance_ratio": 1.1031,
+      "accuracy_minus_macro_f1": null,
+      "majority_minus_minority_f1": 0.0134,
+      "majority_class": "finance",
+      "minority_class": "sports",
+      "majority_f1": 0.4455,
+      "minority_f1": 0.4322,
+      "display": {
+        "imbalance_ratio": "1.1031",
+        "accuracy_minus_macro_f1": null,
+        "majority_minus_minority_f1": "0.0134",
+        "majority_f1": "0.4455",
+        "minority_f1": "0.4322"
+      }
+    },
+    "problems": [
+      {
+        "id": "P1",
+        "kind": "core_fail",
+        "priority": "HIGH",
+        "title": "핵심 지표 미달 (F1 Score)",
+        "source_section": "8.2",
+        "recommend_section": "9.2",
+        "evidence": {
+          "F1 Score": {
+            "value": 0.48007025235639533,
+            "target": 0.5
+          }
+        },
+        "note": null
+      }
+    ],
+    "distribution": {
+      "class_distribution": {
+        "finance": 107,
+        "news": 102,
+        "sports": 97,
+        "tech": 102
+      },
+      "imbalance_ratio": 1.1030927835051547
+    },
+    "verdict": "FAIL",
+    "score": 50,
+    "latency": {
+      "available": false,
+      "mean": null,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "unit": "ms"
+    },
+    "facts": {
+      "contract": "facts-1",
+      "positive_class": null,
+      "n_classes": 4,
+      "class_share_basis": "label_occurrences",
+      "report_purpose_label": "외부 제출",
+      "core_metrics_source": "default",
+      "selected_metrics": [
+        "M4",
+        "M15",
+        "M16",
+        "M17"
+      ],
+      "declarations": {
+        "risk_direction": null,
+        "class_priority": "samples_first",
+        "usage_mode": "realtime"
+      },
+      "verdict_detail": {
+        "verdict": "FAIL",
+        "judged_count": 2,
+        "passed_count": 1,
+        "failed_core": [
+          {
+            "metric_id": "M4",
+            "display_name": "F1 Score"
+          }
+        ],
+        "failed_noncore": [],
+        "unavailable_core": [],
+        "inconclusive_cause": null,
+        "inconclusive_metrics": []
+      },
+      "error_totals": {
+        "unit": "label_cell",
+        "total": 800,
+        "misclassified": 416
+      },
+      "weakest_class": {
+        "label": "sports",
+        "f1": 0.4321608040201005,
+        "support": 97,
+        "share": 0.237745098,
+        "share_text": "0.2377",
+        "macro_f1": 0.48007025235639533,
+        "gap_from_macro": 0.047909448,
+        "gap_text": "0.0479",
+        "low_support": false,
+        "far_below_macro": false
+      },
+      "low_support_classes": [],
+      "top_confusion_pairs": [],
+      "prediction_bias": {
+        "unit": "label_total",
+        "rows": [
+          {
+            "label": null,
+            "predicted": 392,
+            "actual": 408,
+            "difference": -16
+          }
+        ]
+      },
+      "declared_risk_errors": null,
+      "precision_recall_gap": null,
+      "average_gap": {
+        "kind": "macro_vs_micro",
+        "macro_f1": 0.48007025235639533,
+        "other_f1": 0.48,
+        "difference": -0.000070252,
+        "difference_text": "-0.0001",
+        "reference_class": {
+          "label": "sports",
+          "support": 97,
+          "f1": 0.4321608040201005
+        }
+      },
+      "declared_average": {
+        "class_priority": "samples_first",
+        "average": "micro",
+        "precision": 0.4897959183673469,
+        "recall": 0.47058823529411764,
+        "f1": 0.48
+      },
+      "distribution_shift_status": "not_provided",
+      "distribution_shift": [],
+      "ci_available": true,
+      "ci_skipped": [],
+      "fixed_sentences": [
+        {
+          "id": "17",
+          "section": "7.1",
+          "text": "확률이 있는 틀린 레이블 칸 416개 중 확신 오류(틀린 쪽 확률 0.9 이상)는 46개(11.1%)이다. 경계 오류는 예측값을 직접 제출해 결정 임계값을 알 수 없어 계산하지 않았다."
+        },
+        {
+          "id": "7",
+          "section": "7.2",
+          "text": "다중 레이블에서 불균형 비율은 레이블 등장 빈도의 최다값 대 최소값의 비로 정의한다."
+        },
+        {
+          "id": "16",
+          "section": "8.1",
+          "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: Exact Match Ratio."
+        },
+        {
+          "id": "11a",
+          "section": "8.2",
+          "text": "평가 데이터는 학습 데이터와 동일한 출처에서 수집되었다. 본 결과는 동일 분포 내 성능을 나타내며, 다른 운영 환경에서의 일반화 성능을 보증하지 않는다."
+        }
+      ],
+      "omitted": {}
+    }
+  }
+}

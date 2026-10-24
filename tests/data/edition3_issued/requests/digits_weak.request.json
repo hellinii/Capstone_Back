@@ -1,0 +1,793 @@
+{
+ "task_type": "multiclass",
+ "report_purpose": "internal",
+ "fact_sheet": {
+  "n_samples": 540,
+  "dropped_rows": 0,
+  "metrics": [
+   {
+    "metric_id": "M1",
+    "display_name": "Accuracy",
+    "value": 0.5388888888888889,
+    "threshold": 0.9,
+    "status": "fail",
+    "is_core": true,
+    "ci_low": 0.4967,
+    "ci_high": 0.5805,
+    "margin": -0.361111111,
+    "near_target": false,
+    "value_text": "0.539",
+    "higher_is_better": true,
+    "beta": null,
+    "margin_text": "-0.3611",
+    "ci_contains_target": false
+   },
+   {
+    "metric_id": "M2",
+    "display_name": "Precision",
+    "value": 0.5807282359653027,
+    "threshold": null,
+    "status": "info",
+    "is_core": false,
+    "ci_low": null,
+    "ci_high": null,
+    "margin": null,
+    "near_target": false,
+    "value_text": null,
+    "higher_is_better": true,
+    "beta": null,
+    "margin_text": null,
+    "ci_contains_target": null
+   },
+   {
+    "metric_id": "M3",
+    "display_name": "Recall",
+    "value": 0.5353535353535354,
+    "threshold": null,
+    "status": "info",
+    "is_core": false,
+    "ci_low": null,
+    "ci_high": null,
+    "margin": null,
+    "near_target": false,
+    "value_text": null,
+    "higher_is_better": true,
+    "beta": null,
+    "margin_text": null,
+    "ci_contains_target": null
+   },
+   {
+    "metric_id": "M4",
+    "display_name": "F1 Score",
+    "value": 0.5115094290234005,
+    "threshold": 0.85,
+    "status": "fail",
+    "is_core": true,
+    "ci_low": 0.4808,
+    "ci_high": 0.5392,
+    "margin": -0.338490571,
+    "near_target": false,
+    "value_text": "0.512",
+    "higher_is_better": true,
+    "beta": null,
+    "margin_text": "-0.3385",
+    "ci_contains_target": false
+   },
+   {
+    "metric_id": "M6",
+    "display_name": "KL Divergence",
+    "value": 3.6350112672040757,
+    "threshold": null,
+    "status": "info",
+    "is_core": false,
+    "ci_low": null,
+    "ci_high": null,
+    "margin": null,
+    "near_target": false,
+    "value_text": null,
+    "higher_is_better": false,
+    "beta": null,
+    "margin_text": null,
+    "ci_contains_target": null
+   },
+   {
+    "metric_id": "M11",
+    "display_name": "Macro Average",
+    "value": 0.5115094290234005,
+    "threshold": null,
+    "status": "info",
+    "is_core": false,
+    "ci_low": null,
+    "ci_high": null,
+    "margin": null,
+    "near_target": false,
+    "value_text": null,
+    "higher_is_better": true,
+    "beta": null,
+    "margin_text": null,
+    "ci_contains_target": null
+   },
+   {
+    "metric_id": "M12",
+    "display_name": "Micro Average",
+    "value": 0.5388888888888889,
+    "threshold": null,
+    "status": "info",
+    "is_core": false,
+    "ci_low": null,
+    "ci_high": null,
+    "margin": null,
+    "near_target": false,
+    "value_text": null,
+    "higher_is_better": true,
+    "beta": null,
+    "margin_text": null,
+    "ci_contains_target": null
+   },
+   {
+    "metric_id": "M23",
+    "display_name": "Imbalance Ratio",
+    "value": 1.0576923076923077,
+    "threshold": null,
+    "status": "info",
+    "is_core": false,
+    "ci_low": null,
+    "ci_high": null,
+    "margin": null,
+    "near_target": false,
+    "value_text": null,
+    "higher_is_better": false,
+    "beta": null,
+    "margin_text": null,
+    "ci_contains_target": null
+   }
+  ],
+  "per_class": [
+   {
+    "label": "0",
+    "precision": 0.9433962264150944,
+    "recall": 0.9259259259259259,
+    "f1": 0.9345794392523364,
+    "support": 54
+   },
+   {
+    "label": "1",
+    "precision": 0.2682926829268293,
+    "recall": 0.2,
+    "f1": 0.22916666666666666,
+    "support": 55
+   },
+   {
+    "label": "2",
+    "precision": 0,
+    "recall": 0,
+    "f1": 0,
+    "support": 53
+   },
+   {
+    "label": "3",
+    "precision": 0.2052401746724891,
+    "recall": 0.8545454545454545,
+    "f1": 0.33098591549295775,
+    "support": 55
+   },
+   {
+    "label": "4",
+    "precision": 0.6716417910447762,
+    "recall": 0.8333333333333334,
+    "f1": 0.743801652892562,
+    "support": 54
+   },
+   {
+    "label": "5",
+    "precision": 0.9215686274509803,
+    "recall": 0.8545454545454545,
+    "f1": 0.8867924528301887,
+    "support": 55
+   },
+   {
+    "label": "6",
+    "precision": 0.94,
+    "recall": 0.8703703703703703,
+    "f1": 0.9038461538461539,
+    "support": 54
+   },
+   {
+    "label": "7",
+    "precision": 0.8571428571428571,
+    "recall": 0.5555555555555556,
+    "f1": 0.6741573033707865,
+    "support": 54
+   },
+   {
+    "label": "8",
+    "precision": 0,
+    "recall": 0,
+    "f1": 0,
+    "support": 52
+   },
+   {
+    "label": "9",
+    "precision": 1,
+    "recall": 0.25925925925925924,
+    "f1": 0.4117647058823529,
+    "support": 54
+   }
+  ],
+  "class_averages": [
+   {
+    "label": "매크로 평균",
+    "precision": 0.5807282359653027,
+    "recall": 0.5353535353535354,
+    "f1": 0.5115094290234005,
+    "support": 540
+   },
+   {
+    "label": "가중 평균",
+    "precision": 0.5833117572339143,
+    "recall": 0.5388888888888889,
+    "f1": 0.5141889568659742,
+    "support": 540
+   },
+   {
+    "label": "마이크로 평균",
+    "precision": 0.5388888888888889,
+    "recall": 0.5388888888888889,
+    "f1": 0.5388888888888889,
+    "support": 540
+   }
+  ],
+  "confusion": {
+   "labels": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9"
+   ],
+   "matrix": [
+    [
+     50,
+     0,
+     0,
+     2,
+     1,
+     1,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     11,
+     0,
+     36,
+     8,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     11,
+     0,
+     38,
+     0,
+     1,
+     3,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     8,
+     0,
+     47,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     1,
+     2,
+     0,
+     5,
+     45,
+     0,
+     0,
+     1,
+     0,
+     0
+    ],
+    [
+     1,
+     2,
+     0,
+     3,
+     2,
+     47,
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     1,
+     0,
+     1,
+     5,
+     0,
+     47,
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     3,
+     0,
+     14,
+     6,
+     1,
+     0,
+     30,
+     0,
+     0
+    ],
+    [
+     1,
+     2,
+     0,
+     47,
+     0,
+     0,
+     0,
+     2,
+     0,
+     0
+    ],
+    [
+     0,
+     1,
+     0,
+     36,
+     0,
+     1,
+     0,
+     2,
+     0,
+     14
+    ]
+   ],
+   "positive_class": null
+  },
+  "confusion_counts": [
+   {
+    "label": "0",
+    "tp": 50,
+    "fp": 3,
+    "fn": 4,
+    "tn": 483
+   },
+   {
+    "label": "1",
+    "tp": 11,
+    "fp": 30,
+    "fn": 44,
+    "tn": 455
+   },
+   {
+    "label": "2",
+    "tp": 0,
+    "fp": 0,
+    "fn": 53,
+    "tn": 487
+   },
+   {
+    "label": "3",
+    "tp": 47,
+    "fp": 182,
+    "fn": 8,
+    "tn": 303
+   },
+   {
+    "label": "4",
+    "tp": 45,
+    "fp": 22,
+    "fn": 9,
+    "tn": 464
+   },
+   {
+    "label": "5",
+    "tp": 47,
+    "fp": 4,
+    "fn": 8,
+    "tn": 481
+   },
+   {
+    "label": "6",
+    "tp": 47,
+    "fp": 3,
+    "fn": 7,
+    "tn": 483
+   },
+   {
+    "label": "7",
+    "tp": 30,
+    "fp": 5,
+    "fn": 24,
+    "tn": 481
+   },
+   {
+    "label": "8",
+    "tp": 0,
+    "fp": 0,
+    "fn": 52,
+    "tn": 488
+   },
+   {
+    "label": "9",
+    "tp": 14,
+    "fp": 0,
+    "fn": 40,
+    "tn": 486
+   }
+  ],
+  "derived_prediction": null,
+  "error_ratios": {
+   "unit": "sample",
+   "misclassified": 249,
+   "boundary": {
+    "count": 171,
+    "ratio": 0.6867
+   },
+   "boundary_note": null,
+   "confident": {
+    "count": 20,
+    "ratio": 0.0803
+   },
+   "boundary_margin": 0.1,
+   "confident_level": 0.9,
+   "threshold": null
+  },
+  "ci_method_note": "판정 대상 지표의 95% 신뢰구간은 Wilson 점수 구간(M1), 다항 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4)으로 산출하였습니다.",
+  "f1_threshold_gain": null,
+  "imbalance_effect": {
+   "level": "mild",
+   "imbalance_ratio": 1.0577,
+   "accuracy_minus_macro_f1": 0.0274,
+   "majority_minus_minority_f1": 0.2292,
+   "majority_class": "1",
+   "minority_class": "8",
+   "accuracy": 0.5389,
+   "macro_f1": 0.5115,
+   "majority_f1": 0.2292,
+   "minority_f1": 0,
+   "display": {
+    "imbalance_ratio": "1.0577",
+    "accuracy_minus_macro_f1": "0.0274",
+    "majority_minus_minority_f1": "0.2292",
+    "accuracy": "0.5389",
+    "macro_f1": "0.5115",
+    "majority_f1": "0.2292",
+    "minority_f1": "0"
+   }
+  },
+  "problems": [
+   {
+    "id": "P1",
+    "kind": "core_fail",
+    "priority": "HIGH",
+    "title": "핵심 지표 미달 (Accuracy, F1 Score)",
+    "source_section": "8.2",
+    "recommend_section": "9.2",
+    "evidence": {
+     "Accuracy": {
+      "value": 0.5388888888888889,
+      "target": 0.9
+     },
+     "F1 Score": {
+      "value": 0.5115094290234005,
+      "target": 0.85
+     }
+    },
+    "note": null
+   },
+   {
+    "id": "P2",
+    "kind": "weakest_class",
+    "priority": "LOW",
+    "title": "최약 클래스 (2)",
+    "source_section": "7.1·8.3",
+    "recommend_section": "9.1",
+    "evidence": {
+     "2": {
+      "f1": 0,
+      "support": 53,
+      "share": 0.098148148,
+      "macro_f1": 0.5115094290234005,
+      "gap_from_macro": 0.511509429,
+      "low_support": false
+     }
+    },
+    "note": null
+   },
+   {
+    "id": "P3",
+    "kind": "label_caution",
+    "priority": "LOW",
+    "title": "정답 라벨 주의 (신뢰성 검토 없음)",
+    "source_section": "7.2",
+    "recommend_section": "9.1",
+    "evidence": {
+     "정답 라벨 신뢰성": "검토 없음"
+    },
+    "note": null
+   }
+  ],
+  "distribution": {
+   "class_distribution": {
+    "0": 54,
+    "1": 55,
+    "2": 53,
+    "3": 55,
+    "4": 54,
+    "5": 55,
+    "6": 54,
+    "7": 54,
+    "8": 52,
+    "9": 54
+   },
+   "imbalance_ratio": 1.0576923076923077
+  },
+  "verdict": "FAIL",
+  "score": 0,
+  "latency": {
+   "available": false,
+   "mean": null,
+   "p50": null,
+   "p95": null,
+   "p99": null,
+   "unit": "ms"
+  },
+  "facts": {
+   "contract": "facts-1",
+   "positive_class": null,
+   "n_classes": 10,
+   "class_share_basis": "samples",
+   "report_purpose_label": "내부 검증",
+   "core_metrics_source": "default",
+   "selected_metrics": [
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M6",
+    "M11",
+    "M12",
+    "M23"
+   ],
+   "declarations": {
+    "risk_direction": null,
+    "class_priority": "larger_first",
+    "usage_mode": "batch"
+   },
+   "verdict_detail": {
+    "verdict": "FAIL",
+    "judged_count": 2,
+    "passed_count": 0,
+    "failed_core": [
+     {
+      "metric_id": "M1",
+      "display_name": "Accuracy"
+     },
+     {
+      "metric_id": "M4",
+      "display_name": "F1 Score"
+     }
+    ],
+    "failed_noncore": [],
+    "unavailable_core": [],
+    "inconclusive_cause": null,
+    "inconclusive_metrics": []
+   },
+   "error_totals": {
+    "unit": "sample",
+    "total": 540,
+    "misclassified": 249
+   },
+   "weakest_class": {
+    "label": "2",
+    "f1": 0,
+    "support": 53,
+    "share": 0.098148148,
+    "share_text": "0.0981",
+    "macro_f1": 0.5115094290234005,
+    "gap_from_macro": 0.511509429,
+    "gap_text": "0.5115",
+    "low_support": false,
+    "far_below_macro": true
+   },
+   "low_support_classes": [],
+   "top_confusion_pairs": [
+    {
+     "actual": "8",
+     "predicted": "3",
+     "count": 47,
+     "share_of_errors": 0.18875502
+    },
+    {
+     "actual": "2",
+     "predicted": "3",
+     "count": 38,
+     "share_of_errors": 0.152610442
+    },
+    {
+     "actual": "1",
+     "predicted": "3",
+     "count": 36,
+     "share_of_errors": 0.144578313
+    }
+   ],
+   "prediction_bias": {
+    "unit": "per_class",
+    "rows": [
+     {
+      "label": "0",
+      "predicted": 53,
+      "actual": 54,
+      "difference": -1
+     },
+     {
+      "label": "1",
+      "predicted": 41,
+      "actual": 55,
+      "difference": -14
+     },
+     {
+      "label": "2",
+      "predicted": 0,
+      "actual": 53,
+      "difference": -53
+     },
+     {
+      "label": "3",
+      "predicted": 229,
+      "actual": 55,
+      "difference": 174
+     },
+     {
+      "label": "4",
+      "predicted": 67,
+      "actual": 54,
+      "difference": 13
+     },
+     {
+      "label": "5",
+      "predicted": 51,
+      "actual": 55,
+      "difference": -4
+     },
+     {
+      "label": "6",
+      "predicted": 50,
+      "actual": 54,
+      "difference": -4
+     },
+     {
+      "label": "7",
+      "predicted": 35,
+      "actual": 54,
+      "difference": -19
+     },
+     {
+      "label": "8",
+      "predicted": 0,
+      "actual": 52,
+      "difference": -52
+     },
+     {
+      "label": "9",
+      "predicted": 14,
+      "actual": 54,
+      "difference": -40
+     }
+    ]
+   },
+   "declared_risk_errors": null,
+   "precision_recall_gap": null,
+   "average_gap": {
+    "kind": "macro_vs_weighted",
+    "macro_f1": 0.5115094290234005,
+    "other_f1": 0.5141889568659742,
+    "difference": 0.002679528,
+    "difference_text": "0.0027",
+    "reference_class": {
+     "label": "1",
+     "support": 55,
+     "f1": 0.22916666666666666
+    }
+   },
+   "declared_average": {
+    "class_priority": "larger_first",
+    "average": "weighted",
+    "precision": 0.5833117572339143,
+    "recall": 0.5388888888888889,
+    "f1": 0.5141889568659742
+   },
+   "distribution_shift_status": "not_provided",
+   "distribution_shift": [],
+   "ci_available": true,
+   "ci_skipped": [],
+   "fixed_sentences": [
+    {
+     "id": "17",
+     "section": "7.1",
+     "text": "확률이 있는 오분류 249건 중 경계 오류(예측·정답 클래스 확률 차가 0.1 미만)는 171건(68.7%), 확신 오류(예측 클래스 확률 0.9 이상)는 20건(8.0%)이다."
+    },
+    {
+     "id": "12",
+     "section": "7.2",
+     "text": "정답 라벨의 신뢰성이 검토 없음으로, 정답 자체의 오류가 성능 수치에 반영되었을 수 있다. 수치 해석 시 이를 고려해야 한다."
+    },
+    {
+     "id": "16",
+     "section": "8.1",
+     "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: KL Divergence, Macro Average, Micro Average, Imbalance Ratio."
+    }
+   ],
+   "omitted": {}
+  }
+ },
+ "client_inputs": {
+  "model": {
+   "모델명": "DigitReader-Tree",
+   "버전": "v0.1"
+  },
+  "declarations": {
+   "클래스 중요도": "다수 클래스 우선",
+   "사용 방식": "배치"
+  },
+  "training_data": {
+   "학습 데이터셋명": "손글씨 숫자 학습 분할",
+   "학습 데이터 출처": "UCI",
+   "학습 샘플 수": "1,257개",
+   "검증 샘플 수": "0개",
+   "학습 클래스 분포": "제공되지 않음",
+   "채널 효과": "기타(스캐너가 두 종류)",
+   "편향 감소 노력": "수행 안 함"
+  },
+  "test_data": {
+   "평가 데이터 출처": "제공되지 않음",
+   "학습 데이터와의 관계": "제공되지 않음"
+  },
+  "ground_truth": {
+   "정답 라벨 구축 방법": "제공되지 않음 (의뢰자 제공: 외주 업체가 붙였다고 들었으나 확인하지 못함)",
+   "정답 라벨 신뢰성": "검토 없음"
+  },
+  "environment": {
+   "운영체제": "제공되지 않음",
+   "CPU": "제공되지 않음",
+   "GPU": "제공되지 않음",
+   "메모리": "제공되지 않음",
+   "소프트웨어": "제공되지 않음",
+   "학습 가속": "제공되지 않음",
+   "추론 가속": "제공되지 않음",
+   "알고리즘": "제공되지 않음",
+   "하이퍼파라미터": "제공되지 않음"
+  }
+ }
+}

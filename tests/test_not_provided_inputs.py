@@ -21,7 +21,7 @@ def _fs() -> FactSheet:
 
 
 def _ids(client: dict, task: str = "multilabel") -> dict[str, str]:
-    return {c.item_id: c.text for c in select_items(_fs(), client, task)}
+    return {c.item_id: c.text for c in select_items(_fs(), client, task, edition=3)}
 
 
 @pytest.mark.parametrize("value", [None, "", "  ", 3, NOT_PROVIDED, f" {NOT_PROVIDED} ", WITH_NOTE])
@@ -45,7 +45,7 @@ def _chapter_8_message(client: dict) -> str:
     fs = _fs()
     ctx = prompt.build_context(
         fs, {}, [], task_type="multilabel", report_purpose="", client_inputs=client,
-        conclusions=select_items(fs, client, "multilabel"),
+        conclusions=select_items(fs, client, "multilabel", edition=3), edition=3,
     )
     return prompt.build_user_message(ctx, CHAPTERS["8"])
 
@@ -57,9 +57,9 @@ def test_prompt_does_not_say_client_picked_reason_when_not_provided():
 
 
 def test_model_purpose_with_note_is_not_provided():
-    given = {c.item_id for c in select_items(_fs(), {"model": {"모델 용도": "불량 선별"}}, "binary") if "모델 용도" in c.text}
+    given = {c.item_id for c in select_items(_fs(), {"model": {"모델 용도": "불량 선별"}}, "binary", edition=3) if "모델 용도" in c.text}
     assert given  # 용도가 있으면 쓰는 항목이 있음을 먼저 단정
-    texts = [c.text for c in select_items(_fs(), {"model": {"모델 용도": WITH_NOTE}}, "binary")]
+    texts = [c.text for c in select_items(_fs(), {"model": {"모델 용도": WITH_NOTE}}, "binary", edition=3)]
     assert not any("모델 용도" in t for t in texts)
     assert not any("팀에서 정하지 못했음" in t for t in texts)
 
@@ -75,7 +75,7 @@ def test_prompt_class_descriptions_use_the_same_rule():
     # 지시문의 [클래스 이름과 설명] 도 규칙 문장과 같은 한 벌(wording.class_descriptions)을 쓴다.
     fs = _fs()
     ctx = prompt.build_context(fs, {}, [], task_type="multiclass", report_purpose="", client_inputs=CLASS_DESC,
-                               conclusions=select_items(fs, CLASS_DESC, "multiclass"))
+                               conclusions=select_items(fs, CLASS_DESC, "multiclass", edition=3), edition=3)
     assert ctx.class_descriptions == {"0": "정상"}
 
 

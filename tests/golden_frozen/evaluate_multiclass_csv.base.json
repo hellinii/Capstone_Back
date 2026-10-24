@@ -1,0 +1,308 @@
+{
+  "class_distribution": {
+    "bird": 69,
+    "cat": 57,
+    "dog": 74
+  },
+  "dropped_rows": 0,
+  "environment": {
+    "evaluated_at": "<비결정적 값 — 존재만 고정>",
+    "libraries": "<비결정적 값 — 존재만 고정>"
+  },
+  "n_samples": 200,
+  "results": {
+    "failed_metrics": {},
+    "success_metrics": {
+      "M1": 0.335,
+      "M11": {
+        "f1_score": 0.3314034800929962,
+        "precision": 0.3338518128551015,
+        "recall": 0.33149511067131204
+      },
+      "M12": {
+        "f1_score": 0.335,
+        "precision": 0.335,
+        "recall": 0.335
+      },
+      "M13": {
+        "f1_score": 0.33634828629032254,
+        "precision": 0.3401100430053124,
+        "recall": 0.335
+      },
+      "M14": 0.05000000000000002,
+      "M2": 0.3338518128551015,
+      "M21": {
+        "labels": [
+          "bird",
+          "cat",
+          "dog"
+        ],
+        "matrix": [
+          [
+            21,
+            22,
+            26
+          ],
+          [
+            21,
+            17,
+            19
+          ],
+          [
+            17,
+            28,
+            29
+          ]
+        ],
+        "type": "multiclass_or_binary"
+      },
+      "M22": {
+        "accuracy": 0.335,
+        "bird": {
+          "f1-score": 0.328125,
+          "precision": 0.3559322033898305,
+          "recall": 0.30434782608695654,
+          "support": 69.0
+        },
+        "cat": {
+          "f1-score": 0.27419354838709675,
+          "precision": 0.2537313432835821,
+          "recall": 0.2982456140350877,
+          "support": 57.0
+        },
+        "dog": {
+          "f1-score": 0.3918918918918919,
+          "precision": 0.3918918918918919,
+          "recall": 0.3918918918918919,
+          "support": 74.0
+        },
+        "macro avg": {
+          "f1-score": 0.3314034800929962,
+          "precision": 0.3338518128551015,
+          "recall": 0.33149511067131204,
+          "support": 200.0
+        },
+        "weighted avg": {
+          "f1-score": 0.33634828629032254,
+          "precision": 0.3401100430053124,
+          "recall": 0.335,
+          "support": 200.0
+        }
+      },
+      "M23": 1.2982456140350878,
+      "M3": 0.33149511067131204,
+      "M4": 0.3314034800929962,
+      "M5": 0.3314034800929962,
+      "M6": 0.007948540745002702,
+      "class_report": {
+        "accuracy": 0.335,
+        "bird": {
+          "f1-score": 0.328125,
+          "precision": 0.3559322033898305,
+          "recall": 0.30434782608695654,
+          "support": 69.0
+        },
+        "cat": {
+          "f1-score": 0.27419354838709675,
+          "precision": 0.2537313432835821,
+          "recall": 0.2982456140350877,
+          "support": 57.0
+        },
+        "dog": {
+          "f1-score": 0.3918918918918919,
+          "precision": 0.3918918918918919,
+          "recall": 0.3918918918918919,
+          "support": 74.0
+        },
+        "macro avg": {
+          "f1-score": 0.3314034800929962,
+          "precision": 0.3338518128551015,
+          "recall": 0.33149511067131204,
+          "support": 200.0
+        },
+        "weighted avg": {
+          "f1-score": 0.33634828629032254,
+          "precision": 0.3401100430053124,
+          "recall": 0.335,
+          "support": 200.0
+        }
+      },
+      "confidence_intervals": {
+        "M1": {
+          "high": 0.403,
+          "level": 0.95,
+          "low": 0.2732,
+          "method": "wilson"
+        },
+        "M11": {
+          "high": 0.394,
+          "level": 0.95,
+          "low": 0.2665,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M12": {
+          "high": 0.403,
+          "level": 0.95,
+          "low": 0.2732,
+          "method": "wilson"
+        },
+        "M13": {
+          "high": 0.4005,
+          "level": 0.95,
+          "low": 0.2722,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M14": {
+          "high": 0.1501,
+          "level": 0.95,
+          "low": 0.015,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M2": {
+          "high": 0.3968,
+          "level": 0.95,
+          "low": 0.2703,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M23": {
+          "high": 1.8724,
+          "level": 0.95,
+          "low": 1.0625,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M3": {
+          "high": 0.3957,
+          "level": 0.95,
+          "low": 0.2664,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M4": {
+          "high": 0.394,
+          "level": 0.95,
+          "low": 0.2665,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M5": {
+          "high": 0.394,
+          "level": 0.95,
+          "low": 0.2665,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M6": {
+          "high": 0.0593,
+          "level": 0.95,
+          "low": 0.0006,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        }
+      },
+      "confusion_counts": {
+        "rows": [
+          {
+            "fn": 48,
+            "fp": 38,
+            "label": "bird",
+            "tn": 93,
+            "tp": 21
+          },
+          {
+            "fn": 40,
+            "fp": 50,
+            "label": "cat",
+            "tn": 93,
+            "tp": 17
+          },
+          {
+            "fn": 45,
+            "fp": 45,
+            "label": "dog",
+            "tn": 81,
+            "tp": 29
+          }
+        ],
+        "type": "per_class"
+      },
+      "confusion_matrix": {
+        "labels": [
+          "bird",
+          "cat",
+          "dog"
+        ],
+        "matrix": [
+          [
+            21,
+            22,
+            26
+          ],
+          [
+            21,
+            17,
+            19
+          ],
+          [
+            17,
+            28,
+            29
+          ]
+        ],
+        "n_samples": 200,
+        "type": "multiclass_or_binary"
+      },
+      "error_ratios": {
+        "boundary": {
+          "count": 27,
+          "ratio": 0.203
+        },
+        "boundary_margin": 0.1,
+        "boundary_note": null,
+        "confident": {
+          "count": 2,
+          "ratio": 0.015
+        },
+        "confident_level": 0.9,
+        "misclassified": 133,
+        "threshold": null,
+        "unit": "sample"
+      },
+      "imbalance_effect": {
+        "accuracy": 0.335,
+        "accuracy_minus_macro_f1": 0.0036,
+        "display": {
+          "accuracy": "0.335",
+          "accuracy_minus_macro_f1": "0.0036",
+          "imbalance_ratio": "1.2982",
+          "macro_f1": "0.3314",
+          "majority_f1": "0.3919",
+          "majority_minus_minority_f1": "0.1177",
+          "minority_f1": "0.2742"
+        },
+        "imbalance_ratio": 1.2982,
+        "level": "mild",
+        "macro_f1": 0.3314,
+        "majority_class": "dog",
+        "majority_f1": 0.3919,
+        "majority_minus_minority_f1": 0.1177,
+        "minority_class": "cat",
+        "minority_f1": 0.2742
+      }
+    }
+  },
+  "warnings": []
+}

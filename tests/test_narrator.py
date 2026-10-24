@@ -65,11 +65,11 @@ def test_fallback_passes_own_grounding():
     """폴백 서술의 모든 숫자는 fact_sheet/파생값에서만 나오므로 grounding 을 통과해야 한다."""
     fs = _sample_fact_sheet()
     derived = compute_derived(fs)
-    refs = build_benchmark_refs("binary", fs.metrics)
-    wl = build_number_whitelist(fs, refs, derived)
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    wl = build_number_whitelist(fs, refs, derived, edition=3)
 
-    resp = build_fallback_narrative(fs, refs, derived, reason="no_key")
-    grounding = verify_grounding(_all_texts(resp), wl)
+    resp = build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
+    grounding = verify_grounding(_all_texts(resp), wl, edition=3)
 
     assert grounding.passed, f"폴백이 화이트리스트 밖 숫자 사용: {grounding.violations}"
     assert grounding.checked > 0, "검사된 숫자가 없음(템플릿이 비었는지 확인)"
@@ -81,11 +81,11 @@ def test_grounding_catches_hallucination():
     """fact_sheet 에 없는 숫자(환각)를 주입하면 검증이 위반으로 잡아야 한다."""
     fs = _sample_fact_sheet()
     derived = compute_derived(fs)
-    refs = build_benchmark_refs("binary", fs.metrics)
-    wl = build_number_whitelist(fs, refs, derived)
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    wl = build_number_whitelist(fs, refs, derived, edition=3)
 
     hallucinated = ["정확도는 무려 99.7%에 달하며 P99 지연시간은 41.2ms이다."]
-    grounding = verify_grounding(hallucinated, wl)
+    grounding = verify_grounding(hallucinated, wl, edition=3)
 
     assert not grounding.passed
     assert any("99.7" in v for v in grounding.violations)
@@ -96,8 +96,8 @@ def test_exempt_tokens_not_flagged():
     """절 번호/ISO 연도 같은 면제 토큰은 위반으로 잡지 않는다."""
     fs = _sample_fact_sheet()
     derived = compute_derived(fs)
-    wl = build_number_whitelist(fs, [], derived)
-    g = verify_grounding(["본 시험은 ISO/IEC TS 4213:2022 기준으로 7절·8절·9절을 구성한다."], wl)
+    wl = build_number_whitelist(fs, [], derived, edition=3)
+    g = verify_grounding(["본 시험은 ISO/IEC TS 4213:2022 기준으로 7절·8절·9절을 구성한다."], wl, edition=3)
     assert g.passed, f"면제 토큰 오탐: {g.violations}"
 
 
@@ -162,8 +162,8 @@ def _no_special_fact_sheet() -> FactSheet:
 def test_bare_special_numbers_flagged():
     """근거 없는 0/1/100/2022 는 더 이상 면제되지 않고 위반으로 잡힌다(D3a)."""
     fs = _no_special_fact_sheet()
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
-    g = verify_grounding(["정확도는 100%이며 제외 0건, 신뢰도 1.0, 총 2,022건이다."], wl)
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
+    g = verify_grounding(["정확도는 100%이며 제외 0건, 신뢰도 1.0, 총 2,022건이다."], wl, edition=3)
     assert not g.passed
     assert "100%" in g.violations and "0" in g.violations and "2,022" in g.violations
 
@@ -174,23 +174,23 @@ def test_genuine_perfect_and_zero_pass():
         n_samples=100, dropped_rows=0, verdict="PASS", score=100.0,
         metrics=[MetricFact(metric_id="M1", display_name="Accuracy", value=1.0, threshold=0.9, status="pass")],
     )
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
-    g = verify_grounding(["정확도 100%, 제외 0건, 점수 1.0"], wl)
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
+    g = verify_grounding(["정확도 100%, 제외 0건, 점수 1.0"], wl, edition=3)
     assert g.passed, g.violations
 
 
 def test_metric_name_and_ordinal_not_flagged():
     """F1·P99 식별자와 제N종·N절 문맥 토큰은 오탐하지 않는다(D3a)."""
     fs = _no_special_fact_sheet()
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
-    g = verify_grounding(["F1 Score와 P99 지연, 제1종·제2종 오류, 7절 참조."], wl)
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
+    g = verify_grounding(["F1 Score와 P99 지연, 제1종·제2종 오류, 7절 참조."], wl, edition=3)
     assert g.passed, g.violations
 
 
 def test_grounding_covers_recommendation_category():
     """recommendations[].category 의 환각 숫자도 전수 수집으로 검증된다(D3b)."""
     fs = _no_special_fact_sheet()
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
     data = {
         "interpretation": {"confusion_analysis": "", "distribution_analysis": ""},
         "conclusion": {"verdict": "PASS", "benchmark": "", "narrative": "", "risks": ""},
@@ -199,7 +199,7 @@ def test_grounding_covers_recommendation_category():
             {"priority": "HIGH", "category": "재현율 0.777 보강", "action": "", "expected_impact": ""}
         ],
     }
-    g = verify_grounding(_collect_grounding_texts(data), wl)
+    g = verify_grounding(_collect_grounding_texts(data), wl, edition=3)
     assert not g.passed
     assert any("0.777" in v for v in g.violations)
 
@@ -222,8 +222,8 @@ async def test_internal_grounding_violation_falls_back(make_fake_anthropic_clien
     assert resp.meta.reason == "grounding_failed"
     assert resp.meta.grounding.passed is False
     # 폴백 산문은 fact_sheet 근거만 사용하므로 자체 grounding 통과
-    wl = build_number_whitelist(fs, build_benchmark_refs("binary", fs.metrics), compute_derived(fs))
-    assert verify_grounding(_all_texts(resp), wl).passed
+    wl = build_number_whitelist(fs, build_benchmark_refs("binary", fs.metrics, edition=3), compute_derived(fs), edition=3)
+    assert verify_grounding(_all_texts(resp), wl, edition=3).passed
 
 
 async def test_clean_llm_response_source_llm(make_fake_anthropic_client):
@@ -255,10 +255,10 @@ def test_report_purpose_enum_rejects_invalid():
 def test_benchmark_direction_lower_is_better():
     """Hamming Loss(낮을수록 좋음): 범위 아래=우수, 위=미흡 (D7[3])."""
     good = build_benchmark_refs(
-        "multilabel", [MetricFact(metric_id="M15", display_name="Hamming Loss", value=0.02, threshold=0.1, status="pass")]
+        "multilabel", [MetricFact(metric_id="M15", display_name="Hamming Loss", value=0.02, threshold=0.1, status="pass")], edition=3
     )[0]
     bad = build_benchmark_refs(
-        "multilabel", [MetricFact(metric_id="M15", display_name="Hamming Loss", value=0.30, threshold=0.1, status="fail")]
+        "multilabel", [MetricFact(metric_id="M15", display_name="Hamming Loss", value=0.30, threshold=0.1, status="fail")], edition=3
     )[0]
     assert good["direction"] == "lower" and good["quality"] == "better"
     assert bad["quality"] == "worse"
@@ -267,7 +267,7 @@ def test_benchmark_direction_lower_is_better():
 def test_benchmark_direction_higher_is_better():
     """Accuracy(높을수록 좋음): 범위 위=우수 (D7[3])."""
     ref = build_benchmark_refs(
-        "binary", [MetricFact(metric_id="M1", display_name="Accuracy", value=0.95, threshold=0.85, status="pass")]
+        "binary", [MetricFact(metric_id="M1", display_name="Accuracy", value=0.95, threshold=0.85, status="pass")], edition=3
     )[0]
     assert ref["direction"] == "higher" and ref["quality"] == "better"
 
@@ -306,15 +306,15 @@ def test_inconclusive_rejects_all_passed_claim():
 
 def test_fallback_labels_inconclusive():
     fs = _sample_fact_sheet().model_copy(update={"verdict": "INCONCLUSIVE"})
-    benchmark_refs = build_benchmark_refs("binary", fs.metrics)
-    resp = build_fallback_narrative(fs, benchmark_refs, compute_derived(fs), reason="no_key")
+    benchmark_refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    resp = build_fallback_narrative(fs, benchmark_refs, compute_derived(fs), reason="no_key", edition=3)
     assert resp.conclusion.verdict == "INCONCLUSIVE"
     assert "판정 불가" in resp.conclusion.narrative
 
 
 def test_client_input_numbers_are_allowed():
     fs = _sample_fact_sheet()
-    benchmark_refs = build_benchmark_refs("binary", fs.metrics)
+    benchmark_refs = build_benchmark_refs("binary", fs.metrics, edition=3)
     derived = compute_derived(fs)
     client_inputs = {
         "training_data": {"학습 샘플 수": "12,000개", "수집 기간": "2023-01 ~ 2024-12"},
@@ -322,11 +322,11 @@ def test_client_input_numbers_are_allowed():
     }
     text = ["학습 데이터 12,000개, 라벨러 3명, 카파 0.71 로 보고되었다."]
 
-    without = verify_grounding(text, build_number_whitelist(fs, benchmark_refs, derived))
+    without = verify_grounding(text, build_number_whitelist(fs, benchmark_refs, derived, edition=3), edition=3)
     assert not without.passed
 
-    with_inputs = build_number_whitelist(fs, benchmark_refs, derived, client_inputs)
-    assert verify_grounding(text, with_inputs).passed
+    with_inputs = build_number_whitelist(fs, benchmark_refs, derived, client_inputs, edition=3)
+    assert verify_grounding(text, with_inputs, edition=3).passed
 
 
 def test_client_inputs_size_limited():
@@ -396,9 +396,9 @@ def test_class_average_rows_reach_the_fact_sheet_and_whitelist():
         }
     )
     derived = compute_derived(fs)
-    wl = build_number_whitelist(fs, [], derived)
+    wl = build_number_whitelist(fs, [], derived, edition=3)
 
-    g = verify_grounding(["매크로 평균 F1 은 0.705, 가중 평균 F1 은 0.786 이다."], wl)
+    g = verify_grounding(["매크로 평균 F1 은 0.705, 가중 평균 F1 은 0.786 이다."], wl, edition=3)
     assert g.passed, g.violations
 
 
@@ -454,9 +454,9 @@ def test_derived_prediction_threshold_is_allowed_in_narrative():
             )
         }
     )
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
 
-    assert verify_grounding(["예측값은 확률에 임계값 0.35 를 적용해 만들었다."], wl).passed
+    assert verify_grounding(["예측값은 확률에 임계값 0.35 를 적용해 만들었다."], wl, edition=3).passed
 
 
 def test_per_label_thresholds_are_allowed_in_narrative():
@@ -469,9 +469,9 @@ def test_per_label_thresholds_are_allowed_in_narrative():
             )
         }
     )
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
 
-    assert verify_grounding(["레이블 a 는 0.4, b 는 0.65 로 판정했다."], wl).passed
+    assert verify_grounding(["레이블 a 는 0.4, b 는 0.65 로 판정했다."], wl, edition=3).passed
 
 
 async def test_benchmark_refs_come_back_with_the_narrative():
@@ -479,7 +479,7 @@ async def test_benchmark_refs_come_back_with_the_narrative():
     req = NarrativeRequest(task_type=TaskType.binary, fact_sheet=_sample_fact_sheet())
     resp = await generate_narrative(None, req)
 
-    expected = build_benchmark_refs("binary", req.fact_sheet.metrics)
+    expected = build_benchmark_refs("binary", req.fact_sheet.metrics, edition=3)
     assert resp.meta.source == "fallback"
     assert [r.model_dump() for r in resp.benchmark_refs] == expected
     assert len(expected) > 0
@@ -495,9 +495,9 @@ def test_confusion_counts_reach_the_fact_sheet_and_whitelist():
             "confusion_counts": [ConfusionCountFact(label="1", tp=52, fp=56, fn=43, tn=49)],
         }
     )
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
 
-    assert verify_grounding(["양성 기준 TP 52건, FN 43건이다."], wl).passed
+    assert verify_grounding(["양성 기준 TP 52건, FN 43건이다."], wl, edition=3).passed
 
 
 @pytest.mark.parametrize("target", [0.0, -0.1])
@@ -514,7 +514,7 @@ def test_zero_or_negative_target_is_a_target(target):
     d = compute_derived(fs)
     assert d["counts"]["target"] == 1
     assert d["counts"]["passed"] == 0
-    resp = build_fallback_narrative(fs, [], d, "no_key")
+    resp = build_fallback_narrative(fs, [], d, "no_key", edition=3)
     assert "MCC" in resp.conclusion.risks
     assert "모든 시험항목이 기준을 충족" not in resp.conclusion.risks
     assert "1개 중 0개" in resp.conclusion.narrative
@@ -570,7 +570,7 @@ async def test_service_sends_the_method_specific_rule(make_fake_anthropic_client
 
 def _target_ref(threshold, value=0.88, name="Accuracy", task="binary"):
     m = MetricFact(metric_id="M1", display_name=name, value=value, threshold=threshold, status="info")
-    return build_benchmark_refs(task, [m])[0]
+    return build_benchmark_refs(task, [m], edition=3)[0]
 
 
 @pytest.mark.parametrize("threshold, expected", [
@@ -611,29 +611,29 @@ def test_fallback_states_target_level_and_passes_grounding():
         MetricFact(metric_id="M9", display_name="AUROC", value=0.88, status="info"),
     ]})
     derived = compute_derived(fs)
-    refs = build_benchmark_refs("binary", fs.metrics)
-    resp = build_fallback_narrative(fs, refs, derived, reason="no_key")
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    resp = build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
 
     benchmark = resp.conclusion.benchmark
     # S6: 8.1 은 개조식(';' 나열)이 아니라 같은 위치끼리 묶은 서술체 한 문장이다(작성 규칙 D37).
     assert "목표값이 참조 범위보다 낮은 지표는 Accuracy(목표 0), Recall(목표 -0.1)이다." in benchmark
     assert "AUROC(목표" not in benchmark  # 목표 없는 지표는 목표값 수준에 넣지 않는다
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, refs, derived)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, refs, derived, edition=3), edition=3).passed
 
 
 def test_fallback_without_targets_has_no_target_sentence():
     fs = _sample_fact_sheet().model_copy(update={"metrics": [
         MetricFact(metric_id="M1", display_name="Accuracy", value=0.94, status="info"),
     ]})
-    refs = build_benchmark_refs("binary", fs.metrics)
-    resp = build_fallback_narrative(fs, refs, compute_derived(fs), reason="no_key")
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    resp = build_fallback_narrative(fs, refs, compute_derived(fs), reason="no_key", edition=3)
     assert "목표값 수준" not in resp.conclusion.benchmark
 
 
 def test_whitelist_contains_target_values_from_refs():
     fs = _sample_fact_sheet()
     refs = [dict(_target_ref(0.77), target_value=0.77)]
-    wl = build_number_whitelist(fs.model_copy(update={"metrics": []}), refs, {})
+    wl = build_number_whitelist(fs.model_copy(update={"metrics": []}), refs, {}, edition=3)
     assert "0.77" in wl
 
 
@@ -684,22 +684,22 @@ def _bare_fact_sheet(**over) -> FactSheet:
 
 def test_whitelist_has_margin_and_level_only_with_error_ratios():
     """0.1·0.9 는 error_ratios 가 실렸을 때만 서술에 쓸 수 있다."""
-    without = build_number_whitelist(_bare_fact_sheet(), [], {})
+    without = build_number_whitelist(_bare_fact_sheet(), [], {}, edition=3)
     assert "0.1" not in without and "0.9" not in without
 
-    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=_error_ratios()), [], {})
+    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=_error_ratios()), [], {}, edition=3)
     for tok in ("0.1", "0.9", "12", "5", "2", "0.4167", "41.7", "41.67", "0.1667", "16.7", "0.35"):
         assert tok in wl, tok
 
 
 def test_whitelist_takes_per_label_error_thresholds():
     er = _error_ratios(unit="label_cell", threshold={"score_a": 0.42, "score_b": 0.61})
-    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=er), [], {})
+    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=er), [], {}, edition=3)
     assert "0.42" in wl and "0.61" in wl
 
 
 def test_whitelist_skips_null_boundary():
-    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=_error_ratios(**_UNKNOWN)), [], {})
+    wl = build_number_whitelist(_bare_fact_sheet(error_ratios=_error_ratios(**_UNKNOWN)), [], {}, edition=3)
     assert "0.4167" not in wl and "5" not in wl
     assert "0.1667" in wl
 
@@ -707,43 +707,43 @@ def test_whitelist_skips_null_boundary():
 def test_fallback_states_boundary_and_confident_errors():
     fs = _sample_fact_sheet().model_copy(update={"error_ratios": _error_ratios()})
     derived = compute_derived(fs)
-    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key", edition=3)
 
     text = resp.interpretation.confusion_analysis
     assert (
         "오분류 12건 중 결정 경계와의 거리가 0.1 미만인 경계 오류는 5건(41.7%), "
         "틀린 쪽 확률이 0.9 이상인 확신 오류는 2건(16.7%)이다." in text
     )
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_says_boundary_not_computed_when_threshold_unknown():
     fs = _sample_fact_sheet().model_copy(update={"error_ratios": _error_ratios(**_UNKNOWN)})
     derived = compute_derived(fs)
-    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key", edition=3)
 
     text = resp.interpretation.confusion_analysis
     assert "결정 임계값을 알 수 없으므로 경계 오류는 계산하지 않았고" in text
     assert "확신 오류는 2건(16.7%)이다." in text
     assert "경계 오류는 5건" not in text
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_error_sentence_for_label_cells_and_zero_errors():
     cells = _error_ratios(unit="label_cell", threshold={"score_a": 0.5})
     fs = _sample_fact_sheet().model_copy(update={"error_ratios": cells})
-    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.confusion_analysis
+    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key", edition=3).interpretation.confusion_analysis
     assert "틀린 레이블 칸 12칸 중" in text  # S6: 레이블 칸 단위는 '칸'(종전 '12건'은 7.1 의 '800칸'과 단위가 달랐다)
 
     zero = _error_ratios(misclassified=0, boundary={"count": 0, "ratio": None}, confident={"count": 0, "ratio": None})
     fs0 = _sample_fact_sheet().model_copy(update={"error_ratios": zero})
-    text0 = build_fallback_narrative(fs0, [], compute_derived(fs0), "no_key").interpretation.confusion_analysis
+    text0 = build_fallback_narrative(fs0, [], compute_derived(fs0), "no_key", edition=3).interpretation.confusion_analysis
     assert "확률이 있는 오분류가 없어 경계 오류·확신 오류 비율은 산출하지 않았다." in text0
 
 
 def test_fallback_without_error_ratios_is_unchanged():
     fs = _sample_fact_sheet()
-    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.confusion_analysis
+    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key", edition=3).interpretation.confusion_analysis
     assert "경계 오류" not in text and "확신 오류" not in text
 
 
@@ -842,10 +842,10 @@ def test_ci_contains_target_absent_without_intervals():
 
 
 def test_whitelist_has_interval_bounds_and_level_only_with_intervals():
-    without = build_number_whitelist(_bare_fact_sheet(metrics=[_ci_metric(low=None, high=None)]), [], {})
+    without = build_number_whitelist(_bare_fact_sheet(metrics=[_ci_metric(low=None, high=None)]), [], {}, edition=3)
     assert "95" not in without and "0.71" not in without
 
-    wl = build_number_whitelist(_bare_fact_sheet(metrics=[_ci_metric(low=-0.0512, high=0.8333)]), [], {})
+    wl = build_number_whitelist(_bare_fact_sheet(metrics=[_ci_metric(low=-0.0512, high=0.8333)]), [], {}, edition=3)
     for tok in ("-0.0512", "0.8333", "0.95", "95"):
         assert tok in wl, tok
 
@@ -857,7 +857,7 @@ def test_fallback_states_metrics_whose_interval_contains_target():
         _ci_metric(name="Recall", value=0.7, threshold=0.8, low=0.63, high=0.81),
     ]})
     derived = compute_derived(fs)
-    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key", edition=3)
 
     text = resp.conclusion.narrative
     assert (
@@ -865,15 +865,15 @@ def test_fallback_states_metrics_whose_interval_contains_target():
         "표본 변동에 따라 해당 지표의 판정이 달라질 수 있다." in text
     )
     assert "Accuracy(구간" not in text
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_without_contained_targets_has_no_interval_sentence():
     fs = _sample_fact_sheet()
-    assert "신뢰구간" not in build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.narrative
+    assert "신뢰구간" not in build_fallback_narrative(fs, [], compute_derived(fs), "no_key", edition=3).conclusion.narrative
     # S6: 구간이 모두 목표값과 떨어진 두 번째 갈래도 쓴다(필수 서술 항목 8.2 신뢰구간 해석 — 종전에는 아무 말이 없었다).
     outside = fs.model_copy(update={"metrics": [_ci_metric(threshold=0.9)]})
-    narrative = build_fallback_narrative(outside, [], compute_derived(outside), "no_key").conclusion.narrative
+    narrative = build_fallback_narrative(outside, [], compute_derived(outside), "no_key", edition=3).conclusion.narrative
     assert "95% 신뢰구간이 모두 목표값과 떨어져 있어" in narrative
     assert "포함하는 지표" not in narrative
 
@@ -986,24 +986,24 @@ def test_threshold_tuning_absent_without_gain():
 
 def test_whitelist_new_numbers_only_with_facts():
     """margin·3%·gain 네 값·0.1·불균형 값·1.5 는 해당 사실이 실렸을 때만 허용한다."""
-    without = build_number_whitelist(_bare_fact_sheet(), [], {})
+    without = build_number_whitelist(_bare_fact_sheet(), [], {}, edition=3)
     for tok in ("0.1", "1.5", "3", "0.03", "0.37", "3.2"):
         assert tok not in without, tok
 
-    near = build_number_whitelist(_bare_fact_sheet(metrics=[_near_metric(margin=0.012)]), [], {})
+    near = build_number_whitelist(_bare_fact_sheet(metrics=[_near_metric(margin=0.012)]), [], {}, edition=3)
     for tok in ("0.012", "0.03", "3"):
         assert tok in near, tok
     # near_target 이 아니면 3% 는 허용하지 않는다(margin 은 사실이라 허용).
-    not_near = build_number_whitelist(_bare_fact_sheet(metrics=[_near_metric(margin=0.2, near=False)]), [], {})
+    not_near = build_number_whitelist(_bare_fact_sheet(metrics=[_near_metric(margin=0.2, near=False)]), [], {}, edition=3)
     assert "0.2" in not_near and "0.03" not in not_near
 
-    gain = build_number_whitelist(_bare_fact_sheet(f1_threshold_gain=_gain()), [], {})
+    gain = build_number_whitelist(_bare_fact_sheet(f1_threshold_gain=_gain()), [], {}, edition=3)
     for tok in ("0.8421", "0.7012", "0.1409", "0.37", "0.1"):
         assert tok in gain, tok
     assert "1.5" not in gain
 
     ie = build_number_whitelist(_bare_fact_sheet(imbalance_effect=_imbalance(
-        majority_minus_minority_f1=-0.05, majority_class="2", minority_class="7")), [], {})
+        majority_minus_minority_f1=-0.05, majority_class="2", minority_class="7")), [], {}, edition=3)
     for tok in ("3.2", "0.12", "-0.05", "1.5", "0.1", "2", "7"):
         assert tok in ie, tok
 
@@ -1015,7 +1015,7 @@ def test_fallback_risks_mention_near_target_pass_metrics():
         _near_metric(),
     ])
     derived = compute_derived(fs)
-    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key", edition=3)
 
     risks = resp.conclusion.risks
     assert (
@@ -1024,7 +1024,7 @@ def test_fallback_risks_mention_near_target_pass_metrics():
     )
     assert "Accuracy(" not in risks
     assert "식별된 목표 미달 위험은 없다" not in risks
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
     # 합격 성적서의 이 서술이 판정 모순으로 걸리지 않는다.
     from app.narrative.grounding import find_verdict_contradictions
     assert find_verdict_contradictions(_all_texts(resp), "PASS") == []
@@ -1033,12 +1033,12 @@ def test_fallback_risks_mention_near_target_pass_metrics():
 def test_fallback_risks_skip_near_target_fail_and_absent_flags():
     """근소 미달(near_target 이지만 fail)은 아슬아슬 '합격'이 아니다. 키가 없으면 종전 문장 그대로."""
     fs = _sample_fact_sheet()
-    assert build_fallback_narrative(fs, [], compute_derived(fs), "no_key").conclusion.risks == (
+    assert build_fallback_narrative(fs, [], compute_derived(fs), "no_key", edition=3).conclusion.risks == (
         "목표에 미달한 지표가 있어 해당 영역의 성능 저하 위험이 존재한다(목표 미달 지표: Recall(0.7, 목표 0.8))."
     )
     near_fail = _bare_fact_sheet(metrics=[_near_metric(value=0.79, margin=-0.01, status="fail")])
     assert "아슬아슬" not in build_fallback_narrative(
-        near_fail, [], compute_derived(near_fail), "no_key").conclusion.risks
+        near_fail, [], compute_derived(near_fail), "no_key", edition=3).conclusion.risks
 
 
 def test_fallback_metric_numbers_use_report_digits():
@@ -1047,17 +1047,17 @@ def test_fallback_metric_numbers_use_report_digits():
     raw = 0.5473684210526316
     failed = _bare_fact_sheet(metrics=[MetricFact(
         metric_id="M3", display_name="Recall", value=raw, threshold=0.8, status="fail")])
-    resp = build_fallback_narrative(failed, [], compute_derived(failed), "no_key")
+    resp = build_fallback_narrative(failed, [], compute_derived(failed), "no_key", edition=3)
     assert "Recall(0.547, 목표 0.8)" in resp.conclusion.risks
     assert "0.5473" not in " ".join(_all_texts(resp))
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed))).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(failed, [], compute_derived(failed), edition=3), edition=3).passed
 
     near = _bare_fact_sheet(metrics=[_near_metric(value=0.80789, threshold=0.8, margin=0.00789)])
-    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
+    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key", edition=3).conclusion.risks
     assert "Recall(0.808, 목표 0.8, 차이 0.008)" in near_risks
 
     ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.78123, threshold=0.8, low=0.712345, high=0.83456)])
-    ci_resp = build_fallback_narrative(ci, [], compute_derived(ci), "no_key")
+    ci_resp = build_fallback_narrative(ci, [], compute_derived(ci), "no_key", edition=3)
     assert "F1 Score(구간 0.712~0.835, 목표 0.8)" in " ".join(_all_texts(ci_resp))
     assert "F1 Score(0.781, 목표 0.8)" in ci_resp.conclusion.risks
 
@@ -1068,15 +1068,15 @@ def test_fallback_long_threshold_is_rounded_at_every_site():
     t = 2 / 3
     failed = _bare_fact_sheet(metrics=[MetricFact(
         metric_id="M3", display_name="Recall", value=0.5, threshold=t, status="fail")])
-    risks = build_fallback_narrative(failed, [], compute_derived(failed), "no_key").conclusion.risks
+    risks = build_fallback_narrative(failed, [], compute_derived(failed), "no_key", edition=3).conclusion.risks
     assert "Recall(0.5, 목표 0.667)" in risks
 
     near = _bare_fact_sheet(metrics=[_near_metric(value=0.68, threshold=t, margin=0.68 - t)])
-    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key").conclusion.risks
+    near_risks = build_fallback_narrative(near, [], compute_derived(near), "no_key", edition=3).conclusion.risks
     assert "Recall(0.68, 목표 0.667, 차이 0.013)" in near_risks
 
     ci = _bare_fact_sheet(metrics=[_ci_metric(value=0.6, threshold=t, low=0.55, high=0.7)])
-    ci_texts = " ".join(_all_texts(build_fallback_narrative(ci, [], compute_derived(ci), "no_key")))
+    ci_texts = " ".join(_all_texts(build_fallback_narrative(ci, [], compute_derived(ci), "no_key", edition=3)))
     assert "F1 Score(구간 0.55~0.7, 목표 0.667)" in ci_texts
     assert "0.6666" not in ci_texts
 
@@ -1084,7 +1084,7 @@ def test_fallback_long_threshold_is_rounded_at_every_site():
 def test_fallback_risks_state_threshold_gain_only_when_notable():
     fs = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain()})
     derived = compute_derived(fs)
-    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key", edition=3)
     risks = resp.conclusion.risks
     # S6: 숫자(임계값·F1·향상폭)는 결론 목록대로 8.2(임계값 조정 여지)에, 8.3 은 숫자 없이 위험만 — 두 칸에 같은 숫자를
     # 되풀이하지 않는다. 0.37 은 받침 ㄹ(칠)이라 '로'.
@@ -1092,10 +1092,10 @@ def test_fallback_risks_state_threshold_gain_only_when_notable():
     assert "결정 임계값을 0.37로 바꾸면 F1 이 0.7012에서 0.8421까지 오를 수 있다." in narrative
     assert "이 데이터의 최대폭이므로 별도 데이터에서 확인해야 한다." in narrative
     assert "현재 결정 임계값이 최적이 아닐 수 있어" in risks and "0.37" not in risks
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
     small = _sample_fact_sheet().model_copy(update={"f1_threshold_gain": _gain(gain=0.0999)})
-    small_resp = build_fallback_narrative(small, [], compute_derived(small), "no_key")
+    small_resp = build_fallback_narrative(small, [], compute_derived(small), "no_key", edition=3)
     assert "최대폭" not in small_resp.conclusion.narrative and "최적이 아닐" not in small_resp.conclusion.risks
 
 
@@ -1117,18 +1117,18 @@ def test_fallback_distribution_follows_imbalance_level(level, values, expected, 
     """7.2 의 결론은 엔진이 낸 level 로만 쓴다 — distribution.imbalance_ratio(1.857)로 다시 판정하지 않는다."""
     fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": _imbalance(level=level, **values)})
     derived = compute_derived(fs)
-    resp = build_fallback_narrative(fs, [], derived, reason="no_key")
+    resp = build_fallback_narrative(fs, [], derived, reason="no_key", edition=3)
     text = resp.interpretation.distribution_analysis
     assert expected in text
     assert absent not in text
     assert "1.857" not in text
-    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived)).passed
+    assert verify_grounding(_all_texts(resp), build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_fallback_distribution_multilabel_uses_label_gap_only():
     ie = _imbalance(accuracy_minus_macro_f1=None, majority_minus_minority_f1=-0.04, level="no_distortion")
     fs = _sample_fact_sheet().model_copy(update={"imbalance_effect": ie})
-    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.distribution_analysis
+    text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key", edition=3).interpretation.distribution_analysis
     assert "다수 레이블(neg)과 소수 레이블(pos)의 F1 차이(-0.04)는 음수로 소수 레이블의 F1 이 더 높다." in text
     assert "매크로 F1" not in text
 
@@ -1138,7 +1138,7 @@ def test_fallback_distribution_without_imbalance_effect_is_neutral():
     for ir in (1.4, 1.5, 1.857):
         fs = _sample_fact_sheet().model_copy(update={"distribution": DistributionFact(
             class_distribution={"0": 130, "1": 70}, imbalance_ratio=ir)})
-        text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key").interpretation.distribution_analysis
+        text = build_fallback_narrative(fs, [], compute_derived(fs), "no_key", edition=3).interpretation.distribution_analysis
         assert text.endswith(f" 불균형 비율은 {ir}이다."), text
         assert "균형 상태" not in text and "경미" not in text
 
@@ -1208,8 +1208,8 @@ def test_dotted_section_references_are_not_numbers(text):
     from app.narrative.grounding import has_number_token
 
     fs = _no_special_fact_sheet()
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
-    g = verify_grounding([text], wl)
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
+    g = verify_grounding([text], wl, edition=3)
     assert g.passed, g.violations
     assert has_number_token(text) is False
 
@@ -1239,8 +1239,8 @@ def test_dotted_section_rule_does_not_whitelist_fake_values(text, fake):
     from app.narrative.grounding import has_number_token
 
     fs = _no_special_fact_sheet()
-    wl = build_number_whitelist(fs, [], compute_derived(fs))
-    g = verify_grounding([text], wl)
+    wl = build_number_whitelist(fs, [], compute_derived(fs), edition=3)
+    g = verify_grounding([text], wl, edition=3)
     assert not g.passed
     assert any(fake.strip("()") in v for v in g.violations), g.violations
     assert has_number_token(text) is True
@@ -1249,19 +1249,19 @@ def test_dotted_section_rule_does_not_whitelist_fake_values(text, fake):
 def test_whitelist_includes_numbers_in_ci_method_note():
     """6.0 신뢰구간 방식 한 줄의 숫자("2,000회")를 서술이 옮겨 적어도 환각이 아니다."""
     text = ["신뢰구간은 재표집 2,000회로 구했다."]
-    bare = build_number_whitelist(_bare_fact_sheet(), [], {})
-    assert not verify_grounding(text, bare).passed
+    bare = build_number_whitelist(_bare_fact_sheet(), [], {}, edition=3)
+    assert not verify_grounding(text, bare, edition=3).passed
 
     fs = _bare_fact_sheet(ci_method_note="정확도는 Wilson 구간, 그 밖의 지표는 재표집(2,000회)으로 구했다.")
-    assert verify_grounding(text, build_number_whitelist(fs, [], {})).passed
+    assert verify_grounding(text, build_number_whitelist(fs, [], {}, edition=3), edition=3).passed
     # 없으면(None) 건너뛴다.
-    build_number_whitelist(_bare_fact_sheet(ci_method_note=None), [], {})
+    build_number_whitelist(_bare_fact_sheet(ci_method_note=None), [], {}, edition=3)
 
 
 def test_whitelist_includes_absolute_margin():
     """margin 이 음수여도 "목표값보다 0.0288 낮다"처럼 크기만 적는 서술을 허용한다."""
     fs = _bare_fact_sheet(metrics=[_near_metric(value=0.7712, threshold=0.8, margin=-0.0288,
                                                  near=False, status="fail")])
-    wl = build_number_whitelist(fs, [], {})
+    wl = build_number_whitelist(fs, [], {}, edition=3)
     assert "-0.0288" in wl and "0.0288" in wl
-    assert verify_grounding(["Recall 은 목표값보다 0.0288 낮다."], wl).passed
+    assert verify_grounding(["Recall 은 목표값보다 0.0288 낮다."], wl, edition=3).passed

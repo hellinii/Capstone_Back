@@ -75,11 +75,15 @@ def _r4(x: float) -> float:
 
 
 def _interval(low: float, high: float, method: str, **extra) -> Dict[str, Any]:
-    return {"low": _r4(low), "high": _r4(high), "method": method, "level": LEVEL, **extra}
+    # low_raw·high_raw: 반올림 전 경계(판 4 라운드 S1, 대응표 15). 판 4 는 경계가 목표와 같아 보이면 원값으로 자릿수를
+    # 늘린다(0.9497). low·high(넷째 자리)는 판 3 이 쓰는 값이라 그대로 둔다 — 판 3 프론트 파서는 아는 키만 읽는다.
+    return {"low": _r4(low), "high": _r4(high), "method": method, "level": LEVEL,
+            "low_raw": float(low), "high_raw": float(high), **extra}
 
 
 def _skipped(reason: str) -> Dict[str, Any]:
-    return {"low": None, "high": None, "method": "skipped", "level": LEVEL, "reason": reason}
+    return {"low": None, "high": None, "method": "skipped", "level": LEVEL, "reason": reason,
+            "low_raw": None, "high_raw": None}
 
 
 class _Skip(Exception):

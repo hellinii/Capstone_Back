@@ -123,16 +123,16 @@ def _request(task: str, verdict: str, *, client_inputs: bool = True, latency: bo
 def _materials(req: NarrativeRequest):
     fs, task, ci = req.fact_sheet, req.task_type.value, req.client_inputs
     derived = compute_derived(fs, task_type=task)
-    refs = build_benchmark_refs(task, fs.metrics)
+    refs = build_benchmark_refs(task, fs.metrics, edition=3)
     return fs, task, ci, derived, refs
 
 
 def _sections(req: NarrativeRequest) -> dict[str, dict]:
     fs, task, ci, derived, refs = _materials(req)
-    cons = select_items(fs, ci, task)
+    cons = select_items(fs, ci, task, edition=3)
     return {
         sid: generator._rec_dicts(fallback.section_template(
-            sid, fs, refs, derived, task_type=task, client_inputs=ci, conclusions=cons,
+            sid, fs, refs, derived, task_type=task, client_inputs=ci, conclusions=cons, edition=3,
         ))
         for sid in SECTION_IDS
     }
@@ -151,8 +151,8 @@ def test_templates_pass_their_own_checks(task, verdict):
     req = _request(task, verdict)
     fs, task, ci, derived, refs = _materials(req)
     assert fs.verdict == verdict
-    whitelist = build_number_whitelist(fs, refs, derived, ci)
-    conclusions = select_items(fs, ci, task)
+    whitelist = build_number_whitelist(fs, refs, derived, ci, edition=3)
+    conclusions = select_items(fs, ci, task, edition=3)
     exempt = checks.name_exemptions(fs, ci)
     problem_ids = [p.id for p in fs.problems]
     by_section = _sections(req)
@@ -160,18 +160,18 @@ def test_templates_pass_their_own_checks(task, verdict):
         texts = checks.section_texts(sid, parts)
         if sid == "9" and not fs.problems:
             # 문제가 0개면 9칸은 AI 를 부르지 않고 검사하지 않는다(출처 fixed) — 숫자만 본다.
-            assert verify_grounding(texts, whitelist).passed, texts
+            assert verify_grounding(texts, whitelist, edition=3).passed, texts
             continue
         result = checks.check_section(
             sid, parts, whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
-            problem_ids=problem_ids, exempt=exempt,
+            problem_ids=problem_ids, exempt=exempt, edition=3,
         )
         assert result.hard_failures == [], (sid, result.as_record(), texts)
         assert not result.d24_missing, (sid, texts)
     texts = _all_texts(by_section)
     assert find_verdict_contradictions(texts, fs.verdict) == []
     # 이빨 — 검사가 실제로 숫자를 봤고, 판정 문장이 이 판정 이름을 쓴다(판정을 바꾼 픽스처가 그 판정이다).
-    assert verify_grounding(texts, whitelist).checked > 20
+    assert verify_grounding(texts, whitelist, edition=3).checked > 20
     assert f"'{VERDICT_LABEL[verdict]}'" in by_section["8.2"]["conclusion.narrative"]
 
 
@@ -179,13 +179,13 @@ def test_self_check_has_teeth():
     """자기 검문이 헛돌지 않는다 — 템플릿 글의 숫자 하나를 바꾸면 숫자 검사, 판정을 뒤집으면 판정 모순에 걸린다."""
     req = _request("binary", "FAIL")
     fs, task, ci, derived, refs = _materials(req)
-    whitelist = build_number_whitelist(fs, refs, derived, ci)
+    whitelist = build_number_whitelist(fs, refs, derived, ci, edition=3)
     parts = _sections(req)["7.1"]
     text = parts["interpretation.confusion_analysis"]
     assert "99건" in text
     broken = {"interpretation.confusion_analysis": text.replace("99건", "97건")}
     result = checks.check_section("7.1", broken, whitelist=whitelist, verdict="FAIL", conclusions=[],
-                                  problem_ids=[], exempt=set())
+                                  problem_ids=[], exempt=set(), edition=3)
     assert "numbers" in result.hard_failures
     pass_req = _request("binary", "PASS")
     narrative = _sections(pass_req)["8.2"]["conclusion.narrative"]
@@ -298,7 +298,7 @@ def test_items_missing_from_the_old_templates_are_written():
 
 
 def test_interpretive_items_are_fact_sentences_only():
-    cons = {c.item_id: c for c in select_items(*(lambda r: (r.fact_sheet, r.client_inputs, r.task_type.value))(_request("binary", "FAIL")))}
+    cons = {c.item_id: c for c in select_items(*(lambda r: (r.fact_sheet, r.client_inputs, r.task_type.value))(_request("binary", "FAIL")), edition=3)}
     assert cons["8.2-13"].template_text == f"의뢰자가 밝힌 모델 용도는 '{PURPOSE}'이다."
     assert cons["8.3-01"].template_text == "F1 이 가장 낮은 클래스는 F1 0.4975인 0(정상)이다."
     assert "해석" in cons["8.2-13"].text and "위험을 쓴다" in cons["8.3-01"].text  # AI 결론은 해석을 맡긴다
@@ -369,15 +369,15 @@ def test_old_requests_without_facts_or_task_type_do_not_break():
     req = NarrativeRequest.model_validate(_raw("legacy_main"))
     fs = req.fact_sheet
     derived = compute_derived(fs)  # 작업 유형 없이(옛 호출)
-    refs = build_benchmark_refs("binary", fs.metrics)
-    resp = fallback.build_fallback_narrative(fs, refs, derived, "no_key")
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    resp = fallback.build_fallback_narrative(fs, refs, derived, "no_key", edition=3)
     texts = [resp.interpretation.confusion_analysis, resp.interpretation.distribution_analysis, resp.conclusion.benchmark,
              resp.conclusion.narrative, resp.conclusion.risks, resp.recommendation_narrative.data_quality,
              resp.recommendation_narrative.model_ops]
     assert all(t.strip() for t in texts)
-    assert verify_grounding(texts, build_number_whitelist(fs, refs, derived)).passed
+    assert verify_grounding(texts, build_number_whitelist(fs, refs, derived, edition=3), edition=3).passed
     assert find_verdict_contradictions(texts, fs.verdict) == []
-    bare = fallback.build_fallback_narrative(FactSheet(verdict="PASS", score=0.0), [], {}, "no_key")
+    bare = fallback.build_fallback_narrative(FactSheet(verdict="PASS", score=0.0), [], {}, "no_key", edition=3)
     assert bare.interpretation.confusion_analysis == "혼동 행렬 데이터가 제공되지 않아 클래스 간 오분류 분석을 생략한다."
     assert bare.interpretation.distribution_analysis == "클래스 분포 데이터가 제공되지 않아 분포 분석을 생략한다."
 
@@ -397,9 +397,9 @@ def test_engine_counts_give_totals_when_the_matrix_is_missing(task, rows, expect
     """M21(혼동행렬)을 고르지 않은 옛 요청 — 엔진 클래스별 건수(confusion_counts)로 오분류 총건수를 쓴다."""
     fs = FactSheet(verdict="FAIL", score=50.0, n_samples=87, confusion_counts=rows)
     derived = compute_derived(fs, task_type=task)
-    text = fallback.build_fallback_narrative(fs, [], derived, "no_key", task_type=task).interpretation.confusion_analysis
+    text = fallback.build_fallback_narrative(fs, [], derived, "no_key", task_type=task, edition=3).interpretation.confusion_analysis
     assert text.startswith(expected), text
-    assert verify_grounding([text], build_number_whitelist(fs, [], derived)).passed
+    assert verify_grounding([text], build_number_whitelist(fs, [], derived, edition=3), edition=3).passed
 
 
 def test_engine_counts_without_task_type_are_not_guessed_for_many_classes():
@@ -431,7 +431,7 @@ def test_error_nature_material_and_interpretation(boundary, confident, material,
     raw = _raw("binary")
     raw["fact_sheet"]["error_ratios"] = json.loads(_er(boundary, confident).model_dump_json())
     req = NarrativeRequest.model_validate(raw)
-    item = next(c for c in select_items(req.fact_sheet, None, "binary") if c.item_id == "7.1-11")
+    item = next(c for c in select_items(req.fact_sheet, None, "binary", edition=3) if c.item_id == "7.1-11")
     assert material in item.text and sentence in item.template_text
     # 재료의 숫자는 '근거 건수' 한 문장에만 있다(세션 C — 문장에 쓰지 말라는 말과 함께). 그 밖에는 숫자가 없다.
     outside = re.sub(r"근거 건수\([^)]*\): [^.]*\.", "", item.text)
@@ -440,7 +440,7 @@ def test_error_nature_material_and_interpretation(boundary, confident, material,
 
 def test_error_nature_without_any_misclassification_has_no_interpretation():
     fs = FactSheet(verdict="PASS", score=100.0, error_ratios=_er(0, 0, misclassified=0))
-    item = next(c for c in select_items(fs, None, "binary") if c.item_id == "7.1-11")
+    item = next(c for c in select_items(fs, None, "binary", edition=3) if c.item_id == "7.1-11")
     assert item.template_text == "확률이 있는 오분류가 없어 경계 오류·확신 오류 비율은 산출하지 않았다."  # 옛 요청(숫자 문장)
 
 
@@ -462,14 +462,14 @@ def _near_fs(statuses: tuple[str, ...], *, printed: bool) -> FactSheet:
 ])
 def test_near_target_material_and_interpretation(statuses, material, sentence):
     fs = _near_fs(statuses, printed=True)
-    item = next(c for c in select_items(fs, None, "binary") if c.item_id == "8.3-02")
+    item = next(c for c in select_items(fs, None, "binary", edition=3) if c.item_id == "8.3-02")
     assert material in item.text and sentence in item.template_text
     assert not re.search(r"\d", item.template_text)
     assert find_verdict_contradictions([item.template_text], fs.verdict) == []
 
 
 def test_near_target_for_old_requests_lists_passing_metrics_with_numbers():
-    item = next(c for c in select_items(_near_fs(("pass", "fail"), printed=False), None, "binary") if c.item_id == "8.3-02")
+    item = next(c for c in select_items(_near_fs(("pass", "fail"), printed=False), None, "binary", edition=3) if c.item_id == "8.3-02")
     assert item.template_text.startswith("목표값과의 차이가 목표값의 3% 미만인 아슬아슬 합격 지표는 Accuracy(0.802, 목표 0.8, 차이 0.002)로,")
     assert "Recall" not in item.template_text
 
@@ -482,7 +482,7 @@ def test_prompt_carries_the_interpretation_material():
         req = NarrativeRequest.model_validate(_raw(task))
         fs, task_value, ci, derived, refs = _materials(req)
         ctx = prompt.build_context(fs, derived, refs, task_type=task_value, report_purpose="external",
-                                   client_inputs=ci, conclusions=select_items(fs, ci, task_value))
+                                   client_inputs=ci, conclusions=select_items(fs, ci, task_value, edition=3), edition=3)
         msg = prompt.build_user_message(ctx, ("7.1",) if task == "multiclass" else ("8.3",))
         assert material in msg
 
@@ -499,7 +499,7 @@ def _ci_fs(**facts) -> FactSheet:
 
 
 def _ci_text(fs: FactSheet) -> str:
-    return next(c.template_text for c in select_items(fs, None, "binary") if c.item_id == "8.2-03")
+    return next(c.template_text for c in select_items(fs, None, "binary", edition=3) if c.item_id == "8.2-03")
 
 
 def test_ci_sentence_branches():
@@ -514,7 +514,7 @@ def test_ci_sentence_branches():
     none = FactSheet(verdict="PASS", score=100.0, metrics=[_ci_fs().metrics[1]], facts={"ci_available": False})
     assert _ci_text(none) == "이 평가에서는 판정 대상 지표의 신뢰구간을 산출하지 않았다."
     old = FactSheet(verdict="PASS", score=100.0, metrics=[_ci_fs().metrics[1]])
-    assert all(c.item_id != "8.2-03" or c.template_text is None for c in select_items(old, None, "binary"))
+    assert all(c.item_id != "8.2-03" or c.template_text is None for c in select_items(old, None, "binary", edition=3))
 
 
 def test_ci_end_gets_more_digits_when_it_would_look_like_the_target():
@@ -553,7 +553,7 @@ def test_benchmark_values_are_not_raw():
 def test_error_ratio_sentence_uses_cells_for_multilabel():
     er = ErrorRatiosFact(unit="label_cell", misclassified=12, boundary={"count": 5, "ratio": 0.4167},
                          confident={"count": 2, "ratio": 0.1667})
-    assert error_ratio_sentence(er).startswith("틀린 레이블 칸 12칸 중 결정 경계와의 거리가 0.1 미만인 경계 오류는 5칸(41.7%)")
+    assert error_ratio_sentence(er, edition=3).startswith("틀린 레이블 칸 12칸 중 결정 경계와의 거리가 0.1 미만인 경계 오류는 5칸(41.7%)")
 
 
 def test_copied_requests_are_not_mutated_by_templates():
@@ -575,10 +575,10 @@ def test_average_gap_direction_follows_the_sign(other, expected):
         "kind": "macro_vs_weighted", "macro_f1": 0.3314, "other_f1": other, "difference": diff,
         "difference_text": f"{diff:g}", "reference_class": {"label": "dog", "support": 74, "f1": 0.41}}}
     fs = FactSheet(verdict="FAIL", score=0.0, facts=facts)
-    text = next(c.template_text for c in select_items(fs, {"class_label_descriptions": {"dog": "개"}}, "multiclass")
+    text = next(c.template_text for c in select_items(fs, {"class_label_descriptions": {"dog": "개"}}, "multiclass", edition=3)
                 if c.item_id == "8.2-07")
     assert expected in text and "표본이 가장 많은 클래스는 dog(개)이며 표본 74건, F1 0.41이다." in text
-    assert verify_grounding([text], build_number_whitelist(fs, [], compute_derived(fs, task_type="multiclass"))).passed
+    assert verify_grounding([text], build_number_whitelist(fs, [], compute_derived(fs, task_type="multiclass"), edition=3), edition=3).passed
 
 
 @pytest.mark.parametrize("word, pair, expected", [
@@ -611,9 +611,9 @@ def test_judged_metric_values_keep_the_report_spelling_in_gap_sentences():
                              "difference_text": "0.0123", "reference_class": {"label": "a", "support": 9, "f1": 0.5}},
              "precision_recall_gap": {"precision": 0.79996, "recall": 0.6, "difference": 0.19996, "difference_text": "0.2",
                                       "flagged": True}}
-    multi = {c.item_id: c.template_text for c in select_items(FactSheet(verdict="FAIL", score=0.0, metrics=[f1], facts=facts), None, "multiclass")}
+    multi = {c.item_id: c.template_text for c in select_items(FactSheet(verdict="FAIL", score=0.0, metrics=[f1], facts=facts), None, "multiclass", edition=3)}
     assert multi["8.2-07"].startswith("매크로 F1 은 0.69996,")
-    binary = {c.item_id: c.template_text for c in select_items(FactSheet(verdict="FAIL", score=0.0, metrics=[p], facts=facts), None, "binary")}
+    binary = {c.item_id: c.template_text for c in select_items(FactSheet(verdict="FAIL", score=0.0, metrics=[p], facts=facts), None, "binary", edition=3)}
     assert binary["8.2-05"].startswith("양성 클래스의 Precision 은 0.79996,")
 
 
@@ -621,7 +621,7 @@ def test_judged_metric_values_keep_the_report_spelling_in_gap_sentences():
 def test_error_nature_does_not_overstate_a_tiny_share(boundary, confident):
     fs = FactSheet(verdict="PASS", score=100.0, error_ratios=_er(boundary, confident, misclassified=200),
                    facts={"fixed_sentences": [{"id": "17", "section": "7.1", "text": "17"}]})
-    text = next(c.template_text for c in select_items(fs, None, "binary") if c.item_id == "7.1-11")
+    text = next(c.template_text for c in select_items(fs, None, "binary", edition=3) if c.item_id == "7.1-11")
     assert "비중이 크다" not in text and "달라지기 쉽다" not in text
 
 
@@ -646,7 +646,7 @@ def test_large_latency_values_are_plain_decimals_that_pass_the_number_check():
     fs, task, ci, derived, refs = _materials(req)
     risks = _sections(req)["8.3"]["conclusion.risks"]
     assert "1234567.5ms" in risks and "e+" not in risks and "0.00001ms" in risks
-    assert verify_grounding([risks], build_number_whitelist(fs, refs, derived, ci)).passed
+    assert verify_grounding([risks], build_number_whitelist(fs, refs, derived, ci, edition=3), edition=3).passed
 
 
 def test_labels_only_in_facts_lists_are_names_not_code_words():
@@ -656,8 +656,8 @@ def test_labels_only_in_facts_lists_are_names_not_code_words():
     fs, task, ci, derived, refs = _materials(req)
     parts = _sections(req)["7.1"]
     assert "tiger_shark" in parts["interpretation.confusion_analysis"]
-    result = checks.check_section("7.1", parts, whitelist=build_number_whitelist(fs, refs, derived, ci), verdict=fs.verdict,
-                                  conclusions=select_items(fs, ci, task), problem_ids=[], exempt=checks.name_exemptions(fs, ci))
+    result = checks.check_section("7.1", parts, whitelist=build_number_whitelist(fs, refs, derived, ci, edition=3), verdict=fs.verdict,
+                                  conclusions=select_items(fs, ci, task, edition=3), problem_ids=[], exempt=checks.name_exemptions(fs, ci), edition=3)
     assert result.code_words == []
 
 

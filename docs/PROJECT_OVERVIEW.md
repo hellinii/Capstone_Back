@@ -100,7 +100,8 @@ Capstone_Back
         ※ isEvaluated 인 run 에만 발급 허용
 ```
 
-- **성적서 판(contentSchema)**: 성적서 데이터에 판 번호가 찍힌다(지금 판 3). 발급한 옛 판(1·2)은 번호로 열어도 발급 당시 모양 그대로 그린다. 판 3 은 소절 번호·7.3 추가 관찰·7절 ※ 한 줄이 있고, 본문에 AI·LLM 표현이 없다(1.4 LLM 면책 항목 없음). 프론트 `docs/ARCHITECTURE.md` §6.3.
+- **성적서 판(contentSchema)**: 성적서 데이터에 판 번호가 찍힌다(기본 판 3). 성적서는 찍힌 판의 모양으로 그리므로, 발급한 옛 판(1·2)은 번호로 열어도 발급 당시 모양 그대로다. 판 3 은 소절 번호·7.3 추가 관찰·7절 ※ 한 줄이 있고, 본문에 AI·LLM 표현이 없다(1.4 LLM 면책 항목 없음). 프론트 `docs/ARCHITECTURE.md` §6.3.
+- **판 4**: 목차를 1 시험 개요 ~ 6 개선 권고로 다시 묶은 판. 프론트가 run 을 만들 때 한 곳(`reportEdition.newRunContentSchema()`, 빌드 환경변수 `VITE_REPORT_EDITION=4`)에서 정하고, 그 뒤 모든 단계는 찍힌 판만 따른다. 백엔드는 서술 요청 최상위 `report_edition`(기본 3)으로만 판 4 규칙을 쓴다. 운영에서는 아직 켜지 않았다 — 켤 때는 **백엔드 먼저 배포**. 프론트 `docs/ARCHITECTURE.md` §6.6, 백엔드 §13.
 - **작성 기록**: 칸마다 AI 작성(모델 이름)·규칙 기반 문장·고정 문구인지를 발급 보관본에 저장하고(작업 결과 `section_sources`·`section_models`), 서비스 화면의 "작성 기록" 상자에만 보인다 — 인쇄물에는 없다.
 - **기관 이름**: 시드·프론트 자리표시자의 기관 이름은 "리트머스"(옛 "한국 AI 인증원"). 운영 DB 의 기존 행은 SQL 로 한 번 바꿨다(2026-10-23, 방법은 `docs/ARCHITECTURE.md` §12 배포·운영).
 
@@ -116,7 +117,7 @@ Capstone_Back
 | POST `/api/confirm-mapping` | `lib/report/confirmMappingApi.ts` | `analysis/router.py` → `validate_mapping` | Step5 |
 | POST `/api/validate-data` | `hooks/useDataValidation.ts` | `analysis/validation_router.py` → `validate_dataset` | Step6 |
 | POST `/api/evaluate` | `hooks/useReportData.ts` | `evaluation/router.py` → `run_evaluation_pipeline` | 리포트 S1 |
-| POST `/api/narrative/jobs`, GET `/api/narrative/jobs/{id}` | `lib/report/narrativeJobApi.ts` (payload=`buildFactSheet.ts`) | `narrative/router.py` → `jobs.create_job`·`read_job` → `generator.generate_sections` | 리포트 S2 |
+| POST `/api/narrative/jobs`, GET `/api/narrative/jobs/{id}` | `lib/report/narrativeJobApi.ts` (payload=`narrativeRequest.ts` `buildNarrativeRequest` — 사실 시트는 `buildFactSheet.ts`) | `narrative/router.py` → `jobs.create_job`·`read_job` → `generator.generate_sections` | 리포트 S2 |
 | POST `/api/generate-narrative` (옛 경로) | 없음 — 운영 프론트는 2026-10-23 배포부터 부르지 않는다(옛 클라이언트용으로 얼려 둠) | `narrative/router.py` → `legacy.generate_narrative` | 리포트 S2(옛) |
 | GET `/api/organization`, POST `/api/reports/issue`·`{no}/reissue`, GET `/api/reports/{no}`·`/api/reports/{no}/content` | `lib/report/issuanceApi.ts` · `hooks/useIssuance.ts` | `issuance/router.py` → `service` | 발급 |
 
@@ -133,8 +134,8 @@ Capstone_Back
 |---|---|
 | `Capstone_Front/SPEC.md` ⭐ | **지표 요구사항·컬럼 역할·검증 규칙·task_type별 허용 지표를 다루는 모든 작업의 최우선 기준.** 변경 전 프론트/백 양쪽을 이 문서에 맞춘다. |
 | `Capstone_Back/docs/ARCHITECTURE.md` | 백엔드 온보딩·구조 기준 — `app/` 도메인 구조, router→service→순수로직 패턴, 새 지표/API/테이블 추가 위치. (`Capstone_Back/README.md`는 스택·주요 API·로컬 실행 요약) |
-| `Capstone_Back/docs/ARCHITECTURE.md` 의 §10 · §11 · §12 | **서술(7·8·9절)** 작업 번호·칸별 검문·규칙 템플릿·결정 번호 색인과 왜 그렇게 만들었는지(§10), **발급** 번호 규칙·정정 발급·보관본(§11), **배포·운영** 실제 주소·배포 경로·환경변수·운영 메모(§12). |
-| `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. 성적서 서술 흐름·사실 시트·판(contentSchema)·고정 문구 번호 표는 §6. |
+| `Capstone_Back/docs/ARCHITECTURE.md` 의 §10 · §11 · §12 · §13 | **서술(7·8·9절)** 작업 번호·칸별 검문·규칙 템플릿·결정 번호 색인과 왜 그렇게 만들었는지(§10), **발급** 번호 규칙·정정 발급·보관본(§11), **배포·운영** 실제 주소·배포 경로·환경변수·운영 메모(§12), **성적서 판 4** 서술 요청의 `report_edition`·평가 엔진 버전 올림 규칙·정답 폴더(§13). |
+| `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. 성적서 서술 흐름·사실 시트·판(contentSchema)·고정 문구 번호 표는 §6, 판 4 켜는 법·켜기 전 확인 목록·판 4 시험 자료는 §6.6. |
 | `Capstone_Front/docs/FRONTEND_DEVELOPMENT_GUIDELINE.md` | 프론트에 새 페이지/컴포넌트/유틸 추가 시 지킬 규칙. |
 | `Capstone_Front/docs/MATERIAL_PICKER.md` | 평가 흐름 만들기 화면(작업 유형 → 블록 고르기 → 입력)의 흐름 규칙·용어. |
 | `Capstone_Front/docs/COMPOSER_COMPONENTS.md` | 평가 흐름에 넣는 블록(카드)과 항목(필드) 목록 — 코드 정본 `src/data/reportComposer.ts` 를 읽기 쉽게 옮긴 것. |

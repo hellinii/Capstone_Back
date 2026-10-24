@@ -135,7 +135,7 @@ from app.narrative.schemas import FactSheet, MetricFact, PerClassFact  # noqa: E
     ("오분류 5회 감소", ["5"]),
 ])
 def test_predicted_numbers(text, expected):
-    assert checks.predicted_numbers(text) == expected
+    assert checks.predicted_numbers(text, edition=3) == expected
 
 
 def _fs(**kw):
@@ -154,11 +154,11 @@ def test_snake_case_class_names_are_exempt_but_field_names_are_not():
 def test_section_9_is_empty_when_either_text_is_blank():
     parts = {"recommendation_narrative.data_quality": "데이터 권고다.", "recommendation_narrative.model_ops": " ",
              "recommendations": [{"problem_id": "P1", "category": "c", "action": "a", "expected_impact": "e"}]}
-    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set())
+    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set(), edition=3)
     assert r.format == ["empty"]
     parts["recommendation_narrative.model_ops"] = "모델 권고다."
     parts["recommendations"] = []
-    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set())
+    r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set(), edition=3)
     assert r.format == ["empty"]
 
 
@@ -248,7 +248,7 @@ def test_thousands_separator_numbers():
     """checks-12: '1,234.5' 는 숫자 하나, 붙여 쓴 '43,52' 는 숫자 둘."""
     from app.narrative.grounding import verify_grounding
 
-    assert checks.d24_present("p95 응답 시간은 1,234.5ms 이다", (1234.5,))
-    assert verify_grounding(["행렬은 43,52 이다"], {"43", "52"}).passed
-    assert not verify_grounding(["행렬은 43,52 이다"], {"4352"}).passed
-    assert verify_grounding(["재표집 2,000회"], {"2000"}).passed
+    assert checks.d24_present("p95 응답 시간은 1,234.5ms 이다", (1234.5,), edition=3)
+    assert verify_grounding(["행렬은 43,52 이다"], {"43", "52"}, edition=3).passed
+    assert not verify_grounding(["행렬은 43,52 이다"], {"4352"}, edition=3).passed
+    assert verify_grounding(["재표집 2,000회"], {"2000"}, edition=3).passed

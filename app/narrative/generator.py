@@ -38,7 +38,7 @@ from app.core.concurrency import narrative_slot, run_cpu_bound
 from app.narrative import checks, fallback, prompt
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.derived import compute_derived
-from app.narrative.grounding import _add, build_number_whitelist, find_verdict_contradictions
+from app.narrative.grounding import _add, _add_exact, build_number_whitelist, find_verdict_contradictions
 from app.narrative.llm import EFFORT_LEVELS, call_narrative_llm
 from app.narrative.required_items import benchmark_printed_only, error_breakdown, select_items
 from app.narrative.schemas import (
@@ -106,22 +106,28 @@ async def _no_stage(_stage: str) -> None:
 def _prepare(req: NarrativeRequest):
     fs = req.fact_sheet
     task = req.task_type.value
+    # 성적서 양식 판 — 요청의 report_edition 하나만 읽고(판 결정은 프론트 한 곳), 하위 함수에는 모두 이 값을 넘긴다.
+    edition = req.report_edition
     derived = compute_derived(fs, task_type=task)
-    refs = build_benchmark_refs(task, fs.metrics)
-    whitelist = build_number_whitelist(fs, refs, derived, req.client_inputs)
-    conclusions = select_items(fs, req.client_inputs, task)
+    refs = build_benchmark_refs(task, fs.metrics, edition=edition)
+    whitelist = build_number_whitelist(fs, refs, derived, req.client_inputs, edition=edition)
+    # 결론 목록도 여기서 만든 파생값·기준표를 읽는다 — 다시 계산하면 판이 다른 기준표를 읽을 수 있다(판 4 라운드 S2 ②).
+    conclusions = select_items(fs, req.client_inputs, task, edition=edition, derived=derived, benchmark_refs=refs)
     ctx = prompt.build_context(
         fs, derived, refs, task_type=task, report_purpose=req.report_purpose.value,
-        client_inputs=req.client_inputs, conclusions=conclusions,
+        client_inputs=req.client_inputs, conclusions=conclusions, edition=edition,
     )
+    # 판 4 허용 목록은 찍힌 그대로만 받는다(정수 건수에 판 3 의 반올림·×100 백분율 변형을 넣으면 1건이 '100%' 를 허용한다 —
+    # S2·S3 검토 T6). 판 3 은 종전 그대로.
+    add = _add_exact if edition == 4 else _add
     # 지시문에서 덜어 낸 표의 개수('외 k개')도 서술이 쓸 수 있다 — 원본 사실 시트에 없는 수일 수 있어 넣는다.
     for count in (ctx.view.get("덜어 낸 표(일부만 실림)") or {}).values():
-        _add(whitelist, count)
+        add(whitelist, count)
     # 오류 성격 해석 재료의 '둘 다 아닌 오류' 건수(오분류 − 경계 − 확신)도 지시문에 보인다(세션 C) — 문장에 쓰지 말라고 하지만
     # 옮겨 적어도 사실이라 넣는다.
     breakdown = error_breakdown(fs.error_ratios)
     if breakdown is not None and breakdown[2] is not None:
-        _add(whitelist, breakdown[2])
+        add(whitelist, breakdown[2])
     exempt = checks.name_exemptions(fs, req.client_inputs)
     masks = checks.verdict_masks(fs, req.client_inputs)
     return derived, refs, whitelist, conclusions, ctx, exempt, masks
@@ -147,10 +153,10 @@ def _extract(section_id: str, data: dict) -> dict | None:
     return parts
 
 
-def _align(parts: dict, problems: list, *, fill_missing: bool) -> tuple[dict, list[str]]:
+def _align(parts: dict, problems: list, *, fill_missing: bool, edition: int) -> tuple[dict, list[str]]:
     """권고를 문제 목록에 맞춘다(D22) — 목록 밖 번호는 버리고, 우선순위는 문제의 것, 문제 번호 순서.
 
-    fill_missing 이면 권고가 없는 문제를 종류별 폴백 템플릿으로 채운다. 채운 문제 번호를 돌려준다."""
+    fill_missing 이면 권고가 없는 문제를 종류별 폴백 템플릿(그 판의 글 — edition)으로 채운다. 채운 문제 번호를 돌려준다."""
     by_id: dict[str, list[dict]] = {p.id: [] for p in problems}
     for r in parts.get("recommendations") or []:
         if r["problem_id"] in by_id:
@@ -160,7 +166,7 @@ def _align(parts: dict, problems: list, *, fill_missing: bool) -> tuple[dict, li
     for p in problems:
         if not by_id[p.id]:
             if fill_missing:
-                aligned.append(fallback.problem_recommendation(p))
+                aligned.append(fallback.problem_recommendation(p, edition=edition))
                 filled.append(p.id)
             continue
         for r in by_id[p.id]:
@@ -198,6 +204,7 @@ async def generate_sections(
     started = time.perf_counter()
     deadline_at = started + deadline_seconds if deadline_seconds is not None else None
     fs = req.fact_sheet
+    edition = req.report_edition
     derived, refs, whitelist, conclusions, ctx, exempt, masks = await run_cpu_bound(_prepare, req)
     effort = effort or job_effort()
     problem_ids = [p.id for p in fs.problems]
@@ -222,6 +229,7 @@ async def generate_sections(
         st = states[sid]
         st.parts = fallback.section_template(
             sid, fs, refs, derived, task_type=req.task_type.value, client_inputs=req.client_inputs, conclusions=conclusions,
+            edition=edition,
         )
         if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems) or (sid == "8.1" and benchmark_fixed):
             st.source, st.outcome = "fixed", "fixed"  # 7.3 을 검문으로 뺐으면 호출부가 dropped 로 덮는다
@@ -277,7 +285,8 @@ async def generate_sections(
             wait_cap = room if slot_wait is None else min(slot_wait, room)
         user = prompt.build_user_message(ctx, section_ids, regenerate=purpose == "regenerate")
         schema = prompt.response_schema(section_ids, problem_ids)
-        entry["prompt_chars"] = len(prompt.SYSTEM_PROMPT) + len(user)
+        system = prompt.system_prompt(edition)
+        entry["prompt_chars"] = len(system) + len(user)
         waited_from = time.perf_counter()
         slot = {"held": False}
         try:
@@ -303,7 +312,7 @@ async def generate_sections(
                 entry["started_at_seconds"] = round(time.perf_counter() - started, 3)
                 async with asyncio.timeout(limit):
                     result = await call_narrative_llm(
-                        client, system=prompt.SYSTEM_PROMPT, user=user, schema=schema, effort=effort,
+                        client, system=system, user=user, schema=schema, effort=effort,
                     )
         except TimeoutError:
             failure = "timeout" if slot["held"] else "busy"
@@ -321,10 +330,10 @@ async def generate_sections(
 
         model 은 이 글을 낸 호출의 응답 모델 — 글을 실으면 칸 모델로 남긴다(section_models)."""
         st = states[sid]
-        aligned = _align(parts, fs.problems, fill_missing=False)[0] if sid == "9" else parts
+        aligned = _align(parts, fs.problems, fill_missing=False, edition=edition)[0] if sid == "9" else parts
         result = checks.check_section(
             sid, _rec_dicts(aligned), whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
-            problem_ids=problem_ids, exempt=exempt, masks=masks, labels=labels,
+            problem_ids=problem_ids, exempt=exempt, masks=masks, labels=labels, edition=edition,
         )
         st.checks.append(result.as_record())
         hard = result.hard_failures
@@ -345,7 +354,7 @@ async def generate_sections(
             st.kept = ("missing_rec", parts, model)
         if sid == "9" and last_chance and hard == ["missing_recommendation"]:
             # 다시 부른 뒤에도 권고가 빠진 문제만 남았다 — D22 대로 종류별 폴백 템플릿으로 채운다(9칸은 규칙 문장이 섞임).
-            filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
+            filled_parts, filled = _align(parts, fs.problems, fill_missing=True, edition=edition)
             st.parts, st.source, st.outcome, st.reason = filled_parts, "fallback", "filled", "missing_recommendation"
             trace["recommendations_from_template"] = filled
             return True
@@ -372,7 +381,7 @@ async def generate_sections(
             st.parts, st.source, st.outcome, st.d24_missing, st.reason = parts, "llm", "kept_first", True, None
             st.model = model
         else:
-            filled_parts, filled = _align(parts, fs.problems, fill_missing=True)
+            filled_parts, filled = _align(parts, fs.problems, fill_missing=True, edition=edition)
             st.parts, st.source, st.outcome, st.reason = filled_parts, "fallback", "filled", "missing_recommendation"
             trace["recommendations_from_template"] = filled
 

@@ -24,7 +24,7 @@ def _req(name: str) -> NarrativeRequest:
 
 
 def _ids(req: NarrativeRequest) -> list[str]:
-    return [c.item_id for c in select_items(req.fact_sheet, req.client_inputs, req.task_type.value)]
+    return [c.item_id for c in select_items(req.fact_sheet, req.client_inputs, req.task_type.value, edition=3)]
 
 
 # ── 표 ─────────────────────────────────────────────────────────────────────────
@@ -89,13 +89,13 @@ def test_conclusion_numbers_are_grounded(name):
     req = _req(name)
     fs, task = req.fact_sheet, req.task_type.value
     derived = compute_derived(fs, task_type=task)
-    wl = build_number_whitelist(fs, build_benchmark_refs(task, fs.metrics), derived, req.client_inputs)
+    wl = build_number_whitelist(fs, build_benchmark_refs(task, fs.metrics, edition=3), derived, req.client_inputs, edition=3)
     texts = [
-        c.text for c in select_items(fs, req.client_inputs, task)
+        c.text for c in select_items(fs, req.client_inputs, task, edition=3)
         if c.author in ("ai", "ai_fact") and not c.open_ended
     ]
     assert texts
-    result = verify_grounding(texts, wl)
+    result = verify_grounding(texts, wl, edition=3)
     assert result.passed, result.violations
 
 
@@ -106,13 +106,13 @@ def test_legacy_request_without_facts_still_selects():
 
 
 def test_d24_values_are_attached_only_to_d24_items():
-    concl = select_items(_req("binary").fact_sheet, None, "binary")
+    concl = select_items(_req("binary").fact_sheet, None, "binary", edition=3)
     with_values = {c.item_id: c.d24_values for c in concl if c.d24_values}
     assert with_values == {"7.1-03": (43.0, 0.434343434)}
 
 
 def test_conclusions_grouped_by_the_seven_sections():
-    grouped = conclusions_by_section(select_items(_req("multiclass").fact_sheet, None, "multiclass"))
+    grouped = conclusions_by_section(select_items(_req("multiclass").fact_sheet, None, "multiclass", edition=3))
     assert list(grouped) == list(SECTION_IDS)
     assert [c.item_id for c in grouped["7.3"]] == ["7.3-01"] and grouped["7.3"][0].open_ended
 
@@ -132,7 +132,7 @@ def _m(**over) -> MetricFact:
 
 
 def _select(fs: FactSheet, task="binary", client=None) -> dict[str, str]:
-    return {c.item_id: c.text for c in select_items(fs, client, task)}
+    return {c.item_id: c.text for c in select_items(fs, client, task, edition=3)}
 
 
 def test_d24_items_switch_off_for_similar_equal_batch_or_unknown():
@@ -143,7 +143,7 @@ def test_d24_items_switch_off_for_similar_equal_batch_or_unknown():
     assert "7.1-03" not in _select(off)
     lat = LatencyFact(available=True, mean=10.0, p50=9.0, p95=20.0, p99=30.0)
     realtime = _fs(latency=lat, facts=NarrativeFactsFact(declarations={"usage_mode": "realtime"}))
-    picked = {c.item_id: c for c in select_items(realtime, None, "binary")}
+    picked = {c.item_id: c for c in select_items(realtime, None, "binary", edition=3)}
     assert picked["8.3-05"].d24_values == (10.0, 9.0, 20.0, 30.0)
     batch = _fs(latency=lat, facts=NarrativeFactsFact(declarations={"usage_mode": "batch"}))
     assert "8.3-05" not in _select(batch) and "8.3-04" in _select(batch)

@@ -92,7 +92,7 @@ def test_threshold_tuning_is_the_engine_notable():
 # ── 폴백이 표시값을 쓴다 ───────────────────────────────────────────────────────────
 
 def _fallback(fs: FactSheet):
-    return build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key")
+    return build_fallback_narrative(fs, [], compute_derived(fs), reason="no_key", edition=3)
 
 
 def _imbalance(level: str, ir: float, acc: float, gap: float, shown: tuple[str, str, str]):
@@ -151,10 +151,10 @@ def test_fallback_on_contract_examples_passes_its_own_checks(name):
     req = NarrativeRequest.model_validate(json.loads((CONTRACT / f"fact_sheet_{name}.json").read_text(encoding="utf-8")))
     fs = req.fact_sheet
     derived = compute_derived(fs, task_type=req.task_type.value)
-    refs = build_benchmark_refs(req.task_type.value, fs.metrics)
-    out = build_fallback_narrative(fs, refs, derived, reason="no_key")
+    refs = build_benchmark_refs(req.task_type.value, fs.metrics, edition=3)
+    out = build_fallback_narrative(fs, refs, derived, reason="no_key", edition=3)
     data = out.model_dump(exclude={"meta", "benchmark_refs"})
-    grounding = verify_grounding(_collect_grounding_texts(data), build_number_whitelist(fs, refs, derived))
+    grounding = verify_grounding(_collect_grounding_texts(data), build_number_whitelist(fs, refs, derived, edition=3), edition=3)
     assert grounding.passed, grounding.violations
     assert find_verdict_contradictions(_collect_grounding_texts(data), fs.verdict) == []
     # M21 을 고르지 않은 새 요청도 혼동행렬 문장이 있다(S4a — 늘 계산하는 표).
@@ -179,7 +179,7 @@ def test_prompt_drops_big_tables_first_and_keeps_within_limit():
     req = _many_classes(150)
     fs = req.fact_sheet
     derived = compute_derived(fs, task_type="multiclass")
-    refs = build_benchmark_refs("multiclass", fs.metrics)
+    refs = build_benchmark_refs("multiclass", fs.metrics, edition=3)
     system, user, dropped = build_prompts_within_limit(req, fs, derived, refs)
     assert dropped[0] == "confusion.matrix"
     assert len(system) + len(user) <= service.MAX_NARRATIVE_PROMPT_CHARS

@@ -50,12 +50,12 @@ DIGIT_LABELS = frozenset({"0", "1", "2", "8", "10"})
     ("클래스 2의 오분류 5건이 사라진다.", ["5"]),
 ])
 def test_class_name_numbers_are_not_predictions(text, expected):
-    assert checks.predicted_numbers(text, DIGIT_LABELS) == expected
+    assert checks.predicted_numbers(text, DIGIT_LABELS, edition=3) == expected
 
 
 def test_class_name_numbers_still_caught_without_labels():
     # 이름 목록을 주지 않으면(옛 호출) 지금처럼 잡는다 — 이름 면제는 사실 시트의 이름에서만 나온다.
-    assert checks.predicted_numbers("클래스 2의 재현율이 회복된다.") == ["2"]
+    assert checks.predicted_numbers("클래스 2의 재현율이 회복된다.", edition=3) == ["2"]
 
 
 def test_numeric_labels_come_from_every_name_list():
@@ -75,11 +75,11 @@ def test_section_9_check_uses_class_labels():
         "recommendations": [{"problem_id": "P1", "category": "c", "action": "a", "expected_impact": "클래스 2의 누락이 줄어든다."}],
     }
     r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set(),
-                             labels=checks.numeric_labels(fs))
+                             labels=checks.numeric_labels(fs), edition=3)
     assert r.impact_numbers == []
     parts["recommendations"][0]["expected_impact"] = "클래스 2의 누락이 3건 줄어든다."
     r = checks.check_section("9", parts, whitelist=set(), verdict="PASS", conclusions=[], problem_ids=["P1"], exempt=set(),
-                             labels=checks.numeric_labels(fs))
+                             labels=checks.numeric_labels(fs), edition=3)
     assert r.impact_numbers == ["3"]
 
 
@@ -118,7 +118,7 @@ def _raw(name: str) -> dict:
 
 def _cons(raw: dict, client_inputs=None) -> dict:
     req = NarrativeRequest.model_validate(raw)
-    return {c.item_id: c for c in select_items(req.fact_sheet, client_inputs, req.task_type.value)}
+    return {c.item_id: c for c in select_items(req.fact_sheet, client_inputs, req.task_type.value, edition=3)}
 
 
 def test_trimmed_multilabel_counts_use_the_right_josa():
@@ -196,7 +196,7 @@ def test_affected_template_says_distortion_was_observed():
 
 def test_affected_conclusion_and_prompt_note_follow_section_3_wording():
     req = _affected(_raw("binary"))
-    cons = {c.item_id: c for c in select_items(req.fact_sheet, None, "binary")}
+    cons = {c.item_id: c for c in select_items(req.fact_sheet, None, "binary", edition=3)}
     assert cons["7.2-02"].text.startswith("불균형에 따른 성능 지표 왜곡이 관찰되었다(비율이 1.5 이상이고 ")
     _, _, _, _, ctx, _, _ = generator._prepare(req)
     notes = " ".join(ctx.briefs["7.2"].notes)
@@ -222,7 +222,7 @@ def test_small_minority_gets_the_small_sample_note_and_template():
     from app.narrative import fallback
     def template(r):
         derived, refs, _, conclusions, _, _, _ = generator._prepare(r)
-        return fallback.section_template("7.2", r.fact_sheet, refs, derived, task_type="binary", conclusions=conclusions)
+        return fallback.section_template("7.2", r.fact_sheet, refs, derived, task_type="binary", conclusions=conclusions, edition=3)
 
     big = template(_affected(_raw("binary")))
     small = template(req)
@@ -274,7 +274,7 @@ def _nature(er: ErrorRatiosFact, task="binary", *, printed=True):
     if not printed:
         raw["fact_sheet"].pop("facts", None)
     req = NarrativeRequest.model_validate(raw)
-    return next(c for c in select_items(req.fact_sheet, None, task) if c.item_id == "7.1-11")
+    return next(c for c in select_items(req.fact_sheet, None, task, edition=3) if c.item_id == "7.1-11")
 
 
 def test_error_breakdown_counts_neither_only_when_the_two_kinds_cannot_overlap():
@@ -336,7 +336,7 @@ def test_neither_count_is_allowed_and_told_not_to_be_written():
     req = NarrativeRequest.model_validate(raw)
     _, _, whitelist, _, ctx, _, _ = generator._prepare(req)
     assert "104" in whitelist
-    assert "104" not in build_number_whitelist(req.fact_sheet, [], {})  # 원래 목록에는 없다 — 생성기가 넣는다
+    assert "104" not in build_number_whitelist(req.fact_sheet, [], {}, edition=3)  # 원래 목록에는 없다 — 생성기가 넣는다
     msg = prompt.build_user_message(ctx, ("7.1", "7.2", "7.3"))
     assert "둘 다 아닌 오류 104건" in msg
     assert "해석 재료의 건수도 문장에 쓰지 않는다" in msg
@@ -368,7 +368,7 @@ def _near_sheet(metrics, *, printed=True, verdict="PASS"):
 
 
 def _item(fs, item_id="8.3-02"):
-    return next(c for c in select_items(fs, None, "binary") if c.item_id == item_id)
+    return next(c for c in select_items(fs, None, "binary", edition=3) if c.item_id == item_id)
 
 
 def test_near_material_says_which_intervals_contain_the_target():
@@ -418,7 +418,7 @@ def test_near_templates_pass_their_own_checks(printed, verdict, statuses):
     if t is None:  # 옛 요청은 합격한 근소 지표만 쓴다
         assert not printed and all(s == "fail" for s in statuses)
         return
-    assert verify_grounding([t], build_number_whitelist(fs, [], {})).passed, t
+    assert verify_grounding([t], build_number_whitelist(fs, [], {}, edition=3), edition=3).passed, t
     assert find_verdict_contradictions([t], verdict) == [], t
 
 
@@ -491,9 +491,9 @@ def _tie_raw(task="multiclass", *, bird_f1=0.27421, trimmed=False, extra=0):
 
 def test_weakest_ties_by_printed_digits():
     req = NarrativeRequest.model_validate(_tie_raw())
-    assert weakest_ties(req.fact_sheet) == (["cat", "bird"], False)
+    assert weakest_ties(req.fact_sheet, edition=3) == (["cat", "bird"], False)
     req = NarrativeRequest.model_validate(_tie_raw(bird_f1=0.2743))
-    assert weakest_ties(req.fact_sheet) == ([], False)
+    assert weakest_ties(req.fact_sheet, edition=3) == ([], False)
 
 
 def test_tied_weakest_conclusion_names_all_of_them():
@@ -526,7 +526,7 @@ def test_tied_weakest_notes_and_self_check():
         assert "F1 이 같은 최하위 클래스가 여럿이다(cat, bird, 2, 3, 4). 한 클래스만 가장 약한 클래스처럼 쓰지 말고 함께 밝힌다." in notes, sid
     for c in conclusions:
         if c.item_id in ("7.1-10", "8.3-01"):
-            assert verify_grounding([c.template_text], whitelist).passed, c.template_text
+            assert verify_grounding([c.template_text], whitelist, edition=3).passed, c.template_text
             assert checks.code_words([c.template_text], exempt) == []
 
 
@@ -626,18 +626,18 @@ def _bench_fs():
 
 def test_benchmark_rule_sentence_and_fact_view_use_position_consistent_values():
     fs = _bench_fs()
-    refs = build_benchmark_refs("binary", fs.metrics)
-    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs) if c.item_id == "8.1-01")
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs, edition=3) if c.item_id == "8.1-01")
     assert "참조 범위보다 우수한 지표는 AUROC(0.950001, 참조 범위 0.85~0.95)이고" in text
     assert "Precision(0.79996, 참조 범위 0.8~0.92)" in text and "Accuracy(0.84996, 참조 범위 0.85~0.92)" in text
     derived = compute_derived(fs, task_type="binary")
-    view = fact_view.build_fact_view(fs, derived, refs, task_type="binary", task_label="이진 분류", report_purpose="internal")
+    view = fact_view.build_fact_view(fs, derived, refs, task_type="binary", task_label="이진 분류", report_purpose="internal", edition=3)
     rows = {r["지표"]: r for r in view["벤치마크(내부 참조 기준)"]["지표별"]}
     assert (rows["Precision"]["모델 값"], rows["Precision"]["평가(방향 반영)"]) == ("0.79996", "미흡")
     assert (rows["AUROC"]["모델 값"], rows["AUROC"]["평가(방향 반영)"]) == ("0.950001", "우수")
     assert rows["Accuracy"]["모델 값"] == "0.84996"
     # 규칙 문장이 자기 검문(숫자 허용 목록)을 통과한다.
-    assert verify_grounding([text], build_number_whitelist(fs, refs, derived)).passed, text
+    assert verify_grounding([text], build_number_whitelist(fs, refs, derived, edition=3), edition=3).passed, text
     # 응답의 벤치마크 표(계약)는 그대로 — model_value 는 넷째 자리 숫자다.
     assert [r["model_value"] for r in refs] == [0.8, 0.95, 0.85]
 
@@ -677,19 +677,19 @@ def test_session_c_templates_pass_their_own_checks(task, verdict):
     req = NarrativeRequest.model_validate(raw)
     fs_obj, ci = req.fact_sheet, req.client_inputs
     derived = compute_derived(fs_obj, task_type=task)
-    refs = build_benchmark_refs(task, fs_obj.metrics)
-    whitelist = build_number_whitelist(fs_obj, refs, derived, ci)
-    conclusions = select_items(fs_obj, ci, task)
+    refs = build_benchmark_refs(task, fs_obj.metrics, edition=3)
+    whitelist = build_number_whitelist(fs_obj, refs, derived, ci, edition=3)
+    conclusions = select_items(fs_obj, ci, task, edition=3)
     exempt = checks.name_exemptions(fs_obj, ci)
     texts = []
     for sid in SECTION_IDS:
         parts = generator._rec_dicts(fallback.section_template(sid, fs_obj, refs, derived, task_type=task, client_inputs=ci,
-                                                              conclusions=conclusions))
+                                                              conclusions=conclusions, edition=3))
         if sid == "9" and not fs_obj.problems:
             continue
         r = checks.check_section(sid, parts, whitelist=whitelist, verdict=fs_obj.verdict, conclusions=conclusions,
                                  problem_ids=[p.id for p in fs_obj.problems], exempt=exempt,
-                                 masks=checks.verdict_masks(fs_obj, ci), labels=checks.numeric_labels(fs_obj))
+                                 masks=checks.verdict_masks(fs_obj, ci), labels=checks.numeric_labels(fs_obj), edition=3)
         assert r.hard_failures == [], (sid, r.as_record(), parts)
         texts += [t for t in checks.section_texts(sid, parts) if t]
     joined = " ".join(texts)

@@ -1,0 +1,373 @@
+{
+  "class_distribution": {
+    "finance": 107,
+    "news": 102,
+    "sports": 97,
+    "tech": 102
+  },
+  "dropped_rows": 0,
+  "environment": {
+    "evaluated_at": "<비결정적 값 — 존재만 고정>",
+    "libraries": "<비결정적 값 — 존재만 고정>"
+  },
+  "n_samples": 200,
+  "results": {
+    "failed_metrics": {},
+    "success_metrics": {
+      "M15": 0.52,
+      "M16": 0.065,
+      "M17": 0.33625,
+      "M18": 0.002124191465091352,
+      "M2": 0.4906396261785457,
+      "M21": {
+        "labels": [
+          "finance",
+          "news",
+          "sports",
+          "tech"
+        ],
+        "matrix": [
+          [
+            [
+              43,
+              50
+            ],
+            [
+              62,
+              45
+            ]
+          ],
+          [
+            [
+              55,
+              43
+            ],
+            [
+              51,
+              51
+            ]
+          ],
+          [
+            [
+              44,
+              59
+            ],
+            [
+              54,
+              43
+            ]
+          ],
+          [
+            [
+              50,
+              48
+            ],
+            [
+              49,
+              53
+            ]
+          ]
+        ],
+        "type": "multilabel"
+      },
+      "M22": {
+        "finance": {
+          "f1-score": 0.44554455445544555,
+          "precision": 0.47368421052631576,
+          "recall": 0.4205607476635514,
+          "support": 107.0
+        },
+        "macro avg": {
+          "f1-score": 0.48007025235639533,
+          "precision": 0.4906396261785457,
+          "recall": 0.4708668899682428,
+          "support": 408.0
+        },
+        "micro avg": {
+          "f1-score": 0.48,
+          "precision": 0.4897959183673469,
+          "recall": 0.47058823529411764,
+          "support": 408.0
+        },
+        "news": {
+          "f1-score": 0.5204081632653061,
+          "precision": 0.5425531914893617,
+          "recall": 0.5,
+          "support": 102.0
+        },
+        "samples avg": {
+          "f1-score": 0.44433333333333336,
+          "precision": 0.495,
+          "recall": 0.48,
+          "support": 408.0
+        },
+        "sports": {
+          "f1-score": 0.4321608040201005,
+          "precision": 0.4215686274509804,
+          "recall": 0.44329896907216493,
+          "support": 97.0
+        },
+        "tech": {
+          "f1-score": 0.5221674876847291,
+          "precision": 0.5247524752475248,
+          "recall": 0.5196078431372549,
+          "support": 102.0
+        },
+        "weighted avg": {
+          "f1-score": 0.480234268905848,
+          "precision": 0.4912782975397629,
+          "recall": 0.47058823529411764,
+          "support": 408.0
+        }
+      },
+      "M23": 1.1030927835051547,
+      "M3": 0.4708668899682428,
+      "M4": 0.48007025235639533,
+      "M5": 0.48007025235639533,
+      "class_report": {
+        "finance": {
+          "f1-score": 0.44554455445544555,
+          "precision": 0.47368421052631576,
+          "recall": 0.4205607476635514,
+          "support": 107.0
+        },
+        "macro avg": {
+          "f1-score": 0.48007025235639533,
+          "precision": 0.4906396261785457,
+          "recall": 0.4708668899682428,
+          "support": 408.0
+        },
+        "micro avg": {
+          "f1-score": 0.48,
+          "precision": 0.4897959183673469,
+          "recall": 0.47058823529411764,
+          "support": 408.0
+        },
+        "news": {
+          "f1-score": 0.5204081632653061,
+          "precision": 0.5425531914893617,
+          "recall": 0.5,
+          "support": 102.0
+        },
+        "samples avg": {
+          "f1-score": 0.44433333333333336,
+          "precision": 0.495,
+          "recall": 0.48,
+          "support": 408.0
+        },
+        "sports": {
+          "f1-score": 0.4321608040201005,
+          "precision": 0.4215686274509804,
+          "recall": 0.44329896907216493,
+          "support": 97.0
+        },
+        "tech": {
+          "f1-score": 0.5221674876847291,
+          "precision": 0.5247524752475248,
+          "recall": 0.5196078431372549,
+          "support": 102.0
+        },
+        "weighted avg": {
+          "f1-score": 0.480234268905848,
+          "precision": 0.4912782975397629,
+          "recall": 0.47058823529411764,
+          "support": 408.0
+        }
+      },
+      "confidence_intervals": {
+        "M15": {
+          "high": 0.5563,
+          "level": 0.95,
+          "low": 0.485,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M16": {
+          "high": 0.108,
+          "level": 0.95,
+          "low": 0.0384,
+          "method": "wilson"
+        },
+        "M17": {
+          "high": 0.3733,
+          "level": 0.95,
+          "low": 0.2979,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M18": {
+          "high": 0.0208,
+          "level": 0.95,
+          "low": 0.0005,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M2": {
+          "high": 0.5345,
+          "level": 0.95,
+          "low": 0.4448,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M23": {
+          "high": 1.5116,
+          "level": 0.95,
+          "low": 1.0606,
+          "method": "bootstrap_multinomial",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M3": {
+          "high": 0.5147,
+          "level": 0.95,
+          "low": 0.4276,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M4": {
+          "high": 0.5168,
+          "level": 0.95,
+          "low": 0.4369,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        },
+        "M5": {
+          "high": 0.5168,
+          "level": 0.95,
+          "low": 0.4369,
+          "method": "bootstrap",
+          "n_resamples": 2000,
+          "seed": 4213
+        }
+      },
+      "confusion_counts": {
+        "rows": [
+          {
+            "fn": 62,
+            "fp": 50,
+            "label": "finance",
+            "tn": 43,
+            "tp": 45
+          },
+          {
+            "fn": 51,
+            "fp": 43,
+            "label": "news",
+            "tn": 55,
+            "tp": 51
+          },
+          {
+            "fn": 54,
+            "fp": 59,
+            "label": "sports",
+            "tn": 44,
+            "tp": 43
+          },
+          {
+            "fn": 49,
+            "fp": 48,
+            "label": "tech",
+            "tn": 50,
+            "tp": 53
+          }
+        ],
+        "type": "per_class"
+      },
+      "confusion_matrix": {
+        "cell_total": 800,
+        "labels": [
+          "finance",
+          "news",
+          "sports",
+          "tech"
+        ],
+        "matrix": [
+          [
+            [
+              43,
+              50
+            ],
+            [
+              62,
+              45
+            ]
+          ],
+          [
+            [
+              55,
+              43
+            ],
+            [
+              51,
+              51
+            ]
+          ],
+          [
+            [
+              44,
+              59
+            ],
+            [
+              54,
+              43
+            ]
+          ],
+          [
+            [
+              50,
+              48
+            ],
+            [
+              49,
+              53
+            ]
+          ]
+        ],
+        "n_samples": 200,
+        "type": "multilabel",
+        "unit": "label_cell"
+      },
+      "error_ratios": {
+        "boundary": null,
+        "boundary_margin": 0.1,
+        "boundary_note": "threshold_unknown",
+        "confident": {
+          "count": 46,
+          "ratio": 0.1106
+        },
+        "confident_level": 0.9,
+        "misclassified": 416,
+        "threshold": null,
+        "unit": "label_cell"
+      },
+      "imbalance_effect": {
+        "accuracy": null,
+        "accuracy_minus_macro_f1": null,
+        "display": {
+          "accuracy": null,
+          "accuracy_minus_macro_f1": null,
+          "imbalance_ratio": "1.1031",
+          "macro_f1": null,
+          "majority_f1": "0.4455",
+          "majority_minus_minority_f1": "0.0134",
+          "minority_f1": "0.4322"
+        },
+        "imbalance_ratio": 1.1031,
+        "level": "mild",
+        "macro_f1": null,
+        "majority_class": "finance",
+        "majority_f1": 0.4455,
+        "majority_minus_minority_f1": 0.0134,
+        "minority_class": "sports",
+        "minority_f1": 0.4322
+      }
+    }
+  },
+  "warnings": []
+}

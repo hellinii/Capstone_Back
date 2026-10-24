@@ -1,0 +1,66 @@
+{
+  "benchmark_refs": [
+    {
+      "direction": "higher",
+      "metric": "Accuracy",
+      "model_value": 0.94,
+      "position": "above",
+      "quality": "better",
+      "ref_high": 0.92,
+      "ref_low": 0.85,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "within",
+      "target_value": 0.85
+    },
+    {
+      "direction": "higher",
+      "metric": "Recall",
+      "model_value": 0.7,
+      "position": "below",
+      "quality": "worse",
+      "ref_high": 0.92,
+      "ref_low": 0.8,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "within",
+      "target_value": 0.8
+    },
+    {
+      "direction": "higher",
+      "metric": "AUROC",
+      "model_value": 0.88,
+      "position": "within",
+      "quality": "within",
+      "ref_high": 0.95,
+      "ref_low": 0.85,
+      "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)",
+      "target_position": "below",
+      "target_value": 0.8
+    }
+  ],
+  "conclusion": {
+    "benchmark": "내부 참조 기준과 비교하면 참조 범위보다 우수한 지표는 Accuracy(0.94, 참조 범위 0.85~0.92)이고, 참조 범위 안에 드는 지표는 AUROC(0.88, 참조 범위 0.85~0.95)이고, 참조 범위에 비해 미흡한 지표는 Recall(0.7, 참조 범위 0.8~0.92)이다. 비교 기준은 내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 사내 합의 보수 기준이며, 도메인별로 상이할 수 있음)이다. 목표값이 참조 범위보다 낮은 지표는 AUROC(목표 0.8)이고, 목표값이 참조 범위 안에 있는 지표는 Accuracy(목표 0.85), Recall(목표 0.8)이다.",
+    "narrative": "핵심 지표는 모두 목표를 충족하였으나 핵심이 아닌 지표가 목표에 미달하여 종합 판정은 '조건부 합격'이다(목표 미달 지표: Recall(0.7, 목표 0.8)). 참고로 목표값이 설정된 지표 3개 중 2개가 목표를 충족하였다(통과율 66.7%).",
+    "risks": "목표에 미달한 지표가 있어 해당 영역의 성능 저하 위험이 존재한다(목표 미달 지표: Recall(0.7, 목표 0.8)).",
+    "verdict": "CONDITIONAL_PASS"
+  },
+  "interpretation": {
+    "additional_observations": "",
+    "confusion_analysis": "혼동행렬 기준 전체 200건 중 25건(12.5%)이 오분류되었다. 거짓 양성(FP)은 10건, 거짓 음성(FN)은 15건이다.",
+    "distribution_analysis": "평가 데이터셋은 총 200건이며, 클래스 분포는 0 130건(65.0%), 1 70건(35.0%)이다. 불균형 비율은 1.857이다."
+  },
+  "meta": {
+    "grounding": {
+      "checked": 0,
+      "passed": true,
+      "violations": []
+    },
+    "model": null,
+    "reason": "no_key",
+    "source": "fallback"
+  },
+  "recommendation_narrative": {
+    "data_quality": "데이터 측면에서 권고 대상으로 지목된 문제는 없다. 전처리에서 3건이 평가에서 제외되었다.",
+    "model_ops": "모델 측면에서 권고 대상으로 지목된 문제는 없다."
+  },
+  "recommendations": []
+}

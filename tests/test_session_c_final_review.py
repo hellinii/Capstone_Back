@@ -42,7 +42,7 @@ def _nature(er: ErrorRatiosFact, task="binary"):
     raw = _raw(task)
     raw["fact_sheet"]["error_ratios"] = json.loads(er.model_dump_json())
     req = NarrativeRequest.model_validate(raw)
-    return next(c for c in select_items(req.fact_sheet, None, task) if c.item_id == "7.1-11")
+    return next(c for c in select_items(req.fact_sheet, None, task, edition=3) if c.item_id == "7.1-11")
 
 
 MAIN = "오류의 주된 성격으로 해석해도 된다"
@@ -90,10 +90,10 @@ def test_benchmark_rule_sentence_passes_its_own_check_with_extended_digits():
         MetricFact(metric_id="M1", display_name="Accuracy", value=0.849961, threshold=0.8, status="pass", value_text="0.850",
                    margin=0.049961, margin_text="0.05", higher_is_better=True),
     ])
-    refs = build_benchmark_refs("binary", fs.metrics)
-    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs) if c.item_id == "8.1-01")
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs, edition=3) if c.item_id == "8.1-01")
     assert "Precision(0.79996, 참조 범위 0.8~0.92)" in text and "Accuracy(0.84996, 참조 범위 0.85~0.92)" in text
-    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary")))
+    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary"), edition=3), edition=3)
     assert result.passed, result
 
 
@@ -118,12 +118,12 @@ def test_benchmark_value_uses_target_judgment_through_fact_sheet(value, threshol
                    status="pass" if margin is None or margin >= 0 else "fail", value_text=value_text,
                    margin=margin, higher_is_better=True),
     ])
-    refs = build_benchmark_refs("binary", fs.metrics)
-    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs) if c.item_id == "8.1-01")
+    refs = build_benchmark_refs("binary", fs.metrics, edition=3)
+    text = next(c.template_text for c in select_items(fs, None, "binary", benchmark_refs=refs, edition=3) if c.item_id == "8.1-01")
     assert f"Accuracy({expected}, 참조 범위 0.85~0.92)" in text, text
     view = fact_view._benchmarks(refs, fs)
     assert [r["모델 값"] for r in view["지표별"] if r["지표"] == "Accuracy"] == [expected]
-    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary")))
+    result = verify_grounding([text], build_number_whitelist(fs, refs, compute_derived(fs, task_type="binary"), edition=3), edition=3)
     assert result.passed, result
 
 
@@ -159,7 +159,7 @@ def _notes_and_template(raw):
     req = NarrativeRequest.model_validate(raw)
     derived, refs, _, conclusions, ctx, _, _ = generator._prepare(req)
     from app.narrative import fallback
-    parts = fallback.section_template("7.2", req.fact_sheet, refs, derived, task_type="binary", conclusions=conclusions)
+    parts = fallback.section_template("7.2", req.fact_sheet, refs, derived, task_type="binary", conclusions=conclusions, edition=3)
     return req.fact_sheet, " ".join(ctx.briefs["7.2"].notes), " ".join(v for v in parts.values() if isinstance(v, str))
 
 

@@ -10,8 +10,8 @@
   app.evaluation.engine(evaluate), app.evaluation.report(generate_report)
 - 사용처: app.evaluation.router.evaluate_dataset
 """
-from app.evaluation.schemas import EvaluateRequest, EvaluateResponse, EvaluationEnvironment
-from app.evaluation.environment import evaluated_at, library_versions
+from app.evaluation.schemas import EvaluateRequest, EvaluateResponse, EvaluationEnvironment, SourceFileInfo
+from app.evaluation.environment import ENGINE_VERSION, evaluated_at, library_versions
 from app.analysis.validator import find_column_conflicts, find_invalid_roles
 from app.evaluation.engine import evaluate as run_evaluation
 from app.evaluation.report import generate_report
@@ -27,8 +27,13 @@ class EvaluationError(Exception):
         self.message = message
 
 
-def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
-    """충돌검사 → 매핑변환 → engine.evaluate → 전처리오류 → 리포트 조립 → EvaluateResponse."""
+def run_evaluation_pipeline(
+    df, request: EvaluateRequest, source_file: dict | None = None
+) -> EvaluateResponse:
+    """충돌검사 → 매핑변환 → engine.evaluate → 전처리오류 → 리포트 조립 → EvaluateResponse.
+
+    source_file: 라우터가 업로드 원본 바이트로 계산한 지문(`environment.source_file_info`). 그대로 응답에 싣는다.
+    """
     # task_type 에 허용되지 않는 역할 차단 (SPEC §4, A-10).
     # confirm-mapping 을 건너뛰고 이 엔드포인트를 직접 호출하는 경로의 백스톱이다 —
     # 프론트 드롭다운 제한은 UI 경로만 막는다.
@@ -83,4 +88,7 @@ def run_evaluation_pipeline(df, request: EvaluateRequest) -> EvaluateResponse:
         dropped_rows=dropped_rows,
         n_samples=n_samples,
         class_distribution=class_distribution,
+        # 판 4 추적 정보(2.2 파일 해시·크기, 3.5 평가 엔진 버전).
+        source_file=SourceFileInfo(**source_file) if source_file is not None else None,
+        engine_version=ENGINE_VERSION,
     )

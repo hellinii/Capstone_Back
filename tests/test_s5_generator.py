@@ -47,7 +47,7 @@ def _fields(fake) -> list[list[str]]:
 def _template(req: NarrativeRequest, sid: str) -> dict:
     fs = req.fact_sheet
     task = req.task_type.value
-    return fallback.section_template(sid, fs, build_benchmark_refs(task, fs.metrics), compute_derived(fs, task_type=task))
+    return fallback.section_template(sid, fs, build_benchmark_refs(task, fs.metrics, edition=3), compute_derived(fs, task_type=task), edition=3)
 
 
 async def _gen(client, req, **kw):
@@ -472,8 +472,8 @@ async def test_without_a_client_every_section_is_a_template(client, reason):
                                    "8.2": "fallback", "8.3": "fallback", "9": "fallback"}
     assert gen.response.meta.reason == reason and gen.trace["calls"] == []
     whole = fallback.build_fallback_narrative(
-        req.fact_sheet, build_benchmark_refs("binary", req.fact_sheet.metrics),
-        compute_derived(req.fact_sheet, task_type="binary"), reason=reason,
+        req.fact_sheet, build_benchmark_refs("binary", req.fact_sheet.metrics, edition=3),
+        compute_derived(req.fact_sheet, task_type="binary"), reason=reason, edition=3,
     )
     assert gen.response.model_dump(exclude={"meta"}) == whole.model_dump(exclude={"meta"})
 
