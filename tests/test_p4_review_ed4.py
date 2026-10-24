@@ -324,10 +324,40 @@ def test_t6_counts_added_by_the_generator_are_exact_in_edition4():
 # ── T7 멀티레이블 D49 ② 까닭의 분모 ─────────────────────────────────────────────────────
 
 
-def test_t7_multilabel_small_sample_reason_names_label_occurrences():
-    text = _conclusions(_load("multilabel"))["8.3-01"].text
-    assert "작은 표본(30건 미만 또는 레이블 등장의 5% 미만)이고 매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다." in text
-    assert "전체의 5%" not in text and "전체 표본의 5%" not in text
+# S6 질문 4(2026-10-24 사용자 답 "추천대로"): 판 4 멀티레이블 최약 레이블 비율의 분모 = 표본 수(4.5 와 같음). 프론트가
+# class_share_basis "samples" 로 보내고, 백엔드는 그 칸으로 분모 이름('전체 표본')만 고른다(다시 계산하지 않음). 5.2 최약 레이블
+# 문장과 5.5 까닭이 같은 분모 이름이다(T7 — 같은 지시문 안에서 어긋나지 않게).
+
+
+def test_t7_multilabel_weakest_share_uses_sample_denominator():
+    c = _conclusions(_load("multilabel"))
+    assert c["7.1-10"].text == (
+        "F1 이 가장 낮은 레이블은 F1 0.048인 Class9이며, 표본은 80건으로 전체 표본의 8.7%이다. 매크로 F1 과의 차이는 0.352이다. "
+        "이 레이블은 매크로 F1 보다 0.1 이상 낮다. 그 밖에 표본이 작은 레이블은 Class14 13건이다."
+    )
+    # 80건·8.7% 는 작은 표본이 아니다 — 까닭은 매크로 F1 차이 하나
+    assert "이 레이블은 매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다." in c["8.3-01"].text
+    assert all("레이블 등장" not in x.text for x in c.values())
+
+
+def test_t7_multilabel_small_sample_reason_names_sample_denominator():
+    raw = _load("multilabel")
+    w = raw["fact_sheet"]["facts"]["weakest_class"]
+    w.update(support=20, low_support=True)  # 30건 미만으로 바꿔 작은 표본 까닭이 서게
+    text = _conclusions(raw)["8.3-01"].text
+    assert "작은 표본(30건 미만 또는 전체 표본의 5% 미만)이고 매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다." in text
+    assert "레이블 등장" not in text
+
+
+def test_t7_edition3_style_label_occurrence_basis_still_names_label_occurrences():
+    """분모가 레이블 등장 합으로 온 요청(판 3 멀티·S6 전에 만든 판 4 run)은 종전처럼 '레이블 등장'."""
+    raw = _load("multilabel")
+    facts = raw["fact_sheet"]["facts"]
+    facts["class_share_basis"] = "label_occurrences"
+    facts["weakest_class"].update(share=0.020518082, share_text="0.021", low_support=True)
+    c = _conclusions(raw)
+    assert "표본은 80건으로 레이블 등장의 2.1%이다." in c["7.1-10"].text
+    assert "작은 표본(30건 미만 또는 레이블 등장의 5% 미만)이고 매크로 F1 보다 0.1 이상 낮아 운영 위험으로 다룬다." in c["8.3-01"].text
 
 
 # ── T9 미달 지표의 판정 여유 ──────────────────────────────────────────────────────────

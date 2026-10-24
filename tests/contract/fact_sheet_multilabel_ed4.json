@@ -514,10 +514,10 @@
           "Class9": {
             "f1": "0.048",
             "support": 80,
-            "share": "0.021",
+            "share": "0.087",
             "macro_f1": "0.399",
             "gap_from_macro": "0.352",
-            "low_support": true
+            "low_support": false
           }
         },
         "note": null
@@ -568,7 +568,7 @@
       "contract": "facts-1",
       "positive_class": null,
       "n_classes": 14,
-      "class_share_basis": "label_occurrences",
+      "class_share_basis": "samples",
       "report_purpose_label": "외부 제출",
       "core_metrics_source": "client",
       "selected_metrics": [
@@ -611,50 +611,20 @@
         "f1": 0.047619047619047616,
         "f1_text": "0.048",
         "support": 80,
-        "share": 0.020518082,
-        "share_text": "0.021",
+        "share": 0.087241003,
+        "share_text": "0.087",
         "macro_f1": 0.39928109092676245,
         "gap_from_macro": 0.351662043,
         "gap_text": "0.352",
-        "low_support": true,
+        "low_support": false,
         "far_below_macro": true
       },
       "low_support_classes": [
         {
-          "label": "Class10",
-          "support": 92,
-          "share": 0.023595794,
-          "share_text": "0.024"
-        },
-        {
-          "label": "Class11",
-          "support": 91,
-          "share": 0.023339318,
-          "share_text": "0.023"
-        },
-        {
           "label": "Class14",
           "support": 13,
-          "share": 0.003334188,
-          "share_text": "0.003"
-        },
-        {
-          "label": "Class7",
-          "support": 167,
-          "share": 0.042831495,
-          "share_text": "0.043"
-        },
-        {
-          "label": "Class8",
-          "support": 191,
-          "share": 0.04898692,
-          "share_text": "0.049"
-        },
-        {
-          "label": "Class9",
-          "support": 80,
-          "share": 0.020518082,
-          "share_text": "0.021"
+          "share": 0.014176663,
+          "share_text": "0.014"
         }
       ],
       "top_confusion_pairs": [],
