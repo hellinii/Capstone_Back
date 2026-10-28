@@ -607,6 +607,12 @@ class NarrativeRequest(BaseModel):
         ),
     )
 
+    # 심판 읽기 재료(심판 라운드 J2, 계획 10-1) — 판 4 프론트만 싣는다. 형식을 여기서 보지 않는다(Any): 틀리거나 너무 커도
+    # 422·규칙 문장(input_too_large)으로 가지 않고 심판만 보류(재료 없음)가 된다. 읽기·검사는 app.judge.material 한 곳.
+    # facts 안에 두지 않는다 — facts 는 칸 하나가 틀리면 통째로 버려지고 상한(고정 문구 16개·3만 자)이 있다.
+    # 서술 생성은 이 칸을 읽지 않는다(지시문에 들어가지 않음 — tests/test_judge_material.py).
+    judge_material: Any = Field(default=None, description="심판 읽기 재료(판 4). 형식 오류·상한 초과는 이 칸만 버린다")
+
     @field_validator("client_inputs")
     @classmethod
     def _client_inputs_within_limit(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:

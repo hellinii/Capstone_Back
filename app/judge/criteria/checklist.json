@@ -1,0 +1,44 @@
+{
+  "name": "필수 내용 체크리스트(Coverage)",
+  "source": "심판 설계 6.2 항목 + 적용 조건(18개), 계획 Q4 d·Q5(2026-10-29 사용자 답: 추천대로)",
+  "unit": "서술 전체 단위 — 읽는 범위 전체(AI 칸·규칙 문장·고정 문구)를 읽었을 때 독자가 알게 되는가. 어느 칸에 있어야 한다는 규칙은 없다.",
+  "evidence_rule": {
+    "counts": ["ai", "template", "fixed"],
+    "not_counted": ["table"],
+    "why": "고정 문구는 서술 전체에 든다(설계 6.2 결정, 같은 사실을 두 번 쓰지 않는 서술 설계 D32). 표는 맥락으로 읽지만 '서술했다'의 근거로 치지 않는다 — 고정 문구 3절 영향 문장이 '표에만 있고 소견에서 해석하지 않았다'를 빠진 것으로 쓴다(Q5)."
+  },
+  "condition_kinds": ["task_type", "value_present"],
+  "items": [
+    {"id": "분석-1", "reader_learns": "가장 약한 클래스가 무엇이고 값이 얼마인가", "condition": "always"},
+    {"id": "분석-2", "reader_learns": "가장 많이 틀린 곳과 그 건수 — 이진: FN/FP 방향, 다중: 클래스 쌍, 멀티레이블: 가장 많이 틀린 레이블", "condition": "always"},
+    {"id": "분석-3", "reader_learns": "클래스 분포(불균형)가 결과에 영향을 줬는지에 대한 판단", "condition": "always"},
+    {"id": "분석-4", "reader_learns": "오분류의 성격: 임계값 근처에서 틀렸나(경계 오류), 높은 확신으로 틀렸나(확신 오류), 각각 몇 %인가. 경계 오류는 결정 임계값이 있을 때만 요구한다(다중 클래스는 늘)", "condition": "probability_present"},
+    {"id": "분석-5", "reader_learns": "평균 방식(매크로·가중·마이크로) 사이의 차이가 무엇을 뜻하나", "condition": "multi_and_two_average_rows"},
+    {"id": "분석-6", "reader_learns": "학습 분포와 평가 분포가 다른가, 다르면 결과 해석에 어떤 영향이 있나", "condition": "distribution_compared"},
+    {"id": "분석-7", "reader_learns": "고객이 선언한 위험 쪽 오류(FN 또는 FP)가 몇 건이고 무엇을 뜻하는가", "condition": "binary_risk_declared"},
+    {"id": "소견-1", "reader_learns": "판정(합격·조건부 합격·불합격·판정 불가)이 무엇이고, 합격이 아니면 어떤 판정 규칙에서 나왔나", "condition": "always"},
+    {"id": "소견-2", "reader_learns": "어느 지표가 기준을 넘고 어느 지표가 못 넘어서 그 판정인가, 각각 얼마나 넘었거나 못 넘었나(목표 대비 마진)", "condition": "judged_metric_present"},
+    {"id": "소견-3", "reader_learns": "참조 범위 대비 어디에 있는가", "condition": "reference_present"},
+    {"id": "소견-4", "reader_learns": "응답 시간이 용도에 맞는가", "condition": "latency_present"},
+    {"id": "소견-5", "reader_learns": "운영에 들어가면 어떤 실패가 예상되는가", "condition": "always"},
+    {"id": "소견-6", "reader_learns": "주요 지표의 불확실성(신뢰구간). 신뢰구간이 합격선에 걸치면 판정이 흔들릴 수 있다는 점. 구간을 모두 생략했으면 생략 사유를 쓴 것으로 충족", "condition": "judged_metric_present"},
+    {"id": "소견-7", "reader_learns": "평가 데이터가 모델 용도를 얼마나 대표하나", "condition": "eval_data_source_provided"},
+    {"id": "소견-8", "reader_learns": "목표값이 참조 범위보다 낮거나 높으면 그 사실", "condition": "target_outside_reference"},
+    {"id": "권고-1", "reader_learns": "각 권고의 근거가 무엇인가(위의 약점 또는 예방 목적)", "condition": "problems_present"},
+    {"id": "권고-2", "reader_learns": "권고 사이의 우선순위", "condition": "problems_present"},
+    {"id": "권고-3", "reader_learns": "권고를 따르면 무엇이 좋아지는가", "condition": "problems_present"}
+  ],
+  "conditions": {
+    "always": "늘 적용",
+    "probability_present": "확률 컬럼이 있다(오류 성격 비율이 계산됨)",
+    "multi_and_two_average_rows": "다중·멀티레이블이고 평균 행(매크로·가중·마이크로)이 둘 이상 계산됨",
+    "distribution_compared": "학습·평가 분포 비교값이 계산됨(학습 클래스 분포 제공)",
+    "binary_risk_declared": "이진이고 위험 방향을 FN 또는 FP 로 입력함",
+    "judged_metric_present": "판정 대상 지표가 1개 이상",
+    "reference_present": "참조값이 있는 지표가 1개 이상",
+    "latency_present": "지연시간이 있다",
+    "eval_data_source_provided": "보고 항목 2 '평가 데이터 출처'가 제공됨 — 출처와 학습 데이터와의 관계 두 줄 모두(서술 생성기 8.2-14 조건·프론트 재료 점검 항목 2 와 같은 규칙, 대조 표 tests/contract/reporting_item2_cases.json)",
+    "target_outside_reference": "참조값이 있고 목표값이 참조 범위 밖",
+    "problems_present": "문제 목록이 1개 이상(코드 파생값). 0개면 해당 없음"
+  }
+}
