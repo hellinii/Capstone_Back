@@ -536,8 +536,8 @@ class FactSheet(BaseModel):
         default=[],
         max_length=4,
         description=(
-            "클래스별 표(M22)의 평균 줄 — 매크로·가중·마이크로(멀티레이블은 샘플 평균도). "
-            "평균 방식 차이를 8.2 에 쓰는 재료(서술 설계 D17·D39). M22 미선택이면 빈 배열."
+            "클래스별 표의 평균 줄 — 매크로·가중·마이크로(멀티레이블은 샘플 평균도). 표는 엔진이 지표 선택(M22)과 "
+            "무관하게 늘 계산한다(class_report). 평균 방식 차이를 8.2 에 쓰는 재료(서술 설계 D17·D39). 표가 없으면 빈 배열."
         ),
     )
     confusion:    ConfusionFact | None     = None
