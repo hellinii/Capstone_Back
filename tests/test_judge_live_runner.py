@@ -260,3 +260,68 @@ def test_smoke_command_needs_live_and_yes(tmp_path):
     assert jl.main(["smoke", "--ledger", str(path)]) == 2  # --yes 없음
     assert jl.main(["smoke", "--ledger", str(path), "--yes"]) == 2  # --live 없음
     assert jl.Ledger(path).totals()[1] == 0
+
+
+# ── seal-generate(J2 끝) — 가짜 Claude(거절 → 규칙 문장)로 흐름만 ──
+
+
+class _RefusingClaude:
+    def __init__(self):
+        from types import SimpleNamespace
+
+        self.calls = 0
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+
+    def with_options(self, **_kwargs):
+        return self
+
+    async def _create(self, **_kwargs):
+        from types import SimpleNamespace
+
+        self.calls += 1
+        return SimpleNamespace(model="fake-claude", stop_reason="refusal", stop_details=None, content=[],
+                               usage=SimpleNamespace(input_tokens=0, output_tokens=0, iterations=None))
+
+
+def test_seal_generate_writes_read_only_sealed_files(tmp_path):
+    import os
+    import shutil
+
+    src = Path(__file__).parent / "data" / "judge_dev"
+    req_dir = tmp_path / "요청"
+    req_dir.mkdir()
+    for name in ("dev_binary.request.json", "dev_multilabel.request.json"):
+        shutil.copy(src / name, req_dir / name)
+    out = tmp_path / "봉인"
+    runner, _, _ = _runner(tmp_path)
+    fake = _RefusingClaude()
+    summaries = jl.seal_generate(runner, req_dir, out, {"criteria_version": "1.0-dev"}, anthropic_client=fake)
+    assert fake.calls > 0
+    assert [s["tag"] for s in summaries] == ["dev_binary", "dev_multilabel"]
+    assert all(s["status"] == "done" and set(s["sources"]) == {"7.1", "7.2", "7.3", "8.1", "8.2", "8.3", "9"} for s in summaries)
+    # 요약에는 서술 글이 없다(화면에 찍지 않음)
+    assert "interpretation" not in json.dumps(summaries, ensure_ascii=False)
+    sealed = json.loads((out / "dev_binary.json").read_text(encoding="utf-8"))
+    assert set(sealed) == {"tag", "request", "created", "view", "internal"}
+    assert sealed["request"] == json.loads((req_dir / "dev_binary.request.json").read_text(encoding="utf-8"))
+    sums = (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    assert [line.split("  ")[1] for line in sums] == ["dev_binary.json", "dev_multilabel.json"]
+    assert (out / "봉인시각.txt").exists()
+    assert not os.access(out / "dev_binary.json", os.W_OK)
+    rows = runner.ledger.rows()
+    assert [(r["stage"], r["report"]) for r in rows] == [("seal_generate", "dev_binary"), ("seal_generate", "dev_multilabel")]
+    assert rows[0]["result_sha256"] == summaries[0]["sha256"]
+    # 한 번 봉인한 폴더는 다시 만들지 않는다
+    with pytest.raises(jl.RunnerError, match="이미 봉인"):
+        jl.seal_generate(runner, req_dir, out, {}, anthropic_client=fake)
+
+
+def test_seal_generate_refuses_without_claude_client(tmp_path):
+    req_dir = tmp_path / "요청"
+    req_dir.mkdir()
+    (req_dir / "x.request.json").write_text(
+        (Path(__file__).parent / "data" / "judge_dev" / "dev_binary.request.json").read_text(encoding="utf-8"), encoding="utf-8")
+    runner, _, _ = _runner(tmp_path)
+    with pytest.raises(jl.RunnerError, match="서술 클라이언트가 없다"):
+        jl.seal_generate(runner, req_dir, tmp_path / "봉인", {})
+    assert runner.ledger.rows() == []

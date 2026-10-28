@@ -15,6 +15,9 @@ pytest 테스트가 아니다. 실호출(진짜 Claude·OpenAI 호출)은 키가
 
 하위 명령은 단계마다 붙는다.
 - status: 장부 누계와 상한
+- seal-generate(J2 끝): 검증용 판 4 요청(폴더의 *.request.json)마다 실제 앱 작업 경로(POST·GET /api/narrative/jobs, 진짜 Claude)로
+  서술을 한 번 만들고, 요청·작업 결과·내부 기록을 봉인 폴더에 쓴 뒤 SHA256SUMS·봉인 시각을 적고 읽기 전용으로 바꾼다. 서술 글은
+  화면에 찍지 않는다(오염 방지 — 개수·출처·비용·해시만). 작업 DB 는 임시 sqlite. 이미 봉인된 폴더면 거부(다시 만들지 않는다).
 - smoke(J1): 합성 문장으로 ① GPT-6.1 Sol 이 응답 보관을 끈 채 계산 도구를 여러 번 부르는지(암호화 추론을 다음 턴에 되돌림)
   ② GPT-6 Luna 가 Responses 구조화 출력을 받는지 ③ 같은 앞부분을 두 번 보내면 캐시 입력 토큰이 잡히는지. 검증 데이터는 쓰지 않는다.
 
@@ -343,6 +346,97 @@ async def smoke(runner: "Runner", clients: Clients, meta: dict) -> dict:
     return summary
 
 
+def seal_generate(runner: "Runner", req_dir: Path, out_dir: Path, meta: dict, *, anthropic_client=None) -> list[dict]:
+    """봉인 생성. anthropic_client 를 주면(시험) 앱 시작 뒤 그것으로 바꿔 끼운다. 돌려주는 것은 건마다 요약(글 없음)."""
+    import hashlib
+    import os as _os
+    import stat
+    import tempfile
+    from datetime import datetime, timezone
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.database import Base, configure_sqlite
+    from app.main import app
+    from app.narrative import jobs
+    from app.narrative.models import NarrativeJob
+
+    if (out_dir / "SHA256SUMS").exists():
+        raise RunnerError(f"이미 봉인된 폴더다(다시 만들지 않는다): {out_dir}")
+    requests = sorted(req_dir.glob("*.request.json"))
+    if not requests:
+        raise RunnerError(f"요청 파일이 없다: {req_dir}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="judge_seal_")
+    engine = create_engine(f"sqlite:///{tmp}/jobs.db", connect_args={"check_same_thread": False})
+    configure_sqlite(engine)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    app.dependency_overrides[jobs.get_session_factory] = lambda: factory
+    summaries: list[dict] = []
+    try:
+        with TestClient(app) as client:
+            if anthropic_client is not None:
+                app.state.anthropic_client = anthropic_client
+            if app.state.anthropic_client is None:
+                raise RunnerError("서술 클라이언트가 없다(ANTHROPIC_API_KEY) — 봉인 서술을 만들 수 없다")
+            for path in requests:
+                tag = path.name[: -len(".request.json")]
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                created = client.post("/api/narrative/jobs", json=raw)
+                if created.status_code != 200 or not created.json().get("job_id"):
+                    raise RunnerError(f"{tag}: 작업을 만들지 못했다({created.status_code})")
+                job_id = created.json()["job_id"]
+                view = client.get(f"/api/narrative/jobs/{job_id}").json()
+                with factory() as db:
+                    internal = json.loads(db.get(NarrativeJob, job_id).internal_json or "{}")
+                record = {"tag": tag, "request": raw, "created": created.json(), "view": view, "internal": internal}
+                target = out_dir / f"{tag}.json"
+                body = json.dumps(record, ensure_ascii=False, indent=1) + "\n"
+                target.write_text(body, encoding="utf-8")
+                sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+                calls = [c for c in internal.get("calls", []) if c.get("http")]
+                models = sorted({c.get("response_model") for c in calls if c.get("response_model")})
+                cost = internal.get("cost_usd")
+                runner.record({
+                    **meta, "stage": "seal_generate", "report": tag, "variant": "base",
+                    "model_requested": "claude-sonnet-5-5", "model_served": ",".join(models), "effort": internal.get("effort", ""),
+                    "input_tokens": sum(c.get("input_tokens") or 0 for c in calls),
+                    "output_tokens": sum(c.get("output_tokens") or 0 for c in calls),
+                    "cost_usd": "" if cost is None else f"{cost:.6f}", "price_table": "" if cost is None else "anthropic-llm.py",
+                    "seconds": internal.get("seconds_total", ""), "result_file": f"00_봉인/{target.name}", "result_sha256": sha,
+                    "error": (view.get("failure") or "") if view.get("status") != "done" else "",
+                })
+                sources = (view.get("result") or {}).get("section_sources") or {}
+                summaries.append({"tag": tag, "status": view.get("status"), "sources": sources, "cost_usd": cost,
+                                  "http_calls": len(calls), "sha256": sha})
+    finally:
+        app.dependency_overrides.pop(jobs.get_session_factory, None)
+        engine.dispose()
+    files = sorted(out_dir.glob("*.json"))
+    sums = "".join(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}\n" for f in files)
+    (out_dir / "SHA256SUMS").write_text(sums, encoding="utf-8")
+    (out_dir / "봉인시각.txt").write_text(
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + f"  git {meta.get('git_commit', '')}\n", encoding="utf-8")
+    for f in [*files, out_dir / "SHA256SUMS", out_dir / "봉인시각.txt"]:
+        _os.chmod(f, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    return summaries
+
+
+def _cmd_seal(args: argparse.Namespace) -> int:
+    runner = Runner(Ledger(Path(args.ledger)), Budget.from_env(), "live" if args.live else "dev")
+    n = len(list(Path(args.requests).glob("*.request.json")))
+    runner.start(BatchPlan("seal_generate", runs=n, est_cost_usd=round(0.22 * n, 2)), yes=args.yes)
+    if not args.live:
+        raise RunnerError("seal-generate 는 실호출이다 — --live 를 준다")
+    make_clients(live=True)  # .env 를 읽는다(앱 시작이 같은 키로 클라이언트를 만든다)
+    summaries = seal_generate(runner, Path(args.requests), Path(args.out), run_meta())
+    print(json.dumps(summaries, ensure_ascii=False, indent=1))  # 글은 없다 — 상태·출처·비용·해시만
+    return 0
+
+
 def _cmd_smoke(args: argparse.Namespace) -> int:
     import asyncio
 
@@ -374,6 +468,13 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="장부 누계와 상한")
     status.add_argument("--ledger", required=True)
     status.set_defaults(func=_cmd_status)
+    seal_p = sub.add_parser("seal-generate", help="J2 끝 검증용 판 4 서술 생성·봉인(실호출, 건마다 1번)")
+    seal_p.add_argument("--ledger", required=True)
+    seal_p.add_argument("--requests", required=True)
+    seal_p.add_argument("--out", required=True)
+    seal_p.add_argument("--live", action="store_true")
+    seal_p.add_argument("--yes", action="store_true")
+    seal_p.set_defaults(func=_cmd_seal)
     smoke_p = sub.add_parser("smoke", help="J1 실호출 스모크(합성 문장, 약 6회)")
     smoke_p.add_argument("--ledger", required=True)
     smoke_p.add_argument("--out")
