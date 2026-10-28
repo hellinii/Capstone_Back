@@ -1,0 +1,533 @@
+{
+  "task_type": "multiclass",
+  "report_purpose": "internal",
+  "report_edition": 4,
+  "fact_sheet": {
+    "n_samples": 200,
+    "dropped_rows": 0,
+    "metrics": [
+      {
+        "metric_id": "M1",
+        "display_name": "Accuracy",
+        "value": 0.335,
+        "threshold": 0.8,
+        "status": "fail",
+        "is_core": true,
+        "ci_low": 0.2732,
+        "ci_high": 0.403,
+        "margin": -0.465,
+        "near_target": false,
+        "value_text": "0.335",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.465",
+        "ci_contains_target": false,
+        "ci_low_text": "0.273",
+        "ci_high_text": "0.403"
+      },
+      {
+        "metric_id": "M2",
+        "display_name": "Precision",
+        "value": 0.3338518128551015,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "value": 0.33149511067131204,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M4",
+        "display_name": "F1 Score",
+        "value": 0.3314034800929962,
+        "threshold": 0.75,
+        "status": "fail",
+        "is_core": false,
+        "ci_low": 0.2665,
+        "ci_high": 0.394,
+        "margin": -0.41859652,
+        "near_target": false,
+        "value_text": "0.331",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.419",
+        "ci_contains_target": false,
+        "ci_low_text": "0.267",
+        "ci_high_text": "0.394"
+      },
+      {
+        "metric_id": "M6",
+        "display_name": "KL Divergence",
+        "value": 0.007948540745002702,
+        "threshold": 0.1,
+        "status": "pass",
+        "is_core": false,
+        "ci_low": 0.0006,
+        "ci_high": 0.0593,
+        "margin": 0.092051459,
+        "near_target": false,
+        "value_text": "0.008",
+        "higher_is_better": false,
+        "beta": null,
+        "margin_text": "0.092",
+        "ci_contains_target": false,
+        "ci_low_text": "0.001",
+        "ci_high_text": "0.059"
+      },
+      {
+        "metric_id": "M11",
+        "display_name": "Macro Average",
+        "value": 0.3314034800929962,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M12",
+        "display_name": "Micro Average",
+        "value": 0.335,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M23",
+        "display_name": "Imbalance Ratio",
+        "value": 1.2982456140350878,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": false,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      }
+    ],
+    "per_class": [
+      {
+        "label": "bird",
+        "precision": 0.3559322033898305,
+        "recall": 0.30434782608695654,
+        "f1": 0.328125,
+        "support": 69
+      },
+      {
+        "label": "cat",
+        "precision": 0.2537313432835821,
+        "recall": 0.2982456140350877,
+        "f1": 0.27419354838709675,
+        "support": 57
+      },
+      {
+        "label": "dog",
+        "precision": 0.3918918918918919,
+        "recall": 0.3918918918918919,
+        "f1": 0.3918918918918919,
+        "support": 74
+      }
+    ],
+    "class_averages": [
+      {
+        "label": "매크로 평균",
+        "precision": 0.3338518128551015,
+        "recall": 0.33149511067131204,
+        "f1": 0.3314034800929962,
+        "support": 200
+      },
+      {
+        "label": "가중 평균",
+        "precision": 0.3401100430053124,
+        "recall": 0.335,
+        "f1": 0.33634828629032254,
+        "support": 200
+      },
+      {
+        "label": "마이크로 평균",
+        "precision": 0.335,
+        "recall": 0.335,
+        "f1": 0.335,
+        "support": 200
+      }
+    ],
+    "confusion": {
+      "labels": [
+        "bird",
+        "cat",
+        "dog"
+      ],
+      "matrix": [
+        [
+          21,
+          22,
+          26
+        ],
+        [
+          21,
+          17,
+          19
+        ],
+        [
+          17,
+          28,
+          29
+        ]
+      ],
+      "positive_class": null
+    },
+    "confusion_counts": [
+      {
+        "label": "bird",
+        "tp": 21,
+        "fp": 38,
+        "fn": 48,
+        "tn": 93
+      },
+      {
+        "label": "cat",
+        "tp": 17,
+        "fp": 50,
+        "fn": 40,
+        "tn": 93
+      },
+      {
+        "label": "dog",
+        "tp": 29,
+        "fp": 45,
+        "fn": 45,
+        "tn": 81
+      }
+    ],
+    "derived_prediction": null,
+    "error_ratios": {
+      "unit": "sample",
+      "misclassified": 133,
+      "boundary": {
+        "count": 27,
+        "ratio": 0.203
+      },
+      "boundary_note": null,
+      "confident": {
+        "count": 2,
+        "ratio": 0.015
+      },
+      "boundary_margin": 0.1,
+      "confident_level": 0.9,
+      "threshold": null
+    },
+    "ci_method_note": "판정 대상 지표의 95% 신뢰구간은 Wilson 점수 구간(M1), 다항 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4, M6)으로 산출하였습니다.",
+    "f1_threshold_gain": null,
+    "imbalance_effect": {
+      "level": "mild",
+      "imbalance_ratio": 1.2982,
+      "accuracy_minus_macro_f1": 0.0036,
+      "majority_minus_minority_f1": 0.1177,
+      "majority_class": "dog",
+      "minority_class": "cat",
+      "accuracy": 0.335,
+      "macro_f1": 0.3314,
+      "majority_f1": 0.3919,
+      "minority_f1": 0.2742,
+      "display": {
+        "imbalance_ratio": "1.298",
+        "accuracy_minus_macro_f1": "0.004",
+        "majority_minus_minority_f1": "0.118",
+        "accuracy": "0.335",
+        "macro_f1": "0.331",
+        "majority_f1": "0.392",
+        "minority_f1": "0.274"
+      }
+    },
+    "problems": [
+      {
+        "id": "P1",
+        "kind": "core_fail",
+        "priority": "HIGH",
+        "title": "핵심 지표 미달 (Accuracy)",
+        "source_section": "8.2",
+        "recommend_section": "9.2",
+        "evidence": {
+          "Accuracy": {
+            "value": "0.335",
+            "target": "0.800"
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P2",
+        "kind": "noncore_fail",
+        "priority": "MEDIUM",
+        "title": "비핵심 지표 미달 (F1 Score)",
+        "source_section": "8.2",
+        "recommend_section": "9.2",
+        "evidence": {
+          "F1 Score": {
+            "value": "0.331",
+            "target": "0.750"
+          }
+        },
+        "note": null
+      }
+    ],
+    "distribution": {
+      "class_distribution": {
+        "bird": 69,
+        "cat": 57,
+        "dog": 74
+      },
+      "imbalance_ratio": 1.2982456140350878
+    },
+    "verdict": "FAIL",
+    "score": 33.3,
+    "latency": {
+      "available": false,
+      "mean": null,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "unit": "ms"
+    },
+    "facts": {
+      "contract": "facts-1",
+      "positive_class": null,
+      "n_classes": 3,
+      "class_share_basis": "samples",
+      "report_purpose_label": "내부 검증",
+      "core_metrics_source": "client",
+      "selected_metrics": [
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M6",
+        "M11",
+        "M12",
+        "M23"
+      ],
+      "declarations": {
+        "risk_direction": null,
+        "class_priority": "all_equal",
+        "usage_mode": "realtime"
+      },
+      "verdict_detail": {
+        "verdict": "FAIL",
+        "judged_count": 3,
+        "passed_count": 1,
+        "failed_core": [
+          {
+            "metric_id": "M1",
+            "display_name": "Accuracy"
+          }
+        ],
+        "failed_noncore": [
+          {
+            "metric_id": "M4",
+            "display_name": "F1 Score"
+          }
+        ],
+        "unavailable_core": [],
+        "inconclusive_cause": null,
+        "inconclusive_metrics": []
+      },
+      "error_totals": {
+        "unit": "sample",
+        "total": 200,
+        "misclassified": 133
+      },
+      "weakest_class": {
+        "label": "cat",
+        "f1": 0.27419354838709675,
+        "f1_text": "0.274",
+        "support": 57,
+        "share": 0.285,
+        "share_text": "0.285",
+        "macro_f1": 0.3314034800929962,
+        "gap_from_macro": 0.057209932,
+        "gap_text": "0.057",
+        "low_support": false,
+        "far_below_macro": false
+      },
+      "low_support_classes": [],
+      "top_confusion_pairs": [
+        {
+          "actual": "dog",
+          "predicted": "cat",
+          "count": 28,
+          "share_of_errors": 0.210526316
+        },
+        {
+          "actual": "bird",
+          "predicted": "dog",
+          "count": 26,
+          "share_of_errors": 0.195488722
+        },
+        {
+          "actual": "bird",
+          "predicted": "cat",
+          "count": 22,
+          "share_of_errors": 0.165413534
+        }
+      ],
+      "prediction_bias": {
+        "unit": "per_class",
+        "rows": [
+          {
+            "label": "bird",
+            "predicted": 59,
+            "actual": 69,
+            "difference": -10
+          },
+          {
+            "label": "cat",
+            "predicted": 67,
+            "actual": 57,
+            "difference": 10
+          },
+          {
+            "label": "dog",
+            "predicted": 74,
+            "actual": 74,
+            "difference": 0
+          }
+        ]
+      },
+      "declared_risk_errors": null,
+      "precision_recall_gap": null,
+      "average_gap": {
+        "kind": "macro_vs_weighted",
+        "macro_f1": 0.3314034800929962,
+        "other_f1": 0.33634828629032254,
+        "difference": 0.004944806,
+        "difference_text": "0.005",
+        "reference_class": {
+          "label": "dog",
+          "support": 74,
+          "f1": 0.3918918918918919
+        }
+      },
+      "declared_average": null,
+      "distribution_shift_status": "not_provided",
+      "distribution_shift": [],
+      "ci_available": true,
+      "ci_skipped": [],
+      "fixed_sentences": [
+        {
+          "id": "17",
+          "section": "7.1",
+          "text": "확률이 있는 오분류 133건 중 경계 오류(예측·정답 클래스 확률 차가 0.1 미만)는 27건(20.3%), 확신 오류(예측 클래스 확률 0.9 이상)는 2건(1.5%)이다."
+        },
+        {
+          "id": "16",
+          "section": "8.1",
+          "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: KL Divergence, Macro Average, Micro Average, Imbalance Ratio."
+        }
+      ],
+      "omitted": {}
+    }
+  },
+  "client_inputs": {
+    "model": {
+      "모델명": "PetPhoto-RB",
+      "버전": "v0.2",
+      "모델 용도": "보호소에 올라온 사진의 동물 종류(고양이·개·새)를 가려 공고 분류에 쓴다.",
+      "모델 분류": "이미지 분류"
+    },
+    "declarations": {
+      "클래스 중요도": "모든 클래스가 동등",
+      "사용 방식": "대화형(실시간)"
+    },
+    "core_metrics": [
+      "Accuracy"
+    ],
+    "training_data": {
+      "학습 데이터셋명": "보호소 사진 모음",
+      "학습 데이터 출처": "제휴 보호소 3곳",
+      "학습 샘플 수": "3,000개",
+      "검증 샘플 수": "0개",
+      "학습 클래스 분포": "제공되지 않음",
+      "채널 효과": "수집자 차이 (의뢰자 제공: 보호소마다 촬영 기기가 다르다.)",
+      "편향 감소 노력": "수행 안 함"
+    },
+    "test_data": {
+      "평가 데이터 출처": "제공되지 않음",
+      "학습 데이터와의 관계": "제공되지 않음"
+    },
+    "ground_truth": {
+      "정답 라벨 구축 방법": "전문가 수동 (의뢰자 제공: 보호소 직원이 붙임)",
+      "정답 라벨 신뢰성": "단일 라벨러"
+    },
+    "environment": {
+      "운영체제": "Ubuntu 22.04",
+      "CPU": "8핵",
+      "GPU": "RTX 4090",
+      "메모리": "64GB",
+      "소프트웨어": "Python 3.11, PyTorch 2.4",
+      "학습 가속": "예",
+      "추론 가속": "아니오",
+      "알고리즘": "합성곱 신경망",
+      "하이퍼파라미터": {
+        "epochs": "20",
+        "lr": "0.001"
+      }
+    },
+    "class_label_descriptions": {
+      "bird": "새"
+    }
+  }
+}
