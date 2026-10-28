@@ -1,5 +1,6 @@
 {
   "judge_model": "gpt-6.1-sol",
   "extract_model": "gpt-6-luna",
-  "effort": "medium"
+  "effort": "medium",
+  "faithfulness_max_turns": 12
 }

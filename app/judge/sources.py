@@ -107,3 +107,88 @@ def field_catalog(fact_sheet: dict, benchmark_refs: list[dict] | None = None) ->
 def catalog_text(catalog: dict[str, FieldEntry]) -> str:
     """추출 지시문에 실을 칸 목록(값은 싣지 않는다 — 추출은 판단하지 않고 가리키기만 한다)."""
     return "\n".join(f"- {e.name}" if e.description == e.name else f"- {e.name} — {e.description}" for e in catalog.values())
+
+
+# ── 조회 자료 전체(사실 일치 도구·이름 대조) ───────────────────────────────
+
+MAX_TEXT_CHARS = 200  # 이보다 긴 글 칸(설명 문장 등)은 이름 대조 자료로 쓰지 않는다
+
+
+def _walk_texts(value, path: str, out: dict[str, str]) -> None:
+    if path in _SKIP:
+        return
+    if isinstance(value, str):
+        if value.strip() and len(value) <= MAX_TEXT_CHARS:
+            out[path] = value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _walk_texts(v, f"{path}.{k}" if path else str(k), out)
+    elif isinstance(value, list):
+        for i, row in enumerate(value):
+            if isinstance(row, dict):
+                if path == "facts.top_confusion_pairs":
+                    name = f"{row.get('actual')}>{row.get('predicted')}"
+                    _walk_texts(row, f"{path}.{name}", out)
+                    continue
+                name = _row_name(row) or str(i)
+                _walk_texts(row, f"{path}.{name}", out)
+            elif isinstance(row, str):
+                _walk_texts(row, f"{path}.{i}", out)
+
+
+def _flat_numbers(value, path: str, out: dict[str, float | int]) -> None:
+    if _is_number(value):
+        out[path] = value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _flat_numbers(v, f"{path}.{k}", out)
+
+
+SOURCE_LABELS = {"facts": "사실 시트", "report": "성적서 데이터", "given": "AI 에 준 값", "client": "고객 입력"}
+
+
+def _source_of(name: str) -> str:
+    if name.startswith("facts.") or name in ALIASES:
+        return "facts"
+    if name.startswith(("derived.", "benchmark.")):
+        return "given"
+    if name.startswith("client."):
+        return "client"
+    return "report"
+
+
+class Sources:
+    """사실 일치가 조회하는 자료 전부. 숫자 칸(field_catalog + 생성기 파생값)과 글 칸(사실 시트 글 잎 + 고객 입력).
+
+    설계 6.1 조회 순서(사실 시트 → 성적서 데이터 → 고객 입력)는 칸 이름이 겹치지 않아 이름으로 바로 찾고, 찾은 값에 출처를 붙인다.
+    생성기가 AI 에 준 값은 같은 요청에서 다시 계산한다(compute_derived — 생성기와 같은 함수, 결정적).
+    """
+
+    def __init__(self, fact_sheet: dict, benchmark_refs: list[dict] | None, derived: dict | None, client_inputs: dict | None):
+        self.numbers: dict[str, FieldEntry] = field_catalog(fact_sheet, benchmark_refs)
+        flat: dict[str, float | int] = {}
+        _flat_numbers(derived or {}, "derived", flat)
+        for name, v in flat.items():
+            self.numbers[name] = FieldEntry(name, name, v)
+        self.texts: dict[str, str] = {}
+        _walk_texts({k: v for k, v in fact_sheet.items() if k not in ("confusion",)}, "", self.texts)
+        self.texts = {("metric." + k[len("metrics."):] if k.startswith("metrics.") else k): v for k, v in self.texts.items()}
+        _walk_texts(client_inputs or {}, "client", self.texts)
+
+    def lookup(self, name: str) -> dict:
+        if name in self.numbers:
+            return {"field": name, "value": self.numbers[name].value, "source": SOURCE_LABELS[_source_of(name)]}
+        if name in self.texts:
+            return {"field": name, "value": self.texts[name], "source": SOURCE_LABELS[_source_of(name)]}
+        return {"field": name, "found": False, "near": self.find(name.split(".")[-1])[:10]}
+
+    def find(self, query: str, limit: int = 40) -> list[str]:
+        q = query.strip().lower()
+        names = [*self.numbers, *self.texts]
+        hits = [n for n in names if q and q in n.lower()]
+        hits += [n for n in self.texts if q and q in self.texts[n].lower() and n not in hits]
+        return hits[:limit]
+
+    def number(self, name: str) -> float | int | None:
+        e = self.numbers.get(name)
+        return None if e is None else e.value
