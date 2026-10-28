@@ -284,3 +284,7 @@ def test_imbalance_evidence_uses_the_edition4_display_of_the_fact_sheet():
     [p2] = [p for p in fact_view_ed4._problems(fs) if p["번호"] == problem["id"]]
     ev = p2["근거"]
     assert (ev["불균형 비율"], ev["다수 − 소수 F1 차이"], ev["minority_f1"], ev["majority_f1"]) == ("52.923", "0.702", "0.133", "0.835")
+
+
+# 판 4 작업은 심판 키가 없으면 서술 AI 를 부르지 않는다(심판 라운드 J5b, 정3) — 생성 경로를 보려고 심판 자리를 통과로 채운다.
+pytestmark = pytest.mark.usefixtures("judge_passes")

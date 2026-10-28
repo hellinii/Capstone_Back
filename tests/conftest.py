@@ -247,3 +247,25 @@ def _fresh_llm_wallets():
     llm_budget.reset()
     yield
     llm_budget.reset()
+
+
+@pytest.fixture
+def judge_passes(monkeypatch):
+    """판 4 작업의 심판 자리를 '통과'로 채운다(심판 라운드 J5b). 판 4 작업은 심판 키가 없으면 서술 AI 도 부르지 않으므로(정3),
+    판 4 생성 경로를 보는 시험은 이것을 쓴다. 심판 호출 수를 센다(list — 판 3 은 0번이어야 한다)."""
+    from app.judge.core import JudgeRun
+    from app.main import app
+    from app.narrative import jobs
+
+    seen: list[dict] = []
+
+    async def passed(client, req, result, sources, refs, *, deadline=None, clock=None):
+        seen.append(dict(sources))
+        return JudgeRun("pass", None, [], [], {
+            "faithfulness": {"checked": 0, "matched": 0}, "consistency": {"checked": 0, "contradictions": 0},
+            "coverage": {"applicable": 0, "described": 0, "not_applicable": 18, "items": []},
+            "readability": {"rules": 2, "violations": 0}}, {})
+
+    monkeypatch.setattr(jobs, "judge_once", passed)
+    app.state.openai_client = object()  # _no_real_llm_clients 가 테스트 끝에 되돌린다
+    return seen

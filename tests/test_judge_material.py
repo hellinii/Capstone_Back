@@ -178,3 +178,7 @@ def test_edition4_examples_carry_material_that_parses(task):
     prefixes = {k.split("<")[0] for k in vocab}
     fields = [n.field for s in mat.segments for n in s.numbers]
     assert fields and all(any(f.startswith(p) for p in prefixes) for f in fields)
+
+
+# 판 4 작업은 심판 키가 없으면 서술 AI 를 부르지 않는다(심판 라운드 J5b, 정3) — 생성 경로를 보려고 심판 자리를 통과로 채운다.
+pytestmark = pytest.mark.usefixtures("judge_passes")

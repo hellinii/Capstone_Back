@@ -379,12 +379,24 @@ def seal_generate(runner: "Runner", req_dir: Path, out_dir: Path, meta: dict, *,
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     app.dependency_overrides[jobs.get_session_factory] = lambda: factory
     summaries: list[dict] = []
+    # 봉인은 생성만 한다 — 채점은 V2 가 봉인본을 따로 돈다(비용·기준 고정 순서). J5b 부터 판 4 작업 경로가 생성 뒤 심판을
+    # 부르고, 심판 키가 없으면 생성 AI 도 부르지 않으므로(정3) 봉인 동안은 심판 자리를 '돌지 않음'으로 바꿔 끼운다
+    # (작업 결과의 judge 는 보류 judge_error — 봉인본은 발급하지 않는다).
+    from app.judge.core import JudgeRun
+
+    async def _no_judge(*_a, **_k):
+        return JudgeRun(None, "not_run_in_seal")
+
+    real_judge = jobs.judge_once
+    jobs.judge_once = _no_judge
     try:
         with TestClient(app) as client:
             if anthropic_client is not None:
                 app.state.anthropic_client = anthropic_client
             if app.state.anthropic_client is None:
                 raise RunnerError("서술 클라이언트가 없다(ANTHROPIC_API_KEY) — 봉인 서술을 만들 수 없다")
+            if app.state.openai_client is None:
+                app.state.openai_client = object()  # 심판 자리 표시 — 위 _no_judge 가 받아 부르지 않는다
             for path in requests:
                 tag = path.name[: -len(".request.json")]
                 raw = json.loads(path.read_text(encoding="utf-8"))
@@ -416,6 +428,7 @@ def seal_generate(runner: "Runner", req_dir: Path, out_dir: Path, meta: dict, *,
                 summaries.append({"tag": tag, "status": view.get("status"), "sources": sources, "cost_usd": cost,
                                   "http_calls": len(calls), "sha256": sha})
     finally:
+        jobs.judge_once = real_judge
         app.dependency_overrides.pop(jobs.get_session_factory, None)
         engine.dispose()
     files = sorted(out_dir.glob("*.json"))

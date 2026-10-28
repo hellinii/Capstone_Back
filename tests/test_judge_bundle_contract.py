@@ -14,7 +14,7 @@ TESTS = Path(__file__).parent
 NAME = "judge_bundle_ed4.json"
 PATH = TESTS / "contract" / NAME
 FRONT_COPY = TESTS.parents[1] / "Capstone_Front" / "src" / "test" / "contract" / NAME
-SHA256 = "c536b0d56a0ebb0bd00c5ab6ef050e797187d378b25807dc97ccfbd601ec3663"
+SHA256 = "79f4a2ab203b30ddbc2d8f5aa76fcbe99272ab74ff2363e4feed9dc53047d914"
 C = json.loads(PATH.read_text(encoding="utf-8"))
 AXES = ["faithfulness", "consistency", "coverage", "readability"]
 TOP = ["gate", "held_kind", "retry_allowed", "criteria_version", "model", "axes", "counts"]

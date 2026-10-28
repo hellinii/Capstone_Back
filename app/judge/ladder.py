@@ -16,7 +16,7 @@ retry_allowed)이 정한다 — 작업 흐름(J5b)의 키 없음·지갑·작업
 
 상호작용
 - 의존(import): app.judge.core(JudgeRun — 형), app.narrative.generator(GenerationSession — 형)
-- 사용처: (J5b) app.narrative.jobs 의 판 4 심판 갈래, tests
+- 사용처: app.narrative.jobs 의 판 4 심판 갈래, tests
 """
 from __future__ import annotations
 
@@ -33,7 +33,8 @@ REGENERATE_MIN_SECONDS = 60.0
 HELD_KINDS = ("gate_failed", "timeout", "judge_error", "no_key", "budget", "job_limit", "no_material")
 
 # 심판이 판정을 내지 못하고 끝난 일시적 사유(Q6) — 다시 하면 풀릴 수 있다. 4xx(api_error)·거절·형식 오류·안전장치는 아니다.
-TRANSIENT_FAILURES = frozenset({"transient", "timeout"})
+# busy = 심판 슬롯을 남은 시간 안에 얻지 못함(작업 흐름).
+TRANSIENT_FAILURES = frozenset({"transient", "timeout", "busy"})
 
 # 단 이름(내부 기록) — 채점 뒤에 무엇을 했나.
 RUNG_REGENERATE = "regenerate"
@@ -168,5 +169,5 @@ def summary(rec: dict) -> dict:
         "seconds": round(sum(r.get("seconds") or 0 for r in judged), 3),
         "criteria_version": first.get("criteria_version"), "criteria_fingerprint": first.get("criteria_fingerprint"),
         "material_check_version": first.get("material_check_version"),
-        "client_input_assertive": cards[-1]["faithfulness"]["client_input_assertive"] if cards else None,
+        "client_input_assertive": (cards[-1].get("faithfulness") or {}).get("client_input_assertive") if cards else None,
     }
