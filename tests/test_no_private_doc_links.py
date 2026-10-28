@@ -11,7 +11,11 @@ PRIVATE_LINK = re.compile(r"claude\.ai|claude docs|capstone_md_file", re.IGNOREC
 
 
 def _files() -> list[Path]:
-    files = [*ROOT.joinpath("docs").rglob("*.md"), ROOT / "README.md", *ROOT.joinpath("app").rglob("*.py")]
+    # 심판 라운드 J1: 심판 기준 묶음의 프롬프트·체크리스트(app/**/*.md·*.json)와 수동 스크립트(scripts/)도 본다.
+    files = [
+        *ROOT.joinpath("docs").rglob("*.md"), ROOT / "README.md", *ROOT.joinpath("app").rglob("*.py"),
+        *ROOT.joinpath("app").rglob("*.md"), *ROOT.joinpath("app").rglob("*.json"), *ROOT.joinpath("scripts").rglob("*.py"),
+    ]
     return [p for p in files if p.is_file()]
 
 
@@ -20,6 +24,7 @@ def test_no_private_doc_links_in_docs_or_code():
     # 빈 집합을 돌면 늘 통과한다 — 문서 3개(README·ARCHITECTURE·PROJECT_OVERVIEW) + app 코드가 실제로 잡히는지 먼저 본다.
     assert len([p for p in files if p.suffix == ".md"]) >= 3
     assert len(files) > 50
+    assert any(p.parent.name == "scripts" for p in files)  # 넓힌 범위가 실제로 잡힌다
     hits = [
         f"{p.relative_to(ROOT)}:{i}"
         for p in files

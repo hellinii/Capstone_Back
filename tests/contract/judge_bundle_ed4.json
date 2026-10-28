@@ -1,0 +1,62 @@
+{
+  "name": "판 4 서술 작업 결과의 고객용 심판 묶음",
+  "status": "심판 라운드 J1 ④ 계약 초안(2026-10-29, 계획 14-2). 구현은 J5b(백엔드)·J6(프론트). 같은 바이트 사본이 두 저장소 계약 폴더에 있다. 바꾸면 두 사본과 두 시험의 sha256 을 함께 고친다.",
+  "where": "작업 조회 응답 result.judge(NarrativeJobResult 의 선택 칸). 판 4 작업에만 있고 판 3 작업 결과에는 키가 없다. 작업이 failed 면 result 가 없다.",
+  "closed_default": "프론트는 judge 가 없거나, gate 가 아래 값 밖이거나, 모양이 틀리면 '심판 기록 없음'으로 보고 판 4 인쇄·발급·정정을 잠근다. 서버 발급 검사도 내부 기록의 gate 가 passed 일 때만 받는다.",
+  "fields": {
+    "gate": "passed | held. passed 만 인쇄·발급을 연다.",
+    "held_kind": "gate 가 held 일 때 보류 종류(아래 held_kinds 의 키), passed 면 null.",
+    "retry_allowed": "보류 화면에 '서술 다시 만들기'를 줄지. 백엔드가 정한다(판정 지점 하나). passed 면 false. 어느 종류에 줄지는 Q6 답으로 J5a 에 확정.",
+    "criteria_version": "점검 기준 버전(기준 묶음 VERSION, 예 '1.0'). 고객에게는 '점검 기준'으로 보인다.",
+    "model": "심판 모델 이름(작성 기록 '검증 모델' 줄). 응답 모델이 아니라 요청한 모델 이름.",
+    "axes": "결과를 싣는 축 목록, 순서 고정 [faithfulness, consistency, coverage, readability]. 검증(7.7)에서 축을 빼면 그 축이 빠진다.",
+    "counts": "축별 검사 건수·결과 건수. passed 일 때만 값이 있고 held 면 null. 근거 인용·사유·주장 내용은 싣지 않는다.",
+    "counts.faithfulness": "{checked: 검증 가능 주장 수, matched: 데이터와 일치한 수}",
+    "counts.consistency": "{checked: 검사 건수, contradictions: 모순 수}",
+    "counts.coverage": "{applicable: 적용 항목 수, described: 서술된 항목 수, not_applicable: 적용되지 않은 항목 수, items: [{id, described, place}]} — place 는 '있음' 판정이 인용한 글이 판 4 에서 실제로 찍힌 자리(예 '5.2'), 서술되지 않았으면 null",
+    "counts.readability": "{rules: 코드 규칙 수, violations: 코드 규칙 위반 건수}"
+  },
+  "held_kinds": {
+    "gate_failed": "사다리(재생성 → 규칙 문장 → 전부 규칙 문장)를 다 타고도 사실 위반·모순이 남음",
+    "timeout": "서술이 생긴 뒤 작업 시간 제한(10분)을 넘음",
+    "judge_error": "심판 호출 실패(일시적 오류 한 번 더 뒤)·거절·형식 오류·안전장치 무효·예기치 않은 예외·기록 직렬화 실패",
+    "no_key": "심판 키(OpenAI)가 없음 — AI 를 부르지 않고 규칙 문장 서술",
+    "budget": "심판 지갑(시간당 보고서 수) 소진 — AI 를 부르지 않고 규칙 문장 서술",
+    "job_limit": "작업 행 시간당 상한 — 행 없이 바로 규칙 문장 결과",
+    "no_material": "심판 읽기 재료가 없거나 틀림(요청 크기 예산으로 빠짐 포함), 조회 자료(혼동행렬·클래스별 표)가 빔"
+  },
+  "never_in_bundle": ["근거 인용", "판정 사유", "주장 목록", "재생성 횟수", "토큰·비용·시간", "기준 지문"],
+  "examples": {
+    "passed": {
+      "gate": "passed",
+      "held_kind": null,
+      "retry_allowed": false,
+      "criteria_version": "1.0",
+      "model": "gpt-6.1-sol",
+      "axes": ["faithfulness", "consistency", "coverage", "readability"],
+      "counts": {
+        "faithfulness": {"checked": 23, "matched": 23},
+        "consistency": {"checked": 15, "contradictions": 0},
+        "coverage": {
+          "applicable": 2,
+          "described": 2,
+          "not_applicable": 16,
+          "items": [
+            {"id": "분석-1", "described": true, "place": "5.2"},
+            {"id": "소견-1", "described": true, "place": "5.1"}
+          ]
+        },
+        "readability": {"rules": 3, "violations": 0}
+      }
+    },
+    "held": {
+      "gate": "held",
+      "held_kind": "gate_failed",
+      "retry_allowed": false,
+      "criteria_version": "1.0",
+      "model": "gpt-6.1-sol",
+      "axes": ["faithfulness", "consistency", "coverage", "readability"],
+      "counts": null
+    }
+  }
+}

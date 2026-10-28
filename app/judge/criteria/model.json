@@ -1,0 +1,6 @@
+{
+  "judge_model": "gpt-6.1-sol",
+  "extract_model": "gpt-6-luna",
+  "effort": "medium",
+  "self_check_rounds": 2
+}
