@@ -86,3 +86,11 @@ python tests/generate_s0_goldens.py extract --db <c_view.db> --requests <요청 
 # 복사한 뒤 MANIFEST 다시 쓰기(tests/ 에서):
 #   find golden_frozen data/edition3_issued -type f ! -name README.md ! -name MANIFEST.sha256 ! -name '.*' | LC_ALL=C sort | xargs shasum -a 256 > golden_frozen/MANIFEST.sha256
 ```
+
+## 예외로 다시 뜬 기록
+
+사람이 판 3 동작을 바꾸기로 정해 위 "다시 만드는 법"으로 뜬 것. 위 "라운드 끝 확인" 1) 의 diff 에는 이 변경이 보인다.
+
+| 언제 | 무엇이 바뀌었나 | 확인 |
+|---|---|---|
+| 2026-10 심판 라운드 1단계 | 8.2 평균 방식 차이(8.2-07·8.2-08)를 지표 선택(M22)과 무관하게 쓰고, 8.2 평가 데이터의 대표성과 한계(8.2-14 — 평가 데이터 출처가 있을 때)를 더함(서술 설계 v0.14). 16개 파일: `edition3/{bc_strong,digits_strong,digits_weak,multiclass,multilabel,yeast_strong,yeast_weak}.{templates,job_prompts}.json`, `narrative_job_fallback_{multiclass,multilabel}.json`. `data/edition3_issued`(발급본 원문·요청)는 그대로 | 바뀌기 전 코드(563ceff)로 다시 뜬 출력과 견주어, 새 출력에서 이 두 항목의 글(지시문 결론 줄·규칙 문장)만 지우면 글자까지 같음. 사실 시트 보기·옛 경로 지시문·발급본 검문·평가/검증 정답은 바이트까지 같음 |
