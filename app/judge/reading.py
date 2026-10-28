@@ -153,9 +153,12 @@ def build_pieces(result, section_sources: dict, material: JudgeMaterial | None, 
             for (priority, label), pid in zip(seg.rows, seg.row_keys):
                 recs = [r for r in result.recommendations if r.problem_id == pid]
                 for i, rec in enumerate(recs):
-                    cells = [priority, label, rec.action, rec.expected_impact]
-                    text = " / ".join(f"{h}: {c}" for h, c in zip(seg.header, cells))
-                    pieces.append(Piece(f"rec:{seg.place}:{pid}:{i}", "9", seg.place, rec_source, text))
+                    # 한 줄을 두 조각으로 — 프론트가 찍는 우선순위·대응 문제 칸(고정)과 서술 결과의 권고·기대 효과 칸(9칸 출처).
+                    # 섞으면 AI 글만 읽는 모듈(사실 일치·표기·전처리)이 프론트 글(문제 번호 'P1' 등)을 AI 글로 읽는다.
+                    front = " / ".join(f"{h}: {c}" for h, c in zip(seg.header[:2], [priority, label]))
+                    body = " / ".join(f"{h}: {c}" for h, c in zip(seg.header[2:], [rec.action, rec.expected_impact]))
+                    pieces.append(Piece(f"rec:{seg.place}:{pid}:{i}:row", "9", seg.place, "fixed", front))
+                    pieces.append(Piece(f"rec:{seg.place}:{pid}:{i}", "9", seg.place, rec_source, body))
 
     ref = ref_table_piece(benchmark_refs, metrics)
     if ref is not None:

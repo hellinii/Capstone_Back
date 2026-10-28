@@ -77,12 +77,15 @@ async def test_pieces_from_rule_sentence_narrative(name):
     by_id = {p.id: p for p in pieces}
     assert by_id["slot:8.2"].text == gen.response.conclusion.narrative and by_id["slot:8.2"].place == "5.1"
     # 권고 줄 = 서술 결과의 권고 수, 대응 문제 칸은 재료에서
-    recs = [p for p in pieces if p.id.startswith("rec:")]
-    assert len(recs) == len(gen.response.recommendations) > 0
+    recs = [p for p in pieces if p.id.startswith("rec:") and not p.id.endswith(":row")]
+    rows = [p for p in pieces if p.id.endswith(":row")]
+    assert len(recs) == len(rows) == len(gen.response.recommendations) > 0
     assert all(p.source == "template" and p.slot == "9" and p.place in ("6.1", "6.2") for p in recs)
-    for p in recs:
-        pid = p.id.split(":")[2]
-        assert f"{pid} · " in p.text
+    assert all(p.source == "fixed" for p in rows)  # 우선순위·대응 문제 칸은 프론트 글
+    for row, rec in zip(rows, recs):
+        pid = rec.id.split(":")[2]
+        assert row.id == rec.id + ":row" and f"{pid} · " in row.text and f"{pid} · " not in rec.text
+        assert rec.text.startswith("권고: ")
     # 7.3 이 빈 글이면 고정 15 가 들어온다
     assert gen.response.interpretation.additional_observations == ""
     assert by_id["m:5.6-fixed15"].text == "해당 없음"
