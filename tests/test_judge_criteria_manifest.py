@@ -74,3 +74,17 @@ def test_fingerprint_changes_when_a_file_changes(tmp_path, monkeypatch):
     (tmp_path / "model.json").write_text((tmp_path / "model.json").read_text() + " ", encoding="utf-8")
     after = criteria.manifest_text()
     assert before != after and criteria.fingerprint(before) != criteria.fingerprint(after)
+
+
+# 주장 규칙 잠금(심판 라운드 J4 끝, 계획 Q9) — 사람 정답지 표시가 이 규칙으로 시작한다. 바꾸면 표시를 다시 해야 한다.
+CLAIMS_LOCK = "2fd85afecccda1bea6a3d3270c55c1068e06ab589915b7457e5d546cb6403a65"
+
+
+def test_claim_rules_are_locked_for_annotation():
+    import hashlib
+
+    got = hashlib.sha256((criteria.HERE / "claims.json").read_bytes()).hexdigest()
+    assert got == CLAIMS_LOCK, (
+        "주장 규칙(claims.json)이 잠근 뒤 바뀌었다 — 사람 정답지 표시(검증/01_정답지)를 새 규칙으로 다시 해야 한다. "
+        "바꾼 이유를 CHANGELOG 에 적고 표시자에게 알린 뒤 이 값을 고친다"
+    )

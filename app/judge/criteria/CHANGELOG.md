@@ -24,3 +24,5 @@
   - 사실 시트의 숫자 글 칸(*_text)도 숫자 조회 자료로(코드 sources.py — 기준 묶음 밖이지만 판정에 닿아 여기 적는다).
   - AI 파일럿 뒤: 시험 범위 문장(…하지 않았다 등)은 추론이 아님(scope_markers, 코드가 버림), 고객 입력 다시 말하기(참고 글 떼고
     두 글자 묶음 60%), 양성 클래스 ↔ '양성', 선언은 facts.declarations 칸 먼저, '…ㅂ니다'만 합니다체('아니다' 아님).
+- 심판 라운드 J4 끝(2026-10-29): **주장 규칙 잠금** — claims.json sha256 2fd85afecccda1bea6a3d3270c55c1068e06ab589915b7457e5d546cb6403a65. 사람 정답지 표시는 이 규칙으로 한다
+  (바꾸면 표시를 다시 — tests/test_judge_criteria_manifest.py CLAIMS_LOCK).
