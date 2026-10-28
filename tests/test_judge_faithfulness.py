@@ -45,15 +45,29 @@ async def run(claims, *replies):
     return fake, await fa.judge_faithfulness(fake, PIECES, claims, SOURCES, METRICS, [])
 
 
-async def test_numbers_with_known_field_are_checked_by_code_without_llm():
+async def test_numbers_matching_their_field_are_settled_by_code_without_llm():
     claims = [claim("C1", "number", "FN 은 43건", field="confusion_counts.1.fn", number_text="43"),
-              claim("C2", "number", "Accuracy 0.505", piece="slot:8.2", field="metric.M1.value", number_text="0.505"),
-              claim("C3", "number", "FP 56건", field="confusion_counts.1.fp", number_text="55")]  # 틀린 숫자
+              claim("C2", "number", "Accuracy 0.505", piece="slot:8.2", field="metric.M1.value", number_text="0.505")]
     fake, res = await run(claims)
     assert fake.calls == []
-    assert [v.verdict for v in res.verdicts] == ["match", "match", "violation"]
-    assert res.counts["checked"] == 3 and res.counts["matched"] == 2 and res.counts["violations"] == 1
+    assert [v.verdict for v in res.verdicts] == ["match", "match"] and res.counts["checked"] == 2
+
+
+async def test_number_not_matching_its_field_goes_to_agent_then_code_judges():
+    # 추출이 붙인 칸과 어긋나면 바로 위반이 아니다 — 에이전트가 대상을 다시 찾는다(J4 파일럿 오탐)
+    claims = [claim("C1", "number", "FP 56건", field="confusion_counts.1.fn", number_text="56"),  # 칸을 잘못 짚음
+              claim("C2", "number", "FP 56건", field="confusion_counts.1.fp", number_text="55")]  # 진짜 틀린 숫자
+    final = F.json_response({"claims": [answer("C1", expr="{confusion_counts.1.fp}"), answer("C2", expr="{confusion_counts.1.fp}")]})
+    fake, res = await run(claims, final)
+    assert len(fake.calls) == 1 and "C1" in fake.calls[0]["input"][0]["content"]
+    assert [v.verdict for v in res.verdicts] == ["match", "violation"]
     assert res.violations()[0].slot == "7.1"
+
+
+def test_name_matches_code_labels():
+    assert fa.name_matches("FAIL", "종합 판정은 '최종 불합격'")
+    assert fa.name_matches("cat", "가장 약한 클래스는 cat")
+    assert not fa.name_matches("PASS", "종합 판정은 '최종 불합격'")
 
 
 async def test_agent_tool_loop_then_code_judges_its_answer():
@@ -145,3 +159,11 @@ async def test_claim_the_agent_did_not_answer_is_unverifiable():
     claims = [claim("C1", "number", "43건", number_text="43"), claim("C2", "name", "가장 약한 클래스는 0 이다")]
     _, res = await run(claims, F.json_response({"claims": [answer("C1", expr="{confusion_counts.1.fn}")]}))
     assert [v.verdict for v in res.verdicts] == ["match", "unverifiable"]
+
+
+@pytest.mark.parametrize("sentence, marked", [
+    ("도메인별로 상이할 수 있음", True), ("판정이 달라질 가능성은 낮다", True), ("성능 저하 위험이 존재한다", True),
+    ("경계 근처 표본이 많음을 시사한다", True), ("오류의 원인은 라벨 품질이다", False),
+])
+def test_inference_marker_stems(sentence, marked):
+    assert fa.inference_marked(sentence) is marked

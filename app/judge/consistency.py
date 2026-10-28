@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from app.judge import config, criteria, llm
-from app.judge.criteria.rules_numbers import same_quantity
+from app.judge.criteria.rules_numbers import matches, same_quantity
 from app.judge.extract import Claim
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import ALIASES
@@ -64,21 +64,37 @@ def value_groups(pieces: list[Piece], claims: list[Claim]) -> dict[str, list[tup
     return groups
 
 
-def value_mismatches(groups: dict[str, list[tuple[str, Piece]]]) -> tuple[list[Contradiction], int]:
-    """(모순 목록, 검사한 묶음 수). 숫자가 둘 이상인 묶음만 검사한다. 묶음마다 모순은 하나로 센다."""
+def _misassigned(text: str, piece: Piece, fld: str, data: dict | None) -> bool:
+    """서술 쪽 숫자가 묶인 칸의 데이터와는 다르지만 다른 칸의 데이터 값과는 맞나 — 추출이 칸을 잘못 짚은 것으로 본다(J4 파일럿).
+    표·고정 문구 숫자는 프론트가 칸을 알고 찍으므로 보지 않는다."""
+    if not data or piece.source not in ("ai", "template"):
+        return False
+    own = data.get(fld)
+    if own is not None and matches(text, own):
+        return False
+    return any(matches(text, v) for name, v in data.items() if name != fld)
+
+
+def value_mismatches(groups: dict[str, list[tuple[str, Piece]]], data: dict | None = None) -> tuple[list[Contradiction], int, list[dict]]:
+    """(모순 목록, 검사한 묶음 수, 칸을 잘못 짚은 것으로 보고 넘긴 것). 숫자가 둘 이상인 묶음만 검사한다. 묶음마다 모순은 하나.
+    data(칸 이름 → 값)는 코드만 본다 — LLM 에는 가지 않는다(설계 6.3 '지표표·주장 목록은 값 불일치를 보는 코드에만')."""
     found: list[Contradiction] = []
+    skipped: list[dict] = []
     checked = 0
     for fld, entries in groups.items():
         if len(entries) < 2:
             continue
         checked += 1
-        base_text, base_piece = entries[0]
-        for text, piece in entries[1:]:
-            if same_quantity(base_text, text) is False:
-                found.append(Contradiction("value_mismatch", [base_piece.id, piece.id], [base_piece.slot, piece.slot],
-                                           [base_piece.source, piece.source], [base_text, text], {"field": fld}))
-                break
-    return found, checked
+        for (ta, pa), (tb, pb) in ((entries[i], entries[j]) for i in range(len(entries)) for j in range(i + 1, len(entries))):
+            if same_quantity(ta, tb) is not False:
+                continue
+            if _misassigned(ta, pa, fld, data) or _misassigned(tb, pb, fld, data):
+                skipped.append({"field": fld, "numbers": [ta, tb], "pieces": [pa.id, pb.id]})
+                continue
+            found.append(Contradiction("value_mismatch", [pa.id, pb.id], [pa.slot, pb.slot], [pa.source, pb.source], [ta, tb],
+                                       {"field": fld}))
+            break
+    return found, checked, skipped
 
 
 def logic_types() -> list[dict]:
@@ -124,11 +140,11 @@ def _cited(check: dict, by_id: dict[str, Piece]) -> bool:
     return True
 
 
-async def judge_consistency(client, pieces: list[Piece], claims: list[Claim], fs, *, deadline: float | None = None,
-                            clock=None) -> ConsistencyResult:
+async def judge_consistency(client, pieces: list[Piece], claims: list[Claim], fs, *, data: dict | None = None,
+                            deadline: float | None = None, clock=None) -> ConsistencyResult:
     scope = for_module(pieces, "consistency")
     by_id = {p.id: p for p in scope}
-    mismatches, value_checked = value_mismatches(value_groups(scope, claims))
+    mismatches, value_checked, skipped = value_mismatches(value_groups(scope, claims), data)
     types = logic_types()
     type_ids = [t["id"] for t in types]
     schema = llm.json_schema_format("consistency", answer_schema(type_ids, list(by_id)))
@@ -166,6 +182,7 @@ async def judge_consistency(client, pieces: list[Piece], claims: list[Claim], fs
     ]
     found = mismatches + logic
     counts = {"checked": value_checked + len(type_ids), "value_groups_checked": value_checked, "logic_types_checked": len(type_ids),
+              "value_skipped_misassigned": len(skipped),
               "contradictions": len(found),
               "by_type": {t: sum(1 for c in found if c.type == t) for t in ["value_mismatch", *type_ids]}}
     return ConsistencyResult(found, counts, calls)

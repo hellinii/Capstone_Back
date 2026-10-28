@@ -81,7 +81,8 @@ async def judge_once(client, req, result, section_sources: dict, benchmark_refs:
     ext, cov, rea = await asyncio.gather(
         timed("extract", extract_claims(client, pieces, sources.numbers, **kw)),
         timed("coverage", judge_coverage(client, pieces, task, fs, req.client_inputs, benchmark_refs, **kw)),
-        timed("readability", judge_readability(client, pieces, fs, req.client_inputs, **kw)),
+        timed("readability", judge_readability(client, pieces, fs, req.client_inputs,
+                                               source_notes=[r.get("source_note", "") for r in benchmark_refs], **kw)),
     )
     record.update({"extract": ext.as_record(), "coverage": cov.as_record(), "readability": rea.as_record()})
     first_failure = ext.failure or cov.failure or rea.failure
@@ -90,7 +91,8 @@ async def judge_once(client, req, result, section_sources: dict, benchmark_refs:
         return JudgeRun(None, first_failure, record=record)
     faith, cons = await asyncio.gather(
         timed("faithfulness", judge_faithfulness(client, pieces, ext.claims, sources, fs.metrics, benchmark_refs, **kw)),
-        timed("consistency", judge_consistency(client, pieces, ext.claims, fs, **kw)),
+        timed("consistency", judge_consistency(client, pieces, ext.claims, fs,
+                                               data={n: e.value for n, e in sources.numbers.items()}, **kw)),
     )
     record.update({"faithfulness": faith.as_record(), "consistency": cons.as_record()})
     if faith.failure or cons.failure:

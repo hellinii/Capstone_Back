@@ -65,3 +65,15 @@ async def test_uncited_flag_asked_again_then_failure():
 async def test_missing_slot_answer_is_bad_output():
     _, res = await _run(F.json_response({"slots": [ans("7.1")]}))
     assert res.failure == "bad_output"
+
+
+def test_pilot_false_positives_are_gone():
+    fs = M(metrics=[M(display_name="Recall", value=0.5)], per_class=[], confusion_counts=[], distribution=None,
+           problems=[M(id="P1"), M(id="P4")])
+    allowed = rd.allowed_latin(fs, {}, ["내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준)"])
+    pieces = [Piece("slot:7.2", "7.2", "5.3", "template", "비율 차가 10%p 이상이다. 권고(P4)와 같은 기준치 v1 이다.")]
+    assert rd.romanization(pieces, allowed) == []
+    tail = [Piece("slot:8.2", "8.2", "5.1", "template",
+                  "종합 판정은 '최종 불합격'이다(미달한 핵심 지표: Recall(0.547, 목표 0.900)).")]
+    assert rd.sentence_style(tail) == []
+    assert [f.text[:6] for f in rd.sentence_style([Piece("slot:8.2", "8.2", "5.1", "ai", "미달함(Recall).")])] == ["미달함(Re"]

@@ -19,6 +19,8 @@ from app.judge.criteria.rules_numbers import matches, parse_printed, same_quanti
     ("+13", 13, True),
     ("−0.275", -0.275, True),   # U+2212
     ("-0.275", 0.275, False),
+    ("0.066", -0.06588, True),  # 부호 없이 쓴 차이 — 크기로(방향은 말로)
+    ("+0.066", -0.06588, False),  # 부호를 붙였으면 부호까지
     ("6.6%p", 0.066, True),
     ("12", 12.4, True),
     ("12", 12.6, False),

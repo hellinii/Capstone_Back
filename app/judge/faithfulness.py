@@ -148,6 +148,18 @@ def _norm_name(text: str) -> str:
     return re.sub(r"[\s'\"‘’“”]", "", str(text)).lower()
 
 
+def name_matches(actual: str, named: str) -> bool:
+    """데이터의 이름(actual)이 문장이 지목한 이름(named)에 들어 있나. 코드값(판정 FAIL 등)은 기준 묶음 names.json 의 찍히는 이름으로도 본다."""
+    labels = criteria.load_json("names.json")["code_labels"]
+    target = _norm_name(named)
+    if str(actual) in labels:
+        # 코드값이면 문장에 든 이름 가운데 가장 긴 것이 가리키는 코드로 본다('합격'은 '불합격' 안에도 들어 있다)
+        hits = [(len(_norm_name(lab)), code) for code, labs in labels.items() for lab in labs if _norm_name(lab) in target]
+        if hits:
+            return max(hits)[1] == str(actual)
+    return bool(_norm_name(actual)) and _norm_name(actual) in target
+
+
 def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs, piece: Piece | None) -> ClaimVerdict:
     """에이전트 답(없으면 None)과 자료로 주장 하나를 판정한다(코드)."""
     v = ClaimVerdict(claim.id, claim.kind, "unverifiable", claim.slot, claim.piece_id, claim.quote)
@@ -180,7 +192,7 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
         actual = sources.texts.get(ans.get("name_field", "").strip())
         if actual is not None and ans.get("named"):
             v.detail["data"] = actual
-            v.verdict = "match" if _norm_name(actual) in _norm_name(ans["named"]) else "violation"
+            v.verdict = "match" if name_matches(actual, ans["named"]) else "violation"
     elif claim.kind == "degree":
         result = degree_verdict(claim.polarity, ans.get("metric_id", "").strip(), claim.quote, metrics, refs)
         v.verdict = {"ok": "match", "violation": "violation", "target_unclear": "target_unclear"}[result]
@@ -225,10 +237,13 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
     kw = {"clock": clock} if clock else {}
     direct: dict[str, ClaimVerdict] = {}
     for c in claims:
+        # 추출이 붙인 칸은 '가리키기'일 뿐 판정 근거가 아니다 — 그 칸 값과 맞으면 여기서 확정하고, 어긋나면 에이전트가 대상을
+        # 다시 찾게 한다(J4 파일럿: 추출이 F1 최대 임계값의 Recall 을 Recall 값 칸에 붙여 거짓 위반이 났다).
         if c.kind == "number" and c.field and sources.number(c.field) is not None and printed_number(c):
             value = sources.number(c.field)
-            direct[c.id] = ClaimVerdict(c.id, c.kind, "match" if matches(printed_number(c), value) else "violation",
-                                        c.slot, c.piece_id, c.quote, {"field": c.field, "data": value, "by": "code"})
+            if matches(printed_number(c), value):
+                direct[c.id] = ClaimVerdict(c.id, c.kind, "match", c.slot, c.piece_id, c.quote,
+                                            {"field": c.field, "data": value, "by": "code"})
     pending = [c for c in claims if c.id not in direct]
     answers: dict[str, dict] = {}
     calls: list[dict] = []

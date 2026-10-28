@@ -98,3 +98,14 @@ async def test_llm_gets_text_and_verdict_only():
     assert "confusion_counts.1.fn" not in sent  # 주장 목록·칸 이름도 가지 않는다
     assert "m:4.4-counts" in sent and "종합 판정: FAIL" in sent and "기준 미달 지표: Accuracy" in sent
     assert fake.calls[0]["model"] == "gpt-6.1-sol"
+
+
+async def test_misassigned_claim_number_is_skipped_but_non_data_number_counts():
+    data = {"confusion_counts.1.fn": 43, "facts.ftg.best_recall": 44}
+    claims = [num("C1", "44", "confusion_counts.1.fn")]  # 44 는 다른 칸 값과 맞다 — 칸을 잘못 짚음
+    fake = F.FakeOpenAI([none_found()])
+    res = await co.judge_consistency(fake, PIECES, claims, FS, data=data)
+    assert res.contradictions == [] and res.counts["value_skipped_misassigned"] == 1
+    fake = F.FakeOpenAI([none_found()])
+    res = await co.judge_consistency(fake, PIECES, [num("C1", "47", "confusion_counts.1.fn")], FS, data=data)
+    assert [c.type for c in res.contradictions] == ["value_mismatch"]  # 어느 데이터와도 안 맞는 숫자는 센다

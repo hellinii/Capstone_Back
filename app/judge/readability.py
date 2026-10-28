@@ -22,7 +22,7 @@ from app.judge import config, criteria, llm
 from app.judge.reading import Piece, for_module, render
 
 CALL_TIMEOUT_SECONDS = 180.0
-_LATIN = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[._\-][A-Za-z0-9]+)*")
+_LATIN = re.compile(r"(?<![%A-Za-z0-9])[A-Za-z][A-Za-z0-9]*(?:[._\-][A-Za-z0-9]+)*")  # '10%p' 의 p 는 단위
 _SENTENCE = re.compile(r"(?<=[.?!])\s+|\n+")
 _TRAIL = " .?!)\"'’”」』]"
 
@@ -58,12 +58,15 @@ def _strings(value) -> list[str]:
     return []
 
 
-def allowed_latin(fs, client_inputs) -> set[str]:
+def allowed_latin(fs, client_inputs, source_notes: list[str] | None = None) -> set[str]:
     rules = criteria.load_json("readability.json")
     allowed = {t for r in rules["code_rules"] if r["id"] == "romanization" for t in r["always_allowed"]}
     names = [m.display_name for m in fs.metrics] + [p.label for p in fs.per_class] + [c.label for c in fs.confusion_counts]
     names += list((fs.distribution.class_distribution if fs.distribution else {}) or {})
     names += _strings(client_inputs or {})
+    # 성적서에 찍히는 문제 번호(P1 — 6절 권고표 '대응 문제 번호')와 참조 기준 출처 글(기준치 v1)도 성적서 낱말이다(J4 파일럿)
+    names += [p.id for p in getattr(fs, "problems", None) or []]
+    names += list(source_notes or [])
     for n in names:
         allowed.update(_LATIN.findall(str(n)))
     return allowed
@@ -71,6 +74,22 @@ def allowed_latin(fs, client_inputs) -> set[str]:
 
 def romanization(pieces: list[Piece], allowed: set[str]) -> list[Finding]:
     return [Finding("romanization", p.id, p.slot, tok) for p in pieces for tok in _LATIN.findall(p.text) if tok not in allowed]
+
+
+def _drop_tail_parenthetical(s: str) -> str:
+    """문장 끝 괄호 설명을 걷는다 — '…이다(미달 지표: Recall(0.547, 목표 0.900)).' 의 끝은 '이다'(J4 파일럿)."""
+    keep = " .?!\"'’”"  # 닫는 괄호는 남겨 둬야 걷을 괄호를 찾는다
+    s = s.rstrip(keep)
+    while s.endswith(")"):
+        depth = 0
+        for i in range(len(s) - 1, -1, -1):
+            depth += {")": 1, "(": -1}.get(s[i], 0)
+            if depth == 0:
+                s = s[:i].rstrip(keep)
+                break
+        else:
+            break
+    return s.rstrip(_TRAIL)
 
 
 def sentence_style(pieces: list[Piece]) -> list[Finding]:
@@ -86,7 +105,7 @@ def sentence_style(pieces: list[Piece]) -> list[Finding]:
         for s in (x.strip() for x in _SENTENCE.split(p.text)):
             if not s or s.startswith(bullets):
                 continue
-            core = s.rstrip(_TRAIL)
+            core = _drop_tail_parenthetical(s.rstrip(" ."))
             if core.endswith(endings) or not core.endswith("다"):
                 found.append(Finding("sentence_style", p.id, p.slot, s[:120]))
     return found
@@ -112,11 +131,11 @@ def _cited(a: dict, by_id: dict[str, Piece]) -> bool:
     return p is not None and bool(a.get("quote", "").strip()) and _norm(a["quote"]) in _norm(p.text)
 
 
-async def judge_readability(client, pieces: list[Piece], fs, client_inputs, *, deadline: float | None = None,
-                            clock=None) -> ReadabilityResult:
+async def judge_readability(client, pieces: list[Piece], fs, client_inputs, *, source_notes: list[str] | None = None,
+                            deadline: float | None = None, clock=None) -> ReadabilityResult:
     scope = for_module(pieces, "readability")
     by_id = {p.id: p for p in scope}
-    findings = romanization(scope, allowed_latin(fs, client_inputs)) + sentence_style(scope)
+    findings = romanization(scope, allowed_latin(fs, client_inputs, source_notes)) + sentence_style(scope)
     slots = list(dict.fromkeys(p.slot for p in scope))
     counts = {"rules": 2, "violations": len(findings),
               "by_rule": {r: sum(1 for f in findings if f.rule == r) for r in ("romanization", "sentence_style")}}

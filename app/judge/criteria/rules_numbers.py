@@ -4,6 +4,8 @@
 - 백분율↔소수 변환 허용: 0.944 ↔ "94%" 일치, "95%" 위반. 이미 백분율인 데이터(33.5)도 "33.5%" 와 일치.
 - 반올림 방식(올림·짝수 맞춤·이진 표현)의 차이로 갈리지 않게 "찍힌 수 ± 마지막 자리 반 칸" 안이면 일치로 본다.
 - 표기 자릿수 자체는 보지 않는다(설계 6.5). 천 단위 쉼표, 부호(+, −, U+2212), %p 를 읽는다.
+- 부호 없이 쓴 숫자는 크기로도 본다 — "Recall 이 0.066 높다"처럼 방향을 말로 쓴 차이가 음수 데이터(−0.066)와 맞는다(J4 파일럿).
+  부호를 붙여 쓴 숫자(+13, −0.275)는 부호까지 맞아야 한다. 방향이 맞는지는 비교 주장이 따로 본다.
 기준 묶음에 둔다 — 대조 규칙이 바뀌면 판정이 바뀐다.
 """
 from __future__ import annotations
@@ -21,6 +23,7 @@ class Printed:
     value: Decimal
     decimals: int
     percent: bool  # % 또는 %p
+    signed: bool = False  # 부호를 붙여 썼다
 
 
 def parse_printed(text: str) -> Printed | None:
@@ -29,13 +32,14 @@ def parse_printed(text: str) -> Printed | None:
     if not m:
         return None
     sign, whole, frac, unit = m.groups()
+    signed = bool(sign)
     try:
         value = Decimal(whole.replace(",", "") + ("." + frac if frac else ""))
     except InvalidOperation:
         return None
     if sign in ("-", "−"):
         value = -value
-    return Printed(value, len(frac or ""), bool(unit))
+    return Printed(value, len(frac or ""), bool(unit), signed)
 
 
 def _close(printed: Printed, data: Decimal) -> bool:
@@ -49,9 +53,8 @@ def matches(text: str, data: float | int) -> bool | None:
     if p is None:
         return None
     d = Decimal(str(data))
-    if p.percent:
-        return _close(p, d * 100) or _close(p, d)
-    return _close(p, d)
+    values = [d] if p.signed else [d, abs(d)]
+    return any(_close(p, v * 100) or _close(p, v) if p.percent else _close(p, v) for v in values)
 
 
 def same_quantity(a: str, b: str) -> bool | None:
