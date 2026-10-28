@@ -18,6 +18,9 @@ pytest 테스트가 아니다. 실호출(진짜 Claude·OpenAI 호출)은 키가
 - seal-generate(J2 끝): 검증용 판 4 요청(폴더의 *.request.json)마다 실제 앱 작업 경로(POST·GET /api/narrative/jobs, 진짜 Claude)로
   서술을 한 번 만들고, 요청·작업 결과·내부 기록을 봉인 폴더에 쓴 뒤 SHA256SUMS·봉인 시각을 적고 읽기 전용으로 바꾼다. 서술 글은
   화면에 찍지 않는다(오염 방지 — 개수·출처·비용·해시만). 작업 DB 는 임시 sqlite. 이미 봉인된 폴더면 거부(다시 만들지 않는다).
+- pilot(J4 끝): 심판 개발 입력(랜덤 예측, tests/data/judge_dev)으로 채점 실측. --narrative template 이면 키 없는 규칙 문장
+  서술(무료)을, ai 면 진짜 Claude 로 서술을 만들어 judge_once 로 채점한다. 검증 폴더는 읽지 않는다(dev 입력만). 결과 전체를
+  --out 폴더에 쓴다(개발 데이터라 봉인하지 않는다).
 - smoke(J1): 합성 문장으로 ① GPT-6.1 Sol 이 응답 보관을 끈 채 계산 도구를 여러 번 부르는지(암호화 추론을 다음 턴에 되돌림)
   ② GPT-6 Luna 가 Responses 구조화 출력을 받는지 ③ 같은 앞부분을 두 번 보내면 캐시 입력 토큰이 잡히는지. 검증 데이터는 쓰지 않는다.
 
@@ -437,6 +440,76 @@ def _cmd_seal(args: argparse.Namespace) -> int:
     return 0
 
 
+async def pilot(runner: "Runner", clients: Clients, paths: list[Path], out_dir: Path, narrative: str, meta: dict) -> list[dict]:
+    from app.judge.core import judge_once
+    from app.narrative.baselines import build_benchmark_refs
+    from app.narrative.generator import generate_sections
+    from app.narrative.schemas import NarrativeRequest
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summaries = []
+    for path in paths:
+        tag = path.name[: -len(".request.json")]
+        req = NarrativeRequest.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        gen = await generate_sections(clients.anthropic if narrative == "ai" else None, req)
+        if narrative == "ai":
+            calls = [c for c in gen.trace.get("calls", []) if c.get("http")]
+            cost = sum(c.get("cost_usd") or 0 for c in calls)
+            runner.record({**meta, "stage": "pilot_generate", "report": tag, "variant": narrative,
+                           "model_requested": "claude-sonnet-5-5",
+                           "model_served": ",".join(sorted({c.get("response_model") for c in calls if c.get("response_model")})),
+                           "input_tokens": sum(c.get("input_tokens") or 0 for c in calls),
+                           "output_tokens": sum(c.get("output_tokens") or 0 for c in calls),
+                           "cost_usd": f"{cost:.6f}", "price_table": "anthropic-llm.py", "seconds": gen.trace.get("seconds", "")})
+        refs = build_benchmark_refs(req.task_type.value, req.fact_sheet.metrics, edition=4)
+        run = await judge_once(clients.openai, req, gen.response, gen.section_sources, refs)
+        calls = [c for m in ("extract", "faithfulness", "consistency", "coverage", "readability")
+                 for c in (run.record.get(m) or {}).get("calls", [])]
+        cost = run.cost_usd()
+        body = json.dumps({"tag": tag, "narrative": narrative, "sources": gen.section_sources,
+                           "result": gen.response.model_dump(), "gate": run.gate, "failure": run.failure,
+                           "flagged_slots": run.flagged_slots, "scorecard": run.scorecard, "record": run.record},
+                          ensure_ascii=False, indent=1) + "\n"
+        target = out_dir / f"{tag}.{narrative}.json"
+        target.write_text(body, encoding="utf-8")
+        runner.record({**meta, "stage": "pilot_judge", "report": tag, "variant": narrative,
+                       "model_requested": "gpt-6.1-sol+gpt-6-luna",
+                       "model_served": ",".join(sorted({c.get("response_model") for c in calls if c.get("response_model")})),
+                       "effort": run.record.get("effort", ""),
+                       "input_tokens": sum(c.get("input_tokens") or 0 for c in calls),
+                       "cached_input_tokens": sum(c.get("cached_input_tokens") or 0 for c in calls),
+                       "output_tokens": sum(c.get("output_tokens") or 0 for c in calls),
+                       "reasoning_tokens": sum(c.get("reasoning_tokens") or 0 for c in calls),
+                       "cost_usd": "" if cost is None else f"{cost:.6f}", "price_table": "openai-2026-10-28",
+                       "seconds": (run.record.get("seconds") or {}).get("total", ""), "gate": run.gate or "",
+                       "result_file": str(target), "error": run.failure or ""})
+        summaries.append({"tag": tag, "gate": run.gate, "failure": run.failure, "flagged": run.flagged_slots,
+                          "cost_usd": cost, "seconds": run.record.get("seconds"), "calls": len(calls),
+                          "counts": run.scorecard and {k: {kk: vv for kk, vv in v.items() if kk != "items"}
+                                                       for k, v in run.scorecard.items()}})
+    return summaries
+
+
+def _cmd_pilot(args: argparse.Namespace) -> int:
+    import asyncio
+
+    paths = [Path(p) for p in args.request]
+    for p in paths:
+        guard_read(p, "dev")  # 검증 폴더(봉인)는 읽지 않는다
+    runner = Runner(Ledger(Path(args.ledger)), Budget.from_env(), "live" if args.live else "dev")
+    per = 0.25 + (0.2 if args.narrative == "ai" else 0.0)
+    runner.start(BatchPlan(f"pilot_{args.narrative}", runs=len(paths) * (2 if args.narrative == "ai" else 1),
+                           est_cost_usd=round(per * len(paths), 2)), yes=args.yes)
+    if not args.live:
+        raise RunnerError("pilot 은 실호출이다 — --live 를 준다")
+    clients = make_clients(live=True)
+    if clients.openai is None or (args.narrative == "ai" and clients.anthropic is None):
+        raise RunnerError("키가 없다")
+    summaries = asyncio.run(pilot(runner, clients, paths, Path(args.out), args.narrative, run_meta()))
+    print(json.dumps(summaries, ensure_ascii=False, indent=1))
+    return 0
+
+
 def _cmd_smoke(args: argparse.Namespace) -> int:
     import asyncio
 
@@ -475,6 +548,14 @@ def build_parser() -> argparse.ArgumentParser:
     seal_p.add_argument("--live", action="store_true")
     seal_p.add_argument("--yes", action="store_true")
     seal_p.set_defaults(func=_cmd_seal)
+    pilot_p = sub.add_parser("pilot", help="J4 파일럿(개발 입력으로 채점 실측)")
+    pilot_p.add_argument("--ledger", required=True)
+    pilot_p.add_argument("--request", required=True, action="append")
+    pilot_p.add_argument("--out", required=True)
+    pilot_p.add_argument("--narrative", choices=["template", "ai"], default="template")
+    pilot_p.add_argument("--live", action="store_true")
+    pilot_p.add_argument("--yes", action="store_true")
+    pilot_p.set_defaults(func=_cmd_pilot)
     smoke_p = sub.add_parser("smoke", help="J1 실호출 스모크(합성 문장, 약 6회)")
     smoke_p.add_argument("--ledger", required=True)
     smoke_p.add_argument("--out")

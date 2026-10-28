@@ -325,3 +325,32 @@ def test_seal_generate_refuses_without_claude_client(tmp_path):
     with pytest.raises(jl.RunnerError, match="서술 클라이언트가 없다"):
         jl.seal_generate(runner, req_dir, tmp_path / "봉인", {})
     assert runner.ledger.rows() == []
+
+
+# ── pilot(J4 끝) — 가짜 OpenAI 로 흐름만 ──
+
+
+async def test_pilot_flow_with_fake_judge(tmp_path):
+    from tests import judge_fakes as F
+    from tests.test_judge_core import _empty_answers, router
+
+    fake = F.FakeOpenAI([router(_empty_answers(None))] * 30)
+    runner, _, _ = _runner(tmp_path)
+    path = Path(__file__).parent / "data" / "judge_dev" / "dev_multiclass.request.json"
+    out = tmp_path / "pilot"
+    summaries = await jl.pilot(runner, jl.Clients(openai=fake), [path], out, "template", {"criteria_version": "1.0-dev"})
+    assert summaries[0]["failure"] == "no_claims"  # 가짜가 주장 0개라 보류 — 흐름만 본다
+    saved = json.loads((out / "dev_multiclass.template.json").read_text(encoding="utf-8"))
+    assert saved["record"]["material_problem"] is None and saved["result"]["conclusion"]["narrative"]
+    rows = runner.ledger.rows()
+    assert [(r["stage"], r["report"], r["error"]) for r in rows] == [("pilot_judge", "dev_multiclass", "no_claims")]
+
+
+def test_pilot_refuses_validation_folder(tmp_path, monkeypatch):
+    vdir = tmp_path / "검증"
+    (vdir / "00_봉인").mkdir(parents=True)
+    sealed = vdir / "00_봉인" / "bc_strong.request.json"
+    sealed.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("JUDGE_VALIDATION_DIR", str(vdir))
+    assert jl.main(["pilot", "--ledger", str(tmp_path / "l.csv"), "--request", str(sealed), "--out", str(tmp_path / "o"),
+                    "--live", "--yes"]) == 2
