@@ -373,3 +373,12 @@ def test_b31_conditional_pass_without_core_metrics_does_not_claim_core_metrics_p
     fs2 = _fs_without_core(raw)
     fs2.metrics[1].is_core = True
     assert verdict_sentence(fs2, {}, edition=4).startswith("핵심 지표는 모두 목표를 충족하였으나")
+
+
+def test_section_9_note_forbids_asserting_causes_in_edition4_only():
+    from app.narrative import prompt
+    fs = _req(example_raw()).fact_sheet
+    line = "권고의 근거를 쓸 때 데이터로 확인되지 않은 원인을 단정하지 않는다."
+    assert any(line in n for n in prompt._section_notes_ed4("9", fs, {}, "binary"))
+    assert not any(line in n for n in prompt._section_notes("9", fs, {}, "binary", edition=3))
+    assert not any(line in n for n in prompt._section_notes_ed4("7.1", fs, {}, "binary"))
