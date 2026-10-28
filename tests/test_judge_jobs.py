@@ -400,3 +400,50 @@ def test_route_passes_the_openai_client_as_judge_client(factory, monkeypatch):
     finally:
         app.dependency_overrides.pop(jobs.get_session_factory, None)
     assert seen["judge_client"] is marker
+
+
+def test_job_deadline_moves_with_the_front_texts():
+    """백엔드 마감 10분은 프론트 포기 시간(useReportData giveUpMs 12분)·'제한 시간(10분)' 글(ReportStateNotices, 판 3 보관본
+    정답에도 있음)과 함께 움직인다 — 바꾸려면 세 곳을 같이 고친다(계획 14 "10분 안의 숫자", J5b 끝 확정: 그대로 600)."""
+    assert jobs.JOB_DEADLINE_SECONDS == 600.0
+    assert (jobs.ED4_GENERATION_SECONDS, ladder.JUDGE_MIN_SECONDS, ladder.REGENERATE_MIN_SECONDS) == (240.0, 160.0, 60.0)
+
+
+async def test_pilot_timeline_reaches_the_rule_sentence_rung():
+    """실측(생성 60초·채점 150초·재생성 45초)으로 늘 걸리는 경우: 채점 1 → 재생성 → 채점 2 → 걸린 칸 규칙 문장 → 채점 3 → 시간 보류.
+    (JUDGE_ROUND/실측/J5b_시간.md 표의 한 줄 — 숫자를 바꾸면 이 시험과 표를 함께 고친다.)"""
+
+    class Clock:
+        t = 60.0
+
+        def __call__(self):
+            return self.t
+
+    clock = Clock()
+
+    class Sess:
+        result = object()
+        states = dict.fromkeys(("7.1", "7.2", "8.1", "8.2", "8.3", "9"))
+
+        def __init__(self):
+            self.ai = set(self.states)
+
+        def has_ai_text(self, s):
+            return s in self.ai
+
+        async def judge_regenerate(self, sids, *, seconds):
+            clock.t += 45
+            return dict.fromkeys(sids, "regenerated")
+
+        def to_template(self, sids, reason):
+            changed = [s for s in sids if s in self.ai]
+            self.ai -= set(changed)
+            return changed
+
+    async def judge(res, dl):
+        clock.t += 150
+        return JudgeRun("blocked", None, ["8.2"], [], None, {})
+
+    out = await ladder.run_ladder(Sess(), judge, deadline=jobs.JOB_GENERATION_SECONDS, clock=clock)
+    assert [r.get("after") for r in out.record["rounds"] if "gate" in r] == [None, "regenerate", "template_flagged"]
+    assert (out.held_kind, out.retry_allowed, clock.t) == ("timeout", False, 555)

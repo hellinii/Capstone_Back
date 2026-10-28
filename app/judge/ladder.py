@@ -24,9 +24,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-# 채점 한 번에 남겨 둘 최소 시간(초). J4 파일럿 실측 채점 1회 70~158초(AI 서술 약 150초) — J5b 끝에 확정(계획 14 "10분 안의 숫자").
-JUDGE_MIN_SECONDS = 180.0
-# 재생성 단에 줄 최소 시간(초). 생성 1회 실측 27~57초(봉인 6건) — J5b 끝에 확정.
+# 채점 한 번에 남겨 둘 최소 시간(초). J4 파일럿 실측 채점 1회 70~158초(AI 서술 146~158초). J5b 끝 확정(2026-10-29): 180 이면
+# 보통 경우(생성 60초·채점 150초)에 걸린 칸 규칙 문장 단(채점 3)까지 못 가 시간 보류로 끝난다 — 실측 최대(158)를 덮는 160.
+# 채점이 이보다 길어지면 모듈 안 마감(deadline)이 끊어 보류(timeout)다. 시간표는 JUDGE_ROUND/실측/J5b_시간.md.
+JUDGE_MIN_SECONDS = 160.0
+# 재생성 단에 줄 최소 시간(초). 생성 1회 실측 27~57초(봉인 6건), 칸 하나 재생성은 그보다 짧다 — J5b 끝 확정.
 REGENERATE_MIN_SECONDS = 60.0
 
 # 보류 종류 — 고객용 심판 묶음 계약(tests/contract/judge_bundle_ed4.json)의 held_kinds 와 같은 집합(시험이 맞댄다).
