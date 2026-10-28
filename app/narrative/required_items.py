@@ -1272,6 +1272,14 @@ def _threshold_gain(ctx: Ctx) -> str | None:
     )
 
 
+def _shown_zero(number_text: str) -> bool:
+    """찍히는 수 글자가 0 인가('0'·'0.000'·'0.0000' — 부호는 떼고 받는다). 수로 읽히지 않으면 아니다."""
+    try:
+        return float(number_text) == 0
+    except ValueError:
+        return False
+
+
 def _average_gap(ctx: Ctx, kind: str) -> str | None:
     # 지표 선택(M22)과 무관하다(서술 설계 D17·D39, v0.14) — 클래스별 표는 엔진이 늘 계산하고, 프론트가 그 평균 행으로
     # facts.average_gap 을 늘 싣는다(narrativeFacts.averageGap). 값이 없으면(정답 클래스 둘 미만·옛 요청) 쓰지 않는다.
@@ -1281,7 +1289,11 @@ def _average_gap(ctx: Ctx, kind: str) -> str | None:
     other = "가중 평균" if kind == "macro_vs_weighted" else "마이크로 평균"
     size = unsigned(g.difference_text)
     # difference = 다른 평균 − 매크로(프론트 narrativeFacts.averageGap).
-    if g.difference > 0:
+    # 갈래는 찍히는 차이(difference_text)로 고른다 — 반올림 전 값(-0.000015)으로 고르면 표기 자릿수 아래의 차이가 "보다 0 낮다"·
+    # "보다 0.000 낮다"로 찍힌다(심판 라운드 1단계 검토 지적 2, 발급본 입력 digits_strong). 찍히는 차이가 0 이면 이미 있는 '같다' 갈래.
+    if _shown_zero(size):
+        relation = "두 값이 같다"
+    elif g.difference > 0:
         relation = f"{other} F1 이 매크로 F1 보다 {size} 높다"
     elif g.difference < 0:
         relation = f"{other} F1 이 매크로 F1 보다 {size} 낮다"

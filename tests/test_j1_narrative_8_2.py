@@ -288,7 +288,14 @@ async def test_prompt_has_no_representativeness_without_source(task, edition):
 # ── 1) 평균 방식 차이 — M22 를 고르지 않아도 ─────────────────────────────────────────
 
 GAP_ITEM = {"multiclass": "8.2-07", "multilabel": "8.2-08"}
-GAP_WORDS = {"multiclass": "가중 평균 F1 이 매크로 F1 보다", "multilabel": "마이크로 평균 F1 이 매크로 F1 보다"}
+# 계약 예시마다 평균 방식 차이 문장의 관계 말(손으로 적음). 판 4 다중(digits_strong 입력)은 찍히는 차이가 '0.000' 이라
+# '같다'(검토 지적 2 — 전에는 "보다 0.000 낮다").
+GAP_RELATION = {
+    ("multiclass", 3): "가중 평균 F1 이 매크로 F1 보다 0.0049 높다.",
+    ("multiclass", 4): "가중 평균 F1 은 0.989로 두 값이 같다.",
+    ("multilabel", 3): "마이크로 평균 F1 이 매크로 F1 보다 0.0001 낮다.",
+    ("multilabel", 4): "마이크로 평균 F1 이 매크로 F1 보다 0.227 높다.",
+}
 
 
 def _gap_req(task: str, edition: int, *, m22: bool) -> NarrativeRequest:
@@ -307,7 +314,7 @@ def test_average_gap_is_written_without_m22(task, edition):
     assert "M22" not in req.fact_sheet.facts.selected_metrics
     picked = _conclusions(req)
     item = GAP_ITEM[task]
-    assert item in picked and GAP_WORDS[task] in picked[item].text
+    assert item in picked and GAP_RELATION[(task, edition)] in picked[item].text
     assert picked[item].author == "ai" and picked[item].template_text == picked[item].text
     # M22 를 골라도 같은 글(조건이 아니다).
     assert _conclusions(_gap_req(task, edition, m22=True))[item].text == picked[item].text
@@ -342,3 +349,62 @@ async def test_average_gap_reaches_rule_sentence_and_prompt_without_m22(task, ed
     user8 = (await fz.job_prompts(req))["chapters"]["8"]["user"]
     block = user8.split(f"■ {place('8.2', edition=edition)} ", 1)[1]
     assert f"  - {c.text}\n" in block.split("반드시 다룰 결론:\n", 1)[1]
+
+
+# ── 1) 평균 방식 차이 — 찍히는 차이가 0 이면 '같다'(검토 지적 2) ─────────────────────────────
+
+GAP_OTHER = {"multiclass": "가중 평균", "multilabel": "마이크로 평균"}
+
+
+def _gap_with(task: str, edition: int, difference: float, difference_text: str) -> str:
+    raw = _raw(task, edition)
+    gap = raw["fact_sheet"]["facts"]["average_gap"]
+    gap["difference"], gap["difference_text"] = difference, difference_text
+    return _conclusions(NarrativeRequest.model_validate(raw))[GAP_ITEM[task]].text
+
+
+@pytest.mark.parametrize("edition", EDITIONS)
+@pytest.mark.parametrize("task", list(GAP_ITEM))
+@pytest.mark.parametrize(
+    ("difference", "difference_text"),
+    [(-1.5e-05, "0"), (-1.5e-05, "0.000"), (4e-05, "0.0000"), (-4e-05, "-0.0000"), (0.0, "0")],
+)
+def test_average_gap_shown_as_zero_says_equal(task, edition, difference, difference_text):
+    """반올림 전 차이가 0 이 아니어도 찍히는 차이가 0 이면 '두 값이 같다' — '보다 0 낮다'·'보다 0.000 낮다'가 아니다."""
+    text = _gap_with(task, edition, difference, difference_text)
+    assert "두 값이 같다." in text
+    assert "높다" not in text and "낮다" not in text and f"F1 이 매크로 F1 보다" not in text
+
+
+@pytest.mark.parametrize("edition", EDITIONS)
+@pytest.mark.parametrize("task", list(GAP_ITEM))
+def test_average_gap_shown_nonzero_keeps_direction_and_size(task, edition):
+    """반대 갈래 — 찍히는 차이가 0 이 아니면 방향과 크기(부호 뗀 표기)를 그대로 쓴다."""
+    other = GAP_OTHER[task]
+    up = _gap_with(task, edition, 0.0049, "0.0049")
+    assert f"{other} F1 이 매크로 F1 보다 0.0049 높다." in up and "같다" not in up
+    down = _gap_with(task, edition, -7.0e-05, "-0.0001")
+    assert f"{other} F1 이 매크로 F1 보다 0.0001 낮다." in down and "같다" not in down
+
+
+@pytest.mark.parametrize("edition", EDITIONS)
+def test_issued_digits_strong_gap_is_equal_not_zero_lower(edition):
+    """실제 발급본 입력 digits_strong(RPT-2026-0003) — 매크로 0.98887·가중 0.98885(차 -0.000015, 판 3 표기 '0')."""
+    raw = json.loads((ISSUED / "digits_strong.request.json").read_text(encoding="utf-8"))
+    raw["report_edition"] = edition
+    gap = raw["fact_sheet"]["facts"]["average_gap"]
+    assert gap["difference"] < 0 and gap["difference_text"] == "0"
+    text = _conclusions(NarrativeRequest.model_validate(raw))["8.2-07"].text
+    assert "로 두 값이 같다." in text and "낮다" not in text
+
+
+@pytest.mark.parametrize("task", list(GAP_ITEM))
+async def test_edition4_contract_gap_rule_sentence_has_no_zero_lower(task):
+    """판 4 계약 예시(다중은 digits_strong 입력 — 표기 '0.000')의 규칙 문장에 '보다 0.000 낮다'가 없다."""
+    req = NarrativeRequest.model_validate(_raw(task, 4))
+    narrative = (await generator.generate_sections(None, req)).response.conclusion.narrative
+    c = _conclusions(req)[GAP_ITEM[task]]
+    assert c.text in narrative
+    assert "보다 0.000 " not in narrative and "보다 0 " not in narrative
+    if req.fact_sheet.facts.average_gap.difference_text == "0.000":
+        assert "두 값이 같다." in c.text
