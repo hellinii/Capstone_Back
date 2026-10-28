@@ -1078,6 +1078,10 @@ def verdict_sentence(fs: FactSheet, derived: dict, *, edition: int) -> str:
         else:
             text = f"핵심 지표가 목표에 미달하여 종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
     elif fs.verdict == "CONDITIONAL_PASS" and failed:
+        # 결정 대기(심판 라운드 1단계 통합 확인): 핵심 지표가 하나도 없는 성적서(프론트 부록 B31 갈래 — 화면을 거친 입력에서는
+        # 생기지 않는 방어 갈래)에도 이 글이 나가, 같은 판 4 성적서의 4.2 근거(B31 "{미달 지표}이(가) 목표에 미달하여 …")와
+        # 엇갈린다. 고치려면 문서에 없는 새 글이 필요하고, is_core 가 모두 거짓인 요청을 옛 요청(핵심 정보 없음)과 가르는 기준도
+        # 정해야 한다 — 프론트 docs/ARCHITECTURE.md §6.6 켜기 전 확인 목록.
         text = (
             "핵심 지표는 모두 목표를 충족하였으나 핵심이 아닌 지표가 목표에 미달하여 "
             f"종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
