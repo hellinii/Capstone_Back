@@ -503,6 +503,103 @@ async def pilot(runner: "Runner", clients: Clients, paths: list[Path], out_dir: 
     return summaries
 
 
+def job_live(runner: "Runner", req_path: Path, out_dir: Path, meta: dict, *, anthropic_client=None,
+             openai_client=None) -> dict:
+    """J5b 끝 한 작업 — 판 4 요청 하나를 실제 작업 경로(POST → 생성 → 심판 사다리 → 묶음)로 돌린다(계획 §마 J5b 행).
+
+    앱 시작이 .env 의 키로 두 클라이언트를 만든다(--live). 시험은 가짜 클라이언트를 넘긴다. 임시 sqlite 만 쓴다.
+    장부에는 생성(Anthropic)과 채점(OpenAI, 사다리 전체)을 따로 한 줄씩 쓴다. 돌려주는 요약에는 서술 글이 없다."""
+    import hashlib
+    import tempfile
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.database import Base, configure_sqlite
+    from app.main import app
+    from app.narrative import jobs
+    from app.narrative.models import NarrativeJob
+
+    raw = json.loads(Path(req_path).read_text(encoding="utf-8"))
+    if raw.get("report_edition") != 4:
+        raise RunnerError("job 은 판 4 요청만 받는다(report_edition 4)")
+    tag = Path(req_path).name[: -len(".request.json")] if Path(req_path).name.endswith(".request.json") else Path(req_path).stem
+    tmp = tempfile.mkdtemp(prefix="judge_job_")
+    engine = create_engine(f"sqlite:///{tmp}/jobs.db", connect_args={"check_same_thread": False})
+    configure_sqlite(engine)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    app.dependency_overrides[jobs.get_session_factory] = lambda: factory
+    try:
+        with TestClient(app) as client:
+            if anthropic_client is not None:
+                app.state.anthropic_client = anthropic_client
+            if openai_client is not None:
+                app.state.openai_client = openai_client
+            if app.state.anthropic_client is None or app.state.openai_client is None:
+                raise RunnerError("서술(ANTHROPIC)·심판(OPENAI) 클라이언트가 둘 다 있어야 한다")
+            created = client.post("/api/narrative/jobs", json=raw)
+            if created.status_code != 200 or not created.json().get("job_id"):
+                raise RunnerError(f"{tag}: 작업을 만들지 못했다({created.status_code})")
+            job_id = created.json()["job_id"]
+            view = client.get(f"/api/narrative/jobs/{job_id}").json()  # TestClient 는 백그라운드 작업을 응답 전에 끝낸다
+            with factory() as db:
+                internal = json.loads(db.get(NarrativeJob, job_id).internal_json or "{}")
+    finally:
+        app.dependency_overrides.pop(jobs.get_session_factory, None)
+        engine.dispose()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / f"{tag}.job.json"
+    body = json.dumps({"tag": tag, "view": view, "internal": internal}, ensure_ascii=False, indent=1) + "\n"
+    target.write_text(body, encoding="utf-8")
+    sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+    gen_calls = [c for c in internal.get("calls", []) if c.get("http")]
+    gen_cost = internal.get("cost_usd")
+    judge = internal.get("judge") or {}
+    summary = judge.get("summary") or {}
+    jcalls = [c for r in judge.get("rounds", []) for m in ("extract", "faithfulness", "consistency", "coverage", "readability")
+              for c in ((r.get("record") or {}).get(m) or {}).get("calls", [])]
+    common = {**meta, "report": tag, "variant": "job", "result_file": str(target), "result_sha256": sha}
+    runner.record({**common, "stage": "job_generate", "model_requested": "claude-sonnet-5-5",
+                   "model_served": ",".join(sorted({c.get("response_model") for c in gen_calls if c.get("response_model")})),
+                   "input_tokens": sum(c.get("input_tokens") or 0 for c in gen_calls),
+                   "output_tokens": sum(c.get("output_tokens") or 0 for c in gen_calls),
+                   "cost_usd": "" if gen_cost is None else f"{gen_cost:.6f}", "price_table": "anthropic-llm.py",
+                   "seconds": internal.get("seconds", ""), "error": internal.get("failure") or internal.get("reason") or ""})
+    jcost = summary.get("cost_usd")
+    runner.record({**common, "stage": "job_judge", "model_requested": "gpt-6.1-sol+gpt-6-luna",
+                   "model_served": ",".join(sorted({c.get("response_model") for c in jcalls if c.get("response_model")})),
+                   "input_tokens": sum(c.get("input_tokens") or 0 for c in jcalls),
+                   "cached_input_tokens": sum(c.get("cached_input_tokens") or 0 for c in jcalls),
+                   "output_tokens": sum(c.get("output_tokens") or 0 for c in jcalls),
+                   "reasoning_tokens": sum(c.get("reasoning_tokens") or 0 for c in jcalls),
+                   "cost_usd": "" if jcost is None else f"{jcost:.6f}", "price_table": "openai-2026-10-28",
+                   "seconds": summary.get("seconds", ""), "gate": judge.get("gate", ""),
+                   "error": judge.get("held_kind") or ""})
+    return {"tag": tag, "status": view.get("status"), "judge": (view.get("result") or {}).get("judge"),
+            "sources": (view.get("result") or {}).get("section_sources"), "summary": summary,
+            "generation_cost_usd": gen_cost, "generation_reason": internal.get("reason"),
+            "seconds_total": internal.get("seconds_total"), "stages": internal.get("stages"),
+            "rounds": [{k: r.get(k) for k in ("round", "after", "gate", "failure", "flagged", "seconds", "cost_usd", "skipped")}
+                       for r in judge.get("rounds", [])], "sha256": sha}
+
+
+def _cmd_job(args: argparse.Namespace) -> int:
+    path = Path(args.request)
+    guard_read(path, "dev")  # 검증 폴더(봉인)는 읽지 않는다 — 개발 입력만
+    runner = Runner(Ledger(Path(args.ledger)), Budget.from_env(), "live" if args.live else "dev")
+    # 최악: 생성 $0.25 + 채점 3번(시간표상 10분 안 최대) × $0.15 = $0.70. 보통(한 번에 통과) 약 $0.40.
+    runner.start(BatchPlan("job", runs=2, est_cost_usd=0.70), yes=args.yes)
+    if not args.live:
+        raise RunnerError("job 은 실호출이다 — --live 를 준다")
+    make_clients(live=True)  # .env 를 읽는다(앱 시작이 같은 키로 두 클라이언트를 만든다)
+    summary = job_live(runner, path, Path(args.out), run_meta())
+    print(json.dumps(summary, ensure_ascii=False, indent=1))
+    return 0
+
+
 def _cmd_pilot(args: argparse.Namespace) -> int:
     import asyncio
 
@@ -569,6 +666,13 @@ def build_parser() -> argparse.ArgumentParser:
     pilot_p.add_argument("--live", action="store_true")
     pilot_p.add_argument("--yes", action="store_true")
     pilot_p.set_defaults(func=_cmd_pilot)
+    job_p = sub.add_parser("job", help="J5b 끝 한 작업(개발 판 4 입력 하나 — 생성 + 심판 사다리, 실호출)")
+    job_p.add_argument("--ledger", required=True)
+    job_p.add_argument("--request", required=True)
+    job_p.add_argument("--out", required=True)
+    job_p.add_argument("--live", action="store_true")
+    job_p.add_argument("--yes", action="store_true")
+    job_p.set_defaults(func=_cmd_job)
     smoke_p = sub.add_parser("smoke", help="J1 실호출 스모크(합성 문장, 약 6회)")
     smoke_p.add_argument("--ledger", required=True)
     smoke_p.add_argument("--out")

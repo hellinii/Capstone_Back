@@ -354,3 +354,37 @@ def test_pilot_refuses_validation_folder(tmp_path, monkeypatch):
     monkeypatch.setenv("JUDGE_VALIDATION_DIR", str(vdir))
     assert jl.main(["pilot", "--ledger", str(tmp_path / "l.csv"), "--request", str(sealed), "--out", str(tmp_path / "o"),
                     "--live", "--yes"]) == 2
+
+
+# ── J5b 끝 한 작업(job) — 가짜 클라이언트로 실제 작업 경로 ──
+
+
+def test_job_runs_the_real_job_path_and_writes_two_ledger_rows(tmp_path):
+    from scripts.dev_fake_llm_server import FakeAnthropic, FakeOpenAI
+
+    runner, out, _ = _runner(tmp_path)
+    src = Path(__file__).parent / "data" / "judge_dev" / "dev_binary.request.json"
+    an, oa = FakeAnthropic(), FakeOpenAI("pass")
+    summary = jl.job_live(runner, src, tmp_path / "결과", {"criteria_version": "1.0-dev"}, anthropic_client=an, openai_client=oa)
+    assert an.calls > 0 and oa.calls > 0
+    assert summary["status"] == "done" and summary["judge"]["gate"] == "passed"
+    assert summary["summary"]["rounds"] == 1 and "judging" in [s["stage"] for s in summary["stages"]]
+    assert "interpretation" not in json.dumps(summary, ensure_ascii=False)  # 글은 화면에 찍지 않는다
+    rows = runner.ledger.rows()
+    assert [(r["stage"], r["report"], r["variant"]) for r in rows] == [("job_generate", "dev_binary", "job"),
+                                                                        ("job_judge", "dev_binary", "job")]
+    assert rows[1]["gate"] == "passed" and rows[0]["result_sha256"] == summary["sha256"]
+    assert (tmp_path / "결과" / "dev_binary.job.json").exists()
+
+
+def test_job_refuses_edition3_and_needs_live(tmp_path, monkeypatch):
+    runner, _, _ = _runner(tmp_path)
+    ed3 = tmp_path / "x.request.json"
+    raw = json.loads((Path(__file__).parent / "data" / "judge_dev" / "dev_binary.request.json").read_text(encoding="utf-8"))
+    ed3.write_text(json.dumps({**raw, "report_edition": 3}), encoding="utf-8")
+    with pytest.raises(jl.RunnerError, match="판 4"):
+        jl.job_live(runner, ed3, tmp_path / "o", {})
+    monkeypatch.setenv("JUDGE_VALIDATION_DIR", str(tmp_path / "검증"))
+    rc = jl.main(["job", "--ledger", str(tmp_path / "장부2.csv"), "--request",
+                  str(Path(__file__).parent / "data" / "judge_dev" / "dev_binary.request.json"), "--out", str(tmp_path / "o"), "--yes"])
+    assert rc == 2  # --live 없이는 부르지 않는다
