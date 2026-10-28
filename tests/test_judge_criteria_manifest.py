@@ -58,8 +58,8 @@ def test_changelog_has_current_version():
 
 def test_model_settings_match_code_defaults():
     m = criteria.load_json("model.json")
-    assert (m["judge_model"], m["extract_model"], m["effort"]) == (
-        config.DEFAULT_JUDGE_MODEL, config.DEFAULT_EXTRACT_MODEL, config.DEFAULT_EFFORT
+    assert (m["judge_model"], m["extract_model"], m["effort"], m["extract_effort"]) == (
+        config.DEFAULT_JUDGE_MODEL, config.DEFAULT_EXTRACT_MODEL, config.DEFAULT_EFFORT, config.DEFAULT_EXTRACT_EFFORT
     )
 
 

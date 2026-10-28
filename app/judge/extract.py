@@ -151,7 +151,7 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
         out = await llm.create_response(
             client, purpose=f"extract_{round_no}", model=config.extract_model(), instructions=text,
             input=[{"role": "user", "content": user}], timeout_s=CALL_TIMEOUT_SECONDS, deadline=deadline,
-            text_format=schema, **kw,
+            text_format=schema, effort=config.extract_effort(), **kw,
         )
         data, failure = llm.parse_json(out)
         calls.append(out.record.as_dict())

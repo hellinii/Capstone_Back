@@ -91,7 +91,7 @@ async def test_instructions_come_from_claims_json_and_catalog_without_values():
     text = fake.calls[0]["instructions"]
     assert "시사한다" in text and "Precision 0.969, Recall 0.984" in text  # 주장 규칙(claims.json)
     assert "- metric.M3.value" in text and "0.5" not in text  # 칸 이름만, 값은 없다
-    assert fake.calls[0]["model"] == "gpt-6-luna"
+    assert fake.calls[0]["model"] == "gpt-6-luna" and fake.calls[0]["reasoning"] == {"effort": "low"}
 
 
 async def test_zero_claims_with_numbers_is_failure():

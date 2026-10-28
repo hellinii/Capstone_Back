@@ -15,6 +15,9 @@ import re
 DEFAULT_JUDGE_MODEL = "gpt-6.1-sol"
 DEFAULT_EXTRACT_MODEL = "gpt-6-luna"
 DEFAULT_EFFORT = "medium"
+# 공용 전처리(주장 추출)는 판단하지 않고 구절을 옮기는 일이라 추론 강도를 낮게 둔다(설계 4절의 '같은 강도'는 심판 4모듈 —
+# J4 파일럿: medium 이면 추출 한 번에 60~70초, 출력의 절반 이상이 추론 토큰).
+DEFAULT_EXTRACT_EFFORT = "low"
 EFFORT_LEVELS = ("low", "medium", "high")
 
 # 100만 토큰당 달러(입력, 캐시 입력, 출력). OpenAI 공식 가격표(2026-10-28 사용자 확인). 없는 모델은 비용 None(추정하지 않는다).
@@ -41,6 +44,12 @@ def judge_effort() -> str:
     """추론 강도(`JUDGE_EFFORT`). 비었거나 모르는 값이면 코드 기본값."""
     value = os.getenv("JUDGE_EFFORT", "").strip().lower()
     return value if value in EFFORT_LEVELS else DEFAULT_EFFORT
+
+
+def extract_effort() -> str:
+    """전처리 추론 강도(`JUDGE_EXTRACT_EFFORT`). 비었거나 모르는 값이면 코드 기본값."""
+    value = os.getenv("JUDGE_EXTRACT_EFFORT", "").strip().lower()
+    return value if value in EFFORT_LEVELS else DEFAULT_EXTRACT_EFFORT
 
 
 def price_of(model: str | None) -> tuple[float, float, float] | None:
