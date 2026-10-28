@@ -75,6 +75,11 @@ class IssueRequest(BaseModel):
         description="발급 시점의 성적서 원본(FinalReportData). 서버가 그대로 보관해 "
                     "번호로 복원·진위 대조할 수 있게 한다. 선택(미전송 시 메타만 저장).",
     )
+    narrative_job_id: str | None = Field(
+        default=None, max_length=64,
+        description="판 4 성적서(contentSchema 가 1·2·3 정수가 아님)의 서술 작업 번호 — 그 작업이 판 4 · 완료 · 심판 통과여야 "
+                    "발급한다(심판 라운드 J5b). 판 1~3 성적서는 보지 않는다.",
+    )
 
     @field_validator("run_id")
     @classmethod
@@ -112,6 +117,10 @@ class ReissueRequest(BaseModel):
     content: dict | None = Field(
         default=None,
         description="정정된 성적서 원본. 이전 차수의 스냅샷은 보존된다(정정 전후 대조용).",
+    )
+    narrative_job_id: str | None = Field(
+        default=None, max_length=64,
+        description="판 4 성적서의 서술 작업 번호 — 첫 발급과 같은 검사(판 4 · 완료 · 심판 통과).",
     )
 
     @field_validator("run_id")
