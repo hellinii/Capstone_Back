@@ -2,7 +2,8 @@
 
 1) 평균 방식 차이(8.2-07 다중 macro vs weighted, 8.2-08 멀티 macro vs micro — D17·D39)는 지표 선택(M22)과 무관하게
    늘 계산하는 클래스별 표의 평균 행(facts.average_gap)이 있으면 쓴다.
-2) 평가 데이터의 대표성과 한계(8.2-14): 조건은 '평가 데이터 출처가 제공됨'(고객 입력 test_data 의 '평가 데이터 출처').
+2) 평가 데이터의 대표성과 한계(8.2-14): 조건은 '평가 데이터 출처가 제공됨' — 보고 항목 2(고객 입력 test_data 의
+   '평가 데이터 출처'·'학습 데이터와의 관계' 두 줄)가 재료 점검 셈으로 제공되었을 때(1.3 판정과 같게 — 검토 지적 1).
    AI 가 해석하되 고객 입력만으로 단정하지 않고 '~로 보인다'처럼 추론으로 쓰고, 규칙 템플릿은 사실 문장만 찍는다
    (심판 설계 6.2 소견-7 — 고객 정보에 기댄 단정형 해석은 위반).
 
@@ -25,6 +26,8 @@ CONTRACT = Path(__file__).parent / "contract"
 TASKS = ("binary", "multiclass", "multilabel")
 EDITIONS = (3, 4)
 SOURCE_KEY = "평가 데이터 출처"
+RELATION_KEY = "학습 데이터와의 관계"
+RELATION = "다른 출처"
 PURPOSE = "생산 라인 2 의 불량 검출"
 SOURCE = "2025년 1분기 고객 로그에서 무작위로 뽑은 표본"
 
@@ -36,7 +39,8 @@ INTERPRETIVE = ("대표", "보인다", "한계", "해석", "적합", "적절")
 
 _ABSENT = object()  # 키를 아예 두지 않음
 
-# 제공 아님 꼴 — 키 없음, 빈 값, 공백, 글이 아닌 값, '제공되지 않음'(프론트 materialRowText), 모름 + 덧붙이는 글 꼴, '모름' 한 낱말.
+# 제공 아님 꼴 — 키 없음, 빈 값, 공백, 글이 아닌 값, '제공되지 않음'(프론트 materialRowText — '모름' 선택·빈 칸·카드 끔),
+# '모름' 선택 + 덧붙이는 글 꼴.
 NOT_PROVIDED_FORMS = {
     "키 없음": _ABSENT,
     "빈 값": "",
@@ -44,9 +48,24 @@ NOT_PROVIDED_FORMS = {
     "글이 아님": None,
     "제공되지 않음": "제공되지 않음",
     "제공되지 않음+의뢰자 글": "제공되지 않음 (의뢰자 제공: 사내 로그 일부)",
-    "모름": "모름",
-    "모름(앞뒤 공백)": "  모름 ",
 }
+
+# 의뢰자가 글 칸에 직접 적은 '모름' — 프론트 재료 점검(materialCheck, 줄 값이 null 이 아니면 제공)은 제공으로 센다. 서술도
+# 같게 본다(판정이 두 곳에서 갈리지 않게 — 검토 지적 3·4). '모름' 선택(체크)은 프론트가 "제공되지 않음"으로 보낸다(위 꼴).
+TYPED_UNKNOWN = ("모름", "  모름 ", "모름, 사내 로그 일부", "수집 경로는 모름, 사내 로그")
+
+# 발급본 6건(판 3, tests/data/edition3_issued/requests)의 보고 항목 2 제공 여부 — 프론트 보관 원문
+# (Capstone_Front src/test/archive/issued/RPT-2026-000N.content.json)의 materialCheck.printed.impacts 에
+# "평가 데이터 출처: 평가 데이터가 용도를 대표하는지 판단할 수 없다." 줄이 있으면 False. 옆 저장소를 읽지 않도록 손으로 옮겼다.
+ISSUED_ITEM2_PROVIDED = {
+    "bc_strong": True,      # RPT-2026-0001
+    "bc_weak": False,       # RPT-2026-0002 — 출처·관계 모두 제공되지 않음
+    "digits_strong": True,  # RPT-2026-0003
+    "digits_weak": False,   # RPT-2026-0004 — 출처·관계 모두 제공되지 않음
+    "yeast_strong": True,   # RPT-2026-0005
+    "yeast_weak": False,    # RPT-2026-0006 — 출처 '표준 시험 분할'은 있으나 관계가 "제공되지 않음 (의뢰자 제공: …)"
+}
+ISSUED = Path(__file__).parent / "data" / "edition3_issued" / "requests"
 
 
 def _raw(task: str, edition: int) -> dict:
@@ -57,7 +76,9 @@ def _raw(task: str, edition: int) -> dict:
     return raw
 
 
-def _with_source(task: str, edition: int, source, *, purpose: str | None = PURPOSE, test_data: bool = True) -> NarrativeRequest:
+def _with_source(
+    task: str, edition: int, source, *, purpose: str | None = PURPOSE, test_data: bool = True, relation=RELATION,
+) -> NarrativeRequest:
     raw = _raw(task, edition)
     inputs = copy.deepcopy(raw.get("client_inputs") or {})
     model = dict(inputs.get("model") or {})
@@ -71,8 +92,11 @@ def _with_source(task: str, edition: int, source, *, purpose: str | None = PURPO
     else:
         test = dict(inputs.get("test_data") or {})
         test.pop(SOURCE_KEY, None)
+        test.pop(RELATION_KEY, None)
         if source is not _ABSENT:
             test[SOURCE_KEY] = source
+        if relation is not _ABSENT:
+            test[RELATION_KEY] = relation
         inputs["test_data"] = test
     raw["client_inputs"] = inputs
     req = NarrativeRequest.model_validate(raw)
@@ -137,11 +161,49 @@ def test_no_test_data_group_or_relation_only_drops_the_item(task, edition):
 
 
 @pytest.mark.parametrize("edition", EDITIONS)
-def test_unknown_inside_a_sentence_is_still_a_source(edition):
-    """'모름'은 칸 전체가 그 낱말일 때만 제공 아님 — 글 속의 '모름'은 의뢰자가 적은 내용이라 값으로 둔다."""
-    source = "수집 경로는 모름, 사내 로그"
+@pytest.mark.parametrize("task", TASKS)
+@pytest.mark.parametrize("form", list(NOT_PROVIDED_FORMS))
+def test_relation_not_provided_drops_the_item(task, edition, form):
+    """검토 지적 1 — 출처 글이 있어도 학습 데이터와의 관계가 빠지면 보고 항목 2 는 빠짐이다(1.3 이 '평가 데이터가 용도를 대표하는지
+    판단할 수 없다'를 찍는다). 같은 성적서의 8.2 가 대표성을 해석하지 않는다."""
+    assert "8.2-14" not in _conclusions(_with_source(task, edition, SOURCE, relation=NOT_PROVIDED_FORMS[form]))
+    # 반대 갈래 — 관계만 채우면 나온다(출처 글은 그대로).
+    assert "8.2-14" in _conclusions(_with_source(task, edition, SOURCE, relation=RELATION))
+
+
+@pytest.mark.parametrize("edition", EDITIONS)
+@pytest.mark.parametrize("relation", ["같은 출처", "다른 출처", "의뢰자 제공: 같은 병원 자료로 안다", "같은 출처 (의뢰자 제공: 같은 장비)"])
+def test_any_provided_relation_keeps_the_item(edition, relation):
+    """관계는 제공 여부만 본다(같은/다른 출처·글만 적은 답 모두 제공 — 재료 목록 셈 규칙). 템플릿에는 관계를 싣지 않는다."""
+    c = _conclusions(_with_source("multiclass", edition, SOURCE, relation=relation))["8.2-14"]
+    assert c.template_text == _fact(SOURCE)
+
+
+@pytest.mark.parametrize("edition", EDITIONS)
+@pytest.mark.parametrize("name", list(ISSUED_ITEM2_PROVIDED))
+def test_issued_inputs_follow_the_material_check(name, edition):
+    """실제 발급본 요청 6건 — 8.2-14 가 나오는 것은 프론트 1.3(판 3 1.4)이 '평가 데이터 출처'를 빠짐으로 찍지 않은 성적서뿐이다."""
+    raw = json.loads((ISSUED / f"{name}.request.json").read_text(encoding="utf-8"))
+    raw["report_edition"] = edition
+    req = NarrativeRequest.model_validate(raw)
+    assert req.report_edition == edition
+    picked = _conclusions(req)
+    assert ("8.2-14" in picked) is ISSUED_ITEM2_PROVIDED[name]
+    if ISSUED_ITEM2_PROVIDED[name]:
+        assert picked["8.2-14"].template_text == _fact(req.client_inputs["test_data"][SOURCE_KEY].strip())
+
+
+def test_issued_table_has_both_sides():
+    assert set(ISSUED_ITEM2_PROVIDED.values()) == {True, False}
+    assert sorted(p.name.removesuffix(".request.json") for p in ISSUED.glob("*.request.json")) == sorted(ISSUED_ITEM2_PROVIDED)
+
+
+@pytest.mark.parametrize("edition", EDITIONS)
+@pytest.mark.parametrize("source", TYPED_UNKNOWN)
+def test_typed_unknown_is_a_source_like_the_material_check(source, edition):
+    """검토 지적 3·4 — 글 칸에 직접 적은 '모름'(한 낱말이든 글 앞·가운데든)은 프론트 재료 점검처럼 제공으로 센다."""
     c = _conclusions(_with_source("binary", edition, source))["8.2-14"]
-    assert c.template_text == _fact(source)
+    assert c.template_text == _fact(source.strip())
 
 
 @pytest.mark.parametrize("edition", EDITIONS)
@@ -170,9 +232,15 @@ async def test_rule_sentence_prints_only_the_fact(task, edition):
     narrative = given.conclusion.narrative
     # 8.2 칸 마지막 결론(표 순서 — 모델 용도 사실 문장 바로 뒤).
     assert narrative.endswith(f"의뢰자가 밝힌 모델 용도는 '{PURPOSE}'이다. {_fact(SOURCE)}")
-    for form in ("키 없음", "모름", "제공되지 않음+의뢰자 글"):
-        dropped = (await generator.generate_sections(None, _with_source(task, edition, NOT_PROVIDED_FORMS[form]))).response
-        assert SOURCE_KEY not in dropped.conclusion.narrative, form
+    cases = {
+        "출처 키 없음": _with_source(task, edition, NOT_PROVIDED_FORMS["키 없음"]),
+        "출처 모름+글": _with_source(task, edition, NOT_PROVIDED_FORMS["제공되지 않음+의뢰자 글"]),
+        "관계 모름": _with_source(task, edition, SOURCE, relation=NOT_PROVIDED_FORMS["제공되지 않음"]),
+        "관계 모름+글": _with_source(task, edition, SOURCE, relation=NOT_PROVIDED_FORMS["제공되지 않음+의뢰자 글"]),
+    }
+    for form, req in cases.items():
+        dropped = (await generator.generate_sections(None, req)).response
+        assert _fact(SOURCE) not in dropped.conclusion.narrative and "평가 데이터 출처는" not in dropped.conclusion.narrative, form
         # 출처 문장 하나만 빠지고 나머지 8.2 글은 같다.
         assert dropped.conclusion.narrative == narrative.removesuffix(f" {_fact(SOURCE)}"), form
     # 다른 칸에는 출처 문장이 없다(8.2 칸에만).
@@ -209,12 +277,12 @@ async def test_prompt_asks_for_inference_in_the_8_2_slot(task, edition):
 @pytest.mark.parametrize("edition", EDITIONS)
 @pytest.mark.parametrize("task", TASKS)
 async def test_prompt_has_no_representativeness_without_source(task, edition):
-    req = _with_source(task, edition, "모름")
-    chapters = (await fz.job_prompts(req))["chapters"]
-    assert chapters
-    for chapter, sent in chapters.items():
-        assert "얼마나 대표하는지" not in sent["user"], chapter
-        assert INFERENCE not in sent["user"], chapter
+    for req in (_with_source(task, edition, "제공되지 않음"), _with_source(task, edition, SOURCE, relation="제공되지 않음")):
+        chapters = (await fz.job_prompts(req))["chapters"]
+        assert chapters
+        for chapter, sent in chapters.items():
+            assert "얼마나 대표하는지" not in sent["user"], chapter
+            assert INFERENCE not in sent["user"], chapter
 
 
 # ── 1) 평균 방식 차이 — M22 를 고르지 않아도 ─────────────────────────────────────────

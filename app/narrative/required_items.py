@@ -37,9 +37,10 @@ text 가운데 fixed·form·7.3(open_ended) 항목은 AI 용 설명이라 템플
 심판 라운드 1단계(서술 설계 v0.14, 판 구분 없이 판 3·4 모두 — 판 3 얼린 정답은 이 두 항목만 바뀌었다):
 - 8.2 평균 방식 차이(8.2-07 다중 macro vs weighted, 8.2-08 멀티 macro vs micro — D17·D39)는 지표 선택(M22)과 무관하게
   쓴다. 엔진이 클래스별 표(class_report)를 늘 계산하고 프론트가 그 평균 행으로 facts.average_gap 을 늘 싣는다.
-- 8.2 평가 데이터의 대표성과 한계(8.2-14): 평가 데이터 출처가 제공되면(wording.is_not_provided 가 아님) AI 가 해석하고,
-  규칙 템플릿은 출처 사실 문장만 찍는다. 고객 입력만으로 대표성을 단정하지 않고 '~로 보인다'처럼 추론으로 쓰게 한다
-  (심판 설계 6.2 소견-7, 고객 정보에 기댄 단정형 해석 금지).
+- 8.2 평가 데이터의 대표성과 한계(8.2-14): 보고 항목 2 '평가 데이터 출처'가 제공되면(출처 글과 학습 데이터와의 관계 두 줄
+  모두 wording.is_not_provided 가 아님 — 1.3 재료 점검과 같은 판정) AI 가 해석하고, 규칙 템플릿은 출처 사실 문장만 찍는다.
+  고객 입력만으로 대표성을 단정하지 않고 '~로 보인다'처럼 추론으로 쓰게 한다(심판 설계 6.2 소견-7, 고객 정보에 기댄 단정형
+  해석 금지).
 
 상호작용
 - 의존(import): app.narrative.schemas, app.narrative.derived(compute_derived), app.narrative.baselines, app.narrative.sections,
@@ -1354,12 +1355,25 @@ def _purpose_fact(ctx: Ctx) -> str | None:
     return f"의뢰자가 밝힌 모델 용도는 '{purpose}'이다." if purpose else None
 
 
+# TS 4213 보고 항목 2 '평가 데이터 출처'를 이루는 두 줄(프론트 reportMaterials.testRows → client_inputs.test_data, 판 3·4 같은 자리).
+EVAL_SOURCE_ROW = "평가 데이터 출처"
+EVAL_RELATION_ROW = "학습 데이터와의 관계"
+
+
 def _eval_data_source(ctx: Ctx) -> str | None:
-    """의뢰자가 밝힌 평가 데이터 출처(고객 입력 test_data 의 '평가 데이터 출처' 줄 — 프론트 reportMaterials.testRows, 판 3·4 같은
-    자리). 제공되지 않았으면(빈 값·'모름'·'제공되지 않음…' — wording.is_not_provided 한 곳) None."""
+    """보고 항목 2 '평가 데이터 출처'가 제공되었으면 의뢰자가 밝힌 출처 글, 아니면 None — 8.2-14 의 조건('평가 데이터 출처가 제공됨').
+
+    '제공'은 재료 선택 점검의 셈이다: 항목 2 는 출처 글과 학습 데이터와의 관계를 합친 항목이고, 한 항목에 줄이 여럿이면 모든 줄이
+    있어야 제공이다(재료 선택 점검 4.2·표기 규칙 — "학습 데이터와의 관계만 빠져도 '평가 데이터 출처'"). 하나라도 빠지면 성적서
+    1.3(판 3 은 1.4)이 "평가 데이터 출처: 평가 데이터가 용도를 대표하는지 판단할 수 없다."(고정 문구 2.2)를 찍으므로, 같은 성적서의
+    8.2(판 4 는 5.1)가 대표성을 해석하면 말이 엇갈린다(검토 지적 1 — 발급본 RPT-2026-0006 입력 yeast_weak). 그래서 프론트
+    materialCheck 항목 2 와 같은 판정을 쓴다: 두 줄 모두 wording.is_not_provided 가 아님. 프론트는 줄 값이 없으면(null) 그 줄을
+    "제공되지 않음…"으로 보내므로(materialRowText) 이 판정은 1.3 의 판정과 같다."""
     test = ctx.client_inputs.get("test_data") if isinstance(ctx.client_inputs, dict) else None
-    source = test.get("평가 데이터 출처") if isinstance(test, dict) else None
-    if is_not_provided(source):
+    if not isinstance(test, dict):
+        return None
+    source, relation = test.get(EVAL_SOURCE_ROW), test.get(EVAL_RELATION_ROW)
+    if is_not_provided(source) or is_not_provided(relation):
         return None
     return source.strip()
 

@@ -94,3 +94,4 @@ python tests/generate_s0_goldens.py extract --db <c_view.db> --requests <요청 
 | 언제 | 무엇이 바뀌었나 | 확인 |
 |---|---|---|
 | 2026-10 심판 라운드 1단계 | 8.2 평균 방식 차이(8.2-07·8.2-08)를 지표 선택(M22)과 무관하게 쓰고, 8.2 평가 데이터의 대표성과 한계(8.2-14 — 평가 데이터 출처가 있을 때)를 더함(서술 설계 v0.14). 16개 파일: `edition3/{bc_strong,digits_strong,digits_weak,multiclass,multilabel,yeast_strong,yeast_weak}.{templates,job_prompts}.json`, `narrative_job_fallback_{multiclass,multilabel}.json`. `data/edition3_issued`(발급본 원문·요청)는 그대로 | 바뀌기 전 코드(563ceff)로 다시 뜬 출력과 견주어, 새 출력에서 이 두 항목의 글(지시문 결론 줄·규칙 문장)만 지우면 글자까지 같음. 사실 시트 보기·옛 경로 지시문·발급본 검문·평가/검증 정답은 바이트까지 같음 |
+| 2026-10 심판 라운드 1단계 검토 반영 ① | 8.2-14 의 조건을 보고 항목 2(출처 글과 학습 데이터와의 관계 두 줄)가 제공됐을 때로 — 1.3(판 3 1.4)의 '평가 데이터 출처' 빠짐 판정과 같게. 관계가 '제공되지 않음 (의뢰자 제공: …)'인 `yeast_weak`(RPT-2026-0006 입력)에서 8.2-14 가 빠짐. 2개 파일: `edition3/yeast_weak.{templates,job_prompts}.json` | 바로 앞 커밋 코드로 뜬 출력과 견주어 바뀐 것은 이 두 파일뿐이고, 지시문 결론 줄 10곳·규칙 문장의 출처 사실 문장 한 곳이 빠진 것 말고는 글자까지 같음 |
