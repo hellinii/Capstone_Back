@@ -1380,7 +1380,12 @@ def _eval_data_source(ctx: Ctx) -> str | None:
     1.3(판 3 은 1.4)이 "평가 데이터 출처: 평가 데이터가 용도를 대표하는지 판단할 수 없다."(고정 문구 2.2)를 찍으므로, 같은 성적서의
     8.2(판 4 는 5.1)가 대표성을 해석하면 말이 엇갈린다(검토 지적 1 — 발급본 RPT-2026-0006 입력 yeast_weak). 그래서 프론트
     materialCheck 항목 2 와 같은 판정을 쓴다: 두 줄 모두 wording.is_not_provided 가 아님. 프론트는 줄 값이 없으면(null) 그 줄을
-    "제공되지 않음…"으로 보내므로(materialRowText) 이 판정은 1.3 의 판정과 같다."""
+    "제공되지 않음…"으로 보내므로(materialRowText) 이 판정은 1.3 의 판정과 같다.
+
+    두 판정이 같은지는 두 저장소가 같은 바이트로 두는 대조 표 tests/contract/reporting_item2_cases.json 이 지킨다(이 저장소
+    tests/test_j1_item2_contract.py, 프론트 reportingItem2Contract.test.ts). 이 셈을 바꾸면 프론트 materialCheck 항목 2 와 표를
+    함께 바꾼다. 알려진 경계 하나(표의 pending): 의뢰자가 출처 글 칸에 '제공되지 않음'(으로 시작하는 글)을 직접 적으면 프론트는
+    제공, 여기는 빈 칸 대신 오는 말과 글자가 같아 제공 아님 — 글로 적은 '모름'의 셈과 함께 사용자가 정할 일이다."""
     test = ctx.client_inputs.get("test_data") if isinstance(ctx.client_inputs, dict) else None
     if not isinstance(test, dict):
         return None
