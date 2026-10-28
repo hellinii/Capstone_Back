@@ -575,5 +575,336 @@
       "0": "유지",
       "1": "해지"
     }
+  },
+  "judge_material": {
+    "version": "judge-material-1",
+    "material_check_version": "2.0",
+    "segments": [
+      {
+        "id": "4.2-table",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "종합 판정",
+          "판정 대상 지표 중 충족"
+        ],
+        "rows": [
+          [
+            "최종 불합격",
+            "4개 중 0개"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "4",
+            "field": "verdict.judged_count"
+          },
+          {
+            "text": "0",
+            "field": "verdict.passed_count"
+          }
+        ]
+      },
+      {
+        "id": "4.2-basis",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "fixed",
+        "text": "핵심 지표 Recall(M3)이 목표에 미달하여, 3.4의 판정 규칙에 따라 불합격으로 판정하였다.",
+        "numbers": []
+      },
+      {
+        "id": "4.3-margin",
+        "slot": "8.3",
+        "place": "4.3",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "시험항목",
+          "판정 여유"
+        ],
+        "rows": [
+          [
+            "Accuracy",
+            "충분"
+          ],
+          [
+            "Recall (핵심)",
+            "충분"
+          ],
+          [
+            "F1 Score",
+            "충분"
+          ],
+          [
+            "AUROC",
+            "충분"
+          ]
+        ],
+        "numbers": []
+      },
+      {
+        "id": "4.4-counts",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "혼동 행렬 건수",
+        "header": [
+          "양성 클래스",
+          "TP",
+          "TN",
+          "FP",
+          "FN"
+        ],
+        "rows": [
+          [
+            "1",
+            "52",
+            "49",
+            "56",
+            "43"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "52",
+            "field": "confusion_counts.1.tp"
+          },
+          {
+            "text": "49",
+            "field": "confusion_counts.1.tn"
+          },
+          {
+            "text": "56",
+            "field": "confusion_counts.1.fp"
+          },
+          {
+            "text": "43",
+            "field": "confusion_counts.1.fn"
+          }
+        ]
+      },
+      {
+        "id": "4.4-fixed17",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "fixed",
+        "text": "확률이 있는 오분류 99건 중 확신 오류(틀린 쪽 확률 0.9 이상)는 31건(31.3%)이다. 경계 오류는 예측값을 직접 제출해 결정 임계값을 알 수 없어 계산하지 않았다.",
+        "numbers": []
+      },
+      {
+        "id": "4.4-weakest",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "최약 클래스(F1 최저)\n매크로 F1과의 차이 = 매크로 F1 − 이 클래스의 F1. 작은 표본은 표본 수 30건 미만 또는 전체의 5% 미만입니다.",
+        "header": [
+          "클래스",
+          "F1",
+          "표본 수",
+          "비율",
+          "매크로 F1과의 차이",
+          "작은 표본"
+        ],
+        "rows": [
+          [
+            "0(유지)",
+            "0.497",
+            "105",
+            "52.5%",
+            "0.007",
+            "아니오"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "0.497",
+            "field": "facts.weakest_class.f1"
+          },
+          {
+            "text": "105",
+            "field": "facts.weakest_class.support"
+          },
+          {
+            "text": "52.5%",
+            "field": "facts.weakest_class.share"
+          },
+          {
+            "text": "0.007",
+            "field": "facts.weakest_class.gap"
+          }
+        ]
+      },
+      {
+        "id": "4.4-bias",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "예측 편향(예측 수 대 실제 수)",
+        "header": [
+          "양성 클래스",
+          "예측 수",
+          "실제 수",
+          "차이(예측 − 실제)"
+        ],
+        "rows": [
+          [
+            "1(해지)",
+            "108",
+            "95",
+            "+13"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "108",
+            "field": "facts.prediction_bias.1.predicted"
+          },
+          {
+            "text": "95",
+            "field": "facts.prediction_bias.1.actual"
+          },
+          {
+            "text": "+13",
+            "field": "facts.prediction_bias.1.difference"
+          }
+        ]
+      },
+      {
+        "id": "4.4-threshold",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "임계값 조정 여지\nF1의 최대 상승폭은 0.136이다.",
+        "header": [
+          "지표",
+          "현재 예측(제출된 예측값)",
+          "F1이 가장 높은 결정 임계값 0.030"
+        ],
+        "rows": [
+          [
+            "F1 Score",
+            "0.512",
+            "0.648"
+          ],
+          [
+            "Recall",
+            "0.547",
+            "0.989"
+          ],
+          [
+            "Precision",
+            "0.481",
+            "0.482"
+          ]
+        ],
+        "numbers": []
+      },
+      {
+        "id": "5.1-fixed11",
+        "slot": "8.2",
+        "place": "5.1",
+        "kind": "fixed",
+        "text": "평가 데이터는 학습 데이터와 다른 출처에서 수집되었다.",
+        "numbers": []
+      },
+      {
+        "id": "5.3-fixed12",
+        "slot": "7.2",
+        "place": "5.3",
+        "kind": "fixed",
+        "text": "정답 라벨의 구축 방법과 신뢰성이 각각 운영 로그, 검토 없음으로, 정답 자체의 오류가 성능 수치에 반영되었을 수 있다. 수치 해석 시 이를 고려해야 한다.",
+        "numbers": []
+      },
+      {
+        "id": "4.6-fixed16",
+        "slot": "8.1",
+        "place": "4.6",
+        "kind": "fixed",
+        "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: Log Loss, Imbalance Ratio.",
+        "numbers": []
+      },
+      {
+        "id": "5.4-b18",
+        "slot": "8.1",
+        "place": "5.4",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "5.6-fixed15",
+        "slot": "7.3",
+        "place": "5.6",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "6.1-recommend",
+        "slot": "9",
+        "place": "6.1",
+        "kind": "recommend_rows",
+        "text": "",
+        "header": [
+          "우선순위",
+          "대응 문제 번호",
+          "권고",
+          "기대 효과"
+        ],
+        "rows": [
+          [
+            "낮음",
+            "P4 · 학습↔평가 분포 차이 (0, 1)"
+          ],
+          [
+            "낮음",
+            "P5 · 정답 라벨 주의 (구축 방법 운영 로그, 신뢰성 검토 없음)"
+          ]
+        ],
+        "row_keys": [
+          "P4",
+          "P5"
+        ],
+        "numbers": []
+      },
+      {
+        "id": "6.2-recommend",
+        "slot": "9",
+        "place": "6.2",
+        "kind": "recommend_rows",
+        "text": "",
+        "header": [
+          "우선순위",
+          "대응 문제 번호",
+          "권고",
+          "기대 효과"
+        ],
+        "rows": [
+          [
+            "높음",
+            "P1 · 핵심 지표 미달 (Recall)"
+          ],
+          [
+            "중간",
+            "P2 · 비핵심 지표 미달 (Accuracy, F1 Score, AUROC)"
+          ],
+          [
+            "중간",
+            "P3 · 임계값 부적합"
+          ]
+        ],
+        "row_keys": [
+          "P1",
+          "P2",
+          "P3"
+        ],
+        "numbers": []
+      }
+    ]
   }
 }

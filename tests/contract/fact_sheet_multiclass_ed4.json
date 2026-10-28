@@ -899,5 +899,716 @@
       "1": "숫자 1",
       "7": "숫자 7(가로줄 없는 필체 포함)"
     }
+  },
+  "judge_material": {
+    "version": "judge-material-1",
+    "material_check_version": "2.0",
+    "segments": [
+      {
+        "id": "4.2-table",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "종합 판정",
+          "판정 대상 지표 중 충족"
+        ],
+        "rows": [
+          [
+            "최종 합격",
+            "3개 중 3개"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "3",
+            "field": "verdict.judged_count"
+          },
+          {
+            "text": "3",
+            "field": "verdict.passed_count"
+          }
+        ]
+      },
+      {
+        "id": "4.2-basis",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "fixed",
+        "text": "핵심 지표 Accuracy(M1), F1 Score(M4)와 그 밖의 판정 대상 지표가 모두 목표를 충족하여, 3.4의 판정 규칙에 따라 합격으로 판정하였다.",
+        "numbers": []
+      },
+      {
+        "id": "4.3-margin",
+        "slot": "8.3",
+        "place": "4.3",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "시험항목",
+          "판정 여유"
+        ],
+        "rows": [
+          [
+            "Accuracy (핵심)",
+            "작음"
+          ],
+          [
+            "F1 Score (핵심)",
+            "작음"
+          ],
+          [
+            "KL Divergence",
+            "충분"
+          ]
+        ],
+        "numbers": []
+      },
+      {
+        "id": "4.4-counts",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "혼동 행렬 건수\n클래스마다 그 클래스를 양성, 나머지를 음성으로 본 건수입니다.",
+        "header": [
+          "클래스",
+          "TP",
+          "TN",
+          "FP",
+          "FN"
+        ],
+        "rows": [
+          [
+            "0",
+            "54",
+            "486",
+            "0",
+            "0"
+          ],
+          [
+            "1",
+            "55",
+            "484",
+            "1",
+            "0"
+          ],
+          [
+            "2",
+            "53",
+            "486",
+            "1",
+            "0"
+          ],
+          [
+            "3",
+            "55",
+            "485",
+            "0",
+            "0"
+          ],
+          [
+            "4",
+            "54",
+            "486",
+            "0",
+            "0"
+          ],
+          [
+            "5",
+            "53",
+            "484",
+            "1",
+            "2"
+          ],
+          [
+            "6",
+            "53",
+            "485",
+            "1",
+            "1"
+          ],
+          [
+            "7",
+            "53",
+            "486",
+            "0",
+            "1"
+          ],
+          [
+            "8",
+            "52",
+            "487",
+            "1",
+            "0"
+          ],
+          [
+            "9",
+            "52",
+            "485",
+            "1",
+            "2"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "54",
+            "field": "confusion_counts.0.tp"
+          },
+          {
+            "text": "486",
+            "field": "confusion_counts.0.tn"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.0.fp"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.0.fn"
+          },
+          {
+            "text": "55",
+            "field": "confusion_counts.1.tp"
+          },
+          {
+            "text": "484",
+            "field": "confusion_counts.1.tn"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.1.fp"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.1.fn"
+          },
+          {
+            "text": "53",
+            "field": "confusion_counts.2.tp"
+          },
+          {
+            "text": "486",
+            "field": "confusion_counts.2.tn"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.2.fp"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.2.fn"
+          },
+          {
+            "text": "55",
+            "field": "confusion_counts.3.tp"
+          },
+          {
+            "text": "485",
+            "field": "confusion_counts.3.tn"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.3.fp"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.3.fn"
+          },
+          {
+            "text": "54",
+            "field": "confusion_counts.4.tp"
+          },
+          {
+            "text": "486",
+            "field": "confusion_counts.4.tn"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.4.fp"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.4.fn"
+          },
+          {
+            "text": "53",
+            "field": "confusion_counts.5.tp"
+          },
+          {
+            "text": "484",
+            "field": "confusion_counts.5.tn"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.5.fp"
+          },
+          {
+            "text": "2",
+            "field": "confusion_counts.5.fn"
+          },
+          {
+            "text": "53",
+            "field": "confusion_counts.6.tp"
+          },
+          {
+            "text": "485",
+            "field": "confusion_counts.6.tn"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.6.fp"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.6.fn"
+          },
+          {
+            "text": "53",
+            "field": "confusion_counts.7.tp"
+          },
+          {
+            "text": "486",
+            "field": "confusion_counts.7.tn"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.7.fp"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.7.fn"
+          },
+          {
+            "text": "52",
+            "field": "confusion_counts.8.tp"
+          },
+          {
+            "text": "487",
+            "field": "confusion_counts.8.tn"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.8.fp"
+          },
+          {
+            "text": "0",
+            "field": "confusion_counts.8.fn"
+          },
+          {
+            "text": "52",
+            "field": "confusion_counts.9.tp"
+          },
+          {
+            "text": "485",
+            "field": "confusion_counts.9.tn"
+          },
+          {
+            "text": "1",
+            "field": "confusion_counts.9.fp"
+          },
+          {
+            "text": "2",
+            "field": "confusion_counts.9.fn"
+          }
+        ]
+      },
+      {
+        "id": "4.4-fixed17",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "fixed",
+        "text": "확률이 있는 오분류 6건 중 경계 오류(예측·정답 클래스 확률 차가 0.1 미만)는 2건(33.3%), 확신 오류(예측 클래스 확률 0.9 이상)는 0건(0.0%)이다.",
+        "numbers": []
+      },
+      {
+        "id": "4.4-weakest",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "최약 클래스(F1 최저)\n매크로 F1과의 차이 = 매크로 F1 − 이 클래스의 F1. 작은 표본은 표본 수 30건 미만 또는 전체의 5% 미만입니다.",
+        "header": [
+          "클래스",
+          "F1",
+          "표본 수",
+          "비율",
+          "매크로 F1과의 차이",
+          "작은 표본"
+        ],
+        "rows": [
+          [
+            "9",
+            "0.9720",
+            "54",
+            "10.0%",
+            "0.017",
+            "아니오"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "0.9720",
+            "field": "facts.weakest_class.f1"
+          },
+          {
+            "text": "54",
+            "field": "facts.weakest_class.support"
+          },
+          {
+            "text": "10.0%",
+            "field": "facts.weakest_class.share"
+          },
+          {
+            "text": "0.017",
+            "field": "facts.weakest_class.gap"
+          }
+        ]
+      },
+      {
+        "id": "4.4-bias",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "예측 편향(예측 수 대 실제 수)",
+        "header": [
+          "클래스",
+          "예측 수",
+          "실제 수",
+          "차이(예측 − 실제)"
+        ],
+        "rows": [
+          [
+            "0(숫자 0)",
+            "54",
+            "54",
+            "0"
+          ],
+          [
+            "1(숫자 1)",
+            "56",
+            "55",
+            "+1"
+          ],
+          [
+            "2",
+            "54",
+            "53",
+            "+1"
+          ],
+          [
+            "3",
+            "55",
+            "55",
+            "0"
+          ],
+          [
+            "4",
+            "54",
+            "54",
+            "0"
+          ],
+          [
+            "5",
+            "54",
+            "55",
+            "−1"
+          ],
+          [
+            "6",
+            "54",
+            "54",
+            "0"
+          ],
+          [
+            "7[숫자 7(가로줄 없는 필체 포함)]",
+            "53",
+            "54",
+            "−1"
+          ],
+          [
+            "8",
+            "53",
+            "52",
+            "+1"
+          ],
+          [
+            "9",
+            "53",
+            "54",
+            "−1"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.0.predicted"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.0.actual"
+          },
+          {
+            "text": "0",
+            "field": "facts.prediction_bias.0.difference"
+          },
+          {
+            "text": "56",
+            "field": "facts.prediction_bias.1.predicted"
+          },
+          {
+            "text": "55",
+            "field": "facts.prediction_bias.1.actual"
+          },
+          {
+            "text": "+1",
+            "field": "facts.prediction_bias.1.difference"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.2.predicted"
+          },
+          {
+            "text": "53",
+            "field": "facts.prediction_bias.2.actual"
+          },
+          {
+            "text": "+1",
+            "field": "facts.prediction_bias.2.difference"
+          },
+          {
+            "text": "55",
+            "field": "facts.prediction_bias.3.predicted"
+          },
+          {
+            "text": "55",
+            "field": "facts.prediction_bias.3.actual"
+          },
+          {
+            "text": "0",
+            "field": "facts.prediction_bias.3.difference"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.4.predicted"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.4.actual"
+          },
+          {
+            "text": "0",
+            "field": "facts.prediction_bias.4.difference"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.5.predicted"
+          },
+          {
+            "text": "55",
+            "field": "facts.prediction_bias.5.actual"
+          },
+          {
+            "text": "−1",
+            "field": "facts.prediction_bias.5.difference"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.6.predicted"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.6.actual"
+          },
+          {
+            "text": "0",
+            "field": "facts.prediction_bias.6.difference"
+          },
+          {
+            "text": "53",
+            "field": "facts.prediction_bias.7.predicted"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.7.actual"
+          },
+          {
+            "text": "−1",
+            "field": "facts.prediction_bias.7.difference"
+          },
+          {
+            "text": "53",
+            "field": "facts.prediction_bias.8.predicted"
+          },
+          {
+            "text": "52",
+            "field": "facts.prediction_bias.8.actual"
+          },
+          {
+            "text": "+1",
+            "field": "facts.prediction_bias.8.difference"
+          },
+          {
+            "text": "53",
+            "field": "facts.prediction_bias.9.predicted"
+          },
+          {
+            "text": "54",
+            "field": "facts.prediction_bias.9.actual"
+          },
+          {
+            "text": "−1",
+            "field": "facts.prediction_bias.9.difference"
+          }
+        ]
+      },
+      {
+        "id": "4.4-pairs",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "최다 오분류 쌍(상위 3)",
+        "header": [
+          "실제 → 예측",
+          "건수",
+          "오분류 중 비율"
+        ],
+        "rows": [
+          [
+            "5 → 6",
+            "1",
+            "16.7%"
+          ],
+          [
+            "5 → 9",
+            "1",
+            "16.7%"
+          ],
+          [
+            "6 → 1(숫자 1)",
+            "1",
+            "16.7%"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "1",
+            "field": "facts.top_confusion_pairs.5>6.count"
+          },
+          {
+            "text": "16.7%",
+            "field": "facts.top_confusion_pairs.5>6.share_of_errors"
+          },
+          {
+            "text": "1",
+            "field": "facts.top_confusion_pairs.5>9.count"
+          },
+          {
+            "text": "16.7%",
+            "field": "facts.top_confusion_pairs.5>9.share_of_errors"
+          },
+          {
+            "text": "1",
+            "field": "facts.top_confusion_pairs.6>1.count"
+          },
+          {
+            "text": "16.7%",
+            "field": "facts.top_confusion_pairs.6>1.share_of_errors"
+          }
+        ]
+      },
+      {
+        "id": "5.1-fixed11",
+        "slot": "8.2",
+        "place": "5.1",
+        "kind": "fixed",
+        "text": "평가 데이터는 학습 데이터와 동일한 출처에서 수집되었다. 본 결과는 동일 분포 내 성능을 나타내며, 다른 운영 환경에서의 일반화 성능을 보증하지 않는다.",
+        "numbers": []
+      },
+      {
+        "id": "5.3-fixed12",
+        "slot": "7.2",
+        "place": "5.3",
+        "kind": "fixed",
+        "text": "정답 라벨의 구축 방법이 운영 로그로, 정답 자체의 오류가 성능 수치에 반영되었을 수 있다. 수치 해석 시 이를 고려해야 한다.",
+        "numbers": []
+      },
+      {
+        "id": "4.6-fixed16",
+        "slot": "8.1",
+        "place": "4.6",
+        "kind": "fixed",
+        "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: KL Divergence, Macro Average, Micro Average, Imbalance Ratio.",
+        "numbers": []
+      },
+      {
+        "id": "5.4-b18",
+        "slot": "8.1",
+        "place": "5.4",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "5.6-fixed15",
+        "slot": "7.3",
+        "place": "5.6",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "6.1-recommend",
+        "slot": "9",
+        "place": "6.1",
+        "kind": "recommend_rows",
+        "text": "",
+        "header": [
+          "우선순위",
+          "대응 문제 번호",
+          "권고",
+          "기대 효과"
+        ],
+        "rows": [
+          [
+            "낮음",
+            "P2 · 정답 라벨 주의 (구축 방법 운영 로그)"
+          ],
+          [
+            "낮음",
+            "P3 · 평가 데이터가 학습과 같은 출처"
+          ]
+        ],
+        "row_keys": [
+          "P2",
+          "P3"
+        ],
+        "numbers": []
+      },
+      {
+        "id": "6.2-recommend",
+        "slot": "9",
+        "place": "6.2",
+        "kind": "recommend_rows",
+        "text": "",
+        "header": [
+          "우선순위",
+          "대응 문제 번호",
+          "권고",
+          "기대 효과"
+        ],
+        "rows": [
+          [
+            "중간",
+            "P1 · 핵심 지표 근소 합격 (Accuracy, F1 Score)"
+          ]
+        ],
+        "row_keys": [
+          "P1"
+        ],
+        "numbers": []
+      }
+    ]
   }
 }

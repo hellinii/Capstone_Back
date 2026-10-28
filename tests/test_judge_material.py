@@ -144,3 +144,37 @@ def test_material_never_reaches_generation_prompts(api):
     plain = copy.deepcopy(_raw())
     del plain["judge_material"]
     assert _sent_prompts(api, plain) == with_material
+
+
+# ── 계약(tests/contract/judge_material_ed4.json)과 실제 판 4 요청 예시 ──
+
+CONTRACT = Path(__file__).parent / "contract"
+FRONT_COPY = Path(__file__).resolve().parents[2] / "Capstone_Front" / "src" / "test" / "contract" / "judge_material_ed4.json"
+MATERIAL_SHA256 = "bc32c9ecdfec3f3fe4de03a254525a361e3b534dae53b94df780f2de33474e63"
+
+
+def test_material_contract_pinned():
+    import hashlib
+
+    assert hashlib.sha256((CONTRACT / "judge_material_ed4.json").read_bytes()).hexdigest() == MATERIAL_SHA256
+
+
+@pytest.mark.skipif(not FRONT_COPY.exists(), reason="옆 저장소(Capstone_Front)가 없다 — CI 는 저장소 하나만 받는다")
+def test_material_contract_front_copy_identical():
+    assert FRONT_COPY.read_bytes() == (CONTRACT / "judge_material_ed4.json").read_bytes()
+
+
+@pytest.mark.parametrize("task", ["binary", "multiclass", "multilabel"])
+def test_edition4_examples_carry_material_that_parses(task):
+    raw = json.loads((CONTRACT / f"fact_sheet_{task}_ed4.json").read_text(encoding="utf-8"))
+    assert list(raw)[-1] == "judge_material"
+    mat, problem = parse_material(raw["judge_material"])
+    assert problem is None
+    ids = [s.id for s in mat.segments]
+    assert {"4.2-table", "4.2-basis", "4.4-counts", "4.4-fixed17", "5.4-b18", "5.6-fixed15"} <= set(ids)
+    assert any(s.kind == "recommend_rows" for s in mat.segments)
+    assert all(s.slot != "9" or s.place.startswith("6") for s in mat.segments)
+    vocab = json.loads((CONTRACT / "judge_material_ed4.json").read_text(encoding="utf-8"))["number_fields"]
+    prefixes = {k.split("<")[0] for k in vocab}
+    fields = [n.field for s in mat.segments for n in s.numbers]
+    assert fields and all(any(f.startswith(p) for p in prefixes) for f in fields)

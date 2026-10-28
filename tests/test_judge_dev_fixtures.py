@@ -25,10 +25,11 @@ from app.narrative import jobs
 from app.narrative.schemas import NarrativeRequest
 
 DEV = Path(__file__).parent / "data" / "judge_dev"
+# 심판 라운드 J2 ②(2026-10-29) 다시 뜸 — 요청 맨 끝에 심판 읽기 재료(judge_material).
 SHA256 = {
-    "dev_binary.request.json": "37ffed1cc1c4400226b90346b00ec402b7b7ebb2ecaa09aa9ee393ddecce3c90",
-    "dev_multiclass.request.json": "05daa190d67c9a48dec61ffa966b96610ec709748c4bddbe8da1fcde1db58214",
-    "dev_multilabel.request.json": "50631a22cd789cc8f2a787c1b5f0004129e837c818ef36e037630ecf4dd79807",
+    "dev_binary.request.json": "c89582a9c284793d1ff4068e582c25a94aaf62d402a2c815f351a7801f5c8695",
+    "dev_multiclass.request.json": "7368976ef0c419edbfd5d1782729588cdb920b2489f57fca7588281a0a28028c",
+    "dev_multilabel.request.json": "51812acfab01be9fc1328ef7bcef6056c9cabfda694afba6c7c021f77bab2792",
 }
 TASKS = {"dev_binary.request.json": "binary", "dev_multiclass.request.json": "multiclass",
          "dev_multilabel.request.json": "multilabel"}
@@ -92,3 +93,11 @@ def test_job_runs_to_rule_sentences_without_keys(api, name):
     sources = view["result"]["section_sources"]
     assert set(sources.values()) <= {"fallback", "fixed"} and "fallback" in sources.values()
     assert view["result"]["interpretation"], "규칙 문장 서술이 비었다"
+
+
+@pytest.mark.parametrize("name", sorted(SHA256))
+def test_dev_requests_carry_material_that_parses(name):
+    from app.judge.material import parse_material
+
+    mat, problem = parse_material(_raw(name)["judge_material"])
+    assert problem is None and len(mat.segments) >= 10

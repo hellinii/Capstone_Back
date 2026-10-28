@@ -529,5 +529,390 @@
     "class_label_descriptions": {
       "bird": "새"
     }
+  },
+  "judge_material": {
+    "version": "judge-material-1",
+    "material_check_version": "2.0",
+    "segments": [
+      {
+        "id": "4.2-table",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "종합 판정",
+          "판정 대상 지표 중 충족"
+        ],
+        "rows": [
+          [
+            "최종 불합격",
+            "3개 중 1개"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "3",
+            "field": "verdict.judged_count"
+          },
+          {
+            "text": "1",
+            "field": "verdict.passed_count"
+          }
+        ]
+      },
+      {
+        "id": "4.2-basis",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "fixed",
+        "text": "핵심 지표 Accuracy(M1)가 목표에 미달하여, 3.4의 판정 규칙에 따라 불합격으로 판정하였다.",
+        "numbers": []
+      },
+      {
+        "id": "4.3-margin",
+        "slot": "8.3",
+        "place": "4.3",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "시험항목",
+          "판정 여유"
+        ],
+        "rows": [
+          [
+            "Accuracy (핵심)",
+            "충분"
+          ],
+          [
+            "F1 Score",
+            "충분"
+          ],
+          [
+            "KL Divergence",
+            "충분"
+          ]
+        ],
+        "numbers": []
+      },
+      {
+        "id": "4.4-counts",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "혼동 행렬 건수\n클래스마다 그 클래스를 양성, 나머지를 음성으로 본 건수입니다.",
+        "header": [
+          "클래스",
+          "TP",
+          "TN",
+          "FP",
+          "FN"
+        ],
+        "rows": [
+          [
+            "bird",
+            "21",
+            "93",
+            "38",
+            "48"
+          ],
+          [
+            "cat",
+            "17",
+            "93",
+            "50",
+            "40"
+          ],
+          [
+            "dog",
+            "29",
+            "81",
+            "45",
+            "45"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "21",
+            "field": "confusion_counts.bird.tp"
+          },
+          {
+            "text": "93",
+            "field": "confusion_counts.bird.tn"
+          },
+          {
+            "text": "38",
+            "field": "confusion_counts.bird.fp"
+          },
+          {
+            "text": "48",
+            "field": "confusion_counts.bird.fn"
+          },
+          {
+            "text": "17",
+            "field": "confusion_counts.cat.tp"
+          },
+          {
+            "text": "93",
+            "field": "confusion_counts.cat.tn"
+          },
+          {
+            "text": "50",
+            "field": "confusion_counts.cat.fp"
+          },
+          {
+            "text": "40",
+            "field": "confusion_counts.cat.fn"
+          },
+          {
+            "text": "29",
+            "field": "confusion_counts.dog.tp"
+          },
+          {
+            "text": "81",
+            "field": "confusion_counts.dog.tn"
+          },
+          {
+            "text": "45",
+            "field": "confusion_counts.dog.fp"
+          },
+          {
+            "text": "45",
+            "field": "confusion_counts.dog.fn"
+          }
+        ]
+      },
+      {
+        "id": "4.4-fixed17",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "fixed",
+        "text": "확률이 있는 오분류 133건 중 경계 오류(예측·정답 클래스 확률 차가 0.1 미만)는 27건(20.3%), 확신 오류(예측 클래스 확률 0.9 이상)는 2건(1.5%)이다.",
+        "numbers": []
+      },
+      {
+        "id": "4.4-weakest",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "최약 클래스(F1 최저)\n매크로 F1과의 차이 = 매크로 F1 − 이 클래스의 F1. 작은 표본은 표본 수 30건 미만 또는 전체의 5% 미만입니다.",
+        "header": [
+          "클래스",
+          "F1",
+          "표본 수",
+          "비율",
+          "매크로 F1과의 차이",
+          "작은 표본"
+        ],
+        "rows": [
+          [
+            "cat",
+            "0.274",
+            "57",
+            "28.5%",
+            "0.057",
+            "아니오"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "0.274",
+            "field": "facts.weakest_class.f1"
+          },
+          {
+            "text": "57",
+            "field": "facts.weakest_class.support"
+          },
+          {
+            "text": "28.5%",
+            "field": "facts.weakest_class.share"
+          },
+          {
+            "text": "0.057",
+            "field": "facts.weakest_class.gap"
+          }
+        ]
+      },
+      {
+        "id": "4.4-bias",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "예측 편향(예측 수 대 실제 수)",
+        "header": [
+          "클래스",
+          "예측 수",
+          "실제 수",
+          "차이(예측 − 실제)"
+        ],
+        "rows": [
+          [
+            "bird(새)",
+            "59",
+            "69",
+            "−10"
+          ],
+          [
+            "cat",
+            "67",
+            "57",
+            "+10"
+          ],
+          [
+            "dog",
+            "74",
+            "74",
+            "0"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "59",
+            "field": "facts.prediction_bias.bird.predicted"
+          },
+          {
+            "text": "69",
+            "field": "facts.prediction_bias.bird.actual"
+          },
+          {
+            "text": "−10",
+            "field": "facts.prediction_bias.bird.difference"
+          },
+          {
+            "text": "67",
+            "field": "facts.prediction_bias.cat.predicted"
+          },
+          {
+            "text": "57",
+            "field": "facts.prediction_bias.cat.actual"
+          },
+          {
+            "text": "+10",
+            "field": "facts.prediction_bias.cat.difference"
+          },
+          {
+            "text": "74",
+            "field": "facts.prediction_bias.dog.predicted"
+          },
+          {
+            "text": "74",
+            "field": "facts.prediction_bias.dog.actual"
+          },
+          {
+            "text": "0",
+            "field": "facts.prediction_bias.dog.difference"
+          }
+        ]
+      },
+      {
+        "id": "4.4-pairs",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "최다 오분류 쌍(상위 3)",
+        "header": [
+          "실제 → 예측",
+          "건수",
+          "오분류 중 비율"
+        ],
+        "rows": [
+          [
+            "dog → cat",
+            "28",
+            "21.1%"
+          ],
+          [
+            "bird(새) → dog",
+            "26",
+            "19.5%"
+          ],
+          [
+            "bird(새) → cat",
+            "22",
+            "16.5%"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "28",
+            "field": "facts.top_confusion_pairs.dog>cat.count"
+          },
+          {
+            "text": "21.1%",
+            "field": "facts.top_confusion_pairs.dog>cat.share_of_errors"
+          },
+          {
+            "text": "26",
+            "field": "facts.top_confusion_pairs.bird>dog.count"
+          },
+          {
+            "text": "19.5%",
+            "field": "facts.top_confusion_pairs.bird>dog.share_of_errors"
+          },
+          {
+            "text": "22",
+            "field": "facts.top_confusion_pairs.bird>cat.count"
+          },
+          {
+            "text": "16.5%",
+            "field": "facts.top_confusion_pairs.bird>cat.share_of_errors"
+          }
+        ]
+      },
+      {
+        "id": "4.6-fixed16",
+        "slot": "8.1",
+        "place": "4.6",
+        "kind": "fixed",
+        "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: KL Divergence, Macro Average, Micro Average, Imbalance Ratio.",
+        "numbers": []
+      },
+      {
+        "id": "5.4-b18",
+        "slot": "8.1",
+        "place": "5.4",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "5.6-fixed15",
+        "slot": "7.3",
+        "place": "5.6",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "6.2-recommend",
+        "slot": "9",
+        "place": "6.2",
+        "kind": "recommend_rows",
+        "text": "",
+        "header": [
+          "우선순위",
+          "대응 문제 번호",
+          "권고",
+          "기대 효과"
+        ],
+        "rows": [
+          [
+            "높음",
+            "P1 · 핵심 지표 미달 (Accuracy)"
+          ],
+          [
+            "중간",
+            "P2 · 비핵심 지표 미달 (F1 Score)"
+          ]
+        ],
+        "row_keys": [
+          "P1",
+          "P2"
+        ],
+        "numbers": []
+      }
+    ]
   }
 }
