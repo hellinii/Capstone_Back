@@ -105,8 +105,14 @@ def _sentence_of(quote: str, piece: Piece) -> str:
     return quote
 
 
-def _normative(sentence: str) -> bool:
-    return any(m in sentence for m in criteria.load_json("claims.json")["normative_markers"])
+def _not_inference(sentence: str) -> str | None:
+    """추론으로 뽑혔지만 규범 문장이거나 시험 범위 문장이면 그 사유(claims.json normative_markers·scope_markers)."""
+    rules = criteria.load_json("claims.json")
+    if any(m in sentence for m in rules["normative_markers"]):
+        return "normative"
+    if any(m in sentence for m in rules["scope_markers"]):
+        return "scope"
+    return None
 
 
 def _found_text(claims: list[Claim]) -> str:
@@ -129,9 +135,11 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
         if not quote.strip() or _norm(quote) not in _norm(piece.text):
             rejected.append({"round": round_no, "reason": "quote", "piece_id": piece.id, "quote": quote[:200]})
             continue
-        if item["kind"] == "inference" and _normative(_sentence_of(quote, piece)):
-            rejected.append({"round": round_no, "reason": "normative", "piece_id": piece.id, "quote": quote[:200]})
-            continue
+        if item["kind"] == "inference":
+            reason = _not_inference(_sentence_of(quote, piece))
+            if reason:
+                rejected.append({"round": round_no, "reason": reason, "piece_id": piece.id, "quote": quote[:200]})
+                continue
         key = (piece.id, _norm(quote), item["kind"])
         if key in seen:
             continue

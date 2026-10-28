@@ -25,5 +25,8 @@
       "FP",
       "오탐"
     ]
-  }
+  },
+  "positive_class_labels": [
+    "양성"
+  ]
 }

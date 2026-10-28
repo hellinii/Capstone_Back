@@ -180,3 +180,26 @@ def test_client_text_partial_quote():
     assert fa.client_text_matches("2026년 1분기 해지 신청 기록에서 뽑은 200명", "2026년 1분기 해지 신청 기록")
     assert not fa.client_text_matches("2026년 1분기 해지 신청 기록에서 뽑은 200명", "2025년 기록")
     assert not fa.client_text_matches("긴 고객 입력 글", "글")  # 너무 짧은 조각은 맞다고 보지 않는다
+
+
+@pytest.mark.parametrize("actual, named, ok", [
+    ("모든 클래스가 동등", "모든 클래스를 동등하게 본다", True),
+    ("보호소에 올라온 사진의 동물 종류(고양이·개·새)를 가려 공고 분류에 쓴다.", "보호소에 올라온 사진의 동물 종류(고양이·개·새)를 가려 공고 분류에 쓰려는 것", True),
+    ("FN이 더 위험 (의뢰자 제공: 놓치면 기회가 사라진다.)", "FN이 더 위험", True),
+    ("모든 클래스가 동등", "큰 클래스를 먼저", False),
+    ("2026년 1분기 기록", "2025년 3분기 매출", False),
+])
+def test_client_paraphrase(actual, named, ok):
+    assert fa.client_text_matches(actual, named) is ok
+
+
+def test_client_note_itself_can_be_named():
+    actual = "수집자 차이 (의뢰자 제공: 보호소마다 촬영 기기가 다르다.)"
+    assert fa.client_text_matches(actual, "보호소마다 촬영 기기가 다르다고 참고 글을 남겼으므로")
+    assert fa.client_text_matches(actual, "수집자 차이")
+
+
+def test_digits_inside_words_are_not_numbers():
+    assert fa.printed_number(claim("C1", "number", "F1 Score")) is None
+    assert fa.printed_number(claim("C1", "number", "M4 는 0.512 이다")) == "0.512"
+    assert fa.printed_number(claim("C1", "number", "Class9 의 F1 은 37.4%")) == "37.4%"

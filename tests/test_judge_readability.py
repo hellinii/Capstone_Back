@@ -77,3 +77,7 @@ def test_pilot_false_positives_are_gone():
                   "종합 판정은 '최종 불합격'이다(미달한 핵심 지표: Recall(0.547, 목표 0.900)).")]
     assert rd.sentence_style(tail) == []
     assert [f.text[:6] for f in rd.sentence_style([Piece("slot:8.2", "8.2", "5.1", "ai", "미달함(Recall).")])] == ["미달함(Re"]
+
+
+def test_hapnida_only_with_b_final():
+    assert rd.sentence_style([Piece("slot:7.1", "7.1", "5.2", "ai", "이는 그런 뜻이 아니다. 판정은 합격입니다.")])[0].text == "판정은 합격입니다."

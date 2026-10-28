@@ -125,3 +125,11 @@ async def test_normative_inference_is_dropped_by_code():
     res = await extract.extract_claims(fake, pieces, CATALOG)
     assert [c.quote for c in res.claims] == ["경계 근처 표본이 많음을 시사한다"]
     assert [r["reason"] for r in res.rejected] == ["normative"]
+
+
+async def test_scope_sentence_inference_is_dropped_by_code():
+    pieces = [Piece("slot:8.3", "8.3", "5.5", "ai", "응답 시간은 측정하지 않았으므로 지연 위험은 평가하지 않았다.")]
+    fake = F.FakeOpenAI([reply(item("응답 시간은 측정하지 않았으므로", piece="slot:8.3", kind="inference", field="", number_text="")),
+                         reply()])
+    res = await extract.extract_claims(fake, pieces, CATALOG)
+    assert res.claims == [] and [r["reason"] for r in res.rejected] == ["scope"]

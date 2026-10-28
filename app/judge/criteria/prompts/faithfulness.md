@@ -13,6 +13,7 @@
   "{confusion_counts.1.fn} / {facts.error_totals.misclassified}". 백분율이면 비율(0~1) 그대로 둔다(코드가 % 와 맞춘다).
 - 비교·방향(comparison): expr(앞쪽 값 식), expr_b(뒤쪽 값 식), relation(gt·lt·ge·le·eq — 문장이 말하는 앞쪽과 뒤쪽의 관계).
 - 이름(name): name_field — 이름이 나와야 할 글 칸(예 facts.weakest_class.label), named — 문장이 지목한 이름 그대로.
+  의뢰자 선언(위험 방향·클래스 중요도·사용 방식)은 코드 칸 facts.declarations.* 를 쓴다(고객 입력 글 칸보다 먼저).
 - 정도 표현(degree): metric_id — 그 표현이 평가하는 지표 번호(예 M1). 성능 전체를 말하면 빈 글. 지표 성능이 아니라 차이·불균형·
   치우침의 크기를 말하는 표현이면 resolution 을 target_unclear 로.
 - 추론(inference): inference_basis — 그 추론의 근거가 데이터(data)인지, 고객이 적은 입력만(client_input)인지, 그 밖(other)인지.

@@ -92,6 +92,14 @@ def _drop_tail_parenthetical(s: str) -> str:
     return s.rstrip(_TRAIL)
 
 
+def _hapnida(core: str) -> bool:
+    """'…ㅂ니다'(합니다·입니다·됩니다) — '니다' 앞 글자의 받침이 ㅂ. '아니다'는 아니다."""
+    if not core.endswith("니다") or len(core) < 3:
+        return False
+    code = ord(core[-3]) - 0xAC00
+    return 0 <= code < 11172 and code % 28 == 17
+
+
 def sentence_style(pieces: list[Piece]) -> list[Finding]:
     rule = next(r for r in criteria.load_json("readability.json")["code_rules"] if r["id"] == "sentence_style")
     endings, bullets = tuple(rule["endings_disallowed"]), tuple(rule["bullets"])
@@ -106,7 +114,7 @@ def sentence_style(pieces: list[Piece]) -> list[Finding]:
             if not s or s.startswith(bullets):
                 continue
             core = _drop_tail_parenthetical(s.rstrip(" ."))
-            if core.endswith(endings) or not core.endswith("다"):
+            if core.endswith(endings) or _hapnida(core) or not core.endswith("다"):
                 found.append(Finding("sentence_style", p.id, p.slot, s[:120]))
     return found
 

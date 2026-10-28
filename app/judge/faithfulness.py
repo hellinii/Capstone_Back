@@ -34,7 +34,8 @@ RELATIONS = ("gt", "lt", "ge", "le", "eq", "")
 EQ_TOLERANCE = 0.0005 + 1e-9
 BASES = ("data", "client_input", "other", "")
 _FIELD = re.compile(r"\{([^{}]+)\}")
-_NUMBER_IN_TEXT = re.compile(r"[+\-−]?\d[\d,]*(?:\.\d+)?\s*(?:%p|%)?")
+# 낱말에 붙은 숫자('F1'·'M4'·'Class9')는 숫자 주장이 아니다(J4 AI 파일럿 — 'F1 Score' 의 1 을 숫자로 읽었다)
+_NUMBER_IN_TEXT = re.compile(r"(?<![A-Za-z0-9.])[+\-−]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])\s*(?:%p|%)?")
 _SENTENCE = re.compile(r"(?<=[.?!])\s+|\n+")
 
 TOOLS = [
@@ -162,10 +163,34 @@ def name_matches(actual: str, named: str) -> bool:
     return bool(_norm_name(actual)) and _norm_name(actual) in target
 
 
+_CLIENT_NOTE = re.compile(r"\s*\(의뢰자 제공:.*\)\s*$")
+CLIENT_OVERLAP = 0.6
+
+
+def _bigrams(t: str) -> set[str]:
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
 def client_text_matches(actual: str, named: str) -> bool:
-    """고객 입력 칸은 일부 인용도 맞다 — 문장이 고객이 적은 글의 앞부분만 옮기는 일이 흔하다(J4 2차 파일럿). 6자 이상만."""
-    a, n = _norm_name(actual), _norm_name(named)
-    return bool(a) and (a in n or (len(n) >= 6 and n in a))
+    """고객 입력 칸은 다시 말한 글도 맞다(설계 6.1 "고객 입력을 다시 말하는 문장은 그 입력과 맞으면 통과").
+    - 의뢰자 참고 글 '(의뢰자 제공: …)' 은 떼고 본다.
+    - 한쪽이 다른 쪽에 들어 있거나(6자 이상 — 앞부분만 옮김, J4 2차 파일럿),
+    - 두 글자 묶음이 어느 한쪽 기준으로 60% 이상 겹치면(어미만 바꿔 말함 — '쓴다'↔'쓰려는 것', J4 AI 파일럿) 맞다."""
+    n = _norm_name(named)
+    full = str(actual)
+    note = re.search(r"\(의뢰자 제공:(.*)\)\s*$", full)
+    # 선택 값만·참고 글 붙은 전체·참고 글만 — 문장이 참고 글을 말할 수도 있다(J4 AI 파일럿)
+    for cand in {_norm_name(_CLIENT_NOTE.sub("", full)), _norm_name(full), _norm_name(note.group(1)) if note else ""}:
+        if not cand or not n:
+            continue
+        if cand in n or (len(n) >= 6 and n in cand):
+            return True
+        ba, bn = _bigrams(cand), _bigrams(n)
+        if ba and bn:
+            shared = len(ba & bn)
+            if shared / len(ba) >= CLIENT_OVERLAP or shared / len(bn) >= CLIENT_OVERLAP:
+                return True
+    return False
 
 
 def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs, piece: Piece | None) -> ClaimVerdict:
@@ -201,7 +226,13 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
         if actual is not None and ans.get("named"):
             v.detail["data"] = actual
             field_name = ans.get("name_field", "").strip()
-            ok = client_text_matches(actual, ans["named"]) if field_name.startswith("client.") else name_matches(actual, ans["named"])
+            if field_name.startswith("client."):
+                ok = client_text_matches(actual, ans["named"])
+            else:
+                ok = name_matches(actual, ans["named"])
+                positive = sources.texts.get("facts.positive_class")
+                if not ok and positive is not None and str(actual) == positive:  # 양성 클래스를 '양성'으로 부름
+                    ok = any(lab in ans["named"] for lab in criteria.load_json("names.json")["positive_class_labels"])
             v.verdict = "match" if ok else "violation"
     elif claim.kind == "degree":
         result = degree_verdict(claim.polarity, ans.get("metric_id", "").strip(), claim.quote, metrics, refs)
