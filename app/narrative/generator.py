@@ -23,7 +23,8 @@
 상호작용
 - 의존(import): app.narrative.llm·prompt·checks·fallback·required_items·sections·grounding·derived·baselines,
   app.core.concurrency(narrative_slot·run_cpu_bound)
-- 사용처: app.narrative.jobs(run_job·작업 행 상한), tests
+- 사용처: app.narrative.jobs(run_job·작업 행 상한), app.judge.ladder(심판 재생성·규칙 문장 — GenerationSession 의
+  judge_regenerate·to_template, 칸 id 만 넘긴다), tests
 """
 from __future__ import annotations
 
@@ -63,6 +64,9 @@ MIN_CALL_SECONDS = 30.0
 RETRYABLE = frozenset({"api_error", "timeout", "invalid_json", "rate_limited"})
 
 GENERATOR_VERSION = "sections-1"
+
+# '다시' 지시문을 쓰는 호출 목적 — 칸 다시 만들기와 심판 재생성(심판 라운드 J5a). 기록 목적 이름만 다르다.
+REGENERATE_PURPOSES = frozenset({"regenerate", "judge_regenerate"})
 
 
 def job_effort() -> str:
@@ -305,7 +309,8 @@ class GenerationSession:
         if remaining is not None:
             room = remaining - MIN_CALL_SECONDS
             wait_cap = room if self.slot_wait is None else min(self.slot_wait, room)
-        user = prompt.build_user_message(self.ctx, section_ids, regenerate=purpose == "regenerate")
+        # 심판 재생성(judge_regenerate)도 생성 단계 다시 만들기와 같은 지시문이다 — 심판 사유를 넣을 자리가 없다(계획 13-3).
+        user = prompt.build_user_message(self.ctx, section_ids, regenerate=purpose in REGENERATE_PURPOSES)
         schema = prompt.response_schema(section_ids, self.problem_ids)
         system = prompt.system_prompt(self.edition)
         entry["prompt_chars"] = len(system) + len(user)
@@ -493,9 +498,99 @@ class GenerationSession:
                 final_flags.append(sid)
                 self.template(sid, "final_verdict_contradiction")
         trace["final_recheck"] = final_flags
-        reasons = [st.reason for st in states.values() if st.source == "fallback" and st.reason]
-        self.result = _result(fs, states, trace, reasons[0] if reasons else None, self.started, derived=self.derived, refs=self.refs)
+        return self._rebuild()
+
+    def _rebuild(self) -> GenerationResult:
+        reasons = [st.reason for st in self.states.values() if st.source == "fallback" and st.reason]
+        self.result = _result(self.fs, self.states, self.trace, reasons[0] if reasons else None, self.started,
+                              derived=self.derived, refs=self.refs)
         return self.result
+
+    # ── 심판 사다리가 부르는 길(심판 라운드 J5a, 계획 13-1·정6) ──────────────────────
+    # 칸 id 만 받는다 — 심판 사유·인용을 받을 인자가 없다(사유 격리, 계획 13-3). 이 모듈은 app.judge 를 import 하지 않는다.
+
+    def has_ai_text(self, sid: str) -> bool:
+        """인쇄될 글에 AI 글이 들어 있나 — AI 칸, 또는 AI 권고에 빠진 권고만 템플릿으로 채운 9칸."""
+        st = self.states[sid]
+        return st.parts is not None and (st.source == "llm" or st.outcome == "filled")
+
+    def to_template(self, sids, reason: str) -> list[str]:
+        """AI 글이 든 칸을 규칙 문장으로 바꾼다(이미 규칙 문장·고정 문구인 칸은 그대로 — 정6 ②). 7.3 은 빼고 '해당 없음'
+        (정6 ③, D38). 바꾼 칸을 돌려준다."""
+        changed = []
+        for sid in sids:
+            if not self.has_ai_text(sid):
+                continue
+            self.template(sid, reason)
+            if sid == "7.3":
+                self.states[sid].outcome = "dropped"
+            self.states[sid].kept = None
+            changed.append(sid)
+        if changed:
+            self._rebuild()
+        return changed
+
+    async def judge_regenerate(self, sids, *, seconds: float | None) -> dict[str, str]:
+        """심판이 건 칸을 한 번 다시 만든다(정6 ①②③⑦, D36). 칸마다 결과(regenerated·template·dropped·skipped)를 돌려준다.
+
+        - 이미 규칙 문장·고정 문구인 칸은 건너뛴다. 7.3 은 다시 만들지 않고 뺀다.
+        - 지시문은 생성 단계 다시 만들기와 바이트까지 같다(기록 목적 이름만 judge_regenerate).
+        - 다시 만든 글이 생성 검문(권고 빠짐 포함)이나 최종본 판정 모순 재검사에 걸리거나 호출이 실패하면 그 칸 전체를 규칙
+          문장으로 — 둬 둔 첫 글(D24 빠짐·권고 하나 빠짐)을 되살리지 않는다(그 글이 바로 심판이 건 글일 수 있다).
+        - seconds 는 이번 단계에 쓸 시간(사다리가 다음 채점 시간을 빼고 준다). 모자라면 부르지 않고 규칙 문장.
+        """
+        if seconds is not None:
+            self.deadline_at = time.perf_counter() + seconds
+        out: dict[str, str] = {}
+        targets = []
+        for sid in sids:
+            if not self.has_ai_text(sid):
+                out[sid] = "skipped"
+            elif sid == "7.3":
+                self.to_template([sid], "judge")
+                out[sid] = "dropped"
+            else:
+                self.states[sid].kept = None
+                targets.append(sid)
+        if targets and self.client is None:
+            for sid in targets:
+                self.template(sid, "judge_regenerate:no_key")
+                out[sid] = "template"
+            targets = []
+        results = await self.run_batch([((sid,), "judge_regenerate") for sid in targets]) if targets else []
+        if results:
+            await self.stage("checking")
+        for (ids, _), (result, failure) in results:
+            sid = ids[0]
+            parts = None if failure is not None else _extract(sid, result.data)
+            if parts is None:
+                self.template(sid, f"judge_regenerate:{failure or 'missing_field'}")
+            else:
+                self._judge_accept(sid, parts, model=result.record.response_model)
+            st = self.states[sid]
+            if st.source == "llm" and find_verdict_contradictions(
+                checks.mask_names(checks.section_texts(sid, _rec_dicts(st.parts)), self.masks), self.fs.verdict,
+            ):
+                self.template(sid, "judge_regenerate:final_verdict_contradiction")
+            out[sid] = "regenerated" if self.states[sid].source == "llm" else "template"
+        self._rebuild()
+        return out
+
+    def _judge_accept(self, sid: str, parts: dict, *, model: str | None) -> None:
+        fs = self.fs
+        st = self.states[sid]
+        aligned = _align(parts, fs.problems, fill_missing=False, edition=self.edition)[0] if sid == "9" else parts
+        result = checks.check_section(
+            sid, _rec_dicts(aligned), whitelist=self.whitelist, verdict=fs.verdict, conclusions=self.conclusions,
+            problem_ids=self.problem_ids, exempt=self.exempt, masks=self.masks, labels=self.labels, edition=self.edition,
+        )
+        st.checks.append({**result.as_record(), "judge_regenerate": True})
+        if result.hard_failures:
+            self.template(sid, "judge_regenerate:check:" + ",".join(result.hard_failures))
+            return
+        # D24 빠짐만은 생성 단계 마지막 기회처럼 싣고 기록한다(템플릿 사유가 아니다 — D36).
+        st.parts, st.source, st.model, st.outcome = aligned, "llm", model, "judge_regenerated"
+        st.d24_missing = result.d24_missing
 
 
 async def generate_sections(
