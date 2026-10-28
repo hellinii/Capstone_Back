@@ -3,6 +3,7 @@
 실호출은 하지 않는다. `--live` 없이 클라이언트를 만들지 않는지, 장부·상한·누계 알림·dev 읽기 경계를 본다.
 """
 import csv
+import json
 import importlib.util
 import sys
 from pathlib import Path
@@ -225,3 +226,37 @@ def test_status_command(tmp_path, capsys, monkeypatch):
     jl.Ledger(path).append({"stage": "smoke", "cost_usd": "0.25"})
     assert jl.main(["status", "--ledger", str(path)]) == 0
     assert capsys.readouterr().out == "누계 $0.25·1회(비용 모름 0회) | 상한 $4.00·40회\n"
+
+
+# ── smoke(J1) — 가짜 OpenAI 로 흐름만 ──
+
+
+async def test_smoke_flow_with_fake_client(tmp_path):
+    from tests import judge_fakes as F
+
+    fake = F.FakeOpenAI([
+        F.response([F.reasoning_item("enc-1"), F.function_call_item("calc", {"expr": "38/(38+11)"}, "call_1")]),
+        F.json_response({"ratio": 0.7755}),
+        F.json_response({"claims": [{"quote": "0.912", "kind": "number"}]}, model="gpt-6-luna"),
+        F.json_response({"claims": []}, model="gpt-6-luna", use=F.usage(input_tokens=2000, cached=1536)),
+    ])
+    runner, out, _ = _runner(tmp_path)
+    summary = await jl.smoke(runner, jl.Clients(openai=fake), {"criteria_version": "1.0-dev"})
+    tl = summary["tool_loop"]
+    assert (tl["turns"], tl["tool_calls"], tl["encrypted_reasoning_items"], tl["final"]) == (2, 1, 2, {"ratio": 0.7755})  # 두 응답 모두 암호화 추론을 실음
+    # 두 번째 턴 입력에 암호화 추론·함수 호출·도구 결과가 되돌아간다(응답 보관 끔)
+    second_input = fake.calls[1]["input"]
+    assert [i.get("type") for i in second_input[1:]] == ["reasoning", "function_call", "function_call_output"]
+    assert json.loads(second_input[-1]["output"]) == {"value": pytest.approx(38 / 49)}
+    assert [s["cached_input_tokens"] for s in summary["luna"]] == [0, 1536]
+    rows = runner.ledger.rows()
+    assert [(r["stage"], r["report"], r["repeat"]) for r in rows] == [
+        ("smoke", "tool_loop", "1"), ("smoke", "tool_loop", "2"), ("smoke", "luna_extract", "1"), ("smoke", "luna_extract", "2")]
+    assert rows[0]["criteria_version"] == "1.0-dev" and rows[2]["model_served"] == "gpt-6-luna" and rows[0]["cost_usd"]
+
+
+def test_smoke_command_needs_live_and_yes(tmp_path):
+    path = tmp_path / "장부.csv"
+    assert jl.main(["smoke", "--ledger", str(path)]) == 2  # --yes 없음
+    assert jl.main(["smoke", "--ledger", str(path), "--yes"]) == 2  # --live 없음
+    assert jl.Ledger(path).totals()[1] == 0

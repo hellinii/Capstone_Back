@@ -13,7 +13,10 @@ pytest 테스트가 아니다. 실호출(진짜 Claude·OpenAI 호출)은 키가
 - 누계 비용이 $10 단위를 넘을 때마다(단가를 모르는 실행은 20회마다) 멈추고 확인 입력을 받는다.
 - dev 모드는 검증 폴더(JUDGE_VALIDATION_DIR)를 읽지 못한다(guard_read).
 
-하위 명령은 단계마다 붙는다. 지금은 status(장부 누계)뿐이다.
+하위 명령은 단계마다 붙는다.
+- status: 장부 누계와 상한
+- smoke(J1): 합성 문장으로 ① GPT-6.1 Sol 이 응답 보관을 끈 채 계산 도구를 여러 번 부르는지(암호화 추론을 다음 턴에 되돌림)
+  ② GPT-6 Luna 가 Responses 구조화 출력을 받는지 ③ 같은 앞부분을 두 번 보내면 캐시 입력 토큰이 잡히는지. 검증 데이터는 쓰지 않는다.
 
 상호작용
 - 의존(import): csv, os, argparse. `--live` 일 때만 dotenv·anthropic·openai, app.narrative.llm(서술 클라이언트 설정)
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import os
 import sys
@@ -244,6 +248,118 @@ def make_clients(live: bool) -> Clients:
 # ── 명령줄 ───────────────────────────────────────────────────────────
 
 
+def run_meta() -> dict:
+    """장부 줄의 기준 버전·지문·커밋."""
+    import subprocess
+
+    from app.judge import criteria
+
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit, dirty = "", ""
+    return {"criteria_version": criteria.version(), "manifest_sha256": criteria.fingerprint(),
+            "git_commit": commit + ("+dirty" if dirty else "")}
+
+
+def ledger_row(outcome, *, stage: str, report: str, variant: str = "", repeat: int | str = "", meta: dict | None = None) -> dict:
+    """llm.Outcome 하나 → 장부 한 줄."""
+    r = outcome.record
+    return {
+        **(meta or {}), "stage": stage, "report": report, "variant": variant, "repeat": repeat,
+        "model_requested": r.requested_model, "model_served": r.response_model or "", "effort": r.effort,
+        "input_tokens": r.input_tokens, "cached_input_tokens": r.cached_input_tokens, "output_tokens": r.output_tokens,
+        "reasoning_tokens": r.reasoning_tokens, "cost_usd": "" if r.cost_usd is None else f"{r.cost_usd:.6f}",
+        "price_table": "openai-2026-10-28" if r.cost_usd is not None else "", "seconds": r.seconds,
+        "error": r.failure or "",
+    }
+
+
+SMOKE_TOOL = {
+    "type": "function", "name": "calc", "description": "사칙연산 식(숫자, + - * /, 괄호)의 값을 돌려준다.", "strict": True,
+    "parameters": {"type": "object", "properties": {"expr": {"type": "string"}}, "required": ["expr"], "additionalProperties": False},
+}
+SMOKE_RATIO = {"type": "object", "properties": {"ratio": {"type": "number"}}, "required": ["ratio"], "additionalProperties": False}
+SMOKE_CLAIMS = {
+    "type": "object", "additionalProperties": False, "required": ["claims"],
+    "properties": {"claims": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["quote", "kind"],
+        "properties": {"quote": {"type": "string"}, "kind": {"type": "string", "enum": ["number", "name", "comparison", "degree", "inference"]}},
+    }}},
+}
+# 캐시는 앞부분이 1024 토큰 이상일 때 걸린다 — 고정 지시문을 그만큼 길게 만든다(내용은 합성 규칙).
+SMOKE_EXTRACT_RULES = "\n".join(
+    f"규칙 {i}: 문장에서 숫자·이름·비교·정도 표현·추론 주장을 하나씩 뽑고, 인용 구절은 원문 그대로 옮긴다. 주장이 없으면 빈 목록이다."
+    for i in range(1, 61)
+)
+SMOKE_SENTENCE = "합성 문장: 이 모델의 Recall 은 0.912 로 목표 0.9 를 넘었고, FN 이 FP 보다 많아 경계 근처 표본이 많음을 시사한다."
+
+
+async def smoke(runner: "Runner", clients: Clients, meta: dict) -> dict:
+    from app.judge import config
+    from app.judge import llm
+    from app.judge.criteria.rules_calc import calculate
+
+    summary: dict = {"tool_loop": {}, "luna": [], "meta": meta}
+    # ① 도구 반복(Sol)
+    convo: list = [{"role": "user", "content": "FN 38건, FP 11건이다. calc 도구로 FN 이 오류 전체에서 차지하는 비율을 계산해 ratio 로 답하라."}]
+    turns, tool_calls, encrypted = 0, 0, 0
+    final = None
+    for turn in range(1, 5):
+        out = await llm.create_response(
+            clients.openai, purpose="smoke_tool", model=config.judge_model(), instructions="계산은 반드시 calc 도구로 한다.",
+            input=convo, timeout_s=180, tools=[SMOKE_TOOL], text_format=llm.json_schema_format("ratio", SMOKE_RATIO),
+        )
+        runner.record(ledger_row(out, stage="smoke", report="tool_loop", repeat=turn, meta=meta))
+        turns = turn
+        if out.failure:
+            summary["tool_loop"]["failure"] = out.failure
+            break
+        items = llm.next_turn_items(out.response)
+        encrypted += sum(1 for i in items if i.get("type") == "reasoning" and i.get("encrypted_content"))
+        calls = llm.function_calls(out.response)
+        if not calls:
+            final, _ = llm.parse_json(out)
+            break
+        tool_calls += len(calls)
+        convo = convo + items + [
+            {"type": "function_call_output", "call_id": c.call_id, "output": json.dumps({"value": calculate(json.loads(c.arguments)["expr"])})}
+            for c in calls
+        ]
+    summary["tool_loop"].update({"turns": turns, "tool_calls": tool_calls, "encrypted_reasoning_items": encrypted,
+                                 "final": final, "expected_ratio": round(38 / 49, 4)})
+    # ②③ 구조화 출력(Luna) 두 번 — 같은 지시문이면 두 번째에 캐시 입력이 잡힌다
+    for repeat in (1, 2):
+        out = await llm.create_response(
+            clients.openai, purpose="smoke_extract", model=config.extract_model(), instructions=SMOKE_EXTRACT_RULES,
+            input=[{"role": "user", "content": SMOKE_SENTENCE}], timeout_s=120,
+            text_format=llm.json_schema_format("claims", SMOKE_CLAIMS),
+        )
+        runner.record(ledger_row(out, stage="smoke", report="luna_extract", repeat=repeat, meta=meta))
+        data, failure = llm.parse_json(out)
+        summary["luna"].append({"failure": failure, "claims": data, "cached_input_tokens": out.record.cached_input_tokens,
+                                "input_tokens": out.record.input_tokens, "response_model": out.record.response_model})
+    return summary
+
+
+def _cmd_smoke(args: argparse.Namespace) -> int:
+    import asyncio
+
+    runner = Runner(Ledger(Path(args.ledger)), Budget.from_env(), "live" if args.live else "dev")
+    runner.start(BatchPlan("smoke", runs=6, est_cost_usd=0.3), yes=args.yes)
+    if not args.live:
+        raise RunnerError("smoke 는 실호출이다 — --live 를 준다")
+    clients = make_clients(live=True)
+    summary = asyncio.run(smoke(runner, clients, run_meta()))
+    text = json.dumps(summary, ensure_ascii=False, indent=1)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+    print(text)
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     ledger = Ledger(Path(args.ledger))
     spent, runs, unknown = ledger.totals()
@@ -258,6 +374,12 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="장부 누계와 상한")
     status.add_argument("--ledger", required=True)
     status.set_defaults(func=_cmd_status)
+    smoke_p = sub.add_parser("smoke", help="J1 실호출 스모크(합성 문장, 약 6회)")
+    smoke_p.add_argument("--ledger", required=True)
+    smoke_p.add_argument("--out")
+    smoke_p.add_argument("--live", action="store_true")
+    smoke_p.add_argument("--yes", action="store_true")
+    smoke_p.set_defaults(func=_cmd_smoke)
     return parser
 
 
