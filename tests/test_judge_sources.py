@@ -46,3 +46,11 @@ def test_catalog_text_has_names_not_values():
     text = catalog_text(cat)
     assert "- metric.M1.value — Accuracy(M1) value" in text
     assert str(cat["metric.M1.value"].value) not in text
+
+
+def test_numeric_text_fields_are_numbers_too():
+    req, _ = _catalog("dev_binary.request.json")
+    from app.judge.sources import Sources
+
+    s = Sources(req.fact_sheet.model_dump(), [], {}, req.client_inputs)
+    assert s.number("f1_threshold_gain.best_recall_text") == float(req.fact_sheet.f1_threshold_gain.best_recall_text)

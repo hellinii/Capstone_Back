@@ -182,6 +182,15 @@ class Sources:
         _walk_texts({k: v for k, v in fact_sheet.items() if k not in ("confusion",)}, "", self.texts)
         self.texts = {("metric." + k[len("metrics."):] if k.startswith("metrics.") else k): v for k, v in self.texts.items()}
         _walk_texts(client_inputs or {}, "client", self.texts)
+        # 사실 시트가 글로만 싣는 숫자(f1_threshold_gain.best_recall_text 0.989 등)도 숫자 칸으로(J4 3차 파일럿 — 이 값을 몰라
+        # 칸 잘못 짚기를 가리지 못했다). 이름은 글 칸 이름 그대로.
+        from app.judge.criteria.rules_numbers import parse_printed
+
+        for name, text in self.texts.items():
+            if name.endswith("_text") and name not in self.numbers:
+                printed = parse_printed(text)
+                if printed is not None and not printed.percent:
+                    self.numbers[name] = FieldEntry(name, name, float(printed.value))
 
     def lookup(self, name: str) -> dict:
         if name in self.numbers:
