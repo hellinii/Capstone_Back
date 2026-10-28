@@ -31,6 +31,7 @@ from app.judge.sources import Sources
 
 CALL_TIMEOUT_SECONDS = 180.0
 RELATIONS = ("gt", "lt", "ge", "le", "eq", "")
+EQ_TOLERANCE = 0.0005 + 1e-9
 BASES = ("data", "client_input", "other", "")
 _FIELD = re.compile(r"\{([^{}]+)\}")
 _NUMBER_IN_TEXT = re.compile(r"[+\-−]?\d[\d,]*(?:\.\d+)?\s*(?:%p|%)?")
@@ -141,11 +142,12 @@ def inference_marked(sentence: str) -> bool:
 
 
 def _relation_holds(a: float, b: float, rel: str) -> bool | None:
-    return {"gt": a > b, "lt": a < b, "ge": a >= b, "le": a <= b, "eq": abs(a - b) < 1e-9}.get(rel)
+    # '같다'는 찍힌 자릿수(판 4 셋째 자리)로 같으면 참이다 — 0.48007 과 0.48 은 둘 다 0.480 으로 찍힌다(J4 파일럿).
+    return {"gt": a > b, "lt": a < b, "ge": a >= b, "le": a <= b, "eq": abs(a - b) < EQ_TOLERANCE}.get(rel)
 
 
 def _norm_name(text: str) -> str:
-    return re.sub(r"[\s'\"‘’“”]", "", str(text)).lower()
+    return re.sub(r"[\s'\"‘’“”.,]", "", str(text)).lower()
 
 
 def name_matches(actual: str, named: str) -> bool:

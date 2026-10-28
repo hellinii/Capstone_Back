@@ -167,3 +167,10 @@ async def test_claim_the_agent_did_not_answer_is_unverifiable():
 ])
 def test_inference_marker_stems(sentence, marked):
     assert fa.inference_marked(sentence) is marked
+
+
+def test_pilot2_rules():
+    assert fa._relation_holds(0.48007, 0.48, "eq") is True and fa._relation_holds(0.4806, 0.48, "eq") is False
+    assert fa.name_matches("해지할 가입자를 넘긴다.", "해지할 가입자를 넘긴다")
+    assert SOURCES.lookup("rule.imbalance_ratio_threshold") == {"field": "rule.imbalance_ratio_threshold", "value": 1.5,
+                                                                  "source": "판정 규칙 기준값"}

@@ -144,7 +144,8 @@ def _flat_numbers(value, path: str, out: dict[str, float | int]) -> None:
             _flat_numbers(v, f"{path}.{k}", out)
 
 
-SOURCE_LABELS = {"facts": "사실 시트", "report": "성적서 데이터", "given": "AI 에 준 값", "client": "고객 입력"}
+SOURCE_LABELS = {"facts": "사실 시트", "report": "성적서 데이터", "given": "AI 에 준 값", "client": "고객 입력",
+                 "rule": "판정 규칙 기준값"}
 
 
 def _source_of(name: str) -> str:
@@ -154,6 +155,8 @@ def _source_of(name: str) -> str:
         return "given"
     if name.startswith("client."):
         return "client"
+    if name.startswith("rule."):
+        return "rule"
     return "report"
 
 
@@ -169,6 +172,11 @@ class Sources:
         flat: dict[str, float | int] = {}
         _flat_numbers(derived or {}, "derived", flat)
         for name, v in flat.items():
+            self.numbers[name] = FieldEntry(name, name, v)
+        # 규칙 문장·고정 문구가 찍는 판정 기준값(1.5 이상이면 불균형 등) — 이 숫자도 데이터와 대볼 수 있게(J4 파일럿)
+        from app.judge import criteria
+
+        for name, v in criteria.load_json("rule_constants.json")["values"].items():
             self.numbers[name] = FieldEntry(name, name, v)
         self.texts: dict[str, str] = {}
         _walk_texts({k: v for k, v in fact_sheet.items() if k not in ("confusion",)}, "", self.texts)
