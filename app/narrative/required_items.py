@@ -1077,11 +1077,12 @@ def verdict_sentence(fs: FactSheet, derived: dict, *, edition: int) -> str:
                 text += f" 핵심이 아닌 지표 중에도 목표에 미달한 지표가 있다{listing('목표 미달 지표', others)}."
         else:
             text = f"핵심 지표가 목표에 미달하여 종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
+    elif fs.verdict == "CONDITIONAL_PASS" and failed and edition == 4 and not has_core_info:
+        # 판 4 에서 핵심 지표가 하나도 없는 성적서(프론트 부록 B31 갈래 — 화면을 거친 입력에서는 생기지 않는 방어 갈래).
+        # 판 4 요청은 is_core 를 늘 싣으므로 '모두 거짓' = 핵심 지표 없음이다. 아래 일반 문장의 "핵심 지표는 모두 충족하였으나"는
+        # 사실이 아니어서 그 구절만 뺀다 — 4.2 근거(B31 "{미달 지표}이(가) 목표에 미달하여 …")와 같은 뜻(사용자 결정 2026-10-28).
+        text = f"목표에 미달한 지표가 있어 종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
     elif fs.verdict == "CONDITIONAL_PASS" and failed:
-        # 결정 대기(심판 라운드 1단계 통합 확인): 핵심 지표가 하나도 없는 성적서(프론트 부록 B31 갈래 — 화면을 거친 입력에서는
-        # 생기지 않는 방어 갈래)에도 이 글이 나가, 같은 판 4 성적서의 4.2 근거(B31 "{미달 지표}이(가) 목표에 미달하여 …")와
-        # 엇갈린다. 고치려면 문서에 없는 새 글이 필요하고, is_core 가 모두 거짓인 요청을 옛 요청(핵심 정보 없음)과 가르는 기준도
-        # 정해야 한다 — 프론트 docs/ARCHITECTURE.md §6.6 켜기 전 확인 목록.
         text = (
             "핵심 지표는 모두 목표를 충족하였으나 핵심이 아닌 지표가 목표에 미달하여 "
             f"종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."

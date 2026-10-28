@@ -346,3 +346,30 @@ def test_edition4_percent_moves_the_plain_text_not_python_round():
     assert verify_grounding([text], wl, edition=4).violations == []
     twin = _strip_same_source(raw)
     assert "학습 6.2%" in _conclusions(as_edition(twin, 3))["7.2-03"].text
+
+
+# ── B31 — 핵심 지표가 하나도 없는 조건부 합격의 5.1 규칙 문장(심판 라운드 1단계 사용자 결정 2026-10-28) ──────────
+
+
+def _fs_without_core(raw: dict):
+    raw["fact_sheet"]["verdict"] = "CONDITIONAL_PASS"
+    for m in raw["fact_sheet"]["metrics"]:
+        m["is_core"] = False
+    m1 = raw["fact_sheet"]["metrics"][0]
+    m1.update(status="fail", threshold=0.995)
+    return _req(raw).fact_sheet
+
+
+def test_b31_conditional_pass_without_core_metrics_does_not_claim_core_metrics_passed():
+    from app.narrative.required_items import verdict_sentence
+    fs = _fs_without_core(example_raw())
+    text4 = verdict_sentence(fs, {}, edition=4)
+    assert text4.startswith("목표에 미달한 지표가 있어 종합 판정은 '조건부 합격'이다(목표 미달 지표: Accuracy(")
+    assert "핵심 지표" not in text4
+    # 판 3 은 그대로(옛 요청은 핵심 정보가 없을 수 있어 갈래를 판 4 에만 둔다).
+    assert verdict_sentence(fs, {}, edition=3).startswith("핵심 지표는 모두 목표를 충족하였으나")
+    # 핵심 지표가 있으면 판 4 도 일반 문장.
+    raw = example_raw()
+    fs2 = _fs_without_core(raw)
+    fs2.metrics[1].is_core = True
+    assert verdict_sentence(fs2, {}, edition=4).startswith("핵심 지표는 모두 목표를 충족하였으나")
