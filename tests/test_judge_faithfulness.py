@@ -139,3 +139,9 @@ def test_eval_expr():
     assert fa.eval_expr("{confusion_counts.1.fn} / {facts.error_totals.misclassified}", SOURCES) == pytest.approx(43 / 99)
     assert fa.eval_expr("{nope} + 1", SOURCES) is None
     assert fa.eval_expr("", SOURCES) is None
+
+
+async def test_claim_the_agent_did_not_answer_is_unverifiable():
+    claims = [claim("C1", "number", "43건", number_text="43"), claim("C2", "name", "가장 약한 클래스는 0 이다")]
+    _, res = await run(claims, F.json_response({"claims": [answer("C1", expr="{confusion_counts.1.fn}")]}))
+    assert [v.verdict for v in res.verdicts] == ["match", "unverifiable"]
