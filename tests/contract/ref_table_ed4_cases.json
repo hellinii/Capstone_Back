@@ -1,0 +1,282 @@
+{
+  "name": "4.6 참조 범위 표 — 화면 줄",
+  "cases": [
+    {
+      "tag": "bc_strong",
+      "refs": [
+        {
+          "metric": "Accuracy",
+          "model_value": 0.9825,
+          "ref_low": 0.85,
+          "ref_high": 0.92,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": 0.95,
+          "target_position": "above",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "Precision",
+          "model_value": 0.9692,
+          "ref_low": 0.8,
+          "ref_high": 0.92,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": null,
+          "target_position": null,
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "Recall",
+          "model_value": 0.9844,
+          "ref_low": 0.8,
+          "ref_high": 0.92,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": 0.97,
+          "target_position": "above",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "F1 Score",
+          "model_value": 0.9767,
+          "ref_low": 0.83,
+          "ref_high": 0.91,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": 0.95,
+          "target_position": "above",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "AUROC",
+          "model_value": 0.9993,
+          "ref_low": 0.85,
+          "ref_high": 0.95,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": 0.98,
+          "target_position": "above",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "AUPRC",
+          "model_value": 0.9988,
+          "ref_low": 0.8,
+          "ref_high": 0.93,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": null,
+          "target_position": null,
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        }
+      ],
+      "rows": [
+        [
+          "Accuracy",
+          "0.982",
+          "0.85 ~ 0.92",
+          "범위보다 높음",
+          "0.950",
+          "범위보다 높음"
+        ],
+        [
+          "Precision",
+          "0.969",
+          "0.80 ~ 0.92",
+          "범위보다 높음",
+          "—",
+          "—"
+        ],
+        [
+          "Recall",
+          "0.984",
+          "0.80 ~ 0.92",
+          "범위보다 높음",
+          "0.970",
+          "범위보다 높음"
+        ],
+        [
+          "F1 Score",
+          "0.977",
+          "0.83 ~ 0.91",
+          "범위보다 높음",
+          "0.950",
+          "범위보다 높음"
+        ],
+        [
+          "AUROC",
+          "0.999",
+          "0.85 ~ 0.95",
+          "범위보다 높음",
+          "0.980",
+          "범위보다 높음"
+        ],
+        [
+          "AUPRC",
+          "0.999",
+          "0.80 ~ 0.93",
+          "범위보다 높음",
+          "—",
+          "—"
+        ]
+      ],
+      "notes": [
+        "※ 내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+      ]
+    },
+    {
+      "tag": "digits_strong",
+      "refs": [
+        {
+          "metric": "Accuracy",
+          "model_value": 0.9889,
+          "ref_low": 0.8,
+          "ref_high": 0.9,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": 0.98,
+          "target_position": "above",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "Precision",
+          "model_value": 0.9889,
+          "ref_low": 0.78,
+          "ref_high": 0.89,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": null,
+          "target_position": null,
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "Recall",
+          "model_value": 0.989,
+          "ref_low": 0.78,
+          "ref_high": 0.89,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": null,
+          "target_position": null,
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "F1 Score",
+          "model_value": 0.9889,
+          "ref_low": 0.78,
+          "ref_high": 0.89,
+          "direction": "higher",
+          "quality": "better",
+          "target_value": 0.98,
+          "target_position": "above",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        }
+      ],
+      "rows": [
+        [
+          "Accuracy",
+          "0.989",
+          "0.80 ~ 0.90",
+          "범위보다 높음",
+          "0.980",
+          "범위보다 높음"
+        ],
+        [
+          "Precision",
+          "0.989",
+          "0.78 ~ 0.89",
+          "범위보다 높음",
+          "—",
+          "—"
+        ],
+        [
+          "Recall",
+          "0.989",
+          "0.78 ~ 0.89",
+          "범위보다 높음",
+          "—",
+          "—"
+        ],
+        [
+          "F1 Score",
+          "0.989",
+          "0.78 ~ 0.89",
+          "범위보다 높음",
+          "0.980",
+          "범위보다 높음"
+        ]
+      ],
+      "notes": [
+        "※ 내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+      ]
+    },
+    {
+      "tag": "yeast_strong",
+      "refs": [
+        {
+          "metric": "F1 Score",
+          "model_value": 0.3993,
+          "ref_low": 0.7,
+          "ref_high": 0.85,
+          "direction": "higher",
+          "quality": "worse",
+          "target_value": 0.45,
+          "target_position": "below",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "Hamming Loss",
+          "model_value": 0.2093,
+          "ref_low": 0.05,
+          "ref_high": 0.2,
+          "direction": "lower",
+          "quality": "worse",
+          "target_value": 0.22,
+          "target_position": "above",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        },
+        {
+          "metric": "Jaccard Index",
+          "model_value": 0.4946,
+          "ref_low": 0.65,
+          "ref_high": 0.82,
+          "direction": "higher",
+          "quality": "worse",
+          "target_value": 0.45,
+          "target_position": "below",
+          "source_note": "내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+        }
+      ],
+      "rows": [
+        [
+          "F1 Score",
+          "0.399",
+          "0.70 ~ 0.85",
+          "범위보다 낮음",
+          "0.450",
+          "범위보다 낮음"
+        ],
+        [
+          "Hamming Loss (낮을수록 좋음)",
+          "0.209",
+          "0.05 ~ 0.20",
+          "범위보다 높음",
+          "0.220",
+          "범위보다 높음"
+        ],
+        [
+          "Jaccard Index",
+          "0.495",
+          "0.65 ~ 0.82",
+          "범위보다 낮음",
+          "0.450",
+          "범위보다 낮음"
+        ]
+      ],
+      "notes": [
+        "※ 내부 참조 기준치 v1 (공개 벤치마크 평균이 아닌 자체 설정 기준이며, 도메인별로 상이할 수 있음)"
+      ]
+    }
+  ]
+}
