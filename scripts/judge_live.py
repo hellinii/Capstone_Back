@@ -1,0 +1,274 @@
+"""
+judge_live.py — 심판 라운드 실호출 실행기(초안, 심판 라운드 세션 1 J0).
+
+pytest 테스트가 아니다. 실호출(진짜 Claude·OpenAI 호출)은 키가 있는 사람 컴퓨터에서 `--live` 를 줄 때만 한다.
+레포 루트에서: python scripts/judge_live.py <하위 명령> --ledger <장부.csv> [--live] [--yes]
+
+지키는 것
+- `--live` 가 없으면 진짜 LLM 클라이언트를 만들지 않는다. .env 도 `--live` 일 때만 읽는다(키가 있어도 부르지 않게).
+- 한 실행 = 장부(csv) 한 줄. 열 목록은 LEDGER_COLUMNS. 비용은 단가를 아는 모델만 적고 모르면 비운다(추정하지 않는다).
+- 묶음을 시작하기 전에 예상 비용·회차가 남은 상한 안인지 본다. 넘으면 시작하지 않는다(반쯤 돈 묶음을 남기지 않게).
+  상한은 환경변수 JUDGE_LIVE_BUDGET_USD(달러)·JUDGE_LIVE_MAX_RUNS(회차), 없으면 아래 기본값.
+- 시작할 때 첫 줄에 이번 묶음 예상과 지금까지 누계를 찍고, `--yes` 없이는 멈춘다.
+- 누계 비용이 $10 단위를 넘을 때마다(단가를 모르는 실행은 20회마다) 멈추고 확인 입력을 받는다.
+- dev 모드는 검증 폴더(JUDGE_VALIDATION_DIR)를 읽지 못한다(guard_read).
+
+하위 명령은 단계마다 붙는다. 지금은 status(장부 누계)뿐이다.
+
+상호작용
+- 의존(import): csv, os, argparse. `--live` 일 때만 dotenv·anthropic·openai, app.narrative.llm(서술 클라이언트 설정)
+- 사용처: 사람이 직접 실행. 시험은 tests/test_judge_live_runner.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import math
+import os
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable
+
+# 레포 루트를 sys.path 에 추가 (app.* 절대 import 를 위해)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+LEDGER_COLUMNS: tuple[str, ...] = (
+    "run_id", "at", "stage", "report", "variant", "repeat", "mode",
+    "criteria_version", "manifest_sha256", "git_commit",
+    "model_requested", "model_served", "effort",
+    "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens",
+    "cost_usd", "price_table", "seconds", "gate", "result_file", "result_sha256", "error",
+)
+
+MODES = ("dev", "live")
+
+# 라운드 상한 기본값(2026-10-28 사용자 답: 실호출 상한 $4). 회차 상한은 J1 스모크·J2 생성·J4 파일럿·J5b 한 작업의 합보다 넉넉히.
+DEFAULT_BUDGET_USD = 4.0
+DEFAULT_MAX_RUNS = 40
+
+# 누계 알림 — 비용은 이 단위를 넘을 때마다, 단가를 모르는 실행은 이 회차마다 멈춘다.
+CHECKPOINT_USD = 10.0
+CHECKPOINT_UNKNOWN_RUNS = 20
+
+
+class RunnerError(RuntimeError):
+    """실행기가 시작을 거부하거나 멈출 때."""
+
+
+# ── 장부 ─────────────────────────────────────────────────────────────
+
+
+class Ledger:
+    """장부 csv. 없으면 머리줄만 만들고, 있으면 머리줄이 LEDGER_COLUMNS 와 같은지부터 본다."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        if not self.path.exists():
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("w", newline="", encoding="utf-8") as f:
+                csv.writer(f).writerow(LEDGER_COLUMNS)
+        with self.path.open(newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), None)
+        if tuple(header or ()) != LEDGER_COLUMNS:
+            raise RunnerError(f"장부 머리줄이 실행기 열 목록과 다르다: {self.path}")
+
+    def rows(self) -> list[dict[str, str]]:
+        with self.path.open(newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+
+    def totals(self) -> tuple[float, int, int]:
+        """(아는 비용 합, 전체 실행 수, 비용을 모르는 실행 수)."""
+        cost, unknown = 0.0, 0
+        rows = self.rows()
+        for row in rows:
+            if row["cost_usd"].strip():
+                cost += float(row["cost_usd"])
+            else:
+                unknown += 1
+        return cost, len(rows), unknown
+
+    def next_run_id(self) -> str:
+        return f"R-{len(self.rows()) + 1:04d}"
+
+    def append(self, row: dict) -> dict:
+        extra = set(row) - set(LEDGER_COLUMNS)
+        if extra:
+            raise RunnerError(f"장부에 없는 열: {sorted(extra)}")
+        full = {col: "" for col in LEDGER_COLUMNS}
+        full.update({k: "" if v is None else str(v) for k, v in row.items()})
+        if not full["run_id"]:
+            full["run_id"] = self.next_run_id()
+        if not full["at"]:
+            full["at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.path.open("a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow([full[col] for col in LEDGER_COLUMNS])
+        return full
+
+
+# ── 상한·알림 ─────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Budget:
+    usd: float
+    max_runs: int
+
+    @classmethod
+    def from_env(cls) -> "Budget":
+        usd = os.getenv("JUDGE_LIVE_BUDGET_USD", "").strip()
+        runs = os.getenv("JUDGE_LIVE_MAX_RUNS", "").strip()
+        return cls(usd=float(usd) if usd else DEFAULT_BUDGET_USD, max_runs=int(runs) if runs else DEFAULT_MAX_RUNS)
+
+
+@dataclass(frozen=True)
+class BatchPlan:
+    """시작 전에 알리는 묶음 예상. 단가를 모르면 est_cost_usd 는 None(회차 상한으로만 막는다)."""
+
+    stage: str
+    runs: int
+    est_cost_usd: float | None
+
+
+def crossed_checkpoint(before_usd: float, after_usd: float) -> bool:
+    """누계가 $10 단위를 새로 넘었나."""
+    return math.floor(after_usd / CHECKPOINT_USD) > math.floor(before_usd / CHECKPOINT_USD)
+
+
+class Runner:
+    """묶음 하나를 감싼다: start(예상·상한·확인) → record(한 줄 쓰고 누계 알림)."""
+
+    def __init__(
+        self,
+        ledger: Ledger,
+        budget: Budget,
+        mode: str,
+        *,
+        confirm: Callable[[str], str] = input,
+        out: Callable[[str], None] = print,
+    ):
+        if mode not in MODES:
+            raise RunnerError(f"모르는 모드: {mode}")
+        self.ledger, self.budget, self.mode = ledger, budget, mode
+        self._confirm, self._out = confirm, out
+        self._unknown_since_checkpoint = 0
+
+    def start(self, plan: BatchPlan, *, yes: bool) -> None:
+        spent, runs, unknown = self.ledger.totals()
+        est = "모름(단가 없음)" if plan.est_cost_usd is None else f"${plan.est_cost_usd:.2f}"
+        self._out(
+            f"[{self.mode}] 묶음 {plan.stage}: 예상 {plan.runs}회·{est} | 누계 ${spent:.2f}·{runs}회"
+            f"(비용 모름 {unknown}회) | 상한 ${self.budget.usd:.2f}·{self.budget.max_runs}회"
+        )
+        if runs + plan.runs > self.budget.max_runs:
+            raise RunnerError(f"회차 상한을 넘는다: {runs} + {plan.runs} > {self.budget.max_runs}")
+        if plan.est_cost_usd is not None and spent + plan.est_cost_usd > self.budget.usd:
+            raise RunnerError(f"비용 상한을 넘는다: ${spent:.2f} + ${plan.est_cost_usd:.2f} > ${self.budget.usd:.2f}")
+        if not yes:
+            raise RunnerError("확인 인자 --yes 가 없어 시작하지 않는다(위 예상을 보고 다시 실행).")
+
+    def record(self, row: dict) -> dict:
+        before, _, _ = self.ledger.totals()
+        written = self.ledger.append({**row, "mode": self.mode})
+        after = before + (float(written["cost_usd"]) if written["cost_usd"] else 0.0)
+        if not written["cost_usd"]:
+            self._unknown_since_checkpoint += 1
+        self._out(f"  {written['run_id']} {written['stage']} {written['report']} — 누계 ${after:.2f}")
+        reason = None
+        if crossed_checkpoint(before, after):
+            reason = f"누계가 ${math.floor(after / CHECKPOINT_USD) * CHECKPOINT_USD:.0f} 를 넘었다"
+        elif self._unknown_since_checkpoint >= CHECKPOINT_UNKNOWN_RUNS:
+            reason = f"비용을 모르는 실행이 {CHECKPOINT_UNKNOWN_RUNS}회 쌓였다"
+        if reason:
+            self._unknown_since_checkpoint = 0
+            answer = self._confirm(f"{reason}. 이어 하려면 '계속'을 입력: ").strip()
+            if answer != "계속":
+                raise RunnerError(f"{reason} — 확인이 없어 멈춘다.")
+        return written
+
+
+# ── 읽기 경계·클라이언트 ─────────────────────────────────────────────────
+
+
+def validation_dir() -> Path | None:
+    value = os.getenv("JUDGE_VALIDATION_DIR", "").strip()
+    return Path(value).resolve() if value else None
+
+
+def guard_read(path: Path, mode: str) -> Path:
+    """dev 모드에서 검증 폴더 안을 읽으려 하면 거부한다(오염 방지 규칙 2). dev 인데 검증 폴더를 모르면 그것도 거부."""
+    resolved = Path(path).resolve()
+    if mode == "dev":
+        vdir = validation_dir()
+        if vdir is None:
+            raise RunnerError("dev 모드는 JUDGE_VALIDATION_DIR 를 알아야 한다(검증 폴더를 읽지 않음을 확인하려고).")
+        if resolved == vdir or vdir in resolved.parents:
+            raise RunnerError(f"dev 모드는 검증 폴더를 읽지 않는다: {resolved}")
+    return resolved
+
+
+@dataclass
+class Clients:
+    anthropic: object | None = None
+    openai: object | None = None
+
+
+def make_clients(live: bool) -> Clients:
+    """`--live` 일 때만 .env 를 읽고 진짜 클라이언트를 만든다. 아니면 둘 다 None — 키가 있어도 만들지 않는다."""
+    if not live:
+        return Clients()
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    from anthropic import AsyncAnthropic
+    from openai import AsyncOpenAI
+
+    from app.narrative import llm as narrative_llm
+
+    clients = Clients()
+    if os.getenv("ANTHROPIC_API_KEY"):
+        clients.anthropic = AsyncAnthropic(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            timeout=narrative_llm.CALL_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+    if os.getenv("OPENAI_API_KEY"):
+        clients.openai = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=0)
+    if clients.anthropic is None and clients.openai is None:
+        raise RunnerError("--live 인데 ANTHROPIC_API_KEY·OPENAI_API_KEY 가 둘 다 없다.")
+    return clients
+
+
+# ── 명령줄 ───────────────────────────────────────────────────────────
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    ledger = Ledger(Path(args.ledger))
+    spent, runs, unknown = ledger.totals()
+    budget = Budget.from_env()
+    print(f"누계 ${spent:.2f}·{runs}회(비용 모름 {unknown}회) | 상한 ${budget.usd:.2f}·{budget.max_runs}회")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="심판 라운드 실호출 실행기")
+    sub = parser.add_subparsers(dest="command", required=True)
+    status = sub.add_parser("status", help="장부 누계와 상한")
+    status.add_argument("--ledger", required=True)
+    status.set_defaults(func=_cmd_status)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except RunnerError as exc:
+        print(f"멈춤: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
