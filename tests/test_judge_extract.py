@@ -115,3 +115,13 @@ async def test_call_failures_propagate(bad, kind):
 async def test_self_check_failure_is_failure():
     _, res = await run(reply(item("0.912")), F.response([F.message_item("x", refusal=True)]))
     assert res.failure == "refusal" and len(res.calls) == 2
+
+
+async def test_normative_inference_is_dropped_by_code():
+    pieces = [Piece("slot:8.2", "8.2", "5.1", "ai", "별도 데이터에서 확인해야 한다. 경계 근처 표본이 많음을 시사한다.")]
+    fake = F.FakeOpenAI([reply(item("별도 데이터에서 확인해야 한다", piece="slot:8.2", kind="inference", field="", number_text=""),
+                               item("경계 근처 표본이 많음을 시사한다", piece="slot:8.2", kind="inference", field="", number_text="")),
+                         reply()])
+    res = await extract.extract_claims(fake, pieces, CATALOG)
+    assert [c.quote for c in res.claims] == ["경계 근처 표본이 많음을 시사한다"]
+    assert [r["reason"] for r in res.rejected] == ["normative"]

@@ -174,3 +174,9 @@ def test_pilot2_rules():
     assert fa.name_matches("해지할 가입자를 넘긴다.", "해지할 가입자를 넘긴다")
     assert SOURCES.lookup("rule.imbalance_ratio_threshold") == {"field": "rule.imbalance_ratio_threshold", "value": 1.5,
                                                                   "source": "판정 규칙 기준값"}
+
+
+def test_client_text_partial_quote():
+    assert fa.client_text_matches("2026년 1분기 해지 신청 기록에서 뽑은 200명", "2026년 1분기 해지 신청 기록")
+    assert not fa.client_text_matches("2026년 1분기 해지 신청 기록에서 뽑은 200명", "2025년 기록")
+    assert not fa.client_text_matches("긴 고객 입력 글", "글")  # 너무 짧은 조각은 맞다고 보지 않는다

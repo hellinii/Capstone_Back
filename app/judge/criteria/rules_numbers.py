@@ -69,6 +69,8 @@ def same_quantity(a: str, b: str) -> bool | None:
         half = Decimal(5) * Decimal(10) ** (-(p.decimals + 1))
         return (p.value - half) * scale, (p.value + half) * scale
 
+    if pa.signed != pb.signed:  # 한쪽만 부호 — 말로 방향을 쓴 크기(16건 적게)와 표의 부호 붙은 차이(−16)
+        pa, pb = Printed(abs(pa.value), pa.decimals, pa.percent, False), Printed(abs(pb.value), pb.decimals, pb.percent, False)
     scale_a = 100 if (pb.percent and not pa.percent) else 1
     scale_b = 100 if (pa.percent and not pb.percent) else 1
     lo_a, hi_a = interval(pa, scale_a)

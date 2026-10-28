@@ -162,6 +162,12 @@ def name_matches(actual: str, named: str) -> bool:
     return bool(_norm_name(actual)) and _norm_name(actual) in target
 
 
+def client_text_matches(actual: str, named: str) -> bool:
+    """고객 입력 칸은 일부 인용도 맞다 — 문장이 고객이 적은 글의 앞부분만 옮기는 일이 흔하다(J4 2차 파일럿). 6자 이상만."""
+    a, n = _norm_name(actual), _norm_name(named)
+    return bool(a) and (a in n or (len(n) >= 6 and n in a))
+
+
 def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs, piece: Piece | None) -> ClaimVerdict:
     """에이전트 답(없으면 None)과 자료로 주장 하나를 판정한다(코드)."""
     v = ClaimVerdict(claim.id, claim.kind, "unverifiable", claim.slot, claim.piece_id, claim.quote)
@@ -194,7 +200,9 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
         actual = sources.texts.get(ans.get("name_field", "").strip())
         if actual is not None and ans.get("named"):
             v.detail["data"] = actual
-            v.verdict = "match" if name_matches(actual, ans["named"]) else "violation"
+            field_name = ans.get("name_field", "").strip()
+            ok = client_text_matches(actual, ans["named"]) if field_name.startswith("client.") else name_matches(actual, ans["named"])
+            v.verdict = "match" if ok else "violation"
     elif claim.kind == "degree":
         result = degree_verdict(claim.polarity, ans.get("metric_id", "").strip(), claim.quote, metrics, refs)
         v.verdict = {"ok": "match", "violation": "violation", "target_unclear": "target_unclear"}[result]

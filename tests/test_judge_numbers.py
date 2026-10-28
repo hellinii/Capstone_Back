@@ -52,3 +52,7 @@ def test_same_quantity(a, b, same):
 def test_touching_intervals_are_different_quantities():
     assert same_quantity("0.5", "0.6") is False
     assert same_quantity("0.55", "0.5") is True
+
+
+def test_same_quantity_one_signed_compares_magnitude():
+    assert same_quantity("16", "−16") is True and same_quantity("+16", "−16") is False and same_quantity("15", "−16") is False

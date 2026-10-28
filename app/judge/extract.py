@@ -95,6 +95,20 @@ def response_schema(piece_ids: list[str]) -> dict:
     }
 
 
+_SENT = re.compile(r"(?<=[.?!])\s+|\n+")
+
+
+def _sentence_of(quote: str, piece: Piece) -> str:
+    for s in _SENT.split(piece.text):
+        if _norm(quote) in _norm(s):
+            return s
+    return quote
+
+
+def _normative(sentence: str) -> bool:
+    return any(m in sentence for m in criteria.load_json("claims.json")["normative_markers"])
+
+
 def _found_text(claims: list[Claim]) -> str:
     return "\n".join(f"- [{c.piece_id}] {c.kind}: {c.quote}" for c in claims) or "(없음)"
 
@@ -114,6 +128,9 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
             continue
         if not quote.strip() or _norm(quote) not in _norm(piece.text):
             rejected.append({"round": round_no, "reason": "quote", "piece_id": piece.id, "quote": quote[:200]})
+            continue
+        if item["kind"] == "inference" and _normative(_sentence_of(quote, piece)):
+            rejected.append({"round": round_no, "reason": "normative", "piece_id": piece.id, "quote": quote[:200]})
             continue
         key = (piece.id, _norm(quote), item["kind"])
         if key in seen:
