@@ -3,7 +3,7 @@
 두 재료를 읽어 단계별 시간·토큰·비용을 모으고, 8절 효용성 표의 칸을 채운다. 읽기만 한다(장부·결과 파일에 쓰지 않는다).
 
 1. 장부(`검증/장부.csv`, 열은 `검증/장부_열.txt`) — 한 줄 = 실호출 한 번. 단계(stage) 이름 끝으로 나눈다: `_judge` = 채점 1회,
-   `_generate` = 서술 생성 1건, 그 밖은 기타(스모크 등).
+   `_generate` = 서술 생성 1건, `validate_<묶음>`(검증 실행기 — 재현성·결함·sham 회차) = 채점 1회, 그 밖은 기타(스모크 등).
 2. 작업 내부 기록(`internal_json`, 선택 `--job`) — 서술 작업 하나의 생성 시간·비용과 심판 기록(internal["judge"]): 채점 회차마다
    모듈별 시간(전처리·사실 일치·필수 내용·일관성·표기·합산), 전처리 0·1·2번 호출 시간, 모듈별 토큰·비용.
    파일은 내부 기록 dict 그대로이거나 `{"internal": {...}}`(scripts/judge_live.py job 결과 꼴)이다.
@@ -79,8 +79,11 @@ def spread(values: list[float]) -> dict:
             "min": round(min(values), 3), "max": round(max(values), 3)}
 
 
+VALIDATE_PREFIX = "validate_"  # 검증 실행기(scripts/judge_validate.py) 장부 단계 — validate_<묶음>, 한 줄 = 채점 1회
+
+
 def stage_kind(stage: str) -> str:
-    if stage.endswith("_judge"):
+    if stage.endswith("_judge") or stage.startswith(VALIDATE_PREFIX):
         return "채점"
     if stage.endswith("_generate"):
         return "생성"

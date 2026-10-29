@@ -104,7 +104,9 @@ def test_sum_known():
 
 
 @pytest.mark.parametrize("stage, kind", [("pilot_judge", "채점"), ("job_judge", "채점"), ("verify_judge", "채점"),
-                                         ("seal_generate", "생성"), ("smoke", "기타"), ("judge_pilot", "기타")])
+                                         ("seal_generate", "생성"), ("smoke", "기타"), ("judge_pilot", "기타"),
+                                         ("validate_reproducibility", "채점"), ("validate_defects", "채점"),
+                                         ("validate_sham", "채점")])
 def test_stage_kind(stage, kind):
     assert R.stage_kind(stage) == kind
 
@@ -218,3 +220,22 @@ def test_sealed_folder_refused_in_other_spellings(tmp_path, monkeypatch):
     other.mkdir()
     (other / "y.json").write_text(json.dumps({"judge": {}}), encoding="utf-8")
     R.read_job(other / "y.json")  # 봉인 밖은 읽는다
+
+
+def test_validation_runner_ledger_counts_as_scoring(tmp_path, monkeypatch):
+    """검증 실행기(judge_validate)가 실제로 쓰는 장부 꼴 — 단계 validate_<묶음> 줄은 채점으로 센다(J10 검토)."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("judge_validate", root / "scripts" / "judge_validate.py")
+    jv = importlib.util.module_from_spec(spec)
+    sys.modules["judge_validate"] = jv
+    spec.loader.exec_module(jv)
+    monkeypatch.setenv("JUDGE_VALIDATION_DIR", str(tmp_path / "검증"))
+    ledger = tmp_path / "장부.csv"
+    jv.execute(jv.RunArgs(mode="dev", batch="reproducibility", ledger=ledger, out=tmp_path / "runs", yes=True, seed=1,
+                          reports=["dev_binary"], repeats=2), echo=lambda _: None)
+    rep = R.ledger_summary(R.read_ledger(ledger))
+    assert set(rep["by_kind"]) == {"채점"} and rep["by_kind"]["채점"]["rows"] == 2
