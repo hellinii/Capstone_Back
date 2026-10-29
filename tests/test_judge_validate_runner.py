@@ -496,6 +496,7 @@ def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_pat
     assert result["extraction"]["pooled_with_additions"] == {"recall": 1.0, "precision": 1.0, "n_pairs": 2, "n_gold": 2,
                                                              "n_pred": 2, "added": 1}
     assert result["extraction"]["reports"]["dev_binary"]["with_additions"]["added"] == 1
+    assert result["extraction"]["passed"] is True and result["verdicts"]["extraction"] == "통과"  # V1 결정 11
     # 놓친 주장(Q12②) — 회차마다 match 결과를 missed_rows 에, 정답지 폴더의 판정표를 confirmed_additions 에 넘긴다
     assert [a for a, _ in fake.named("missed_rows")] == [({"pairs": [1]},), ({"pairs": [1]},)]
     ((judged_rows,), _), = fake.named("confirmed_additions")
@@ -653,6 +654,8 @@ def test_report_missed_claims_with_real_extraction(tmp_path):
     ext = r["extraction"]
     assert ext["pooled"] == {"recall": 1.0, "precision": 2 / 5, "n_pairs": 2, "n_gold": 2, "n_pred": 5}
     assert ext["pooled_with_additions"] == {"recall": 1.0, "precision": 4 / 5, "n_pairs": 4, "n_gold": 4, "n_pred": 5, "added": 1}
+    # V1 결정 11 — 판정은 보탠 뒤 합친 값: 정밀도 0.8 < 0.95 라 미달(보태기 전 0.4 가 아니라 뒤 값으로 본다)
+    assert ext["passed"] is False and r["verdicts"]["extraction"] == "미달"
     after = ext["reports"]["T1"]["with_additions"]
     assert after["added"] == 1 and [m["n_gold"] for m in after["runs"]] == [2, 2]
     assert [m["n_gold"] for m in ext["reports"]["T1"]["runs"]] == [1, 1]  # 앞 값은 원 정답지 그대로
@@ -998,3 +1001,16 @@ def test_keys_are_read_only(tmp_path, vdir):
     for f in keys:
         mode = f.stat().st_mode
         assert not mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH), (f, oct(mode))
+
+
+def test_extraction_verdict_uses_pooled_values_after_additions():
+    """V1 결정 11 — 보태기 전엔 미달이어도 보탠 뒤 0.95 이상이면 통과, 기준 바로 아래면 미달, 값이 없으면 계산 불가."""
+    def ext(before, after):
+        return {"pooled": {"recall": before[0], "precision": before[1]},
+                "pooled_with_additions": {"recall": after[0], "precision": after[1]}}
+
+    assert jv.extraction_passed(ext((1.0, 0.5), (1.0, 0.95))) is True
+    assert jv.extraction_passed(ext((0.5, 1.0), (0.95, 1.0))) is True  # 기준값 자체는 통과(이상)
+    assert jv.extraction_passed(ext((1.0, 1.0), (0.949, 1.0))) is False
+    assert jv.extraction_passed(ext((1.0, 1.0), (1.0, 0.94))) is False
+    assert jv.extraction_passed(ext((1.0, 1.0), (None, 1.0))) is None

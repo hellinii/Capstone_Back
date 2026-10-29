@@ -485,6 +485,15 @@ def planted_sentence(meta: dict) -> str | None:
 
 
 UNCOMPUTABLE = "계산 불가"
+EXTRACTION_MIN = 0.95  # V1 결정 11 — 재현율·정밀도 모두, 3건 × 회차를 합친 값·놓친 주장을 보탠 뒤로 판정
+
+
+def extraction_passed(ext: dict) -> bool | None:
+    """추출 판정(V1 결정 11) — 보태기 전 값이 아니라 놓친 주장을 보탠 뒤 합친 값의 재현율·정밀도가 모두 기준 이상."""
+    judged_on = ext["pooled_with_additions"]
+    if judged_on["recall"] is None or judged_on["precision"] is None:
+        return None
+    return judged_on["recall"] >= EXTRACTION_MIN and judged_on["precision"] >= EXTRACTION_MIN
 
 
 def verdict_word(value: bool | None) -> str:
@@ -612,6 +621,7 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
             "n_pairs": pairs, "n_gold": gold_n, "n_pred": pred_n}, "pooled_with_additions": {
             "recall": pairs2 / gold_n2 if gold_n2 else None, "precision": pairs2 / pred_n2 if pred_n2 else None,
             "n_pairs": pairs2, "n_gold": gold_n2, "n_pred": pred_n2, "added": added}}
+        out["extraction"]["passed"] = extraction_passed(out["extraction"])
         if missed:
             out["missed_claims"] = missed
 
@@ -643,6 +653,7 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
         ("axes_passed", (out.get("reproducibility") or {}).get("axes_passed")),
         ("detection", (out.get("detection") or {}).get("passed")) if "detection" in out else ("detection", None),
         ("independence_passed", out.get("independence_passed")), ("sham_passed", out.get("sham_passed")),
+        ("extraction", (out.get("extraction") or {}).get("passed")),
         ("agreement", (out.get("agreement") or {}).get("passed")))}
     return out
 
