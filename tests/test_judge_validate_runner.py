@@ -249,3 +249,134 @@ def test_extraction_batch_calls_nothing(tmp_path, vdir):
 
     assert jv.execute(_dev(tmp_path, batch="extraction"), client=Boom(), echo=echo)["ran"] == 0
     assert "채점을 따로 부르지 않는다" in lines[0]
+
+
+# ── ⑥ 가짜 LLM 으로 처음부터 끝까지 한 바퀴(dev) — 개발 입력 3건 → 재현성 → 합성 결함 1·sham 1 → report(가짜 통계) ──
+
+_AUDIT = {"on": False, "paths": []}
+
+
+def _audit(event, args):
+    if _AUDIT["on"] and event == "open" and args and isinstance(args[0], (str, bytes, Path)):
+        _AUDIT["paths"].append(str(args[0]))
+
+
+sys.addaudithook(_audit)
+
+
+class FakeStats:
+    """다른 갈래(stats)가 만드는 함수 자리 — 받은 인자를 적고 정해 둔 값을 돌려준다(배선만 본다)."""
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def module(self, names):
+        import types
+
+        mod = types.ModuleType("fake")
+        for name in names:
+            setattr(mod, name, self._fn(name))
+        return mod
+
+    def _fn(self, name):
+        def fn(*args):
+            self.calls.append((name, args))
+            if name == "axis_scores":
+                return {"faithfulness": 1.0, "coverage": 0.5, "consistency": 0.0, "readability": 0.0}
+            if name == "match_claims":
+                return [("짝", 1)]
+            return {"fn": name}
+        return fn
+
+
+def _plant_synthetic(defects: Path, bases):
+    from app.judge.validation import variants as V
+
+    b = bases["dev_binary"]
+    slot = "conclusion.narrative"
+    text = V.read_slot(b.result, slot)
+    first = V.sentences(text)[0]
+    after = first[:-1] + " (worse)."
+    V.write_variant(defects, {"id": "D01", "base": "dev_binary", "axis": "readability", "kind": "영어 코드값 노출",
+                              "planted_by": "인용", "slot": slot, "intent": "코드값 노출(합성)", "before": first, "after": after},
+                    b.result, V.replace_sentence(text, 0, after))
+    m = bases["dev_multiclass"]
+    slot = "conclusion.risks"
+    text = V.read_slot(m.result, slot)
+    first = V.sentences(text)[0]
+    V.write_variant(defects, {"id": "S01", "base": "dev_multiclass", "axis": "sham", "kind": "어순", "planted_by": "민서",
+                              "slot": slot, "intent": "뜻 그대로(합성)", "before": first, "after": "즉, " + first},
+                    m.result, V.replace_sentence(text, 0, "즉, " + first))
+
+
+def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_path, vdir, monkeypatch):
+    import asyncio
+
+    work = tmp_path / "work"
+    defects = work / "결함"
+    ledger = work / "장부.csv"
+    _plant_synthetic(defects, asyncio.run(jv.dev_bases(jv.DEV_INPUTS)))
+    answers = work / "정답지"
+    answers.mkdir()
+    (answers / "dev_binary.claims.csv").write_text("문장번호,종류,인용 구절,메모\n1,number,0.505,\n", encoding="utf-8")
+    fake = FakeStats()
+    for mod, names in (("stats", ["icc_a1", "axis_scores", "reproducibility", "gate_stability", "defect_detected",
+                                  "independence_ok", "sham_ok"]),
+                       ("extraction", ["match_claims", "recall_precision"]), ("agreement", ["agreement_rate"])):
+        monkeypatch.setitem(sys.modules, f"app.judge.validation.{mod}", fake.module(names))
+
+    _AUDIT.update(on=True, paths=[])
+    try:
+        common = dict(mode="dev", ledger=ledger, out=work / "runs", yes=True, seed=11, defects=defects)
+        repro = jv.execute(jv.RunArgs(batch="reproducibility", reports=[], repeats=2, **common), echo=_quiet()[1])
+        dfx = jv.execute(jv.RunArgs(batch="defects", **common), echo=_quiet()[1])
+        sham = jv.execute(jv.RunArgs(batch="sham", **common), echo=_quiet()[1])
+        ext = jv.execute(jv.RunArgs(batch="extraction", **common), echo=_quiet()[1])
+        result = jv.cmd_report("dev", ledger=ledger, out=work / "결과", answers=answers, echo=_quiet()[1])
+    finally:
+        _AUDIT["on"] = False
+    # 검증 폴더(미끼 포함)는 한 번도 열지 않았다 — 열린 파일이 실제로 잡히는지도 본다(빈 감시는 늘 통과).
+    opened = [Path(p).resolve() for p in _AUDIT["paths"]]
+    assert any(p == ledger.resolve() for p in opened)
+    assert [p for p in opened if p == vdir or vdir in p.parents] == []
+
+    assert (repro["ran"], dfx["ran"], sham["ran"], ext["ran"]) == (6, 1, 1, 0)
+    rows = _rows(ledger)
+    assert [(r["stage"], r["report"], r["variant"]) for r in rows].count(("validate_defects", "dev_binary", "D01")) == 1
+    assert {r["stage"] for r in rows} == {"validate_reproducibility", "validate_defects", "validate_sham"}
+    assert all(r["mode"] == "dev" and r["result_sha256"] for r in rows) and len(rows) == 8
+
+    # report 배선: 축마다 재현성(성적서 3 × 회차 2), 게이트 안정, 결함 탐지·독립성(심은 축), sham, 추출 짝짓기
+    names = [c[0] for c in fake.calls]
+    assert names.count("axis_scores") == 8
+    repro_calls = [c[1][0] for c in fake.calls if c[0] == "reproducibility"]
+    assert len(repro_calls) == 4 and all(len(m) == 3 and all(len(row) == 2 for row in m) for m in repro_calls)
+    (gates,) = [c[1][0] for c in fake.calls if c[0] == "gate_stability"]
+    assert len(gates) == 3 and all(len(g) == 2 for g in gates)
+    (detect,) = [c[1] for c in fake.calls if c[0] == "defect_detected"]
+    assert detect[0]["id"] == "D01" and detect[1]["key"].variant == "D01"
+    (indep,) = [c[1] for c in fake.calls if c[0] == "independence_ok"]
+    assert indep[0] == "readability" and len(indep[1]) == 1 and len(indep[2]) == 2
+    (sham_call,) = [c[1] for c in fake.calls if c[0] == "sham_ok"]
+    assert len(sham_call[0]) == 1 and len(sham_call[1]) == 2
+    assert names.count("match_claims") == 2 and names.count("recall_precision") == 2  # dev_binary 회차 2개만 정답지가 있다
+    (human, system) = [c[1] for c in fake.calls if c[0] == "match_claims"][0]
+    assert human[0]["인용 구절"] == "0.505" and isinstance(system, list)
+    assert "agreement_rate" not in names  # 사람 일치도 짝이 없으면 부르지 않는다
+    assert set(result) >= {"reproducibility", "gate_stability", "base_gate_pass", "defects", "sham", "extraction"}
+    assert result["defects"]["D01"]["axis"] == "readability" and result["sham"]["S01"]["base"] == "dev_multiclass"
+    saved = json.loads((work / "결과" / "검증결과.json").read_text(encoding="utf-8"))
+    assert saved["fingerprint"] == criteria.fingerprint() and saved["runs"] == 8
+
+
+def test_report_refuses_tampered_result_file(tmp_path, vdir):
+    jv.execute(_dev(tmp_path, repeats=1), echo=_quiet()[1])
+    row = _rows(tmp_path / "work" / "장부.csv")[0]
+    Path(row["result_file"]).write_text("{}", encoding="utf-8")
+    with pytest.raises(jv.RunnerError, match="결과 원본 해시가 장부와 다르다"):
+        jv.cmd_report("dev", ledger=tmp_path / "work" / "장부.csv", out=tmp_path / "o", api={})
+
+
+def test_stats_api_names_are_the_agreed_ten():
+    assert sorted(jv.STATS_API) == sorted(["icc_a1", "axis_scores", "reproducibility", "gate_stability", "defect_detected",
+                                           "independence_ok", "sham_ok", "agreement_rate", "match_claims", "recall_precision"])
