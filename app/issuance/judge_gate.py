@@ -9,11 +9,15 @@
 - 정수 1·2·3 이면 검사하지 않는다. 그 밖(4, "4", 4.0, 그 밖의 값)은 모두 판 4 로 보고 검사한다.
 
 거절 사유 코드(거절마다 다름): judge_job_missing(번호 없음) · judge_job_not_found(작업 없음) · judge_job_not_edition4(판 4 작업
-아님) · judge_record_expired(작업 기록 보관 기간이 지남) · judge_not_passed(진행 중·실패·보류).
-서술 글 지문 대조(같은 작업의 서술인지)는 P1(Q1 다, J9)이다 — 지금은 "통과한 다른 작업 번호"를 막지 못한다.
+아님) · judge_record_expired(작업 기록 보관 기간이 지남) · judge_not_passed(진행 중·실패·보류) ·
+judge_narrative_unrecorded(통과 기록에 서술 글 지문이 없음) · judge_narrative_mismatch(content 의 서술 글이 그 작업의 글과 다름).
+
+서술 글 지문 대조(J9, 계획 14-9b·Q1 다): 작업이 통과할 때 남긴 서술 글 지문(internal judge.narrative_sha256)과 content 안 서술 글의
+지문(app.narrative.digest — 무엇을 같게 보는지는 그 모듈 머리)을 맞댄다. "통과한 다른 작업 번호"·서술을 바꾼 content 를 막는다.
+프론트는 모르는 judge_* 코드도 B48 "서버가 발급을 거절했습니다: {서버 글}"로 보인다(judgeNotice.isJudgeRejection) — 새 화면 글 없음.
 
 상호작용
-- 의존(import): app.narrative.models(NarrativeJob), app.narrative.jobs(record_retention — 보관 기간 한 곳), app.issuance.service(IssuanceError)
+- 의존(import): app.narrative.models(NarrativeJob), app.narrative.digest(서술 글 지문), app.narrative.jobs(record_retention — 보관 기간 한 곳), app.issuance.service(IssuanceError)
 - 사용처: app.issuance.router(issue·reissue)
 """
 from __future__ import annotations
@@ -24,6 +28,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.issuance.service import IssuanceError
+from app.narrative import digest
 from app.narrative.models import NarrativeJob, _utcnow
 
 MESSAGES = {
@@ -32,6 +37,8 @@ MESSAGES = {
     "judge_job_not_edition4": "판 4 서술 작업이 아니어서 판 4 성적서를 발급할 수 없습니다",
     "judge_record_expired": "서술 작업 기록의 보관 기간이 지나 판 4 성적서를 발급할 수 없습니다",
     "judge_not_passed": "심판을 통과하지 않은 서술이어서 판 4 성적서를 발급할 수 없습니다(발급 보류)",
+    "judge_narrative_unrecorded": "서술 작업에 서술 글 기록이 없어 판 4 성적서를 발급할 수 없습니다",
+    "judge_narrative_mismatch": "성적서의 서술이 심판을 통과한 서술과 달라 판 4 성적서를 발급할 수 없습니다",
 }
 
 
@@ -63,6 +70,11 @@ def reject_reason(db: Session, content: dict | None, job_id: str | None, *, now:
     judge = internal.get("judge")
     if job.status != "done" or not isinstance(judge, dict) or judge.get("gate") != "passed":
         return "judge_not_passed"
+    recorded = judge.get("narrative_sha256")
+    if not isinstance(recorded, str) or not recorded:
+        return "judge_narrative_unrecorded"
+    if digest.of_content(content) != recorded:
+        return "judge_narrative_mismatch"
     return None
 
 

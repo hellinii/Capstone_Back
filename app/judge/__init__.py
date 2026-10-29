@@ -13,4 +13,5 @@ import 규칙(tests/test_judge_import_rules.py 가 지킨다)
 - config: 모델 이름·추론 강도·단가표(모르면 None)
 - llm: OpenAI Responses 호출 한 곳(재시도·시간·토큰·비용 기록)
 - criteria/: 기준 고정 묶음(체크리스트·주장 규칙·프롬프트 등)과 지문(MANIFEST)
+- criteria_lock: 검증 기록 잠금(14-10) — 지금 기준 지문이 검증 기록(validated.json, J11 이 씀)과 다르면 판 4 보류
 """

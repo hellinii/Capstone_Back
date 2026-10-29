@@ -58,8 +58,9 @@ from sqlalchemy import delete, update
 
 from app.core import database, llm_budget
 from app.core.concurrency import judge_slot, run_cpu_bound
-from app.judge import alert, bundle, ladder
+from app.judge import alert, bundle, criteria_lock, ladder
 from app.judge.core import JudgeRun, judge_once
+from app.narrative import digest
 from app.narrative import sections
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.models import NarrativeJob, _utcnow
@@ -755,6 +756,9 @@ async def run_job_ed4(
     if failure is None:
         judge_rec.setdefault("judge_budget", judge_state)
         judge_rec["summary"] = ladder.summary(judge_rec)
+        if verdict is not None and verdict["gate"] == "passed" and narrative is not None:
+            # 서술 글 지문(14-9b) — 발급·정정 때 content 의 서술과 맞댄다(app.issuance.judge_gate). 통과한 글만 남긴다.
+            judge_rec["narrative_sha256"] = digest.of_result(narrative)
     judge_record = _serializable_judge(judge_rec, job_id)
     if judge_record.get("serialize_error") and narrative is not None:
         verdict = bundle.held("judge_error", retry_allowed=False)
@@ -799,6 +803,21 @@ async def _judge_branch(session, judge, judge_state, deadline_at, clock, judge_r
         allowed = ladder.retry_allowed(kind, failure=None, ever_blocked=False)
         judge_rec.update({"gate": "held", "held_kind": kind, "failure": None, "retry_allowed": allowed, "rounds": []})
         return bundle.held(kind, retry_allowed=allowed)
+    # 검증 기록 잠금(계획 14-10·정9) — 지금 기준이 검증한 기준이 아니면 심판을 부르지 않고 보류(judge_error, 다시 만들기 없음).
+    # 판정은 여기 한 곳. 꺼져 있으면(개발·시험) 기록에 off 를 남긴다.
+    try:
+        locked = criteria_lock.problem()
+    except Exception as exc:  # noqa: BLE001 — 기준 파일을 못 읽는 것도 통과로 새지 않는다
+        locked = f"error:{type(exc).__name__}"
+    judge_rec["criteria_lock"] = locked or ("ok" if criteria_lock.enabled() else "off")
+    if locked:
+        allowed = ladder.retry_allowed("judge_error", failure="criteria_lock", ever_blocked=False)
+        logger.error("검증 기록 잠금(%s) → 심판을 부르지 않고 발급 보류(judge_error)", locked)
+        judge_rec.update({"gate": "held", "held_kind": "judge_error", "failure": "criteria_lock",
+                          "retry_allowed": allowed, "rounds": []})
+        return bundle.held("judge_error", retry_allowed=allowed)
+    if judge_rec["criteria_lock"] == "off":
+        logger.warning("검증 기록 잠금이 꺼져 있다(%s=off) — 개발·시험 전용, 운영에 두면 안 된다", criteria_lock.ENV)
     try:
         outcome = await ladder.run_ladder(session, judge, deadline=deadline_at, clock=clock, record=judge_rec)
     except Exception as exc:  # noqa: BLE001 — 심판 갈래의 어떤 예외도 통과로 새지 않는다
