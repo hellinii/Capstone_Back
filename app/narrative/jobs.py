@@ -509,12 +509,17 @@ async def create_job(raw, *, client, session_factory, background_tasks, judge_cl
             result=NarrativeJobResult(**customer_result(gen, judge)),
         )
 
-    # 판 4 는 심판을 먼저 본다(정3) — 심판 키가 없거나 심판 지갑이 비었으면 서술 AI 도 부르지 않는다(생성 비용을 버리지 않게).
-    # 규칙 문장 서술 + 발급 보류(no_key·budget). 판 3 은 심판이 없다(Q1 가).
+    # 판 4 는 심판을 먼저 본다(정3) — 심판 키가 없거나·검증 기록 잠금에 걸렸거나·심판 지갑이 비었으면 서술 AI 도 부르지 않는다
+    # (생성 비용·심판 지갑을 버리지 않게). 규칙 문장 서술 + 발급 보류(no_key·judge_error·budget). 판 3 은 심판이 없다(Q1 가).
+    # 잠금은 여기서 한 번(J10 검토 — 잠긴 배포에서 서술 AI·심판 지갑을 쓰지 않게), 심판 갈래(_judge_branch)에서 한 번 더 본다.
     judge_state = None
+    lock_problem = None
     if edition4:
         if judge_client is None:
             judge_state = "no_key"
+        elif (lock_problem := _lock_problem()) is not None:
+            judge_state = "locked"
+            logger.error("검증 기록 잠금(%s) → 만들 때 규칙 문장 + 발급 보류(judge_error) — 서술 AI·심판 지갑을 쓰지 않는다", lock_problem)
         elif llm_budget.judge.try_consume():
             judge_state = "reserved"
         else:
@@ -528,7 +533,7 @@ async def create_job(raw, *, client, session_factory, background_tasks, judge_cl
     if [t for t in trimmed if t not in SOFT_REPAIRS]:
         forced_reason, budget = "input_too_large", "not_needed"
         logger.warning("서술 작업 입력이 상한을 넘어 줄임 → 규칙 문장으로 완료(input_too_large): %s", trimmed)
-    elif judge_state in ("no_key", "budget"):
+    elif judge_state in ("no_key", "budget", "locked"):
         forced_reason, budget = f"judge_{judge_state}", "not_needed"
     elif client is None:
         budget = "no_key"
@@ -565,7 +570,7 @@ async def create_job(raw, *, client, session_factory, background_tasks, judge_cl
             run_job_ed4, job_id,
             session_factory=session_factory, client=client, request=request,
             forced_reason=forced_reason, judge_client=judge_client if judge_state == "reserved" else None,
-            judge_state=judge_state,
+            judge_state=judge_state, lock_problem=lock_problem,
         )
         return NarrativeJobCreated(job_id=job_id, status="running", stage="queued", benchmark_refs=benchmark_refs)
     background_tasks.add_task(
@@ -668,6 +673,7 @@ async def run_job_ed4(
     forced_reason: str | None = None,
     judge_client=None,
     judge_state: str | None = None,
+    lock_problem: str | None = None,
     clock=time.monotonic,
 ) -> None:
     """판 4 작업(심판 라운드 J5b, 계획 14-1·정3). 생성 → 심판 사다리 → 고객용 심판 묶음 → 끝 상태 → 운영자 알림.
@@ -675,7 +681,8 @@ async def run_job_ed4(
     - 작업 마감은 하나(JOB_DEADLINE_SECONDS). 생성은 ED4_GENERATION_SECONDS 안, 채점은 JOB_GENERATION_SECONDS 까지.
     - 서술이 생긴 뒤 바깥 제한을 넘으면 done + 보류(timeout), 서술이 없으면 failed(timeout) — 판 3 과 같은 실패.
     - 심판 갈래의 모든 예외 → 보류(judge_error). 심판 기록은 끝 상태를 쓰기 전에 직렬화해 보고, 안 되면 최소 기록 + judge_error.
-    - 심판 키 없음·심판 지갑 소진(judge_state)은 만들 때 정해져 AI 를 부르지 않고(forced_reason) 규칙 문장 + 보류.
+    - 심판 키 없음·검증 기록 잠금(locked — lock_problem 이 사유)·심판 지갑 소진(judge_state)은 만들 때 정해져 AI 를 부르지 않고
+      (forced_reason) 규칙 문장 + 보류.
     - 예외를 밖으로 던지지 않는다. 테스트는 이 함수를 직접 await 한다(clock 은 가짜 시계 자리).
     """
     started = time.perf_counter()
@@ -730,7 +737,7 @@ async def run_job_ed4(
                 call_timeout=JOB_CALL_TIMEOUT_SECONDS, on_stage=on_stage, trace_into=gen_trace,
             )
             await session.run(forced_reason=forced_reason)
-            verdict = await _judge_branch(session, judge, judge_state, deadline_at, clock, judge_rec)
+            verdict = await _judge_branch(session, judge, judge_state, deadline_at, clock, judge_rec, lock_problem=lock_problem)
             narrative = customer_result(session.result, verdict)
     except TimeoutError:
         if session is not None and session.result is not None:
@@ -796,26 +803,39 @@ async def _heartbeat(on_stage) -> None:
         await on_stage("judging")
 
 
-async def _judge_branch(session, judge, judge_state, deadline_at, clock, judge_rec: dict) -> dict:
+def _lock_problem() -> str | None:
+    """검증 기록 잠금 사유(없으면 None). 판정 자체가 터져도(기준 파일을 못 읽음 등) 통과로 새지 않게 사유로 바꾼다."""
+    try:
+        return criteria_lock.problem()
+    except Exception as exc:  # noqa: BLE001
+        return f"error:{type(exc).__name__}"
+
+
+def _lock_held(judge_rec: dict, locked: str) -> dict:
+    allowed = ladder.retry_allowed("judge_error", failure="criteria_lock", ever_blocked=False)
+    logger.error("검증 기록 잠금(%s) → 심판을 부르지 않고 발급 보류(judge_error)", locked)
+    judge_rec.update({"criteria_lock": locked, "gate": "held", "held_kind": "judge_error", "failure": "criteria_lock",
+                      "retry_allowed": allowed, "rounds": []})
+    return bundle.held("judge_error", retry_allowed=allowed)
+
+
+async def _judge_branch(session, judge, judge_state, deadline_at, clock, judge_rec: dict, *,
+                        lock_problem: str | None = None) -> dict:
     """심판 갈래 — 고객용 심판 묶음을 돌려준다. 예외는 여기서 보류(judge_error)로 바꾼다(바깥 시간 초과는 그대로 나간다)."""
+    if judge_state == "locked":  # 만들 때 잠금에 걸림 — 서술 AI 도 부르지 않았다
+        return _lock_held(judge_rec, lock_problem or "unknown")
     if judge_state != "reserved":
         kind = judge_state or "no_key"
         allowed = ladder.retry_allowed(kind, failure=None, ever_blocked=False)
         judge_rec.update({"gate": "held", "held_kind": kind, "failure": None, "retry_allowed": allowed, "rounds": []})
         return bundle.held(kind, retry_allowed=allowed)
     # 검증 기록 잠금(계획 14-10·정9) — 지금 기준이 검증한 기준이 아니면 심판을 부르지 않고 보류(judge_error, 다시 만들기 없음).
-    # 판정은 여기 한 곳. 꺼져 있으면(개발·시험) 기록에 off 를 남긴다.
-    try:
-        locked = criteria_lock.problem()
-    except Exception as exc:  # noqa: BLE001 — 기준 파일을 못 읽는 것도 통과로 새지 않는다
-        locked = f"error:{type(exc).__name__}"
-    judge_rec["criteria_lock"] = locked or ("ok" if criteria_lock.enabled() else "off")
+    # 만들 때(create_job) 한 번 보고 여기서 한 번 더 본다(두 겹 — 그 사이 기록·기준이 바뀌어도, 만들 때 검사를 건너뛴 길에서도).
+    # 꺼져 있으면(개발·시험) 기록에 off 를 남긴다 — 발급 검사가 이 값을 본다(app.issuance.judge_gate).
+    locked = _lock_problem()
     if locked:
-        allowed = ladder.retry_allowed("judge_error", failure="criteria_lock", ever_blocked=False)
-        logger.error("검증 기록 잠금(%s) → 심판을 부르지 않고 발급 보류(judge_error)", locked)
-        judge_rec.update({"gate": "held", "held_kind": "judge_error", "failure": "criteria_lock",
-                          "retry_allowed": allowed, "rounds": []})
-        return bundle.held("judge_error", retry_allowed=allowed)
+        return _lock_held(judge_rec, locked)
+    judge_rec["criteria_lock"] = "ok" if criteria_lock.enabled() else "off"
     if judge_rec["criteria_lock"] == "off":
         logger.warning("검증 기록 잠금이 꺼져 있다(%s=off) — 개발·시험 전용, 운영에 두면 안 된다", criteria_lock.ENV)
     try:

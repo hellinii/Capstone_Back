@@ -447,3 +447,68 @@ async def test_pilot_timeline_reaches_the_rule_sentence_rung():
     out = await ladder.run_ladder(Sess(), judge, deadline=jobs.JOB_GENERATION_SECONDS, clock=clock)
     assert [r.get("after") for r in out.record["rounds"] if "gate" in r] == [None, "regenerate", "template_flagged"]
     assert (out.held_kind, out.retry_allowed, clock.t) == ("timeout", False, 555)
+
+
+# ── J10 검토 ⑥ 검증 기록 잠금을 만들 때도 본다(P1-8 가) — 두 겹을 각각 ──
+
+
+def _lock_calls(monkeypatch, answers):
+    """criteria_lock.problem 을 부를 때마다 answers 를 차례로(끝나면 마지막 값) — 한 겹만 잠기게."""
+    from app.judge import criteria_lock
+
+    seen = []
+
+    def problem(*a, **k):
+        seen.append(1)
+        return answers[min(len(seen), len(answers)) - 1]
+
+    monkeypatch.setattr(criteria_lock, "problem", problem)
+    return seen
+
+
+async def test_lock_at_create_spends_no_ai_and_no_judge_wallet(factory, make_section_client, alerts, monkeypatch):
+    """만들 때 겹만 잠김(심판 갈래 겹은 통과라고 답함) — 서술 AI·심판·두 지갑 모두 쓰지 않고 규칙 문장 + 보류(judge_error)."""
+    calls = _lock_calls(monkeypatch, ["unvalidated", None])
+    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}))
+    an = make_section_client()
+    judge_before, narr_before = llm_budget.judge.remaining(), llm_budget.narrative.remaining()
+    c = await _create(factory, _ed4(), client=an, judge_client=F.FakeOpenAI([]))
+    assert calls == [1]  # 만들 때 한 번만 — 갈래 겹은 부르지 않았다(locked 길)
+    assert an.beta.messages.create.call_count == 0 and seen == []
+    assert (llm_budget.judge.remaining(), llm_budget.narrative.remaining()) == (judge_before, narr_before)
+    j = (await _read(factory, c.job_id))["result"]["judge"]
+    assert (j["gate"], j["held_kind"], j["retry_allowed"], j["counts"]) == ("held", "judge_error", False, None)
+    internal = _internal(factory, c.job_id)
+    assert (internal["budget"], internal["judge_budget"], internal["reason"]) == ("not_needed", "locked", "judge_locked")
+    rec = internal["judge"]
+    assert (rec["gate"], rec["held_kind"], rec["failure"], rec["criteria_lock"]) == ("held", "judge_error", "criteria_lock",
+                                                                                     "unvalidated")
+    assert alerts.sent == [(c.job_id, "held", "judge_error")]
+    _no_passed_anywhere(factory, c.job_id)
+
+
+async def test_lock_in_judge_branch_alone_still_holds(factory, make_section_client, alerts, monkeypatch):
+    """만들 때 겹은 통과(None), 심판 갈래 겹만 잠김 — 그래도 심판을 부르지 않고 보류. 두 겹이 서로를 가리지 않는다."""
+    calls = _lock_calls(monkeypatch, [None, "fingerprint_mismatch"])
+    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}))
+    an = make_section_client()
+    c = await _create(factory, _ed4(), client=an, judge_client=F.FakeOpenAI([]))
+    assert len(calls) == 2 and seen == []
+    assert an.beta.messages.create.call_count > 0  # 만들 때 겹을 지났으니 서술 AI 는 불렀다
+    rec = _internal(factory, c.job_id)["judge"]
+    assert (rec["gate"], rec["held_kind"], rec["criteria_lock"]) == ("held", "judge_error", "fingerprint_mismatch")
+    _no_passed_anywhere(factory, c.job_id)
+
+
+async def test_locked_result_has_the_same_shape_as_no_key(factory, make_section_client, alerts, monkeypatch):
+    """고객이 받는 결과 — 잠긴 작업과 심판 키 없는 작업은 같은 규칙 문장 서술, 같은 묶음 꼴(보류 종류만 다름)."""
+    no_key = await _create(factory, _ed4(), client=make_section_client(), judge_client=None)
+    _lock_calls(monkeypatch, ["unvalidated"])
+    locked = await _create(factory, _ed4(), client=make_section_client(), judge_client=F.FakeOpenAI([]))
+    a, b = (await _read(factory, no_key.job_id))["result"], (await _read(factory, locked.job_id))["result"]
+    ja, jb = a.pop("judge"), b.pop("judge")
+    assert a == b  # 서술 본문·칸별 출처·칸별 모델이 같다(둘 다 규칙 문장)
+    assert set(a["section_sources"].values()) <= {"fallback", "fixed"}
+    assert list(ja) == list(jb) and {k: v for k, v in ja.items() if k != "held_kind"} == \
+        {k: v for k, v in jb.items() if k != "held_kind"}
+    assert (ja["held_kind"], jb["held_kind"]) == ("no_key", "judge_error")

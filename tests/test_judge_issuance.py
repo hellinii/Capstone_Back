@@ -359,3 +359,62 @@ def test_smoke_and_edition3_do_not_touch_the_digest(shared, monkeypatch):
     client, _ = shared
     assert _issue(client, run_id="s", content={"smoke": True}).status_code == 200
     assert _issue(client, run_id="e3", content={"contentSchema": 3, "interpretation": {}}).status_code == 200
+
+
+# ── J10 검토 ⑥ 통과 기록의 검증 기록 잠금 값(P1-8 나) — 공유 DB 고정 장치 ──
+
+
+def _set_lock(factory, job_id, value) -> None:
+    with factory() as db:
+        job = db.get(NarrativeJob, job_id)
+        internal = json.loads(job.internal_json)
+        if value is None:
+            internal["judge"].pop("criteria_lock", None)
+        else:
+            internal["judge"]["criteria_lock"] = value
+        job.internal_json = json.dumps(internal, ensure_ascii=False)
+        db.commit()
+
+
+@pytest.mark.parametrize("value, lock_env, ok", [
+    ("ok", "off", True), ("ok", None, True),          # 검증한 기준으로 채점 — 늘 받음
+    ("off", "off", True),                             # 잠금을 끈 개발·시험 서버의 기록 — 지금도 꺼져 있으면 받음
+    ("off", None, False), ("off", "on", False),       # 지금 잠금이 켜져 있으면(운영) 꺼진 채 채점한 기록은 거절
+    (None, "off", False), ("unvalidated", "off", False), ("error:OSError", "off", False), ("", "off", False),
+])
+def test_issuance_checks_the_recorded_criteria_lock(shared, judge_passes, monkeypatch, value, lock_env, ok):
+    from app.judge import criteria_lock
+
+    client, factory = shared
+    job_id = _job(client, _ed4())
+    assert json.loads(_row_internal(factory, job_id))["judge"]["criteria_lock"] == "off"  # conftest 가 끈 채 채점
+    content = _content(client, job_id)
+    _set_lock(factory, job_id, value)
+    if lock_env is None:
+        monkeypatch.delenv(criteria_lock.ENV, raising=False)
+    else:
+        monkeypatch.setenv(criteria_lock.ENV, lock_env)
+    resp = _issue(client, content=content, job_id=job_id)
+    if ok:
+        assert resp.status_code == 200, resp.text
+    else:
+        assert _code(resp) == "judge_criteria_unverified"
+
+
+def _row_internal(factory, job_id) -> str:
+    with factory() as db:
+        return db.get(NarrativeJob, job_id).internal_json
+
+
+# ── P1-7(J10 검토): 고객 글에 내부 낱말('심판'·'판 4') — 문안은 사용자 결정이라 지금은 고치지 않는다 ──
+
+
+@pytest.mark.parametrize("code", sorted(judge_gate.MESSAGES))
+@pytest.mark.xfail(strict=True, reason="문안 결정 대기 — 서버 발급 거절 글(MESSAGES)이 내부 낱말 '심판'·'판 4'를 담고 있다(P1-7)")
+def test_issuance_messages_have_no_internal_words(code):
+    msg = judge_gate.MESSAGES[code]
+    assert "심판" not in msg and "판 4" not in msg, msg
+
+
+def test_new_reason_code_is_in_the_pending_wording_check():
+    assert "judge_criteria_unverified" in judge_gate.MESSAGES  # 새 사유 글도 위 xfail 대상(같은 꼴의 문안)

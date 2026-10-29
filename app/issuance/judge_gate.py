@@ -10,14 +10,19 @@
 
 거절 사유 코드(거절마다 다름): judge_job_missing(번호 없음) · judge_job_not_found(작업 없음) · judge_job_not_edition4(판 4 작업
 아님) · judge_record_expired(작업 기록 보관 기간이 지남) · judge_not_passed(진행 중·실패·보류) ·
-judge_narrative_unrecorded(통과 기록에 서술 글 지문이 없음) · judge_narrative_mismatch(content 의 서술 글이 그 작업의 글과 다름).
+judge_narrative_unrecorded(통과 기록에 서술 글 지문이 없음) · judge_narrative_mismatch(content 의 서술 글이 그 작업의 글과 다름) ·
+judge_criteria_unverified(통과 기록이 검증 기록 잠금을 거치지 않음).
+
+검증 기록 잠금 확인(J10 검토, 계획 14-10): 통과 기록의 judge.criteria_lock 이 "ok"(검증한 기준으로 채점)면 받는다. "off"(잠금을 끈
+개발·시험 서버에서 채점)는 **지금도 잠금이 꺼져 있을 때만** 받는다 — 운영은 잠금을 끌 길이 없으니(app.judge.criteria_lock) 닫힌
+쪽이고, 개발 스모크는 그대로 된다. 그 밖의 값·없음(잠금 전 기록)은 거절.
 
 서술 글 지문 대조(J9, 계획 14-9b·Q1 다): 작업이 통과할 때 남긴 서술 글 지문(internal judge.narrative_sha256)과 content 안 서술 글의
 지문(app.narrative.digest — 무엇을 같게 보는지는 그 모듈 머리)을 맞댄다. "통과한 다른 작업 번호"·서술을 바꾼 content 를 막는다.
 프론트는 모르는 judge_* 코드도 B48 "서버가 발급을 거절했습니다: {서버 글}"로 보인다(judgeNotice.isJudgeRejection) — 새 화면 글 없음.
 
 상호작용
-- 의존(import): app.narrative.models(NarrativeJob), app.narrative.digest(서술 글 지문), app.narrative.jobs(record_retention — 보관 기간 한 곳), app.issuance.service(IssuanceError)
+- 의존(import): app.judge.criteria_lock(enabled — 늦은 import), app.narrative.models(NarrativeJob), app.narrative.digest(서술 글 지문), app.narrative.jobs(record_retention — 보관 기간 한 곳), app.issuance.service(IssuanceError)
 - 사용처: app.issuance.router(issue·reissue)
 """
 from __future__ import annotations
@@ -39,6 +44,7 @@ MESSAGES = {
     "judge_not_passed": "심판을 통과하지 않은 서술이어서 판 4 성적서를 발급할 수 없습니다(발급 보류)",
     "judge_narrative_unrecorded": "서술 작업에 서술 글 기록이 없어 판 4 성적서를 발급할 수 없습니다",
     "judge_narrative_mismatch": "성적서의 서술이 심판을 통과한 서술과 달라 판 4 성적서를 발급할 수 없습니다",
+    "judge_criteria_unverified": "검증된 심판 기준으로 채점된 서술이 아니어서 판 4 성적서를 발급할 수 없습니다",
 }
 
 
@@ -75,7 +81,14 @@ def reject_reason(db: Session, content: dict | None, job_id: str | None, *, now:
         return "judge_narrative_unrecorded"
     if digest.of_content(content) != recorded:
         return "judge_narrative_mismatch"
-    return None
+    lock = judge.get("criteria_lock")
+    if lock == "ok":
+        return None
+    from app.judge import criteria_lock  # 늦은 import — 발급 모듈 import 때 심판 기준 묶음을 끌지 않게
+
+    if lock == "off" and not criteria_lock.enabled():
+        return None
+    return "judge_criteria_unverified"
 
 
 def check(db: Session, content: dict | None, job_id: str | None) -> None:
