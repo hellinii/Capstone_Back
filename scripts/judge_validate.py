@@ -21,6 +21,11 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
     - extraction 은 채점을 부르지 않는다(재현성 회차의 추출 기록을 report 가 정답지와 짝짓는다).
 - report     : 장부·결과 원본으로 7.6 판정값을 계산한다. 계산은 app.judge.validation 의 stats·extraction·agreement 가 하고,
                이 명령은 그 함수들을 부르는 얇은 층이다(STATS_API). 결과는 verify 면 05_결과/검증결과.json, dev 면 출력 폴더.
+- check-defects : 결함본·sham 폴더 꼴 검사(meta 칸·심은 사람 역할·칸 하나·문장 하나·before/after·diff.txt). verify 는 V1 뒤
+               --allow-sealed 로만(봉인 서술을 연다), dev 는 합성 바탕(개발 입력)으로.
+- make-diff <D01> : diff.txt 를 도구로 쓴다.
+- sheets     : 사람 일치도 채점지(블라인드 — 시스템 판정·결함 여부 없음, 결함본 문항은 7.2 역할대로 인용/민서), 열쇠(따로 + 해시,
+               읽기 전용), 읽을 문서(문서 번호만). 층 나눈 표본(--n 기본 80, --overlap 축마다 겹침 5, --seed 기록).
 - rescope    : 재검증 범위(정10) — 바뀐 파일(--changed 또는 --since <커밋>) → 다시 돌 모듈·묶음·사람 일치도 축.
 - status     : 장부 누계와 상한.
 
@@ -266,6 +271,28 @@ async def run_batch(ctx: Ctx, batch: str, *, client, bases: dict[str, Base], rep
     return {"batch": batch, "ran": len(order), "seed": seed, "gates": gates, "spent_usd": round(spent, 6)}
 
 
+def variant_problems(variants: dict[str, tuple[dict, dict]], bases: dict[str, Base], diffs: dict[str, str | None] | None = None,
+                     ) -> list[str]:
+    """변형마다 꼴 검사(variants.check_variant). diffs 를 주지 않으면 diff.txt 는 보지 않는다(실행 전 검사는 칸·문장만)."""
+    out = []
+    for vid, (meta, slots) in sorted(variants.items()):
+        base = bases.get(meta.get("base"))
+        if base is None:
+            out.append(f"{vid}: 바탕 성적서 {meta.get('base')!r} 가 없다")
+            continue
+        diff = diffs.get(vid) if diffs is not None else None
+        out += [f"{vid}: {p}" for p in V.check_variant(vid, meta, slots, diff, base.result, check_diff=diffs is not None)]
+    return out
+
+
+def _slot_ok(base: Base, meta: dict, slots: dict) -> bool:
+    try:
+        V.read_slot(base.result, meta.get("slot", ""))
+    except (KeyError, IndexError, ValueError):
+        return False
+    return isinstance(slots.get(meta.get("slot")), str)
+
+
 def load_variants(folder: Path | None) -> dict[str, tuple[dict, dict]]:
     if folder is None or not Path(folder).is_dir():
         return {}
@@ -330,6 +357,11 @@ def execute(a: RunArgs, *, client=None, confirm: Callable[[str], str] = input, e
             client = jl.make_clients(live=True).openai
             if client is None:
                 raise RunnerError("OPENAI_API_KEY 가 없다")
+    diffs = {vid: ((defects / vid / "diff.txt").read_text(encoding="utf-8") if (defects / vid / "diff.txt").exists() else None)
+             for vid in variants}
+    bad = variant_problems(variants, bases, diffs)  # check-defects 와 같은 검사(diff.txt 까지)
+    if bad:
+        raise RunnerError("결함본·sham 꼴이 틀려 시작하지 않는다:\n  - " + "\n  - ".join(bad))
     ctx = Ctx(a.mode, ledger, out, rel_root, confirm, echo, jl.run_meta())
     return asyncio.run(run_batch(ctx, a.batch, client=client, bases=bases, reports=reports, variants=variants,
                                  repeats=repeats, max_runs=max_runs, budget=jl.Budget.from_env(),
@@ -365,7 +397,7 @@ def collect_runs(ledger_rows: list[dict], *, fingerprint: str, mode: str, root: 
         body = path.read_bytes()
         if row.get("result_sha256") and hashlib.sha256(body).hexdigest() != row["result_sha256"]:
             raise RunnerError(f"결과 원본 해시가 장부와 다르다: {path}")
-        runs.append({"key": key, **json.loads(body)})
+        runs.append({**json.loads(body), "key": key})  # 열쇠는 장부의 RunKey(결과 원본의 key 는 dict)
     return runs
 
 
@@ -464,6 +496,163 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
     return result
 
 
+# ── 결함본 검사·차이 만들기·사람 채점지(17-5) ────────────────────────────
+
+
+def sealed_reading_problems(allow_sealed: bool) -> list[str]:
+    """봉인 서술을 여는 명령(결함 검사·차이·채점지)의 조건 — 기준 고정 뒤(V1), 사람이 허락했을 때만(--allow-sealed)."""
+    problems = []
+    if not allow_sealed:
+        problems.append("--allow-sealed 가 없다 — 봉인 서술 열람은 V1(기준 고정) 뒤 사람이 허락한 뒤에만")
+    if criteria.version().endswith("-dev") or criteria.version_problem() is not None:
+        problems.append(f"기준 버전이 고정되지 않았다(지금 {criteria.version()}) — 봉인은 기준 고정 전에 열지 않는다")
+    return problems
+
+
+def _variant_inputs(mode: str, *, defects: Path | None, inputs: Path | None, allow_sealed: bool):
+    """(변형들, 바탕들, diff 글들, 결함 폴더). verify 는 검증 폴더 봉인·결함, dev 는 주어진 합성 폴더·개발 입력."""
+    if mode == "verify":
+        problems = sealed_reading_problems(allow_sealed)
+        if problems:
+            raise RunnerError("봉인을 열지 않는다:\n  - " + "\n  - ".join(problems))
+        vroot = validation_root()
+        folder, bases_of = vroot / DEFECTS, lambda tags: sealed_bases(vroot / SEALED, tags)
+    else:
+        if defects is None:
+            raise RunnerError("dev 는 --defects(합성 결함 폴더)를 준다")
+        folder = guard(defects, "dev")
+        dev_in = guard(inputs or DEV_INPUTS, "dev")
+        bases_of = lambda tags: {t: b for t, b in asyncio.run(dev_bases(dev_in)).items() if t in tags}  # noqa: E731
+    variants = load_variants(folder)
+    bases = bases_of(sorted({m.get("base") for m, _ in variants.values() if m.get("base")}))
+    diffs = {vid: ((folder / vid / "diff.txt").read_text(encoding="utf-8") if (folder / vid / "diff.txt").exists() else None)
+             for vid in variants}
+    return variants, bases, diffs, folder
+
+
+def cmd_check_defects(mode: str, *, defects: Path | None = None, inputs: Path | None = None, allow_sealed: bool = False,
+                      echo: Callable[[str], None] = print) -> list[str]:
+    """결함본·sham 폴더 전체 검사. 통과/문제만 찍는다(서술 글은 찍지 않음)."""
+    variants, bases, diffs, _ = _variant_inputs(mode, defects=defects, inputs=inputs, allow_sealed=allow_sealed)
+    problems = variant_problems(variants, bases, diffs)
+    for vid in sorted(variants):
+        mine = [p for p in problems if p.startswith(f"{vid}: ")]
+        echo(f"{vid} {'통과' if not mine else '문제 ' + str(len(mine)) + '개'}")
+        for p in mine:
+            echo(f"  - {p[len(vid) + 2:]}")
+    echo(f"결함본 {sum(v.startswith('D') for v in variants)}개 · sham {sum(v.startswith('S') for v in variants)}개 · 문제 {len(problems)}개")
+    return problems
+
+
+def cmd_make_diff(mode: str, variant: str, *, defects: Path | None = None, inputs: Path | None = None,
+                  allow_sealed: bool = False, echo: Callable[[str], None] = print) -> Path:
+    """diff.txt 를 도구로 쓴다(사람이 손으로 쓰지 않는다)."""
+    variants, bases, _, folder = _variant_inputs(mode, defects=defects, inputs=inputs, allow_sealed=allow_sealed)
+    if variant not in variants:
+        raise RunnerError(f"없는 변형: {variant}")
+    meta, slots = variants[variant]
+    base = bases.get(meta.get("base"))
+    if base is None or not _slot_ok(base, meta, slots):
+        raise RunnerError(f"{variant}: 바탕 성적서·칸을 찾지 못했다")
+    target = folder / variant / "diff.txt"
+    target.write_text(V.make_diff(V.read_slot(base.result, meta["slot"]), slots[meta["slot"]], meta["slot"]), encoding="utf-8")
+    echo(f"{variant} diff.txt 씀")
+    return target
+
+
+def doc_text(base: Base, slots: dict | None) -> str:
+    """사람이 읽을 문서 — 심판이 읽는 것과 같은 조각(서술 칸 + 고정 문구 + 표). 결함 여부·변형 이름은 없다."""
+    from app.judge.material import parse_material
+    from app.judge.reading import build_pieces, render
+    from app.narrative.baselines import build_benchmark_refs
+    from app.narrative.schemas import NarrativeJobResult, NarrativeRequest
+
+    req = NarrativeRequest.model_validate(base.request)
+    result = NarrativeJobResult.model_validate(V.apply_slots(base.result, slots) if slots else base.result)
+    material, _ = parse_material(req.judge_material)
+    refs = build_benchmark_refs(req.task_type.value, req.fact_sheet.metrics, edition=4)
+    pieces = build_pieces(result, result.section_sources, material, refs, req.fact_sheet.metrics)
+    return f"# 바탕 성적서 데이터: {base.tag}\n\n" + render(pieces) + "\n"
+
+
+def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80, overlap: int = 5, seed: int | None = None,
+               defects: Path | None = None, inputs: Path | None = None, allow_sealed: bool = False,
+               echo: Callable[[str], None] = print) -> dict:
+    """사람 일치도 채점지(블라인드, 역할대로)·열쇠(따로 + 해시)·읽을 문서. 표본은 검증 회차 결과에서 층 나눠 뽑는다(시드 기록)."""
+    import csv
+    import io
+    import stat
+
+    from app.judge.validation import sheets as SH
+
+    vroot = validation_root()
+    if mode == "verify":
+        problems = sealed_reading_problems(allow_sealed)
+        if problems:
+            raise RunnerError("봉인을 열지 않는다:\n  - " + "\n  - ".join(problems))
+        ledger, out, root = Path(ledger or vroot / "장부.csv"), Path(out or vroot / HUMAN), vroot
+    else:
+        if ledger is None:
+            raise RunnerError("dev sheets 는 --ledger(임시 장부)를 준다")
+        ledger = guard(ledger, "dev")
+        out = guard(out or Path(tempfile.mkdtemp(prefix="judge_validate_sheets_")), "dev")
+        root = None
+    runs = collect_runs(jl.Ledger(ledger).rows(), fingerprint=criteria.fingerprint(),
+                        mode="live" if mode == "verify" else "dev", root=root)
+    # 같은 성적서·변형은 첫 회차만(카-4: 판정은 1회째로 본다 — V1 에서 바꾸면 여기)
+    first = {}
+    for r in sorted(runs, key=lambda r: r["key"]):
+        first.setdefault((r["key"].report, r["key"].variant), r)
+    types = criteria.load_json("contradictions.json")["types"]
+    items = [i for r in first.values() for i in SH.items_from_run({**r, "key": r["key"].__dict__}, types)]
+    seed = random.SystemRandom().randrange(1, 10**9) if seed is None else seed
+    assigned = SH.assign(SH.sample(items, n, seed), overlap_per_axis=overlap, seed=seed)
+    sheets, key, docs = SH.build(assigned, seed)
+    variants = {}
+    if any(r["key"].variant != R.BASE_VARIANT for r in first.values()):
+        variants, bases, _, _ = _variant_inputs(mode, defects=defects, inputs=inputs, allow_sealed=allow_sealed)
+    else:
+        bases = (sealed_bases(vroot / SEALED, sorted({r["key"].report for r in first.values()})) if mode == "verify"
+                 else asyncio.run(dev_bases(guard(inputs or DEV_INPUTS, "dev"))))
+    by_run = {r["run_id"]: r for r in first.values()}
+
+    def table(columns, rows) -> str:
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(columns)
+        w.writerows(rows)
+        return buf.getvalue()
+
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "문서").mkdir(exist_ok=True)
+    for label, (run_id, report_tag) in docs.items():
+        variant = by_run[run_id]["key"].variant
+        slots = variants[variant][1] if variant != R.BASE_VARIANT else None
+        (out / "문서" / f"{label}.txt").write_text(doc_text(bases[report_tag], slots), encoding="utf-8")
+    for who, rows in sheets.items():
+        (out / f"채점지_{who}.csv").write_text(table(SH.SHEET_COLUMNS, rows), encoding="utf-8")
+    checklist = criteria.load_json("checklist.json")["items"]
+    (out / "필수내용_항목.md").write_text(
+        f"# 필수 내용 항목 (기준 {criteria.version()})\n\n| 항목 | 독자가 알아야 할 것 |\n|---|---|\n"
+        + "".join(f"| {i['id']} | {i['reader_learns']} |\n" for i in checklist), encoding="utf-8")
+    key_dir = out / "열쇠"
+    key_dir.mkdir(exist_ok=True)
+    key_body = table(SH.KEY_COLUMNS, key)
+    key_sha = hashlib.sha256(key_body.encode("utf-8")).hexdigest()
+    (key_dir / "열쇠.csv").write_text(key_body, encoding="utf-8")
+    (key_dir / "열쇠.sha256").write_text(f"{key_sha}  열쇠.csv\n", encoding="utf-8")
+    strata: dict[str, int] = {}
+    for item in assigned:
+        strata[SH.stratum(item)] = strata.get(SH.stratum(item), 0) + 1
+    draw = {"seed": seed, "n": n, "overlap_per_axis": overlap, "candidates": len(items), "drawn": len(assigned),
+            "strata": dict(sorted(strata.items())), "per_scorer": {w: len(r) for w, r in sheets.items()}, "key_sha256": key_sha}
+    (out / "뽑기.json").write_text(json.dumps(draw, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    for f in (key_dir / "열쇠.csv", key_dir / "열쇠.sha256"):
+        os.chmod(f, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    echo(f"채점지: 인용 {len(sheets['인용'])}문항 · 민서 {len(sheets['민서'])}문항 · 문서 {len(docs)}개 · 시드 {seed} · 열쇠 sha256 {key_sha}")
+    return draw
+
+
 # ── 재검증 범위(정10) ─────────────────────────────────────────────────
 
 
@@ -513,6 +702,25 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--ledger")
     rep.add_argument("--out")
     rep.add_argument("--answers")
+    for name, helptext in (("check-defects", "결함본·sham 꼴 검사(verify 는 V1 뒤 --allow-sealed)"),
+                           ("make-diff", "결함본·sham 의 diff.txt 를 도구로 쓴다")):
+        c = sub.add_parser(name, help=helptext)
+        c.add_argument("--mode", choices=MODES, required=True)
+        c.add_argument("--defects", help="dev 전용 — 합성 결함 폴더")
+        c.add_argument("--inputs", help="dev 전용 — 개발 입력 폴더")
+        c.add_argument("--allow-sealed", action="store_true", help="봉인 서술 열람 허락(V1 뒤, 사람)")
+        if name == "make-diff":
+            c.add_argument("variant")
+    sh = sub.add_parser("sheets", help="사람 일치도 채점지·열쇠(층 나눈 표본, 시드 기록)")
+    sh.add_argument("--mode", choices=MODES, required=True)
+    sh.add_argument("--ledger")
+    sh.add_argument("--out")
+    sh.add_argument("--n", type=int, default=80, help="표본 크기(기본 80 — 줄인 안에 맞게 바꿀 수 있다)")
+    sh.add_argument("--overlap", type=int, default=5, help="축마다 두 사람이 같이 채점할 문항 수")
+    sh.add_argument("--seed", type=int)
+    sh.add_argument("--defects")
+    sh.add_argument("--inputs")
+    sh.add_argument("--allow-sealed", action="store_true")
     rs = sub.add_parser("rescope", help="재검증 범위(정10): 바뀐 파일 → 다시 돌 모듈·묶음")
     rs.add_argument("--changed", nargs="*", default=[])
     rs.add_argument("--since", help="이 커밋(예: judge-criteria-v1.0)부터 HEAD 까지 바뀐 파일")
@@ -526,6 +734,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             return jl.main(["status", "--ledger", args.ledger])
+        if args.command in ("check-defects", "make-diff", "sheets") and args.mode == "verify" and (args.defects or args.inputs):
+            raise RunnerError("verify 는 입력·결함을 검증 폴더에서만 읽는다(--inputs·--defects 는 dev 전용)")
+        opt = lambda v: Path(v) if v else None  # noqa: E731
+        if args.command == "check-defects":
+            problems = cmd_check_defects(args.mode, defects=opt(args.defects), inputs=opt(args.inputs),
+                                         allow_sealed=args.allow_sealed)
+            return 1 if problems else 0
+        if args.command == "make-diff":
+            cmd_make_diff(args.mode, args.variant, defects=opt(args.defects), inputs=opt(args.inputs),
+                          allow_sealed=args.allow_sealed)
+            return 0
+        if args.command == "sheets":
+            cmd_sheets(args.mode, ledger=opt(args.ledger), out=opt(args.out), n=args.n, overlap=args.overlap, seed=args.seed,
+                       defects=opt(args.defects), inputs=opt(args.inputs), allow_sealed=args.allow_sealed)
+            return 0
         if args.command == "rescope":
             cmd_rescope(args.changed, args.since)
             return 0
