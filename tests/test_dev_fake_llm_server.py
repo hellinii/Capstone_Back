@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -73,6 +74,32 @@ def test_refuses_a_non_temporary_database(tmp_path):
     proc = _child("pass", {"DATABASE_URL": f"sqlite:///{ROOT / 'data' / 'dev_fake_should_not_exist.db'}"})
     assert proc.returncode != 0 and "임시 sqlite" in (proc.stderr + proc.stdout)
     assert not (ROOT / "data" / "dev_fake_should_not_exist.db").exists()
+
+
+def _pretend_temp_dir(monkeypatch, path) -> None:
+    """TMPDIR 을 바꿔 gettempdir 가 다시 읽게 한다(캐시 tempfile.tempdir 를 비움 — monkeypatch 가 되돌린다)."""
+    monkeypatch.setenv("TMPDIR", str(path))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+
+
+def test_refuses_repo_database_even_when_the_clone_is_under_the_temp_dir(monkeypatch):
+    """/tmp 아래 clone 흉내: 임시 폴더를 저장소의 부모로 두면 저장소 data/ 도 "임시 폴더 아래"가 된다 — 그래도 거부."""
+    _pretend_temp_dir(monkeypatch, ROOT.parent)
+    assert os.path.realpath(tempfile.gettempdir()) == os.path.realpath(ROOT.parent)
+    with pytest.raises(SystemExit, match="임시 sqlite"):
+        dev.temp_sqlite_only(f"sqlite:///{ROOT / 'data' / 'x.db'}")
+    with pytest.raises(SystemExit, match="임시 sqlite"):
+        dev.temp_sqlite_only(f"sqlite:///{ROOT / 'x.db'}")
+    dev.temp_sqlite_only(f"sqlite:///{ROOT.parent / 's5e_not_the_repo' / 'dev.db'}")  # 저장소 밖 임시 경로는 받는다
+
+
+def test_refuses_a_sibling_that_only_shares_the_temp_dir_prefix(monkeypatch, tmp_path):
+    base = tmp_path / "t"
+    base.mkdir()
+    _pretend_temp_dir(monkeypatch, base)
+    dev.temp_sqlite_only(f"sqlite:///{base / 'dev.db'}")
+    with pytest.raises(SystemExit, match="임시 sqlite"):
+        dev.temp_sqlite_only(f"sqlite:///{tmp_path / 'tx' / 'dev.db'}")  # /…/tx 는 /…/t 아래가 아니다
 
 
 def test_refuses_postgres_url():

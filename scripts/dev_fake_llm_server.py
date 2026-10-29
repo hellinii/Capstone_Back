@@ -171,10 +171,21 @@ def assert_all_fake(state) -> None:
         raise SystemExit(f"가짜가 아닌 LLM 클라이언트가 있다: {bad or '(클라이언트 없음)'} — 개발 서버를 멈춘다")
 
 
+def _is_under(path: str, base: str) -> bool:
+    """path 가 base 자신이거나 그 아래인가(글자 앞부분이 아니라 경로 마디로 — /tmpx 는 /tmp 아래가 아니다)."""
+    try:
+        return os.path.commonpath([path, base]) == base
+    except ValueError:  # 드라이브가 다르거나 상대·절대가 섞임
+        return False
+
+
 def temp_sqlite_only(url: str) -> None:
+    """임시 폴더 아래 sqlite 만 받는다(닫힌 쪽). 저장소(ROOT) 안 경로는 저장소가 임시 폴더 아래에 있어도(/tmp 아래 clone) 거부한다."""
     tmp = os.path.realpath(tempfile.gettempdir())
+    repo = os.path.realpath(ROOT)
     path = url[len("sqlite:///"):] if url.startswith("sqlite:///") else None
-    if path is None or not os.path.realpath(path).startswith(tmp):
+    real = os.path.realpath(path) if path else None
+    if real is None or not _is_under(real, tmp) or _is_under(real, repo):
         raise SystemExit(f"개발 서버는 임시 sqlite 만 쓴다(지금 {url!r}) — 운영·로컬 DB 를 건드리지 않게 멈춘다")
 
 
