@@ -139,13 +139,21 @@ def _manifest_tool():
 
 
 def _bundle_copy(tmp_path):
+    """고정 전(1.0-dev, 기록 없음, MANIFEST 맞음) 사본 — 저장소가 이미 고정됐어도(1.0) 같은 출발점에서 freeze 를 본다."""
     for p in [*criteria.bundle_files(), criteria.HERE / "MANIFEST.sha256", criteria.HERE / "VERSIONS.json",
               criteria.HERE / "CHANGELOG.md"]:
         dst = tmp_path / p.relative_to(criteria.HERE)
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(p.read_bytes())
+    (tmp_path / "VERSION").write_text("1.0-dev\n", encoding="utf-8")
+    (tmp_path / "VERSIONS.json").write_text("{}\n", encoding="utf-8")
+    tool = _manifest_tool()
+    tool.write_manifest(tmp_path)
     with (tmp_path / "CHANGELOG.md").open("a", encoding="utf-8") as f:
         f.write("\n## 1.0\n\n- 시험용 고정.\n")
+    with tool.bundle_at(tmp_path):  # 출발점 확인 — 고정 전·기록 없음·지문 맞음
+        assert (criteria.version(), criteria.recorded_versions()) == ("1.0-dev", {})
+        assert criteria.recorded_manifest() == criteria.manifest_text()
     return tmp_path
 
 

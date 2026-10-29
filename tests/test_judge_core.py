@@ -7,7 +7,7 @@ from types import SimpleNamespace as M
 
 import pytest
 
-from app.judge import aggregate, core, safety
+from app.judge import aggregate, core, criteria, safety
 from app.judge.consistency import ConsistencyResult, Contradiction
 from app.judge.coverage import CoverageResult, ItemResult
 from app.judge.faithfulness import ClaimVerdict, FaithResult
@@ -118,7 +118,10 @@ async def test_judge_once_no_claims_safety_holds_with_numbers():
     assert (run.gate, run.failure) == (None, "no_claims")  # 숫자가 있는데 주장 0 → 보류
 
 
-async def test_judge_once_passes_with_one_matching_claim_and_records():
+async def test_judge_once_passes_with_one_matching_claim_and_records(monkeypatch):
+    # 기록의 기준 버전은 저장소 VERSION(잠그기 전 1.0-dev, 뒤 1.0)이 아니라 criteria.version() 이 돌려준 값이어야 한다 —
+    # 어느 상태에서도 같은 것을 보게 눈에 띄는 가짜 버전을 꽂는다(코드에 박은 버전 글자면 빨개진다).
+    monkeypatch.setattr(criteria, "version", lambda: "9.9-시험")
     req, gen, refs = await _setup()
     text = gen.response.conclusion.narrative
     answers = _empty_answers(None)
@@ -138,7 +141,8 @@ async def test_judge_once_passes_with_one_matching_claim_and_records():
     assert card["faithfulness"]["unverifiable"] == 1 and card["consistency"]["contradictions"] == 0
     assert card["coverage"]["applicable"] + card["coverage"]["not_applicable"] == 18
     rec = run.record
-    assert rec["criteria_version"] == "1.0-dev" and len(rec["criteria_fingerprint"]) == 64
+    assert rec["criteria_version"] == "9.9-시험" and rec["criteria_fingerprint"] == criteria.fingerprint()
+    assert len(rec["criteria_fingerprint"]) == 64
     assert {"extract", "coverage", "readability", "faithfulness", "consistency", "pieces", "seconds"} <= set(rec)
     assert {"extract", "coverage", "readability", "faithfulness", "consistency", "aggregate", "total"} <= set(rec["seconds"])
     assert run.cost_usd() is not None

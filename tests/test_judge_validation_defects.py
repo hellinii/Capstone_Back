@@ -180,6 +180,7 @@ def test_write_variant_round_trip(tmp_path):
 
 def test_check_defects_verify_refuses_before_v1_or_without_permission(monkeypatch):
     jv = _jv()
+    monkeypatch.setattr(criteria, "version", lambda: "1.0-dev")  # V1 전 상태를 만든다(저장소 VERSION 과 상관없이)
     with pytest.raises(jv.RunnerError) as err:
         jv.cmd_check_defects("verify", allow_sealed=False, echo=lambda _: None)
     assert "--allow-sealed 가 없다" in str(err.value) and "기준 버전이 고정되지 않았다" in str(err.value)

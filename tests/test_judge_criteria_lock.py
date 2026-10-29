@@ -31,7 +31,7 @@ def lock_on(monkeypatch):
 
 @pytest.fixture
 def fixed_version(monkeypatch):
-    """기준을 '1.0'(고정된 버전)으로 본다 — 지금 저장소는 1.0-dev 라 기록이 맞아도 dev_version 으로 잠긴다."""
+    """기준을 '1.0'(고정된 버전)으로 본다 — 저장소 VERSION(잠그기 전 1.0-dev, 뒤 1.0)과 상관없이."""
     monkeypatch.setattr(criteria, "version", lambda: "1.0")
 
 
@@ -81,8 +81,9 @@ def test_matching_record_unlocks(lock_on, fixed_version, tmp_path):
     assert criteria_lock.problem(_record(tmp_path, version="1.0", fingerprint=_current_fp())) is None
 
 
-def test_dev_version_is_locked_even_with_matching_record(lock_on, tmp_path):
-    assert criteria.version().endswith("-dev")
+def test_dev_version_is_locked_even_with_matching_record(lock_on, tmp_path, monkeypatch):
+    # 저장소 VERSION 에 기대지 않고 개발 중 버전을 만든다(잠그기 전·뒤 모두 같은 것을 본다).
+    monkeypatch.setattr(criteria, "version", lambda: "1.0-dev")
     path = _record(tmp_path, version=criteria.version(), fingerprint=_current_fp())
     assert criteria_lock.problem(path) == criteria_lock.DEV_VERSION
 

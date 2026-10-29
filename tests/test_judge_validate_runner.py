@@ -69,7 +69,7 @@ def _git_ok(manifest: str):
 
 @pytest.fixture
 def frozen(monkeypatch):
-    """기준이 1.0 으로 고정된 것처럼(지금 사본은 1.0-dev)."""
+    """기준이 1.0 으로 고정된 것처럼(저장소 VERSION·기록과 상관없이)."""
     monkeypatch.setattr(criteria, "version", lambda: "1.0")
     monkeypatch.setattr(criteria, "version_problem", lambda *a, **k: None)
 
@@ -114,7 +114,8 @@ def test_verify_manifest_must_also_match_files(tmp_path, monkeypatch, frozen):
     assert len(problems) == 1 and "MANIFEST" in problems[0]
 
 
-def test_verify_execute_refuses_with_every_reason_and_touches_nothing(tmp_path, vdir):
+def test_verify_execute_refuses_with_every_reason_and_touches_nothing(tmp_path, vdir, monkeypatch):
+    monkeypatch.setattr(criteria, "version", lambda: "1.0-dev")  # 고정 전 상태를 만든다(저장소 VERSION 과 상관없이)
     ledger = tmp_path / "장부.csv"
     git = lambda *a: (0, " M x\n") if a[0] == "status" else (128, "")  # noqa: E731
     with pytest.raises(jv.RunnerError) as err:
