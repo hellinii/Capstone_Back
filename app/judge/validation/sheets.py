@@ -171,3 +171,52 @@ def human_pairs(key_rows: list[dict], filled: dict[str, list[dict]]) -> dict:
         if len(by) == 2:
             human_human[axis].append((by["인용"], by["민서"]))
     return {"system_human": system_human, "human_human": human_human, "blank": blank}
+
+
+# ── 8절 블라인드 읽기 묶음(P1) — "심판 없음 = 사람이 직접 읽고 결함을 찾음" ─────────────────────────
+# 읽는 사람은 그 결함을 심지 않은 사람이다(심은 사람은 답을 안다): 결함본은 심은 사람이 아닌 쪽에게만 간다. 바탕·sham 은 둘 다에게
+# 섞어 넣어 "어느 문서에 결함이 있는지"를 모르게 한다. 읽는 사람은 문서마다 문제라고 본 문장을 글자 그대로 옮겨 적고 시간을 적는다.
+READING_COLUMNS = ("문서", "문제 문장(글자 그대로)", "축(사실 일치/필수 내용/일관성/표기)", "메모")
+READING_KEY_COLUMNS = ("문서", "성적서", "변형", "변형_축", "심은_문장", "항목", "읽는_사람")
+READERS = ("인용", "민서")
+
+
+def build_reading(bases: list[str], variants: dict[str, dict], seed: int) -> tuple[dict[str, list[tuple]], list[tuple]]:
+    """(읽기 목록 {읽는 사람: [(문서, 성적서, 변형)]}, 열쇠 줄). variants = {변형 id: meta}. 문서 번호는 사람마다 따로 섞는다."""
+    rng = random.Random(seed + 3)
+    lists: dict[str, list[tuple]] = {}
+    key: list[tuple] = []
+    for reader in READERS:
+        docs = [(b, "base") for b in sorted(bases)]
+        for vid, meta in sorted(variants.items()):
+            if meta.get("planted_by") != reader:
+                docs.append((meta["base"], vid))
+        rng.shuffle(docs)
+        labels = [f"읽기-{reader}-{n:02d}" for n in range(1, len(docs) + 1)]
+        lists[reader] = [(label, tag, vid) for label, (tag, vid) in zip(labels, docs)]
+        for label, tag, vid in lists[reader]:
+            meta = variants.get(vid, {})
+            key.append((label, tag, vid, meta.get("axis", ""), meta.get("after") or meta.get("before") or "",
+                        meta.get("item_id", ""), reader))
+    return lists, key
+
+
+def reading_hits(key_rows: list[dict], filled: list[dict], touches) -> dict[str, dict]:
+    """읽은 결과 → 결함본마다 사람이 심은 문장을 짚었나. touches = 인용·문장 겹침 판정(stats.touches 를 넘긴다).
+    필수 내용(지운 문장)은 적은 글이 지운 문장을 짚었거나 메모에 항목 번호를 적었으면 찾은 것으로 본다. 결함 없는 문서의 지적은 false_alarms."""
+    found_col = READING_COLUMNS[1]
+    by_doc: dict[str, list[dict]] = {}
+    for row in filled:
+        by_doc.setdefault(row["문서"], []).append(row)
+    out: dict[str, dict] = {}
+    false_alarms = 0
+    for k in key_rows:
+        notes = [r for r in by_doc.get(k["문서"], []) if (r.get(found_col) or "").strip() or (r.get("메모") or "").strip()]
+        if k["변형"] in ("base",) or k["변형"].startswith("S"):
+            false_alarms += sum(1 for r in notes if (r.get(found_col) or "").strip())
+            continue
+        hit = any(touches(r.get(found_col) or "", k["심은_문장"]) for r in notes if k["심은_문장"])
+        if not hit and k["항목"]:
+            hit = any(k["항목"] in (r.get("메모") or "") + (r.get(found_col) or "") for r in notes)
+        out[k["변형"]] = {"axis": k["변형_축"], "reader": k["읽는_사람"], "found": hit}
+    return {"defects": out, "false_alarms": false_alarms}

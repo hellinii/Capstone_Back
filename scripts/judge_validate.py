@@ -26,6 +26,7 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
 - make-diff <D01> : diff.txt 를 도구로 쓴다.
 - sheets     : 사람 일치도 채점지(블라인드 — 시스템 판정·결함 여부 없음, 결함본 문항은 7.2 역할대로 인용/민서), 열쇠(따로 + 해시,
                읽기 전용), 읽을 문서(문서 번호만). 층 나눈 표본(--n 기본 80, --overlap 축마다 겹침 5, --seed 기록).
+- reading    : 8절 블라인드 읽기 묶음(P1) — 사람마다 문서(결함본은 심지 않은 사람에게만)·빈 읽기표·열쇠. report 가 효용성 표로 센다.
 - rescope    : 재검증 범위(정10) — 바뀐 파일(--changed 또는 --since <커밋>) → 다시 돌 모듈·묶음·사람 일치도 축.
 - status     : 장부 누계와 상한.
 
@@ -408,8 +409,8 @@ def planted_sentence(meta: dict) -> str | None:
 
 
 def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str, tuple[list, list]] | None = None,
-           human_scores: dict | None = None) -> dict:
-    """7.6 판정값. runs = collect_runs 결과(판정은 장부 순서가 아니라 회차 번호 순).
+           human_scores: dict | None = None, human_reading: dict | None = None) -> dict:
+    """7.6 판정값(+ 8절 효용성 — human_reading = sheets.reading_hits 결과). runs = collect_runs 결과(판정은 장부 순서가 아니라 회차 번호 순).
     human_claims = {성적서: (claims.csv 줄, sentences.csv 줄)}, human_scores = sheets.human_pairs 결과."""
     by_batch: dict[str, list[dict]] = {}
     for r in sorted(runs, key=lambda r: r["key"]):
@@ -468,6 +469,12 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
             "recall": pairs / gold_n if gold_n else None, "precision": pairs / pred_n if pred_n else None,
             "n_pairs": pairs, "n_gold": gold_n, "n_pred": pred_n}}
 
+    if human_reading and defects:
+        hits = human_reading["defects"]
+        out["effectiveness"] = {  # 8절 — 기준은 심어 둔 결함(사람이 아니라)
+            "defects": len(defects), "system_found": sum(any(d["hits"]) for d in defects.values()),
+            "human_found": sum(1 for v in defects if hits.get(v, {}).get("found")),
+            "human_read": sum(1 for v in defects if v in hits), "human_false_alarms": human_reading["false_alarms"]}
     if human_scores:
         def rates(pairs: list[tuple]) -> dict | None:
             if not pairs:
@@ -519,6 +526,22 @@ def read_human_scores(folder: Path) -> dict | None:
     return SH.human_pairs(_csv_rows(key), filled)
 
 
+def read_human_reading(folder: Path) -> dict | None:
+    """8절 읽기 결과(04_사람평가/읽기) — 열쇠와 읽기표가 있고 하나라도 적혔을 때만."""
+    from app.judge.validation import sheets as SH
+
+    key = Path(folder) / "읽기" / "열쇠" / "읽기_열쇠.csv"
+    sheets = [Path(folder) / "읽기" / r / "읽기표.csv" for r in SH.READERS]
+    if not key.exists() or not all(p.exists() for p in sheets):
+        return None
+    filled = [r for p in sheets for r in _csv_rows(p) if r["문서"].startswith("읽기-")]
+    if not any((r.get(SH.READING_COLUMNS[1]) or "").strip() or (r.get("메모") or "").strip() for r in filled):
+        return None
+    from app.judge.validation.stats import touches  # 결함 탐지와 같은 '짚었나' 규칙
+
+    return SH.reading_hits(_csv_rows(key), filled, touches)
+
+
 def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[str, Callable] | None = None,
                answers: Path | None = None, human: Path | None = None, echo: Callable[[str], None] = print) -> dict:
     vroot = validation_root()
@@ -539,7 +562,8 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
     tags = sorted({r["key"].report for r in runs if r["key"].batch == "reproducibility"})
     claims = read_human_claims(answers, tags) if answers and Path(answers).is_dir() else {}
     scores = read_human_scores(human) if human and Path(human).is_dir() else None
-    result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores)
+    reading = read_human_reading(human) if human and Path(human).is_dir() else None
+    result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores, human_reading=reading)
     result.update({"mode": mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(), "tag": TAG})
     out.mkdir(parents=True, exist_ok=True)
     target = out / "검증결과.json"
@@ -705,6 +729,50 @@ def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80,
     return draw
 
 
+def cmd_reading(mode: str, *, out: Path | None, seed: int | None = None, defects: Path | None = None,
+                inputs: Path | None = None, allow_sealed: bool = False, echo: Callable[[str], None] = print) -> dict:
+    """8절 블라인드 읽기 묶음(P1) — 사람마다 읽을 문서(결함본은 심지 않은 사람에게만, 바탕·sham 은 둘 다)와 빈 읽기표, 열쇠(따로 + 해시)."""
+    import csv
+    import io
+    import stat
+
+    from app.judge.validation import sheets as SH
+
+    variants, _, _, _ = _variant_inputs(mode, defects=defects, inputs=inputs, allow_sealed=allow_sealed)
+    tags = sorted({m["base"] for m, _ in variants.values()})
+    vroot = validation_root()
+    bases = sealed_bases(vroot / SEALED, tags) if mode == "verify" else asyncio.run(dev_bases(guard(inputs or DEV_INPUTS, "dev")))
+    out = Path(out or vroot / HUMAN / "읽기") if mode == "verify" else guard(out or Path(tempfile.mkdtemp(prefix="judge_reading_")), "dev")
+    seed = random.SystemRandom().randrange(1, 10**9) if seed is None else seed
+    lists, key = SH.build_reading(tags, {v: m for v, (m, _) in variants.items()}, seed)
+
+    def table(columns, rows) -> str:
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(columns)
+        w.writerows(rows)
+        return buf.getvalue()
+
+    for reader, docs in lists.items():
+        folder = out / reader
+        (folder / "문서").mkdir(parents=True, exist_ok=True)
+        for label, tag, vid in docs:
+            slots = variants[vid][1] if vid != R.BASE_VARIANT else None
+            (folder / "문서" / f"{label}.txt").write_text(doc_text(bases[tag], slots), encoding="utf-8")
+        (folder / "읽기표.csv").write_text(table(SH.READING_COLUMNS, [(label, "", "", "") for label, _, _ in docs]
+                                                + [("시작 시각", "", "", ""), ("끝 시각", "", "", "")]), encoding="utf-8")
+    key_dir = out / "열쇠"
+    key_dir.mkdir(parents=True, exist_ok=True)
+    body = table(SH.READING_KEY_COLUMNS, key)
+    sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    (key_dir / "읽기_열쇠.csv").write_text(body, encoding="utf-8")
+    (key_dir / "읽기_열쇠.sha256").write_text(f"{sha}  읽기_열쇠.csv\n", encoding="utf-8")
+    for f in key_dir.iterdir():
+        os.chmod(f, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    echo(f"읽기 묶음: " + " · ".join(f"{r} {len(d)}문서" for r, d in lists.items()) + f" · 시드 {seed} · 열쇠 sha256 {sha}")
+    return {"seed": seed, "docs": {r: len(d) for r, d in lists.items()}, "key_sha256": sha}
+
+
 # ── 재검증 범위(정10) ─────────────────────────────────────────────────
 
 
@@ -764,6 +832,13 @@ def build_parser() -> argparse.ArgumentParser:
         c.add_argument("--allow-sealed", action="store_true", help="봉인 서술 열람 허락(V1 뒤, 사람)")
         if name == "make-diff":
             c.add_argument("variant")
+    rd = sub.add_parser("reading", help="8절 블라인드 읽기 묶음(P1)")
+    rd.add_argument("--mode", choices=MODES, required=True)
+    rd.add_argument("--out")
+    rd.add_argument("--seed", type=int)
+    rd.add_argument("--defects")
+    rd.add_argument("--inputs")
+    rd.add_argument("--allow-sealed", action="store_true")
     sh = sub.add_parser("sheets", help="사람 일치도 채점지·열쇠(층 나눈 표본, 시드 기록)")
     sh.add_argument("--mode", choices=MODES, required=True)
     sh.add_argument("--ledger")
@@ -787,7 +862,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             return jl.main(["status", "--ledger", args.ledger])
-        if args.command in ("check-defects", "make-diff", "sheets") and args.mode == "verify" and (args.defects or args.inputs):
+        if args.command in ("check-defects", "make-diff", "sheets", "reading") and args.mode == "verify" and (args.defects or args.inputs):
             raise RunnerError("verify 는 입력·결함을 검증 폴더에서만 읽는다(--inputs·--defects 는 dev 전용)")
         opt = lambda v: Path(v) if v else None  # noqa: E731
         if args.command == "check-defects":
@@ -797,6 +872,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "make-diff":
             cmd_make_diff(args.mode, args.variant, defects=opt(args.defects), inputs=opt(args.inputs),
                           allow_sealed=args.allow_sealed)
+            return 0
+        if args.command == "reading":
+            cmd_reading(args.mode, out=opt(args.out), seed=args.seed, defects=opt(args.defects), inputs=opt(args.inputs),
+                        allow_sealed=args.allow_sealed)
             return 0
         if args.command == "sheets":
             cmd_sheets(args.mode, ledger=opt(args.ledger), out=opt(args.out), n=args.n, overlap=args.overlap, seed=args.seed,

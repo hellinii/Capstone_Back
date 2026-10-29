@@ -475,6 +475,38 @@ def test_one_full_dev_loop_with_real_stats_gives_real_numbers(tmp_path, vdir):
     assert agr["system_human"]["kappa"] is not None or agr["system_human"]["ac1"] is not None
 
 
+def test_blind_reading_bundle_and_effectiveness(tmp_path, vdir):
+    """8절(P1) — 결함본은 심지 않은 사람에게만, 바탕·sham 은 섞어서. 사람이 찾은 수·헛짚음을 효용성 표로 센다."""
+    import csv as _csv
+
+    loop = _full_loop(tmp_path)
+    work = loop["work"]
+    lines: list[str] = []
+    got = jv.cmd_reading("dev", out=work / "사람" / "읽기", seed=4, defects=work / "결함", echo=lines.append)
+    # 결함 D01·D02(인용 님이 심음)는 민서에게만, S01(민서가 심음)은 인용 님에게만. 바탕 2건(dev_binary·dev_multiclass)은 둘 다.
+    assert got["docs"] == {"인용": 3, "민서": 4} and "시드 4" in lines[0]
+    key = _rows(work / "사람" / "읽기" / "열쇠" / "읽기_열쇠.csv")
+    assert {(k["변형"], k["읽는_사람"]) for k in key if k["변형"] != "base"} == {("D01", "민서"), ("D02", "민서"), ("S01", "인용")}
+    docs = sorted(p.name for p in (work / "사람" / "읽기" / "민서" / "문서").iterdir())
+    assert len(docs) == 4 and not any("D0" in d or "base" in d for d in docs)
+    sheet = work / "사람" / "읽기" / "민서" / "읽기표.csv"
+    rows = _rows(sheet)
+    doc_of = {k["변형"]: k["문서"] for k in key if k["읽는_사람"] == "민서"}
+    for r in rows:
+        if r["문서"] == doc_of["D01"]:
+            r["문제 문장(글자 그대로)"] = V_after(work, "D01")
+        if r["문서"] == doc_of["base"]:
+            r["문제 문장(글자 그대로)"] = "괜찮은 문장을 잘못 짚음"
+    with sheet.open("w", newline="", encoding="utf-8") as f:
+        w = _csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", human=work / "사람", echo=_quiet()[1])
+    eff = r["effectiveness"]
+    assert (eff["defects"], eff["human_read"], eff["human_found"], eff["human_false_alarms"]) == (2, 2, 1, 1)
+    assert eff["system_found"] == sum(any(d["hits"]) for d in r["defects"].values()) >= 1
+
+
 def test_report_refuses_tampered_result_file(tmp_path, vdir):
     jv.execute(_dev(tmp_path, repeats=1), echo=_quiet()[1])
     row = _rows(tmp_path / "work" / "장부.csv")[0]
