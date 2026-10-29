@@ -182,6 +182,9 @@ def build_app(mode: str, judge_delay: float = 0.0):
     """키를 빈 문자열로 덮고 임시 DB 를 정한 뒤 앱을 import 해 가짜 클라이언트를 끼운 앱을 돌려준다."""
     os.environ["OPENAI_API_KEY"] = ""
     os.environ["ANTHROPIC_API_KEY"] = ""
+    # 검증 기록 잠금(14-10)을 끈다 — V2 전에는 검증 기록이 없어 켜 두면 가짜 심판이 통과해도 모두 보류가 된다. 이 서버는 임시 sqlite
+    # 전용 개발 진입점이라 운영 진입점(app.main)의 기본값(켜짐)은 그대로다.
+    os.environ["JUDGE_CRITERIA_LOCK"] = "off"
     if not os.environ.get("DATABASE_URL", "").startswith("sqlite:///"):
         os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.mkdtemp(prefix='dev_fake_llm_')}/dev.db"
     from app.core import database

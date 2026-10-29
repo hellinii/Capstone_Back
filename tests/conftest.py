@@ -249,6 +249,13 @@ def _fresh_llm_wallets():
     llm_budget.reset()
 
 
+@pytest.fixture(autouse=True)
+def _criteria_lock_off(monkeypatch):
+    """검증 기록 잠금(app.judge.criteria_lock, 계획 14-10)을 시험에서 끈다 — V2 전에는 검증 기록이 없어 켜 두면 판 4 통과 흐름을
+    보는 시험이 모두 보류가 된다. 잠금 자체를 보는 시험(tests/test_judge_criteria_lock.py)은 monkeypatch.delenv 로 다시 켠다."""
+    monkeypatch.setenv("JUDGE_CRITERIA_LOCK", "off")
+
+
 @pytest.fixture
 def judge_passes(monkeypatch):
     """판 4 작업의 심판 자리를 '통과'로 채운다(심판 라운드 J5b). 판 4 작업은 심판 키가 없으면 서술 AI 도 부르지 않으므로(정3),
