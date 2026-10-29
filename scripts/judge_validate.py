@@ -608,9 +608,14 @@ def read_human_scores(folder: Path) -> dict | None:
     sheets = {who: Path(folder) / f"채점지_{who}.csv" for who in ("인용", "민서")}
     if not key.exists() or not all(p.exists() for p in sheets.values()):
         return None
-    filled = {who: _csv_rows(p) for who, p in sheets.items()}
+    read = {who: read_keyed_sheet(p) for who, p in sheets.items()}
+    filled = {who: rows for who, (_, rows) in read.items()}
     if not any((r.get(SH.SHEET_COLUMNS[6]) or "").strip() for rows in filled.values() for r in rows):
         return None
+    draw = Path(folder) / "뽑기.json"
+    check_key(key, {f"채점지_{who}": sha for who, (sha, _) in read.items()},
+              recorded={"열쇠.sha256": _sha_file(key.parent / "열쇠.sha256"),
+                        "뽑기.json": json.loads(draw.read_text(encoding="utf-8")).get("key_sha256") if draw.exists() else None})
     return SH.human_pairs(_csv_rows(key), filled)
 
 
@@ -622,9 +627,12 @@ def read_human_reading(folder: Path) -> dict | None:
     sheets = [Path(folder) / "읽기" / r / "읽기표.csv" for r in SH.READERS]
     if not key.exists() or not all(p.exists() for p in sheets):
         return None
-    filled = [r for p in sheets for r in _csv_rows(p) if r["문서"].startswith("읽기-")]
+    read = {p.parent.name: read_keyed_sheet(p) for p in sheets}
+    filled = [r for _, rows in read.values() for r in rows if r["문서"].startswith("읽기-")]
     if not any((r.get(SH.READING_COLUMNS[1]) or "").strip() or (r.get("메모") or "").strip() for r in filled):
         return None
+    check_key(key, {f"읽기표_{who}": sha for who, (sha, _) in read.items()},
+              recorded={"읽기_열쇠.sha256": _sha_file(key.parent / "읽기_열쇠.sha256")})
     from app.judge.validation.stats import touches  # 결함 탐지와 같은 '짚었나' 규칙
 
     return SH.reading_hits(_csv_rows(key), filled, touches)
@@ -725,8 +733,49 @@ def cmd_make_diff(mode: str, variant: str, *, defects: Path | None = None, input
     return target
 
 
-def doc_text(base: Base, slots: dict | None) -> str:
-    """사람이 읽을 문서 — 심판이 읽는 것과 같은 조각(서술 칸 + 고정 문구 + 표). 결함 여부·변형 이름은 없다."""
+KEY_HEAD = "# 열쇠 sha256: "  # 채점지·읽기표 첫 줄 — 어느 열쇠와 짝인지(report 가 맞대 본다)
+
+
+def refuse_nonempty(out: Path, *, ignore: tuple[str, ...] = ()) -> None:
+    """출력 폴더가 비어 있지 않으면 시작 전에 거부한다 — 채점지·열쇠를 덮어쓰지 않는다(이미 나눠 준 표와 열쇠가 어긋나지 않게)."""
+    if Path(out).exists():
+        if not Path(out).is_dir():
+            raise RunnerError(f"출력 자리가 폴더가 아니다: {out}")
+        left = sorted(p.name for p in Path(out).iterdir() if p.name not in ignore)
+        if left:
+            raise RunnerError(f"출력 폴더가 비어 있지 않다(덮어쓰지 않는다 — 새 폴더를 준다): {out} — {', '.join(left[:5])}")
+
+
+def read_keyed_sheet(path: Path) -> tuple[str | None, list[dict]]:
+    """머리 줄(KEY_HEAD)이 있는 채점지·읽기표 → (열쇠 해시, 줄)."""
+    import csv
+    import io
+
+    text = Path(path).read_text(encoding="utf-8")
+    first, _, rest = text.partition("\n")
+    sha = first[len(KEY_HEAD):].strip() if first.startswith(KEY_HEAD) else None
+    body = rest if sha is not None else text
+    rows = [r for r in csv.DictReader(io.StringIO(body)) if any((v or "").strip() for v in r.values())]
+    return sha, rows
+
+
+def check_key(key_path: Path, sheet_shas: dict[str, str | None], *, recorded: dict[str, str | None]) -> str:
+    """열쇠 파일의 실제 해시가 채점지 머리·기록(열쇠.sha256·뽑기.json)과 모두 같은가. 다르면 거부(사유 문장)."""
+    actual = hashlib.sha256(Path(key_path).read_bytes()).hexdigest()
+    bad = [f"{name}({sha or '없음'})" for name, sha in {**sheet_shas, **recorded}.items() if sha != actual]
+    if bad:
+        raise RunnerError(f"열쇠 {Path(key_path).name}(sha256 {actual[:12]}…)가 짝과 맞지 않는다 — {', '.join(bad)}. "
+                          "다른 묶음의 채점지·열쇠를 섞지 않는다")
+    return actual
+
+
+def _sha_file(path: Path) -> str | None:
+    return Path(path).read_text(encoding="utf-8").split()[0] if Path(path).exists() else None
+
+
+def doc_text(base: Base, slots: dict | None, label: str) -> str:
+    """사람이 읽을 문서 — 심판이 읽는 것과 같은 조각(서술 칸 + 고정 문구 + 표). 머리는 문서 번호뿐이다 — 결함 여부·변형 이름·
+    바탕 성적서 태그는 없다(태그가 보이면 같은 성적서의 두 판본을 맞대 볼 수 있다, J10 검토)."""
     from app.judge.material import parse_material
     from app.judge.reading import build_pieces, render
     from app.narrative.baselines import build_benchmark_refs
@@ -737,13 +786,14 @@ def doc_text(base: Base, slots: dict | None) -> str:
     material, _ = parse_material(req.judge_material)
     refs = build_benchmark_refs(req.task_type.value, req.fact_sheet.metrics, edition=4)
     pieces = build_pieces(result, result.section_sources, material, refs, req.fact_sheet.metrics)
-    return f"# 바탕 성적서 데이터: {base.tag}\n\n" + render(pieces) + "\n"
+    return f"# {label}\n\n" + render(pieces) + "\n"
 
 
 def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80, overlap: int = 5, seed: int | None = None,
                defects: Path | None = None, inputs: Path | None = None, allow_sealed: bool = False,
                echo: Callable[[str], None] = print) -> dict:
-    """사람 일치도 채점지(블라인드, 역할대로)·열쇠(따로 + 해시)·읽을 문서. 표본은 검증 회차 결과에서 층 나눠 뽑는다(시드 기록)."""
+    """사람 일치도 채점지(블라인드, 역할대로)·열쇠(따로 + 해시)·읽을 문서. 표본은 검증 회차 결과에서 층 나눠 뽑는다(시드 기록).
+    채점지 첫 줄과 뽑기.json 에 열쇠 해시 — report 가 열쇠 파일과 맞대 본다. 출력 폴더가 비어 있지 않으면 시작하지 않는다."""
     import csv
     import io
     import stat
@@ -762,6 +812,7 @@ def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80,
         ledger = guard(ledger, "dev")
         out = guard(out or Path(tempfile.mkdtemp(prefix="judge_validate_sheets_")), "dev")
         root = None
+    refuse_nonempty(out, ignore=("읽기",))  # 읽기 묶음(cmd_reading 기본 자리 04_사람평가/읽기)은 먼저 만들어 둘 수 있다
     runs = collect_runs(jl.Ledger(ledger).rows(), fingerprint=criteria.fingerprint(),
                         mode="live" if mode == "verify" else "dev", root=root)
     # 같은 성적서·변형은 첫 회차만(카-4: 판정은 1회째로 본다 — V1 에서 바꾸면 여기)
@@ -788,22 +839,22 @@ def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80,
         w.writerows(rows)
         return buf.getvalue()
 
+    key_body = table(SH.KEY_COLUMNS, key)
+    key_sha = hashlib.sha256(key_body.encode("utf-8")).hexdigest()
     out.mkdir(parents=True, exist_ok=True)
     (out / "문서").mkdir(exist_ok=True)
     for label, (run_id, report_tag) in docs.items():
         variant = by_run[run_id]["key"].variant
         slots = variants[variant][1] if variant != R.BASE_VARIANT else None
-        (out / "문서" / f"{label}.txt").write_text(doc_text(bases[report_tag], slots), encoding="utf-8")
+        (out / "문서" / f"{label}.txt").write_text(doc_text(bases[report_tag], slots, label), encoding="utf-8")
     for who, rows in sheets.items():
-        (out / f"채점지_{who}.csv").write_text(table(SH.SHEET_COLUMNS, rows), encoding="utf-8")
+        (out / f"채점지_{who}.csv").write_text(KEY_HEAD + key_sha + "\n" + table(SH.SHEET_COLUMNS, rows), encoding="utf-8")
     checklist = criteria.load_json("checklist.json")["items"]
     (out / "필수내용_항목.md").write_text(
         f"# 필수 내용 항목 (기준 {criteria.version()})\n\n| 항목 | 독자가 알아야 할 것 |\n|---|---|\n"
         + "".join(f"| {i['id']} | {i['reader_learns']} |\n" for i in checklist), encoding="utf-8")
     key_dir = out / "열쇠"
     key_dir.mkdir(exist_ok=True)
-    key_body = table(SH.KEY_COLUMNS, key)
-    key_sha = hashlib.sha256(key_body.encode("utf-8")).hexdigest()
     (key_dir / "열쇠.csv").write_text(key_body, encoding="utf-8")
     (key_dir / "열쇠.sha256").write_text(f"{key_sha}  열쇠.csv\n", encoding="utf-8")
     strata: dict[str, int] = {}
@@ -820,7 +871,8 @@ def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80,
 
 def cmd_reading(mode: str, *, out: Path | None, seed: int | None = None, defects: Path | None = None,
                 inputs: Path | None = None, allow_sealed: bool = False, echo: Callable[[str], None] = print) -> dict:
-    """8절 블라인드 읽기 묶음(P1) — 사람마다 읽을 문서(결함본은 심지 않은 사람에게만, 바탕·sham 은 둘 다)와 빈 읽기표, 열쇠(따로 + 해시)."""
+    """8절 블라인드 읽기 묶음(P1) — 사람마다 읽을 문서(결함본은 심지 않은 사람에게만, 한 사람에게 한 성적서의 한 판본만 —
+    sheets.build_reading)와 빈 읽기표(머리에 열쇠 해시), 열쇠(따로 + 해시). 출력 폴더가 비어 있지 않으면 시작하지 않는다."""
     import csv
     import io
     import stat
@@ -832,8 +884,9 @@ def cmd_reading(mode: str, *, out: Path | None, seed: int | None = None, defects
     vroot = validation_root()
     bases = sealed_bases(vroot / SEALED, tags) if mode == "verify" else asyncio.run(dev_bases(guard(inputs or DEV_INPUTS, "dev")))
     out = Path(out or vroot / HUMAN / "읽기") if mode == "verify" else guard(out or Path(tempfile.mkdtemp(prefix="judge_reading_")), "dev")
+    refuse_nonempty(out)
     seed = random.SystemRandom().randrange(1, 10**9) if seed is None else seed
-    lists, key = SH.build_reading(tags, {v: m for v, (m, _) in variants.items()}, seed)
+    lists, key, unplaced = SH.build_reading(tags, {v: m for v, (m, _) in variants.items()}, seed)
 
     def table(columns, rows) -> str:
         buf = io.StringIO()
@@ -842,24 +895,26 @@ def cmd_reading(mode: str, *, out: Path | None, seed: int | None = None, defects
         w.writerows(rows)
         return buf.getvalue()
 
+    body = table(SH.READING_KEY_COLUMNS, key)
+    sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
     for reader, docs in lists.items():
         folder = out / reader
         (folder / "문서").mkdir(parents=True, exist_ok=True)
         for label, tag, vid in docs:
             slots = variants[vid][1] if vid != R.BASE_VARIANT else None
-            (folder / "문서" / f"{label}.txt").write_text(doc_text(bases[tag], slots), encoding="utf-8")
-        (folder / "읽기표.csv").write_text(table(SH.READING_COLUMNS, [(label, "", "", "") for label, _, _ in docs]
+            (folder / "문서" / f"{label}.txt").write_text(doc_text(bases[tag], slots, label), encoding="utf-8")
+        (folder / "읽기표.csv").write_text(KEY_HEAD + sha + "\n" + table(SH.READING_COLUMNS, [(label, "", "", "") for label, _, _ in docs]
                                                 + [("시작 시각", "", "", ""), ("끝 시각", "", "", "")]), encoding="utf-8")
     key_dir = out / "열쇠"
     key_dir.mkdir(parents=True, exist_ok=True)
-    body = table(SH.READING_KEY_COLUMNS, key)
-    sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
     (key_dir / "읽기_열쇠.csv").write_text(body, encoding="utf-8")
     (key_dir / "읽기_열쇠.sha256").write_text(f"{sha}  읽기_열쇠.csv\n", encoding="utf-8")
     for f in key_dir.iterdir():
         os.chmod(f, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
     echo(f"읽기 묶음: " + " · ".join(f"{r} {len(d)}문서" for r, d in lists.items()) + f" · 시드 {seed} · 열쇠 sha256 {sha}")
-    return {"seed": seed, "docs": {r: len(d) for r, d in lists.items()}, "key_sha256": sha}
+    if unplaced:  # 한 사람에게 한 성적서의 한 판본만 — 자리가 없는 결함본은 이번 묶음에서 읽지 않는다(효용성 표의 '읽은 결함'에서 빠짐)
+        echo(f"이번 읽기 묶음에 자리가 없는 결함본 {len(unplaced)}개: {', '.join(unplaced)}")
+    return {"seed": seed, "docs": {r: len(d) for r, d in lists.items()}, "key_sha256": sha, "unplaced": unplaced}
 
 
 # ── 재검증 범위(정10) ─────────────────────────────────────────────────

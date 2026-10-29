@@ -316,10 +316,14 @@ def test_cli_sheets_dev_writes_sheets_key_hash_and_docs(tmp_path, monkeypatch):
     assert (out / "열쇠" / "열쇠.sha256").read_text(encoding="utf-8").split()[0] == hashlib.sha256(key).hexdigest() == draw["key_sha256"]
     with (out / "채점지_인용.csv").open(encoding="utf-8") as f:
         rows = list(csv.reader(f))
-    assert tuple(rows[0]) == SH.SHEET_COLUMNS and len(rows) > 1
+    assert rows[0] == [f"# 열쇠 sha256: {draw['key_sha256']}"]  # 머리 줄 — report 가 열쇠와 맞대 본다(J10)
+    assert tuple(rows[1]) == SH.SHEET_COLUMNS and len(rows) > 2
     docs = sorted(p.name for p in (out / "문서").iterdir())
     assert docs and all(d.startswith("문서-") for d in docs)
     assert "dev_binary" not in "".join(docs)
+    for d in docs:  # 문서 머리에도 바탕 태그가 없다(블라인드, J10)
+        text = (out / "문서" / d).read_text(encoding="utf-8")
+        assert text.startswith(f"# {d[:-4]}\n") and "dev_binary" not in text.splitlines()[0] and "바탕" not in text.splitlines()[0]
     assert "시드 9" in lines[0]
     assert "| 분석-1 |" in (out / "필수내용_항목.md").read_text(encoding="utf-8")
 

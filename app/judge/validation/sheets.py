@@ -174,23 +174,33 @@ def human_pairs(key_rows: list[dict], filled: dict[str, list[dict]]) -> dict:
 
 
 # ── 8절 블라인드 읽기 묶음(P1) — "심판 없음 = 사람이 직접 읽고 결함을 찾음" ─────────────────────────
-# 읽는 사람은 그 결함을 심지 않은 사람이다(심은 사람은 답을 안다): 결함본은 심은 사람이 아닌 쪽에게만 간다. 바탕·sham 은 둘 다에게
-# 섞어 넣어 "어느 문서에 결함이 있는지"를 모르게 한다. 읽는 사람은 문서마다 문제라고 본 문장을 글자 그대로 옮겨 적고 시간을 적는다.
+# 읽는 사람은 그 결함을 심지 않은 사람이다(심은 사람은 답을 안다): 결함본은 심은 사람이 아닌 쪽에게만 간다. 한 사람에게는 **한 성적서의
+# 한 판본만** 준다(J10 검토 — 바탕본과 결함본을 같이 읽으면 두 글을 맞대 차이를 찾는 일이 된다). 성적서마다 그 사람이 읽을 수 있는
+# 결함본이 있으면 그중 하나, 없으면 그 사람이 심지 않은 sham, 그것도 없으면 바탕본을 준다. 이번 묶음에 자리가 없는 결함본은
+# unplaced 로 돌려준다(다른 판본을 이미 받은 사람에게 줄 수 없다 — 효용성 표에서 '사람이 읽은 결함' 수로 따로 보인다).
+# 읽는 사람은 문서마다 문제라고 본 문장을 글자 그대로 옮겨 적고 시간을 적는다.
 READING_COLUMNS = ("문서", "문제 문장(글자 그대로)", "축(사실 일치/필수 내용/일관성/표기)", "메모")
 READING_KEY_COLUMNS = ("문서", "성적서", "변형", "변형_축", "심은_문장", "항목", "읽는_사람")
 READERS = ("인용", "민서")
 
 
-def build_reading(bases: list[str], variants: dict[str, dict], seed: int) -> tuple[dict[str, list[tuple]], list[tuple]]:
-    """(읽기 목록 {읽는 사람: [(문서, 성적서, 변형)]}, 열쇠 줄). variants = {변형 id: meta}. 문서 번호는 사람마다 따로 섞는다."""
+def build_reading(bases: list[str], variants: dict[str, dict], seed: int,
+                  ) -> tuple[dict[str, list[tuple]], list[tuple], list[str]]:
+    """(읽기 목록 {읽는 사람: [(문서, 성적서, 변형)]}, 열쇠 줄, 자리가 없는 결함본). variants = {변형 id: meta}.
+    사람마다 성적서 하나에 문서 하나. 문서 번호는 사람마다 따로 섞는다."""
     rng = random.Random(seed + 3)
     lists: dict[str, list[tuple]] = {}
     key: list[tuple] = []
+    placed: set[str] = set()
     for reader in READERS:
-        docs = [(b, "base") for b in sorted(bases)]
-        for vid, meta in sorted(variants.items()):
-            if meta.get("planted_by") != reader:
-                docs.append((meta["base"], vid))
+        docs = []
+        for tag in sorted(set(bases)):
+            mine = sorted(v for v, m in variants.items() if m.get("base") == tag and m.get("planted_by") != reader)
+            defects = [v for v in mine if v.startswith("D") and v not in placed]
+            shams = [v for v in mine if v.startswith("S")]
+            pick = rng.choice(defects) if defects else (rng.choice(shams) if shams else "base")
+            placed.add(pick)
+            docs.append((tag, pick))
         rng.shuffle(docs)
         labels = [f"읽기-{reader}-{n:02d}" for n in range(1, len(docs) + 1)]
         lists[reader] = [(label, tag, vid) for label, (tag, vid) in zip(labels, docs)]
@@ -198,7 +208,8 @@ def build_reading(bases: list[str], variants: dict[str, dict], seed: int) -> tup
             meta = variants.get(vid, {})
             key.append((label, tag, vid, meta.get("axis", ""), meta.get("after") or meta.get("before") or "",
                         meta.get("item_id", ""), reader))
-    return lists, key
+    unplaced = sorted(v for v in variants if v.startswith("D") and v not in placed)
+    return lists, key, unplaced
 
 
 def reading_hits(key_rows: list[dict], filled: list[dict], touches) -> dict[str, dict]:

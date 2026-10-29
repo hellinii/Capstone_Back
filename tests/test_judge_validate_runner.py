@@ -355,12 +355,30 @@ def _answers(folder: Path, base) -> None:
     (folder / f"{base.tag}.claims.csv").write_text(A.to_csv(A.CLAIM_COLUMNS, [(no, "number", tok, "")]), encoding="utf-8")
 
 
+def _read_keyed(path: Path) -> tuple[str, list[dict]]:
+    """머리 줄(열쇠 해시) + 표."""
+    head, _, body = path.read_text(encoding="utf-8").partition("\n")
+    assert head.startswith("# 열쇠 sha256: ")
+    import io
+
+    return head, list(csv.DictReader(io.StringIO(body)))
+
+
+def _write_keyed(path: Path, head: str, rows: list[dict]) -> None:
+    import io
+
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=list(rows[0]), lineterminator="\n")
+    w.writeheader()
+    w.writerows(rows)
+    path.write_text(head + "\n" + buf.getvalue(), encoding="utf-8")
+
+
 def _fill_sheets(folder: Path) -> dict:
     """합성 사람 채점 — 인용 님은 열쇠의 시스템 판정 그대로, 민서는 겹침 문항 하나를 뒤집고 인용 님 판정 하나를 비운다."""
-    import csv as _csv
-
     key = {r["문항"]: r["시스템_문제"] for r in _rows(folder / "열쇠" / "열쇠.csv")}
-    sheets = {who: _rows(folder / f"채점지_{who}.csv") for who in ("인용", "민서")}
+    read = {who: _read_keyed(folder / f"채점지_{who}.csv") for who in ("인용", "민서")}
+    sheets = {who: rows for who, (_, rows) in read.items()}
     overlap = sorted({r["문항"] for r in sheets["인용"]} & {r["문항"] for r in sheets["민서"]})
     flipped, blanked = overlap[0], next(r["문항"] for r in sheets["인용"] if r["문항"] not in overlap)
     for who, rows in sheets.items():
@@ -371,10 +389,7 @@ def _fill_sheets(folder: Path) -> dict:
             if who == "인용" and r["문항"] == blanked:
                 v = ""
             r["판정(예/아니오)"] = v
-        with (folder / f"채점지_{who}.csv").open("w", newline="", encoding="utf-8") as f:
-            w = _csv.DictWriter(f, fieldnames=list(rows[0]))
-            w.writeheader()
-            w.writerows(rows)
+        _write_keyed(folder / f"채점지_{who}.csv", read[who][0], rows)
     return {"overlap": len(overlap), "total": sum(len(r) for r in sheets.values())}
 
 
@@ -480,37 +495,42 @@ def test_one_full_dev_loop_with_real_stats_gives_real_numbers(tmp_path, vdir):
 
 
 def test_blind_reading_bundle_and_effectiveness(tmp_path, vdir):
-    """8절(P1) — 결함본은 심지 않은 사람에게만, 바탕·sham 은 섞어서. 사람이 찾은 수·헛짚음을 효용성 표로 센다."""
-    import csv as _csv
-
+    """8절(P1) — 결함본은 심지 않은 사람에게만, 한 사람에게 한 성적서의 한 판본만. 사람이 찾은 수·헛짚음을 효용성 표로 센다."""
     loop = _full_loop(tmp_path)
     work = loop["work"]
     lines: list[str] = []
     got = jv.cmd_reading("dev", out=work / "사람" / "읽기", seed=4, defects=work / "결함", echo=lines.append)
-    # 결함 D01·D02(인용 님이 심음)는 민서에게만, S01(민서가 심음)은 인용 님에게만. 바탕 2건(dev_binary·dev_multiclass)은 둘 다.
-    assert got["docs"] == {"인용": 3, "민서": 4} and "시드 4" in lines[0]
+    # 바탕 성적서 2건(dev_binary·dev_multiclass) — 사람마다 2문서. D01·D02(인용 님이 심음, dev_binary)는 민서만 읽을 수 있고
+    # 민서는 dev_binary 를 한 판본만 받으므로 둘 중 하나는 자리가 없다. S01(민서가 심음, dev_multiclass)은 인용 님에게.
+    assert got["docs"] == {"인용": 2, "민서": 2} and "시드 4" in lines[0]
+    assert len(got["unplaced"]) == 1 and got["unplaced"][0] in ("D01", "D02") and "자리가 없는 결함본" in lines[1]
     key = _rows(work / "사람" / "읽기" / "열쇠" / "읽기_열쇠.csv")
-    assert {(k["변형"], k["읽는_사람"]) for k in key if k["변형"] != "base"} == {("D01", "민서"), ("D02", "민서"), ("S01", "인용")}
+    placed = ({"D01", "D02"} - set(got["unplaced"])).pop()
+    assert {(k["읽는_사람"], k["성적서"], k["변형"]) for k in key} == {
+        ("민서", "dev_binary", placed), ("민서", "dev_multiclass", "base"),
+        ("인용", "dev_binary", "base"), ("인용", "dev_multiclass", "S01")}
     docs = sorted(p.name for p in (work / "사람" / "읽기" / "민서" / "문서").iterdir())
-    assert len(docs) == 4 and not any("D0" in d or "base" in d for d in docs)
+    assert len(docs) == 2 and not any("D0" in d or "base" in d for d in docs)
     sheet = work / "사람" / "읽기" / "민서" / "읽기표.csv"
-    rows = _rows(sheet)
+    head, rows = _read_keyed(sheet)
     doc_of = {k["변형"]: k["문서"] for k in key if k["읽는_사람"] == "민서"}
     for r in rows:
-        if r["문서"] == doc_of["D01"]:
-            r["문제 문장(글자 그대로)"] = V_after(work, "D01")
+        if r["문서"] == doc_of[placed]:  # 결함 문서지만 엉뚱한 곳을 짚음 → 찾은 것 아님
+            r["문제 문장(글자 그대로)"] = "엉뚱한 곳을 짚은 글"
         if r["문서"] == doc_of["base"]:
             r["문제 문장(글자 그대로)"] = "괜찮은 문장을 잘못 짚음"
-        if r["문서"] == doc_of["D02"]:  # 결함 문서지만 엉뚱한 곳을 짚음 → 찾은 것 아님
-            r["문제 문장(글자 그대로)"] = "엉뚱한 곳을 짚은 글"
-    with sheet.open("w", newline="", encoding="utf-8") as f:
-        w = _csv.DictWriter(f, fieldnames=list(rows[0]))
-        w.writeheader()
-        w.writerows(rows)
+    _write_keyed(sheet, head, rows)
     r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", human=work / "사람", echo=_quiet()[1], plan=PLAN2)
     eff = r["effectiveness"]
-    assert (eff["defects"], eff["human_read"], eff["human_found"], eff["human_false_alarms"]) == (2, 2, 1, 1)
+    assert (eff["defects"], eff["human_read"], eff["human_found"], eff["human_false_alarms"]) == (2, 1, 0, 1)
     assert eff["system_found"] == sum(any(d["hits"]) for d in r["defects"].values()) >= 1
+    for row in rows:  # 이번엔 심은 문장을 그대로 옮김 → 찾음
+        if row["문서"] == doc_of[placed]:
+            row["문제 문장(글자 그대로)"] = V_after(work, placed) or "분석-1"
+            row["메모"] = "분석-1"
+    _write_keyed(sheet, head, rows)
+    r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과2", human=work / "사람", echo=_quiet()[1], plan=PLAN2)
+    assert r["effectiveness"]["human_found"] == 1
 
 
 def test_report_uses_the_api_it_is_given(tmp_path, vdir):
@@ -710,3 +730,68 @@ def test_dev_collect_runs_refuses_result_file_pointing_into_validation_folder(tm
     row = {**_rows(tmp_path / "work" / "장부.csv")[0], "result_file": str(vdir / "00_봉인" / "미끼.json")}
     with pytest.raises(jv.RunnerError, match="검증 폴더"):
         jv.collect_runs([row], fingerprint=criteria.fingerprint(), mode="dev", root=None)
+
+
+# ── J10 ④ 덮어쓰기 금지·열쇠 짝 맞대기(P1-4), 블라인드(P1-5) ──
+
+
+def test_sheets_and_reading_refuse_nonempty_output(tmp_path, vdir):
+    loop = _full_loop(tmp_path)
+    work = loop["work"]
+    before = (work / "사람" / "채점지_인용.csv").read_bytes()
+    with pytest.raises(jv.RunnerError, match="비어 있지 않다"):
+        jv.cmd_sheets("dev", ledger=work / "장부.csv", out=work / "사람", n=16, overlap=2, seed=6, defects=work / "결함",
+                      echo=_quiet()[1])
+    assert (work / "사람" / "채점지_인용.csv").read_bytes() == before
+    jv.cmd_reading("dev", out=work / "읽기", seed=1, defects=work / "결함", echo=_quiet()[1])
+    with pytest.raises(jv.RunnerError, match="비어 있지 않다"):
+        jv.cmd_reading("dev", out=work / "읽기", seed=2, defects=work / "결함", echo=_quiet()[1])
+    (work / "새사람" / "읽기").mkdir(parents=True)  # 읽기 묶음을 먼저 만든 자리에는 채점지를 만들 수 있다
+    (work / "새사람" / "읽기" / "x").write_text("", encoding="utf-8")
+    jv.cmd_sheets("dev", ledger=work / "장부.csv", out=work / "새사람", n=16, overlap=2, seed=6, defects=work / "결함",
+                  echo=_quiet()[1])
+
+
+@pytest.mark.parametrize("where", ["sheet_head", "draw", "sha_file", "reading_head"])
+def test_report_refuses_key_that_does_not_match_its_sheets(tmp_path, vdir, where):
+    loop = _full_loop(tmp_path)
+    human = loop["work"] / "사람"
+    jv.cmd_reading("dev", out=human / "읽기", seed=4, defects=loop["work"] / "결함", echo=_quiet()[1])
+    other = "0" * 64
+    if where == "sheet_head":
+        head, rows = _read_keyed(human / "채점지_민서.csv")
+        _write_keyed(human / "채점지_민서.csv", "# 열쇠 sha256: " + other, rows)
+    elif where == "draw":
+        draw = json.loads((human / "뽑기.json").read_text(encoding="utf-8"))
+        (human / "뽑기.json").write_text(json.dumps({**draw, "key_sha256": other}), encoding="utf-8")
+    elif where == "sha_file":
+        f = human / "열쇠" / "열쇠.sha256"
+        f.chmod(0o644)
+        f.write_text(other + "  열쇠.csv\n", encoding="utf-8")
+    else:
+        sheet = human / "읽기" / "민서" / "읽기표.csv"
+        head, rows = _read_keyed(sheet)
+        rows[0]["메모"] = "무언가"
+        _write_keyed(sheet, "# 열쇠 sha256: " + other, rows)
+    with pytest.raises(jv.RunnerError, match="짝과 맞지 않는다"):
+        jv.cmd_report("dev", ledger=loop["work"] / "장부.csv", out=tmp_path / "o", human=human, echo=_quiet()[1], plan=PLAN2)
+
+
+def test_build_reading_gives_one_edition_per_report_to_each_reader():
+    from app.judge.validation import sheets as SH
+
+    variants = {}
+    for i, (base, axis, by) in enumerate([("a", "faithfulness", "민서"), ("a", "coverage", "인용"), ("b", "consistency", "민서"),
+                                          ("b", "readability", "인용"), ("c", "faithfulness", "민서"), ("c", "coverage", "인용")]):
+        variants[f"D0{i + 1}"] = {"base": base, "axis": axis, "planted_by": by, "after": f"문장 {i}"}
+    for i, (base, by) in enumerate([("a", "민서"), ("b", "인용"), ("c", "민서")]):
+        variants[f"S0{i + 1}"] = {"base": base, "axis": "sham", "planted_by": by}
+    for seed in range(20):
+        lists, key, unplaced = SH.build_reading(["a", "b", "c"], variants, seed)
+        for reader, docs in lists.items():
+            tags = [t for _, t, _ in docs]
+            assert sorted(tags) == ["a", "b", "c"], (seed, reader, docs)  # 성적서마다 한 판본
+            assert all(variants.get(v, {}).get("planted_by") != reader for _, _, v in docs)  # 심은 사람은 안 읽음
+        read = {v for docs in lists.values() for _, _, v in docs}
+        assert read >= {v for v in variants if v.startswith("D")} - set(unplaced)
+        assert unplaced == []  # 성적서마다 두 사람이 하나씩 읽을 결함이 있다 — 6개 모두 자리
