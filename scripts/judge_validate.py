@@ -21,6 +21,9 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
     - extraction 은 채점을 부르지 않는다(재현성 회차의 추출 기록을 report 가 정답지와 짝짓는다).
 - report     : 장부·결과 원본으로 7.6 판정값을 계산한다. 계산은 app.judge.validation 의 stats·extraction·agreement 가 하고,
                이 명령은 그 함수들을 부르는 얇은 층이다(STATS_API). 결과는 verify 면 05_결과/검증결과.json, dev 면 출력 폴더.
+               정답지가 있는 성적서마다 사람이 놓친 주장 판정표(놓친주장_<태그>.csv — 시스템만 찾은 주장, 회차를 합쳐 한 줄씩)를
+               같은 출력 폴더에 쓴다. 사람이 판정해 정답지 폴더에 <태그>.missed.csv 로 두면 "예" 줄을 보탤 목록
+               (보탤주장_<태그>.csv, claims.csv 꼴)으로 내고 검증결과.json 에도 싣는다. 정답지 자체는 고치지 않는다.
 - check-defects : 결함본·sham 폴더 꼴 검사(meta 칸·심은 사람 역할·칸 하나·문장 하나·before/after·diff.txt). verify 는 V1 뒤
                --allow-sealed 로만(봉인 서술을 연다), dev 는 합성 바탕(개발 입력)으로.
 - make-diff <D01> : diff.txt 를 도구로 쓴다.
@@ -59,7 +62,9 @@ for _p in (str(ROOT), str(ROOT / "scripts")):
 import judge_live as jl  # noqa: E402
 
 from app.judge import criteria  # noqa: E402
+from app.judge.validation import annotation as A  # noqa: E402
 from app.judge.validation import runs as R  # noqa: E402
+from app.judge.validation.extraction import MISSED_COLUMNS  # noqa: E402 — 표 열 이름(계산 함수는 STATS_API 로)
 from app.judge.validation import variants as V  # noqa: E402
 
 RunnerError = jl.RunnerError
@@ -377,6 +382,7 @@ STATS_API = {
     "independence_ok": "stats", "sham_ok": "stats", "agreement_rate": "stats", "human_agreement_ok": "stats",
     "gold_from_csv": "extraction", "pred_from_extract": "extraction", "match_claims": "extraction",
     "recall_precision": "extraction", "runs_distribution": "extraction",
+    "missed_rows": "extraction", "confirmed_additions": "extraction",
     "cohen_kappa": "agreement", "gwet_ac1": "agreement",
 }
 
@@ -408,10 +414,22 @@ def planted_sentence(meta: dict) -> str | None:
     return meta.get("after") or meta.get("before") or None
 
 
+def merge_missed(per_run: list[list[tuple]]) -> list[tuple]:
+    """회차마다의 놓친 주장 줄(extraction.missed_rows) → 한 표. 같은 문장·칸·종류·인용(공백 정리)은 한 줄, 번호는 1부터 다시."""
+    seen: dict[tuple, tuple] = {}
+    for rows in per_run:
+        for row in rows:
+            key = (str(row[1]), row[2], row[3], " ".join(str(row[4]).split()))
+            seen.setdefault(key, row)
+    return [(i, *row[1:]) for i, row in enumerate(seen.values(), 1)]
+
+
 def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str, tuple[list, list]] | None = None,
-           human_scores: dict | None = None, human_reading: dict | None = None) -> dict:
+           human_scores: dict | None = None, human_reading: dict | None = None,
+           human_missed: dict[str, list[dict]] | None = None) -> dict:
     """7.6 판정값(+ 8절 효용성 — human_reading = sheets.reading_hits 결과). runs = collect_runs 결과(판정은 장부 순서가 아니라 회차 번호 순).
-    human_claims = {성적서: (claims.csv 줄, sentences.csv 줄)}, human_scores = sheets.human_pairs 결과."""
+    human_claims = {성적서: (claims.csv 줄, sentences.csv 줄)}, human_scores = sheets.human_pairs 결과,
+    human_missed = {성적서: 사람이 판정한 놓친 주장 표 줄}(Q12② — "예" 줄만 보탤 목록으로)."""
     by_batch: dict[str, list[dict]] = {}
     for r in sorted(runs, key=lambda r: r["key"]):
         by_batch.setdefault(r["key"].batch, []).append(r)
@@ -454,20 +472,31 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
         out["sham_passed"] = all(s["sham"] and s["sham"]["ok"] for s in shams.values())
 
     if human_claims:
-        extraction, pairs, gold_n, pred_n = {}, 0, 0, 0
+        extraction, missed, pairs, gold_n, pred_n = {}, {}, 0, 0, 0
         for tag, (claim_rows, sentence_rows) in sorted(human_claims.items()):
             if tag not in base_runs:
                 continue
             gold = api["gold_from_csv"](claim_rows, sentence_rows)
             preds = [api["pred_from_extract"](((r.get("record") or {}).get("extract") or {}).get("claims") or [], sentence_rows)
                      for r in base_runs[tag]]
-            per_run = [api["recall_precision"](api["match_claims"](gold, p)) for p in preds]
+            matches = [api["match_claims"](gold, p) for p in preds]
+            per_run = [api["recall_precision"](m) for m in matches]
             for m in per_run:
                 pairs, gold_n, pred_n = pairs + m["n_pairs"], gold_n + m["n_gold"], pred_n + m["n_pred"]
             extraction[tag] = {"runs": per_run, "distribution": api["runs_distribution"](gold, preds)}
+            # 사람이 놓친 주장(Q12②) — 시스템만 찾은 주장을 판정표로. 판정한 표가 있으면 "예" 줄을 보탤 목록으로.
+            judged = (human_missed or {}).get(tag)
+            try:
+                additions = api["confirmed_additions"](judged) if judged else []
+            except ValueError as exc:
+                raise RunnerError(f"{tag} 놓친 주장 판정표: {exc}") from exc
+            missed[tag] = {"rows": merge_missed([api["missed_rows"](m) for m in matches]), "judged": bool(judged),
+                           "additions": additions}
         out["extraction"] = {"reports": extraction, "pooled": {
             "recall": pairs / gold_n if gold_n else None, "precision": pairs / pred_n if pred_n else None,
             "n_pairs": pairs, "n_gold": gold_n, "n_pred": pred_n}}
+        if missed:
+            out["missed_claims"] = missed
 
     if human_reading and defects:
         hits = human_reading["defects"]
@@ -510,6 +539,33 @@ def read_human_claims(folder: Path, tags: list[str]) -> dict[str, tuple[list, li
             if rows:
                 found[tag] = (rows, _csv_rows(sentences))
     return found
+
+
+def read_human_missed(folder: Path, tags: list[str]) -> dict[str, list[dict]]:
+    """사람이 판정한 놓친 주장 표(정답지 폴더의 <태그>.missed.csv — report 가 쓴 놓친주장_<태그>.csv 를 판정해 옮긴 것)."""
+    found = {}
+    for tag in tags:
+        path = Path(folder) / f"{tag}.missed.csv"
+        if path.exists():
+            rows = _csv_rows(path)
+            if rows:
+                found[tag] = rows
+    return found
+
+
+def write_missed(out: Path, missed: dict[str, dict]) -> list[Path]:
+    """놓친 주장 판정표(놓친주장_<태그>.csv)와, 판정한 줄이 있으면 보탤 목록(보탤주장_<태그>.csv)을 출력 폴더에 쓴다."""
+    written = []
+    for tag, m in sorted(missed.items()):
+        path = Path(out) / f"놓친주장_{tag}.csv"
+        path.write_text(A.to_csv(MISSED_COLUMNS, m["rows"]), encoding="utf-8")
+        written.append(path)
+        if m["additions"]:
+            path = Path(out) / f"보탤주장_{tag}.csv"
+            path.write_text(A.to_csv(A.CLAIM_COLUMNS, [[row[c] for c in A.CLAIM_COLUMNS] for row in m["additions"]]),
+                            encoding="utf-8")
+            written.append(path)
+    return written
 
 
 def read_human_scores(folder: Path) -> dict | None:
@@ -561,11 +617,15 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
                         mode="live" if mode == "verify" else "dev", root=root)
     tags = sorted({r["key"].report for r in runs if r["key"].batch == "reproducibility"})
     claims = read_human_claims(answers, tags) if answers and Path(answers).is_dir() else {}
+    judged_missed = read_human_missed(answers, sorted(claims)) if claims else {}
     scores = read_human_scores(human) if human and Path(human).is_dir() else None
     reading = read_human_reading(human) if human and Path(human).is_dir() else None
-    result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores, human_reading=reading)
+    result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores, human_reading=reading,
+                    human_missed=judged_missed)
     result.update({"mode": mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(), "tag": TAG})
     out.mkdir(parents=True, exist_ok=True)
+    for path in write_missed(out, result.get("missed_claims") or {}):
+        echo(f"놓친 주장 표 {path}")
     target = out / "검증결과.json"
     target.write_text(json.dumps(result, ensure_ascii=False, indent=1, default=str) + "\n", encoding="utf-8")
     echo(f"검증 결과 {target} — 회차 {result['runs']}개")
