@@ -11,10 +11,27 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from app.judge import config, criteria
 
-# 고정한 버전 → 기준 지문. 덧붙이기만 한다(V1 에서 "1.0" 을 처음 적는다).
+# 고정한 버전 → 기준 지문. 덧붙이기만 한다(V1 에서 "1.0" 을 처음 적는다 — scripts/judge_criteria_manifest.py freeze 가 찍는 줄).
+# 왜 시험에 사본을 박나(git 이력·태그 대신): CI 는 저장소를 얕게 받고 태그를 받지 않아 이력을 읽는 시험은 CI 에서 깨진다.
+# 사본이 시험 파일에 있으면 VERSIONS.json 의 기록 줄을 지우거나 바꾸려면 두 파일을 함께 고쳐야 하고, 그 diff 가 검토에 드러난다.
 KNOWN: dict[str, str] = {}
+
+
+def append_only_problems(known: dict[str, str], recorded: dict[str, str]) -> list[str]:
+    """기록(VERSIONS.json)이 사본(KNOWN)을 앞에서부터 글자 그대로 담고 있나 — 지움·바꿈·끼워 넣기를 사유로."""
+    problems = []
+    for ver, fp in known.items():
+        if ver not in recorded:
+            problems.append(f"기록 줄이 지워졌다: {ver}")
+        elif recorded[ver] != fp:
+            problems.append(f"기록 줄이 바뀌었다: {ver}")
+    if not problems and list(recorded)[: len(known)] != list(known):
+        problems.append("기록 순서가 바뀌었다(새 줄은 끝에만 덧붙인다)")
+    return problems
 
 
 def test_manifest_matches_files():
@@ -48,12 +65,29 @@ def test_version_problem_cases():
 
 def test_version_records_are_append_only():
     recorded = criteria.recorded_versions()
-    assert {k: recorded.get(k) for k in KNOWN} == KNOWN
+    assert append_only_problems(KNOWN, recorded) == []
     assert all(re.fullmatch(r"[0-9a-f]{64}", v) for v in recorded.values())
+    # 기록에만 있고 사본에 없는 버전 = 시험 사본을 덧붙이지 않은 고정(또는 몰래 더한 줄)
+    assert set(recorded) == set(KNOWN), "VERSIONS.json 에 새 기록이 있으면 같은 줄을 이 시험의 KNOWN 에 덧붙인다"
+
+
+def test_append_only_detects_delete_change_and_reorder():
+    # 이빨: 사본과 기록이 어긋나는 세 꼴을 각각 잡는다.
+    known = {"1.0": "a" * 64, "1.1": "b" * 64}
+    assert append_only_problems(known, dict(known)) == []
+    assert append_only_problems(known, {**known, "1.2": "c" * 64}) == []  # 끝에 덧붙이기는 된다
+    assert append_only_problems(known, {"1.1": "b" * 64}) == ["기록 줄이 지워졌다: 1.0"]
+    assert append_only_problems(known, {"1.0": "d" * 64, "1.1": "b" * 64}) == ["기록 줄이 바뀌었다: 1.0"]
+    assert append_only_problems(known, {"1.1": "b" * 64, "1.0": "a" * 64}) == ["기록 순서가 바뀌었다(새 줄은 끝에만 덧붙인다)"]
 
 
 def test_changelog_has_current_version():
     assert f"## {criteria.version()}\n" in (criteria.HERE / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_changelog_has_every_recorded_version():
+    text = (criteria.HERE / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert [v for v in criteria.recorded_versions() if f"## {v}\n" not in text] == []
 
 
 def test_model_settings_match_code_defaults():
@@ -88,3 +122,75 @@ def test_claim_rules_are_locked_for_annotation():
         "주장 규칙(claims.json)이 잠근 뒤 바뀌었다 — 사람 정답지 표시(검증/01_정답지)를 새 규칙으로 다시 해야 한다. "
         "바꾼 이유를 CHANGELOG 에 적고 표시자에게 알린 뒤 이 값을 고친다"
     )
+
+
+# ── V1 고정 명령(scripts/judge_criteria_manifest.py freeze) — 임시 사본 폴더에서만 돈다 ──
+
+
+def _manifest_tool():
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "judge_criteria_manifest", Path(__file__).resolve().parents[1] / "scripts" / "judge_criteria_manifest.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _bundle_copy(tmp_path):
+    for p in [*criteria.bundle_files(), criteria.HERE / "MANIFEST.sha256", criteria.HERE / "VERSIONS.json",
+              criteria.HERE / "CHANGELOG.md"]:
+        dst = tmp_path / p.relative_to(criteria.HERE)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(p.read_bytes())
+    with (tmp_path / "CHANGELOG.md").open("a", encoding="utf-8") as f:
+        f.write("\n## 1.0\n\n- 시험용 고정.\n")
+    return tmp_path
+
+
+def test_freeze_writes_version_manifest_and_one_record(tmp_path, monkeypatch):
+    tool = _manifest_tool()
+    here = _bundle_copy(tmp_path)
+    fp = tool.freeze("1.0", here)
+    monkeypatch.setattr(criteria, "HERE", here)
+    assert criteria.version() == "1.0"
+    assert criteria.recorded_manifest() == criteria.manifest_text()
+    assert criteria.recorded_versions() == {"1.0": fp} and fp == criteria.fingerprint()
+    assert criteria.version_problem() is None
+    # 고정 뒤 기준 파일을 바꾸고 MANIFEST 만 다시 써도 기록과 달라 빨개진다(7.4 — 버전을 올려야 한다).
+    (here / "model.json").write_text((here / "model.json").read_text(encoding="utf-8") + " ", encoding="utf-8")
+    tool.write_manifest(here)
+    assert "VERSION 을 올리고" in criteria.version_problem()
+
+
+def test_freeze_main_prints_known_line_and_tag(tmp_path, capsys):
+    tool = _manifest_tool()
+    here = _bundle_copy(tmp_path)
+    assert tool.main(["freeze", "1.0", "--criteria-dir", str(here)]) == 0
+    out = capsys.readouterr().out
+    assert '"1.0": "' in out and "git tag -a judge-criteria-v1.0" in out
+
+
+@pytest.mark.parametrize("case, msg", [
+    ("dev_name", "숫자.숫자"),
+    ("already", "이미 고정 기록"),
+    ("dirty", "MANIFEST 가 다르다"),
+    ("no_changelog", "CHANGELOG.md 에 '## 1.0'"),
+])
+def test_freeze_refuses_and_changes_nothing(tmp_path, case, msg):
+    tool = _manifest_tool()
+    here = _bundle_copy(tmp_path)
+    version = "1.0"
+    if case == "dev_name":
+        version = "1.0-dev"
+    elif case == "already":
+        (here / "VERSIONS.json").write_text('{"1.0": "' + "a" * 64 + '"}\n', encoding="utf-8")
+    elif case == "dirty":
+        (here / "checklist.json").write_text((here / "checklist.json").read_text(encoding="utf-8") + " ", encoding="utf-8")
+    else:
+        (here / "CHANGELOG.md").write_text("# 기록\n", encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in here.iterdir() if p.is_file()}
+    with pytest.raises(tool.FreezeError, match=re.escape(msg)):
+        tool.freeze(version, here)
+    assert {p.name: p.read_bytes() for p in here.iterdir() if p.is_file()} == before
