@@ -292,6 +292,8 @@ class FakeStats:
         "agreement_rate": 0.9, "human_agreement_ok": True, "gold_from_csv": [{"id": "G1"}], "pred_from_extract": [{"id": "P1"}],
         "match_claims": {"pairs": [1]}, "recall_precision": {"recall": 1.0, "precision": 1.0, "n_pairs": 1, "n_gold": 1, "n_pred": 1},
         "runs_distribution": {"recall": {}}, "cohen_kappa": 0.5, "gwet_ac1": 0.6,
+        "missed_rows": [(1, 3, "7.1", "degree", "몰려 있다", "", "")],
+        "confirmed_additions": [{"문장번호": "3", "종류": "degree", "인용 구절": "몰려 있다", "메모": "보탬", "added": True}],
     }
 
     def __init__(self):
@@ -421,6 +423,8 @@ def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_pat
     try:
         loop = _full_loop(tmp_path)
         work = loop["work"]
+        judged = "번호,문장번호,칸,종류,인용 구절,진짜 주장인가(예/아니오),메모\n1,3,7.1,degree,몰려 있다,예,\n"
+        (work / "정답지" / "dev_binary.missed.csv").write_text(judged, encoding="utf-8")
         result = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", answers=work / "정답지", human=work / "사람",
                                echo=_quiet()[1], plan=PLAN2)
     finally:
@@ -450,6 +454,16 @@ def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_pat
     assert fake.named("human_agreement_ok") and fake.named("cohen_kappa") and fake.named("gwet_ac1")
     assert result["detection"] == {"passed": True} and result["sham_passed"] and result["independence_passed"]
     assert result["extraction"]["pooled"] == {"recall": 1.0, "precision": 1.0, "n_pairs": 2, "n_gold": 2, "n_pred": 2}
+    # 놓친 주장(Q12②) — 회차마다 match 결과를 missed_rows 에, 정답지 폴더의 판정표를 confirmed_additions 에 넘긴다
+    assert [a for a, _ in fake.named("missed_rows")] == [({"pairs": [1]},), ({"pairs": [1]},)]
+    ((judged_rows,), _), = fake.named("confirmed_additions")
+    assert [r["인용 구절"] for r in judged_rows] == ["몰려 있다"]
+    missed = result["missed_claims"]["dev_binary"]
+    assert missed["judged"] and missed["rows"] == [(1, 3, "7.1", "degree", "몰려 있다", "", "")]  # 두 회차 같은 줄은 하나
+    assert missed["additions"] == FakeStats.RETURNS["confirmed_additions"]
+    assert _rows(work / "결과" / "놓친주장_dev_binary.csv")[0]["인용 구절"] == "몰려 있다"
+    assert _rows(work / "결과" / "보탤주장_dev_binary.csv") == [{"문장번호": "3", "종류": "degree", "인용 구절": "몰려 있다",
+                                                              "메모": "보탬"}]
     saved = json.loads((work / "결과" / "검증결과.json").read_text(encoding="utf-8"))
     assert saved["fingerprint"] == criteria.fingerprint() and saved["runs"] == 9
 
@@ -549,6 +563,51 @@ def test_report_refuses_tampered_result_file(tmp_path, vdir):
     Path(row["result_file"]).write_text("{}", encoding="utf-8")
     with pytest.raises(jv.RunnerError, match="결과 원본 해시가 장부와 다르다"):
         jv.cmd_report("dev", ledger=tmp_path / "work" / "장부.csv", out=tmp_path / "o", api={})
+
+
+def _missed_runs(claims_per_run: list[list[dict]]) -> list[dict]:
+    return [{"key": R.RunKey("reproducibility", "T1", "base", i), "gate": "pass", "record": {"extract": {"claims": cs}}}
+            for i, cs in enumerate(claims_per_run, 1)]
+
+
+_SENT = [dict(zip(("문장번호", "조각", "칸", "판4자리", "출처", "문장"), r)) for r in (
+    ("1", "p71", "7.1", "5.2", "ai", "정확도는 0.912이다."),
+    ("2", "p71", "7.1", "5.2", "ai", "오류는 클래스 3에 몰려 있다."),
+)]
+
+
+def _claim(kind, quote, number_text=""):
+    return {"kind": kind, "quote": quote, "piece_id": "p71", "slot": "7.1", "number_text": number_text, "round": 0}
+
+
+def test_report_missed_claims_with_real_extraction(tmp_path):
+    """합성 — 실제 extraction 함수로: 시스템만 찾은 주장을 회차를 합쳐 판정표로, 판정한 "예" 줄만 보탤 목록으로."""
+    api = jv.load_stats_api()
+    api["reproducibility"] = lambda base, expected_runs=None: {"gates_passed": True}
+    gold_rows = [{"문장번호": "1", "종류": "number", "인용 구절": "0.912", "메모": ""}]
+    runs = _missed_runs([
+        [_claim("number", "0.912", "0.912"), _claim("degree", "몰려 있다")],
+        [_claim("number", "0.912", "0.912"), _claim("degree", "몰려 있다"), _claim("name", "여기 없는 구절")],
+    ])
+    r = jv.report(runs, api, human_claims={"T1": (gold_rows, _SENT)})
+    m = r["missed_claims"]["T1"]
+    assert m["rows"] == [(1, 2, "7.1", "degree", "몰려 있다", "", ""), (2, "", "7.1", "name", "여기 없는 구절", "", "")]
+    assert m["judged"] is False and m["additions"] == []
+    assert r["extraction"]["pooled"]["n_pairs"] == 2  # 짝짓기는 그대로
+
+    judged = [dict(zip(jv.importlib.import_module("app.judge.validation.extraction").MISSED_COLUMNS, row)) for row in m["rows"]]
+    judged[0]["진짜 주장인가(예/아니오)"] = "예"
+    judged[1]["진짜 주장인가(예/아니오)"] = "아니오"
+    r = jv.report(runs, api, human_claims={"T1": (gold_rows, _SENT)}, human_missed={"T1": judged})
+    added = r["missed_claims"]["T1"]["additions"]
+    assert [(a["문장번호"], a["인용 구절"], a["added"]) for a in added] == [(2, "몰려 있다", True)]
+    paths = jv.write_missed(tmp_path, r["missed_claims"])
+    assert [p.name for p in paths] == ["놓친주장_T1.csv", "보탤주장_T1.csv"]
+    assert [row["인용 구절"] for row in _rows(tmp_path / "보탤주장_T1.csv")] == ["몰려 있다"]
+
+    judged[1]["진짜 주장인가(예/아니오)"] = "예"  # 문장번호 없는 줄을 "예" — 실행기는 멈춤 사유로
+    with pytest.raises(jv.RunnerError, match="T1 놓친 주장 판정표"):
+        jv.report(runs, api, human_claims={"T1": (gold_rows, _SENT)}, human_missed={"T1": judged})
 
 
 def test_stats_api_names_exist_in_real_modules():
