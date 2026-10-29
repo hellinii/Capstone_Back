@@ -6,7 +6,7 @@
 
 ## 1. 이 백엔드가 하는 일 (한 문단)
 
-**ISO/IEC TS 4213** 기준으로 AI **분류 모델**의 성능을 평가하고 성적서를 발급하는 FastAPI 서버입니다. 사용자가 모델 예측 결과 파일(CSV/JSON)을 올리면 → ① **어떤 컬럼이 정답/예측/점수인지 파악**하고(LLM 자동 매핑, OpenAI) → ② **지표(정확도·정밀도 등)를 계산**하고 → ③ **결과를 자연어로 설명**하고(성적서 7·8·9절, Claude) → ④ **성적서를 발급**합니다. Render + Neon Postgres에 배포됩니다(§12).
+**ISO/IEC TS 4213** 기준으로 AI **분류 모델**의 성능을 평가하고 성적서를 발급하는 FastAPI 서버입니다. 사용자가 모델 예측 결과 파일(CSV/JSON)을 올리면 → ① **어떤 컬럼이 정답/예측/점수인지 파악**하고(LLM 자동 매핑, OpenAI) → ② **지표(정확도·정밀도 등)를 계산**하고 → ③ **결과를 자연어로 설명**하고(성적서 7·8·9절, Claude — 판 4 성적서는 다른 모델(OpenAI)이 그 설명을 데이터와 맞대 검사하는 심판을 거친다, §14) → ④ **성적서를 발급**합니다. Render + Neon Postgres에 배포됩니다(§12).
 
 ---
 
@@ -57,13 +57,27 @@ app/
 │   ├── checks.py        칸별 검사                   grounding.py  숫자 허용 목록·판정 모순
 │   ├── fallback.py      규칙 템플릿(칸 함수 7개)     wording.py  조사·숫자 표기·클래스 이름(설명)
 │   ├── fact_view_ed4.py 판 4 사실 시트 보기(§13)     wording_ed4.py  판 4 숫자 표기(§13)
+│   ├── digest.py        판 4 서술 글 지문(심판 통과 글 ↔ 발급 content 대조, §14.6)
 │   └── derived.py       서버 파생 계산    baselines.py  지표 참조 기준치    schemas.py
+│
+├── judge/             ③' 심판 — 판 4 서술 검사(LLM: OpenAI gpt-6.1-sol) — 자세히는 §14
+│   ├── core.py          채점 한 번(judge_once)          ladder.py   발급 보류 사다리·보류 종류·다시 만들기 허용
+│   ├── extract.py       공용 전처리(주장 추출)          material.py·reading.py·sources.py  읽을 재료·조각·대조할 데이터 칸
+│   ├── faithfulness.py  사실 일치  coverage.py 필수 내용  consistency.py 일관성  readability.py 표기
+│   ├── aggregate.py     합산·게이트   safety.py 안전장치   bundle.py 고객용 심판 묶음   alert.py 운영자 알림
+│   ├── llm.py           OpenAI 호출 한 곳   config.py 모델·추론 강도·단가   criteria_lock.py 검증 기록 잠금
+│   ├── criteria/        기준 묶음(체크리스트·규칙·프롬프트·모델 설정)과 지문 MANIFEST·VERSION·VERSIONS·CHANGELOG
+│   └── validation/      검증 도구의 순수 함수(회차·결함본·통계·추출 짝짓기·채점지·재검증 범위) — 앱 실행 경로는 import 하지 않음
 │
 └── issuance/          ④ 발급 — 성적서 번호 채번·발급 (DB: 발급 표 — 서술 작업 표와 함께 DB 를 쓰는 곳)
     ├── router.py        API (/api/organization, /api/reports/issue·{no}·{no}/reissue·{no}/content)  service.py  발급 트랜잭션
+    ├── judge_gate.py    판 4 서버 발급 검사(서술 작업 번호가 판 4·완료·심판 통과인지, §14.6)
     ├── models.py        DB 테이블(Organization·Report·ReportSnapshot·Issuance)  serializers.py  DB→응답 변환
     └── bootstrap.py     기본 기관 시드                schemas.py
 ```
+
+`scripts/` 에는 사람이 직접 돌리는 도구가 있다 — 심판 검증·실호출·비용 집계·기준 지문(`judge_*.py`), 가짜 LLM 개발 서버
+(`dev_fake_llm_server.py`). §14.9·§14.10.
 
 DB 표는 모두 5개다 — 발급 4개(`organization`·`report`·`report_snapshot`·`issuance`, `issuance/models.py`)와 서술 작업 1개(`narrative_jobs`, `narrative/models.py` 의 `NarrativeJob`). 자세히는 §11.
 
@@ -87,15 +101,16 @@ DB 표는 모두 5개다 — 발급 4개(`organization`·`report`·`report_snaps
 ② /api/evaluate          evaluation : 지표 계산
       ▼
 ③ POST /api/narrative/jobs narrative : 작업 번호 + 8.1 벤치마크 표를 바로 돌려주고, 서술은 뒤에서 만든다
-③ GET  /api/narrative/jobs/{id}      : 단계(대기·생성 중·검사 중·다시 만드는 중·완료·실패)와 결과
+③ GET  /api/narrative/jobs/{id}      : 단계(대기·생성 중·검사 중·다시 만드는 중·검증 중(판 4)·완료·실패)와 결과
+      │    (판 4 작업은 서술을 만든 뒤 심판이 검사한다 — 통과해야 발급 가능, 아니면 발급 보류. §14)
       │    (옛 경로 /api/generate-narrative 는 옛 클라이언트용으로 얼려 둠 — 운영 프론트는 2026-10-23 배포부터
       │     작업 경로만 쓴다. 다음 라운드에 지운다)
       ▼
-④ /api/reports/issue     issuance : 성적서 번호 발급 + DB 저장
+④ /api/reports/issue     issuance : 성적서 번호 발급 + DB 저장(판 4 성적서는 심판 통과 작업 번호 검사, §14.6)
    (발급 뒤 GET /api/reports/{no} 발급정보 · GET /api/reports/{no}/content 발급 시점 원본 · POST /api/reports/{no}/reissue 정정 발급)
 ```
 
-- **LLM 을 쓰는 곳**: ①분석은 OpenAI(`OPENAI_API_KEY`, 모델 `MAPPING_MODEL` 기본 `gpt-6-luna`), ③서술은 Anthropic(`ANTHROPIC_API_KEY`, 모델 `NARRATIVE_MODEL` 기본 `claude-sonnet-5-5`). 키가 없거나 호출이 실패하면 자동으로 규칙 기반으로 대체돼서 서버는 안 죽습니다.
+- **LLM 을 쓰는 곳**: ①분석은 OpenAI(`OPENAI_API_KEY`, 모델 `MAPPING_MODEL` 기본 `gpt-6-luna`), ③서술은 Anthropic(`ANTHROPIC_API_KEY`, 모델 `NARRATIVE_MODEL` 기본 `claude-sonnet-5-5`), ③'판 4 심판은 OpenAI(같은 `OPENAI_API_KEY`, 모델 `JUDGE_MODEL` 기본 `gpt-6.1-sol` — §14.11). 키가 없거나 호출이 실패하면 자동으로 규칙 기반으로 대체돼서 서버는 안 죽습니다(판 4 는 심판을 못 하면 서술은 보이되 발급 보류).
 - **DB를 쓰는 곳**: ④발급 표와 ③서술 작업 표(`narrative_jobs` — 진행 단계·결과·내부 기록, 입력은 저장하지 않음). 나머지는 업로드 파일을 메모리에서 처리하고 끝(디스크 저장 없음).
 
 ---
@@ -108,6 +123,7 @@ DB 표는 모두 5개다 — 발급 4개(`organization`·`report`·`report_snaps
 | **analysis** | 컬럼 파악 + 데이터 점검 | `/api/analyze-columns`, `/api/confirm-mapping`, `/api/validate-data` | `router.py` → `analysis_service.py` |
 | **evaluation** | 지표 계산 | `/api/evaluate` | `router.py` → `service.py` |
 | **narrative** | 결과 서술 | `/api/narrative/jobs`(새) · `/api/generate-narrative`(옛) | `router.py` → `jobs.py` → `generator.py` (옛 경로는 `legacy.py`) |
+| **judge** | 판 4 서술 검사(심판) | — (서술 작업 안에서 돈다) | `narrative/jobs.py` 의 `run_job_ed4` → `judge/ladder.py` → `judge/core.py` |
 | **issuance** | 성적서 발급 | `/api/organization`, `/api/reports/issue`, `/api/reports/{no}`, `/api/reports/{no}/reissue`, `/api/reports/{no}/content` | `router.py` → `service.py` |
 
 시스템: `GET /health` (상태 확인).
@@ -126,6 +142,9 @@ DB 표는 모두 5개다 — 발급 4개(`organization`·`report`·`report_snaps
 | 서술 지시문 / 규칙 문장 | `narrative/prompt.py`(AI) / `narrative/fallback.py`(규칙 템플릿 — 칸 함수) |
 | 서술 검사(숫자·판정 모순 등) | `narrative/checks.py`, `narrative/grounding.py` |
 | DB 테이블 | `issuance/models.py`, `narrative/models.py` |
+| 판 4 심판이 재는 것(항목·규칙·프롬프트) | `judge/criteria/` — 고치면 MANIFEST 다시 쓰기·버전·재검증(§14.7) |
+| 판 4 보류 종류·다시 만들기 허용 | `judge/ladder.py` 의 `held_kind`·`retry_allowed`(§14.4) |
+| 판 4 발급 거절 사유 | `issuance/judge_gate.py`(§14.6) |
 
 **패턴이 거의 같습니다**: 요청은 `router`(HTTP만) → `service`(흐름) → 세부 헬퍼로 흐릅니다. 예외는 서술(narrative)로, 흐름이 `jobs.py`(작업 번호) → `generator.py`(장별 생성·칸별 검문)와 옛 경로 `legacy.py` 에 있습니다(§10).
 
@@ -468,7 +487,7 @@ AI 가 쓸 내용과 규칙 문장이 쓸 내용이 어긋나지 않는다.
 - **내부용**(`internal_json`, 서버 로그): 실패 종류, 칸마다 출처·결과(first·second·kept_first·filled·template·dropped·fixed)·시도 수·
   검사 기록, 호출마다 목적·칸·응답 모델(대체 모델 포함)·대체 요청을 보냈는지·거절 종류·토큰·비용·슬롯 대기, 429 횟수, 단계별 시각,
   7.3 원문. 입력(사실 시트·고객 입력)은 저장하지 않는다 — 작업은 메모리의 요청으로 돌고, 서버가 재시작되면 유실이 된다.
-- 표 `narrative_jobs`: `status`(running·done·failed) · `stage`(queued·generating·checking·regenerating·done·failed) · `result_json` ·
+- 표 `narrative_jobs`: `status`(running·done·failed) · `stage`(queued·generating·checking·regenerating·judging(판 4 만, §14)·done·failed) · `result_json` ·
   `internal_json` · `created_at`/`updated_at`/`finished_at`(tz 없는 UTC). **열은 확정** — 앞으로는 두 JSON 칸 안에서만 늘린다(§7 규칙 4).
 - 끝나는 방식: 서술이 생기면 AI 든 규칙 문장이든 **완료**(키 없음·지갑 소진·호출 실패·검사 위반·입력 상한 초과 모두). **실패**는 전체 10분
   초과(timeout)·멈춤(lost — 마지막 갱신 뒤 360초 또는 만든 뒤 630초, 조회 때 판정)·예기치 않은 오류(error)·결과 글을 지움(expired).
@@ -579,6 +598,8 @@ AI 가 쓸 내용과 규칙 문장이 쓸 내용이 어긋나지 않는다.
   바뀐 최상위 절 목록이 붙는다.
 - **시각**: DB 에는 tz 없는 UTC 로 저장하고, 응답의 `issued_at` 은 `+00:00` 오프셋을 붙인 ISO8601 로 내보낸다. 오프셋이 없으면
   프론트가 한국 시간으로 잘못 읽어 날짜가 하루 어긋날 수 있다. 화면 표기(KST)는 프론트가 한다.
+- **판 4 성적서**: 첫 발급과 정정 발급 모두 요청의 `narrative_job_id` 가 "판 4 · 완료 · 심판 통과" 작업이어야 하고, `content` 의 서술 글이 그 작업이
+  통과한 글과 같아야 한다. 아니면 409 와 사유 코드(§14.6). 판 1~3 성적서는 이 검사를 받지 않는다.
 - **가짜 데이터 0**: 발급 전 성적서는 가짜 번호를 만들지 않고 "초안(미발급)"으로 표시한다(프론트). 서버도 모르는 값은 지어내지 않는다.
 - **표**: `organization`(기관 1행) 1 : N `report`(번호 단위) 1 : N `issuance`(차수 이력), `report` 1 : N `report_snapshot`(차수별 보관본).
   서술 작업 표 `narrative_jobs` 는 발급과 관계없는 따로 선 표다(§10.7). 다섯 표 모두 기동 때 `init_db()` 의 `create_all` 이 만든다.
@@ -611,7 +632,8 @@ Render 는 포크 main 을 따라가지만 자동 배포가 꺼져 있어(`autoD
 
 - **Rollback 금지(2026-10-23 부터)**: Render 대시보드의 Rollback 으로 옛 리비전을 띄우면 그 리비전은 종료된 옛 모델을 부른다.
   문제가 생기면 되돌리는 커밋(revert)을 만들어 같은 배포 경로로 내보낸다.
-- **환경변수(Render 대시보드 Environment)**: `DATABASE_URL`(Neon), `OPENAI_API_KEY`(매핑), `ANTHROPIC_API_KEY`(서술), `PYTHON_VERSION`.
+- **환경변수(Render 대시보드 Environment)**: `DATABASE_URL`(Neon), `OPENAI_API_KEY`(매핑·판 4 심판), `ANTHROPIC_API_KEY`(서술), `PYTHON_VERSION`.
+  판 4 를 켤 때 운영자 알림을 받으려면 `JUDGE_ALERT_WEBHOOK_URL`. **`JUDGE_CRITERIA_LOCK` 은 운영에 두지 않는다**(§14.8).
   서술만 문제가 생기면 `ANTHROPIC_API_KEY` 를 지워 규칙 문장으로 돌린다. 키가 들어 있는지·어떤 모델인지는 `/health` 의
   `llm.narrative`·`llm.mapping`(`key`·`model`)으로 본다. 환경변수를 저장해도 서버가 다시 뜨지 않을 수 있으니 **Manual Deploy** 로 다시 띄운다.
 - **기관 이름 바꾸기**: API 가 없으므로(§11) Neon SQL 편집기에서 한 번 직접 바꾼다 — 예:
@@ -620,6 +642,8 @@ Render 는 포크 main 을 따라가지만 자동 배포가 꺼져 있어(`autoD
 - **새 표**: `narrative_jobs` 처럼 새 표는 기동 때 `create_all` 이 알아서 만든다. 이미 있는 표에 열을 더하는 것은 하지 못하므로
   (마이그레이션 도구 없음, §7 규칙 4) 스키마를 늘릴 때는 새 표로 한다.
 - **판 4 를 켤 때는 백엔드가 먼저**: 프론트가 판 4 를 켜기(Vercel 환경변수) 전에 판 4 를 아는 백엔드가 운영에 떠 있어야 한다. `/health` 의 `commit` 으로 확인한다. 이유는 §13.
+  그 백엔드에는 검증을 마친 기준의 기록(`app/judge/validated.json`, §14.8)이 들어 있어야 한다 — 없으면 판 4 성적서가 모두 발급 보류다.
+- **판 4 발급 보류 찾기**: 서버 로그에서 머리말 `[심판 알림]` 을 찾는다. 작업마다 심판 한 줄 요약도 로그에 남는다(판정·회차·비용·시간·기준 버전, §14.5).
 - **콜드 스타트**: Render 무료는 한동안 요청이 없으면 잠들고, 깨어나는 데 30~60초쯤 걸린다. 시연 전에 `/health` 를 한 번 불러 깨운다.
 - **Neon 연결 문자열**: `sslmode=require` 를 둔다. 연결 때 `channel_binding` 옵션 오류가 나면 그 옵션만 빼면 된다.
 
@@ -652,6 +676,7 @@ Render 는 포크 main 을 따라가지만 자동 배포가 꺼져 있어(`autoD
   - 숫자 표기 `wording_ed4.py` — 셋째 자리·끝 0 유지, 판정과 어긋나 보이면 여섯째 자리까지 늘림. 규칙은 두 저장소 공통 대조 표 `tests/contract/number_wording_ed4.json`(프론트 `src/test/contract/` 와 같은 바이트)에 있다.
   - 지시문(`prompt.py` 판 4 system)·숫자 검문(`grounding.py` 판 4 허용 목록과 판 4 절 번호)·규칙 문장(`required_items.py`·`fallback.py`)·출처 글(`baselines.py`). 칸은 같은 일곱 칸이고 자리만 판 4 번호(8.2 → 5.1, 9.1 → 6.1 등, `sections.place`)다.
   - 문제 종류 `same_source`(평가 데이터가 학습과 같은 출처)와 그 규칙 권고 — 판 4 요청에만 온다.
+  - 판 4 작업은 서술을 만든 뒤 심판이 검사하고(`jobs.run_job_ed4`), 결과에 고객용 심판 묶음 `judge` 가 붙는다. 판 4 요청에는 심판 읽기 재료 `judge_material` 이 실린다(서술 생성은 읽지 않는다). §14.
 - 옛 경로(`/api/generate-narrative`, `legacy.py`)는 `report_edition` 을 읽지 않고 늘 판 3 이다. 사실 시트를 통째로 지시문에 넣으므로 판 4 전용 칸은 빼고 넣는다(`EDITION4_ONLY_SHEET_FIELDS`).
 - 계약 사본: 판 4 명세 `tests/contract/fact_sheet_contract_ed4.json`, 칸→자리 대응표 `narrative_slots_ed4.json`, 이진·다중·멀티 예시 `fact_sheet_{binary,multiclass,multilabel}_ed4.json`. 예시는 프론트가 앱이 실제로 보낸 요청을 떠서 만든다. 프론트 사본과 같은 바이트여야 하고(옆 저장소가 있을 때만 대조 — CI 는 이 저장소만 받는다), 고칠 때는 두 저장소와 sha256 을 함께 고친다.
 
@@ -686,3 +711,281 @@ Render 는 포크 main 을 따라가지만 자동 배포가 꺼져 있어(`autoD
 | `tests/contract/*_ed4.json` | 판 4 서술 요청 계약(13.2) | 프론트가 다시 뜨고 두 저장소를 같이 고친다 |
 
 판 4 서술 시험은 `tests/test_p4_*.py` 다(판 4 예시를 실제 앱에 넣어 끝까지 도는 통합 시험 `test_p4_integration_ed4.py` 포함). 판 3 정답은 위 판 3 폴더가 지킨다.
+
+---
+
+## 14. 판 4 심판 — 서술 검사 · 발급 보류 · 기준 묶음 · 검증 도구 (2026-10, 심판 라운드)
+
+한 줄 요약: **판 4 서술은 다 만든 뒤 다른 회사 모델(OpenAI)이 한 번 더 읽어 검사하고, 통과해야만 인쇄·발급할 수 있다.**
+걸리면 문제 칸을 다시 만들거나 규칙 문장으로 바꿔 다시 검사하고, 그래도 안 되면 "발급 보류"로 끝난다. 판 3 은 심판이 돌지 않는다.
+
+비유하면 서술 생성기(Claude)가 쓴 글을 따로 선 검수자(심판)가 데이터 원본과 맞대 보는 것이다. 검수자는 글을 고치지 않고
+"어느 칸이 틀렸다"만 알린다. 고치는 일(다시 만들기·규칙 문장)은 서술 쪽이 한다.
+
+### 14.1 언제 도나
+
+- **판 4 작업만**: 서술 요청의 `report_edition` 이 4 인 작업(§13.2)이 `jobs.run_job_ed4` 로 돈다. 판 3 작업(`run_job`)과 옛 경로는
+  심판을 부르지 않고, 판 3 결과·내부 기록에는 심판 키가 하나도 없다.
+- **순서**: 생성(판 3 과 같은 생성기) → 심판 사다리(14.3) → 고객용 심판 묶음을 결과에 붙여 끝 상태 쓰기 → 보류·실패면 운영자 알림.
+  채점 중에는 작업 단계가 `judging`("검증 중")이다(판 4 작업에만 있는 단계).
+- **시간은 서술 작업과 같은 10분 마감 하나**(`JOB_DEADLINE_SECONDS`). 생성은 `ED4_GENERATION_SECONDS` 안에서 끝내고, 채점은 끝 상태를
+  쓸 여유를 뺀 `JOB_GENERATION_SECONDS` 까지 쓴다. 채점 하나를 시작하려면 최소 `ladder.JUDGE_MIN_SECONDS` 가 남아 있어야 한다.
+  채점이 길어 유실(§10.7)로 오인되지 않게 채점 중에는 `JUDGE_HEARTBEAT_SECONDS` 마다 단계를 다시 쓴다.
+- **심판 키·지갑은 만들 때 먼저 본다**: 심판 클라이언트는 매핑과 같은 `OPENAI_API_KEY` 의 OpenAI 클라이언트다(`app.state.openai_client`).
+  키가 없거나(no_key) 심판 지갑(`JUDGE_REPORTS_PER_HOUR`)이 비었으면(budget) **서술 AI 도 부르지 않고** 규칙 문장 서술 + 발급
+  보류로 끝낸다 — 검사하지 못할 글에 생성 비용을 쓰지 않게. 작업 행 상한(job_limit)도 판 4 면 보류 묶음을 붙인다.
+- **동시 채점 수**: 채점 한 번이 칸 하나(`JUDGE_SLOTS`, 서술 칸과 따로). 칸을 `JUDGE_SLOT_WAIT_SECONDS` 안에 얻지 못하면 보류(busy).
+
+### 14.2 채점 한 번 (`core.judge_once`)
+
+채점은 주어진 서술을 **검사만** 한다(생성 없음). 사다리·작업 흐름·검증 실행기·파일럿이 모두 이 함수 하나를 쓴다.
+
+1. **읽을 재료 모으기**(`material.py`·`reading.py`): 성적서에 실제로 찍힌 글을 "조각"으로 모은다. 조각 출처는 넷 — `ai`(AI 칸)·
+   `template`(규칙 문장 칸)·`fixed`(고정 문구)·`table`(표). AI·규칙 문장 글은 백엔드가 생성 결과로 갖고 있고, 프론트가 찍는 고정
+   문구·표는 프론트가 서술 요청의 `judge_material` 에 **화면과 같은 글자로** 실어 보낸다(계약 `tests/contract/judge_material_ed4.json`).
+   4.6 참조 범위 표는 백엔드가 만든다. 재료가 없거나 모양이 틀리거나, 조회 자료(혼동행렬 건수·클래스별 표)가 비었으면 채점하지
+   않고 보류(no_material). 재료 칸은 서술 생성 지시문에 들어가지 않는다.
+2. **공용 전처리 — 주장 추출**(`extract.py`, 모델 `gpt-6-luna`·추론 강도 low): AI·규칙 문장 조각에서 사실 주장(숫자·비교·이름·정도·
+   추론)을 인용 구절과 함께 뽑는다. 빠진 주장을 같은 모델에 최대 2번 더 묻는다(자기 점검). 인용이 그 조각에 없는 주장은 버리고,
+   숫자가 있는데 주장이 0개면 실패(no_claims).
+3. **4축을 따로 잰다** — 모델 `gpt-6.1-sol`, 추론 강도 medium. 넷은 서로의 결과를 보지 않는다.
+
+| 축 | 무엇을 | 방식 | 읽는 범위 | 게이트 |
+|---|---|---|---|---|
+| 사실 일치 `faithfulness.py` | 주장이 데이터(사실 시트·파생값·고객 입력·4.6 표)와 맞나 | 칸이 정해진 숫자 주장은 코드가 바로 대조. 나머지는 도구 4개를 쓰는 에이전트가 **대상 칸·식만** 찾고, 맞다·틀리다는 코드가 계산해 정한다 | AI·규칙 문장 | 위반·단정형 추론 1건 이상이면 막음 |
+| 필수 내용 `coverage.py` | 꼭 다룰 항목이 글에 있나 | 적용 항목은 코드가 고르고(기준 묶음 `checklist.json`), LLM 은 있다/없다 + 인용. 인용이 표에만 있으면 "없음" | 전부 | 아님 |
+| 일관성 `consistency.py` | 같은 값이 다르게 찍혔나, 글끼리 모순이 있나 | 값 불일치는 코드(같은 칸의 찍힌 숫자 비교), 논리 모순 3유형(판정↔권고, 약점↔권고, 분석↔소견)은 LLM — 두 구절 인용 필수 | 전부 | 모순 1건 이상이면 막음 |
+| 표기 `readability.py` | 영어 코드값 노출·서술체·어법 | 코드 규칙 2개(로마자 노출, 해라체·글머리 기호) + LLM 어법 판정 | AI·규칙 문장 | 아님 |
+
+4. **합산과 게이트**(`aggregate.py`, LLM 없음): 축마다 "검사 n건 중 m건"처럼 분모를 함께 낸다. 종합 점수는 만들지 않는다.
+   게이트는 **사실 위반(단정형 추론 포함) ≥ 1 또는 모순 ≥ 1 이면 blocked**, 아니면 pass. 필수 내용·표기는 게이트가 아니다.
+   걸린 칸: 사실 위반은 그 주장의 칸, 모순은 서술 칸 쪽(둘 다 서술 칸이면 7.1 → 9 순서의 뒤쪽). 둘 다 표·고정 문구면 고칠 칸이
+   없다(unfixable).
+5. **안전장치**(`safety.py`): 합산 전에 모든 위반·모순·"서술됨" 판정의 인용이 실제로 그 조각 글에 있는지 한 번 더 본다. 하나라도
+   어긋나면 그 채점을 쓰지 않고 보류(safety).
+6. 어느 모듈이든 호출이 실패하면(시간 초과·거절·형식 오류·인용 없음 등) 게이트 없이 실패로 끝난다 — **실패가 통과로 새지 않는다.**
+
+- **OpenAI 호출 한 곳**(`judge/llm.py`): Responses API, 응답 보관 끔(`store=False` — 서술 글·사실 값이 OpenAI 쪽에 남지 않게),
+  온도·seed 없음, SDK 재시도 끔. 일시적 오류(429·5xx·연결 끊김)만 남은 시간 안에서 한 번 더. 비용은 응답 모델 단가(`config.PRICES_PER_MTOK`)로
+  세고, 단가를 모르면 None(추정하지 않는다).
+- **import 규칙**(`tests/test_judge_import_rules.py`): 서술 생성 쪽 모듈(지시문·생성기·검문·결론 목록·사실 시트 보기·규칙 문장·
+  표기)은 `app.judge` 를 import 하지 않는다 — 작업 흐름(`jobs.py`)만 심판을 부른다. 거꾸로 `app.judge` 는 서술 쪽 판정 규칙
+  (`checks`·`grounding`·`required_items`)을 import 하지 않는다 — 서술 검문을 고치면 심판 기준이 몰래 바뀌기 때문이다. 필요한 작은
+  도구는 기준 묶음(14.6)에 복사해 둔다. **심판 사유·인용은 생성 쪽으로 넘기지 않는다** — 다시 만들기에는 칸 이름만 넘긴다.
+
+### 14.3 발급 보류 사다리 (`ladder.py`)
+
+```
+채점 1 ─통과→ 끝(passed)
+  └ 걸림 → 걸린 칸 AI 로 다시 만들기(작업당 한 바퀴) → 채점 2 ─통과→ 끝
+                 └ 걸림 → 걸린 칸 규칙 문장 → 채점 3 ─통과→ 끝
+                            └ 걸림 → 서술 칸 전부 규칙 문장 → 채점 4 ─통과→ 끝
+                                       └ 걸림 → 발급 보류(gate_failed)
+```
+
+- 이미 규칙 문장·고정 문구인 칸은 다시 만들지 않는다. 7.3 은 규칙 문장이 없어 비우고 "해당 없음"이 찍힌다.
+- 한 단이 아무 칸도 바꾸지 못하면 같은 글을 다시 채점하지 않고 다음 단으로 간다. 마지막 단도 바꿀 것이 없으면 보류.
+- 남은 시간이 "다시 만들기(`REGENERATE_MIN_SECONDS`) + 채점(`JUDGE_MIN_SECONDS`)"에 모자라면 다시 만들기 단을 건너뛰고 규칙 문장 단으로.
+  채점할 시간조차 없으면 보류(timeout).
+- 재채점은 늘 서술 전체다. 채점이 실패하면 그 자리에서 보류한다.
+
+### 14.4 보류 종류와 "서술 다시 만들기"
+
+보류 종류와 다시 만들기 허용은 `ladder.held_kind`·`ladder.retry_allowed` 두 함수가 정한다(작업 흐름의 키 없음·지갑·행 상한·바깥 시간
+초과도 이 함수를 부른다). 종류 목록은 `ladder.HELD_KINDS` 이고 고객 묶음 계약과 같은 집합이다(시험이 맞댄다).
+
+| 보류 종류 | 언제 | 다시 만들기 |
+|---|---|---|
+| `gate_failed` | 사다리를 다 타고도 사실 위반·모순이 남음 | 없음 |
+| `timeout` | 채점할 시간이 모자람, 또는 서술이 생긴 뒤 10분 마감을 넘음 | 게이트에 한 번도 걸리지 않았을 때만 |
+| `judge_error` | 심판 호출 실패·거절·형식 오류·안전장치·예기치 않은 예외·기록 직렬화 실패·검증 기록 잠금(14.7) | 게이트에 한 번도 걸리지 않았고 일시적 사유(호출 시간 초과·5xx·429·연결 끊김·슬롯 대기 초과)일 때만 |
+| `no_key` | 심판 키(OpenAI)가 없음 | 없음 |
+| `budget` | 심판 지갑 소진 | 늘 있음(한 시간쯤 뒤) |
+| `job_limit` | 작업 행 시간당 상한 — 행 없이 바로 규칙 문장 결과 | 없음 |
+| `no_material` | 심판 읽기 재료가 없거나 틀림(요청 크기 예산으로 빠짐 포함), 조회 자료가 빔 | 없음 |
+
+- 판 4 작업에서 서술이 생기기 전에 10분을 넘으면 판 3 과 같은 실패(failed·timeout)다. 서술이 생긴 뒤 넘으면 완료 + 보류(timeout).
+
+### 14.5 고객 묶음과 내부 기록
+
+- **고객용 묶음**(조회 응답 `result.judge`, `bundle.py`, 계약 `tests/contract/judge_bundle_ed4.json` — 프론트와 같은 바이트):
+  `gate`(passed·held), `held_kind`, `retry_allowed`, `criteria_version`(점검 기준 버전), `model`(요청한 심판 모델 이름), `axes`(싣는 축 목록 —
+  `bundle.PUBLISHED_AXES` 한 곳), `counts`(passed 일 때만 — 축별 검사·결과 건수와 필수 내용 항목별 서술 여부·판 4 자리). **근거 인용·
+  판정 사유·주장 목록·재생성 횟수·토큰·비용·시간·기준 지문은 싣지 않는다** — 번호만 알면 열리는 응답이기 때문이다. 판 3 결과에는
+  `judge` 키가 없다.
+- **내부 기록**(`internal_json["judge"]`): 판정·보류 종류·실패 사유, 채점 회차마다 걸린 칸·점수표·모듈별 결과·호출 기록(토큰·비용·
+  시간), 다시 만든 칸·규칙 문장으로 바꾼 칸, 심판 지갑 상태(`judge_budget`), 잠금 상태(`criteria_lock`: ok·off·잠금 사유), 한 줄
+  요약(`summary` — 서버 로그에도 한 줄), 통과했으면 **서술 글 지문**(`narrative_sha256`, 14.6). 판 4 작업 내부 기록 최상위에는
+  `report_edition: 4` 가 있다.
+- **운영자 알림**(`alert.py`): 서버 로그 한 줄(머리말 `[심판 알림]`) + 환경변수 `JUDGE_ALERT_WEBHOOK_URL` 이 있으면 그 주소로 POST.
+  판 4 발급 보류(held)·판 4 생성 실패(failed), 그리고 조회 때 유실로 판정한 작업(lost — 판과 관계없이)에 작업당 한 번. 작업 번호·
+  종류·짧은 사유만 싣고 서술 글·인용·고객 입력은 싣지 않는다. 웹훅은 몇 초 제한·재시도 없음이고, 실패해도 작업 상태를 바꾸지 않는다.
+
+### 14.6 서버 발급 검사 (`issuance/judge_gate.py`)
+
+화면 잠금(프론트)만으로는 옛 화면·직접 호출을 막지 못하므로, 서버가 판 4 성적서의 **첫 발급과 정정 발급** 모두에서 다시 본다.
+요청 칸 `narrative_job_id`(서술 작업 번호)가 "판 4 · 완료 · 심판 통과"인 작업이어야 받는다.
+
+- **판 판정**(프론트 `reportLock.isEdition4Content` 와 같은 닫힌 쪽 규칙): `content` 가 없거나 `contentSchema` 가 없으면 판 1 로 보고 검사하지
+  않는다(CI 발급 스모크 `{"smoke": true}` 가 여기). 정수 1·2·3 이면 검사하지 않는다. 그 밖의 값(4, "4", 4.0 …)은 모두 판 4 로 검사한다.
+- **서술 글 지문 대조**(`narrative/digest.py`): 통과한 작업의 서술 글 지문(`internal_json.judge.narrative_sha256`)과 `content` 안 서술
+  글로 만든 지문을 맞댄다 — "통과한 다른 작업 번호"를 붙이거나 서술을 바꾼 `content` 를 막는다. 지문은 프론트가 작업 응답을
+  성적서 데이터로 옮기는 규칙(빈 칸은 "", 우선순위는 대문자·모르면 MEDIUM 등)을 흉내 낸 모양의 sha256 이고, 글자는 바이트 그대로
+  본다(공백·유니코드 정규화 없음). 규칙은 `digest.py` 머리에 있다 — 프론트의 옮기는 규칙이 바뀌면 함께 고친다.
+- **거절 사유 코드**(거절마다 다름, HTTP 409, 글 끝 괄호에 코드):
+
+| 코드 | 뜻 |
+|---|---|
+| `judge_job_missing` | 작업 번호가 없음 |
+| `judge_job_not_found` | 그 번호의 작업이 없음 |
+| `judge_job_not_edition4` | 판 4 작업이 아님 |
+| `judge_record_expired` | 작업 기록 보관 기간(`NARRATIVE_JOB_RETENTION_DAYS`)이 지남 |
+| `judge_not_passed` | 진행 중·실패·보류 |
+| `judge_narrative_unrecorded` | 통과 기록에 서술 글 지문이 없음 |
+| `judge_narrative_mismatch` | `content` 의 서술 글이 그 작업의 글과 다름 |
+
+- 작업 행 상한(job_limit)으로 행 없이 끝난 판 4 결과는 작업 번호가 없어 발급 검사를 통과할 수 없다(보류 그대로).
+- 프론트는 모르는 `judge_*` 코드도 "서버가 발급을 거절했습니다: {서버 글}"로 보인다 — 코드를 더해도 화면 글을 고칠 필요가 없다.
+
+### 14.7 기준 묶음 `app/judge/criteria/` 와 버전
+
+심판이 **무엇을 어떻게 재는지** 정하는 파일 전부를 한 폴더에 묶고 지문으로 고정한다 — 체크리스트(`checklist.json`)·주장 규칙
+(`claims.json`)·모순 유형(`contradictions.json`)·정도 표현(`degree.json`)·이름 표(`names.json`)·표기 규칙(`readability.json`)·판정
+기준값(`rule_constants.json`)·모델 설정(`model.json` — 심판·전처리 모델, 추론 강도, 사실 일치 에이전트 최대 회차)·프롬프트(`prompts/`)·
+작은 코드 규칙(`rules_*.py`)과 로더(`__init__.py`).
+
+| 파일 | 뜻 |
+|---|---|
+| `MANIFEST.sha256` | 묶음 파일마다 sha256. 이 글 전체의 sha256 이 **기준 지문**이다 |
+| `VERSION` | 지금 버전. 고정 전에는 `1.0-dev` 처럼 `-dev` 가 붙는다 |
+| `VERSIONS.json` | 고정한 버전 → 지문 기록. **덧붙이기만** 한다 |
+| `CHANGELOG.md` | 무엇을 왜 바꿨는지. 버전마다 `## <버전>` 절 |
+
+`MANIFEST.sha256`·`VERSIONS.json`·`CHANGELOG.md` 자신은 지문에 들지 않는다(설명 글을 고쳐도 기준은 같다).
+
+- **기준 파일을 고칠 때**: 같은 커밋에서 `venv/bin/python scripts/judge_criteria_manifest.py`(= `write`)로 MANIFEST 를 다시 쓰고, 이유를
+  CHANGELOG 에 적는다. 시험(`tests/test_judge_criteria_manifest.py`)이 파일 ↔ MANIFEST, 버전 기록 ↔ 지금 지문을 맞대서, 몰래 바꾸면 빨개진다.
+- **고정(freeze)**: `venv/bin/python scripts/judge_criteria_manifest.py freeze 1.0` — VERSION 을 그 버전으로 바꾸고 MANIFEST 를 다시 쓴 뒤
+  `VERSIONS.json` 끝에 "버전 → 지문"을 덧붙인다. 버전 꼴이 "숫자.숫자"가 아니거나, 이미 기록된 버전이거나, 파일과 MANIFEST 가 다르거나,
+  CHANGELOG 에 그 버전 절이 없으면 아무 파일도 바꾸지 않고 거부한다. 끝나면 시험에 덧붙일 줄과 태그 명령(`judge-criteria-v<버전>`)을
+  찍는다 — 태그는 사람이 붙인다.
+- **고정 뒤에 하나라도 바꾸면 버전을 올리고 다시 검증한다.** 고정한 버전의 지문은 바뀌면 시험이 빨개지고, MANIFEST 만 다시 써도 기록과 달라
+  빨개진다. 다시 돌 범위는 `judge_validate.py rescope`(14.9)로 본다.
+- `claims.json`(주장 규칙)은 사람 정답지 표시의 기준이라 sha256 을 시험에 따로 잠가 두었다(`CLAIMS_LOCK`). 바꾸면 정답지 표시도 다시 한다.
+
+### 14.8 검증 기록 잠금 (`criteria_lock.py`)
+
+"운영에 나가는 기준 = 검증을 마친 기준"을 코드로 지킨다. 검증을 마친 기준의 버전·지문을 `app/judge/validated.json` 에 적고(기준
+묶음 폴더 **밖** — 안에 두면 기록을 쓰는 순간 지문이 바뀐다), 판 4 작업은 심판을 부르기 직전에 **지금 파일로 다시 만든** 지문이
+이 기록과 같은지 본다.
+
+```json
+{"version": "1.0", "fingerprint": "<지금 파일로 만든 MANIFEST 글의 sha256>", "tag": "judge-criteria-v1.0", "validated_at": "…", "note": "…"}
+```
+
+- 판정에 쓰는 것은 `version`·`fingerprint` 둘뿐이다(나머지는 사람이 읽는 기록). 서버에서 기준 파일 하나가 몰래 바뀌어도 잡힌다.
+- 기록이 없음(unvalidated)·읽을 수 없음·지금 버전이 `-dev`·버전이나 지문이 다름이면 **심판을 부르지 않고** 보류(judge_error, 다시 만들기
+  없음 — 다시 만들어도 같은 기준이라 풀리지 않는다). 사유는 내부 기록 `judge.criteria_lock` 과 서버 로그에만 남는다.
+- **기록 파일은 검증을 마친 뒤에 쓴다.** 그 전에는 기록이 없으므로 판 4 작업은 늘 보류다 — 판 4 를 켜기 전 확인 목록의 한 줄이다.
+- **잠금은 늘 켜져 있다.** 끄는 길은 환경변수 `JUDGE_CRITERIA_LOCK=off` 하나뿐이고(대소문자·앞뒤 공백만 너그럽게, 그 밖의 값은 모두
+  켜짐), pytest 장치(`tests/conftest.py`)와 가짜 LLM 개발 서버(14.10)만 쓴다. **운영(Render)에는 절대 두지 않는다.** 꺼진 상태도 내부
+  기록(`criteria_lock: "off"`)과 경고 로그로 남는다.
+
+### 14.9 검증 도구 (사람이 직접 실행 — pytest 가 아님)
+
+심판을 운영에 내기 전에 "같은 글에 같은 판정을 내나(재현성), 심어 둔 결함을 잡나, 뜻이 같은 글을 같게 보나(sham), 주장을 빠짐없이
+뽑나(추출 재현율·정밀도), 사람과 판정이 맞나(일치도)"를 재는 도구다. 계산은 `app/judge/validation/` 의 순수 함수가 하고, 스크립트는
+그 함수를 부르는 얇은 층이다. 앱 실행 경로는 이 모듈을 import 하지 않는다.
+
+| 모듈 | 하는 일 |
+|---|---|
+| `runs.py` | 묶음 넷(`reproducibility`·`defects`·`sham`·`extraction`)의 회차 계획·이어 하기·순서 섞기. 기본 회차는 `DEFAULTS` |
+| `variants.py` | 결함본·sham 폴더 꼴(`meta.json`·`slots.json`·`diff.txt`)과 적용 |
+| `stats.py` | ICC·게이트 재현성·결함 탐지·독립성·sham·사람 일치 판정(기준값은 상수·인자) |
+| `extraction.py` | 사람 정답지 주장 ↔ 시스템 추출 주장 일대일 짝짓기, 재현율·정밀도, 사람이 놓친 주장 판정표 |
+| `agreement.py` | 카파·Gwet AC1 |
+| `annotation.py` | 정답지 표 꼴(문장 표·주장 표) |
+| `sheets.py` | 블라인드 사람 채점지·열쇠, 블라인드 읽기 묶음 |
+| `rescope.py` | 바뀐 파일 → 다시 돌 모듈·묶음·사람 일치도 축 |
+
+**`scripts/judge_validate.py`** — 검증 실행기. 레포 루트에서 `venv/bin/python scripts/judge_validate.py <하위 명령> --mode dev|verify …`.
+
+- **두 모드**
+  - `dev`: 가짜 LLM(심판 "문제 없음" 답)과 개발 입력(`tests/data/judge_dev` — 키 없이 규칙 문장 서술을 만든다)·합성 결함만으로 흐름을
+    돈다. 검증 폴더 안 경로는 입력·결함·장부·출력 어느 것으로도 받지 않는다(열기 전에 거부 — 오염 방지). 결과는 임시 폴더.
+  - `verify`: 진짜 검증. 다섯이 모두 맞아야 시작하고, 어긋난 사유를 하나씩 따로 찍는다 — ① 작업 트리가 깨끗함 ② 기준 버전이 고정 버전이고
+    기록된 지문과 같음 ③ 지금 MANIFEST 가 태그 `judge-criteria-v1.0` 의 MANIFEST 와 같음 ④ `--live` ⑤ 장부에 쓸 수 있음.
+- **검증 폴더**: 환경변수 `JUDGE_VALIDATION_DIR`(없으면 코드 `validation_root()` 의 기본 위치). 안의 하위 폴더 이름은 코드 상수다 —
+  `00_봉인`(검증용 봉인 서술, `SHA256SUMS` 와 맞아야 함)·`01_정답지`(사람 주장 표시)·`02_결함`(결함본·sham)·`03_실행`(회차별 결과 원본)·
+  `04_사람평가`(채점지·읽기표)·`05_결과`(report 결과), 장부는 `장부.csv`. 봉인 서술 글은 화면에 찍지 않는다(개수·해시·게이트만).
+- **하위 명령**
+
+| 명령 | 하는 일 |
+|---|---|
+| `run <묶음>` | 회차마다 장부 한 줄 + 결과 원본 파일 하나. 시작할 때 예상 회차·비용·장부 누계를 찍고 `--yes` 가 없으면 멈춘다. `extraction` 은 채점을 부르지 않는다(재현성 회차의 추출 기록을 쓴다) |
+| `report` | 장부·결과 원본으로 판정값을 계산해 `검증결과.json`(verify 는 `05_결과`, dev 는 `--out`). 정답지·사람 채점이 있으면 추출 재현율·일치도·효용성도. 아래 "놓친 주장" |
+| `check-defects` / `make-diff <변형>` | 결함본·sham 폴더 꼴 검사 / `diff.txt` 를 도구로 쓰기 |
+| `sheets` | 사람 일치도 채점지(블라인드 — 시스템 판정·결함 여부 없음)·열쇠(따로, 해시)·읽을 문서. 층을 나눈 표본(`--n`·`--overlap`·`--seed`) |
+| `reading` | 블라인드 읽기 묶음 — 사람마다 문서(결함본은 심지 않은 사람에게만)·빈 읽기표·열쇠. report 가 효용성 표로 센다 |
+| `rescope` | 재검증 범위 — `--changed <파일…>` 또는 `--since <커밋·태그>` 로 바뀐 파일을 주면 다시 돌 모듈·묶음·사람 일치도 축을 찍는다. 표에 없는 심판 코드는 공통(전부 다시)으로 본다 |
+| `status --ledger <장부>` | 장부 누계와 상한 |
+
+  `verify` 에서 봉인 서술을 여는 명령(`check-defects`·`make-diff`·`sheets`·`reading`)은 기준 고정 뒤 사람이 `--allow-sealed` 를 줄 때만 돈다.
+  `verify` 는 `--inputs`·`--defects` 를 받지 않는다(검증 폴더에서만 읽는다).
+- **이어 하기**: 같은 모드·같은 기준 지문으로 결과 파일까지 적힌 회차는 건너뛴다 — 멈춘 뒤 같은 명령을 다시 치면 이어 간다. 기준 지문이
+  달라지면(버전을 올린 재검증) 처음부터다. 남은 회차는 시드로 섞는다(`--seed`, 없으면 새로 뽑아 찍고 계획 파일·결과 원본에 남김).
+- **예산**: 묶음을 시작하기 전에 묶음 회차 상한(`--max-runs`, 기본은 `runs.DEFAULTS`)과 라운드 남은 상한(환경변수 `JUDGE_LIVE_BUDGET_USD`
+  달러·`JUDGE_LIVE_MAX_RUNS` 회차, 없으면 `judge_live.py` 기본값)을 넘으면 시작하지 않는다. 돌다가 묶음 예산(`--batch-budget-usd`, 기본은
+  예상 × 1.5)을 넘으면 멈춘다. 누계 비용이 $10 단위를 넘을 때마다(단가를 모르면 20회마다) 멈추고 확인을 받는다.
+- **사람이 놓친 주장**: `report` 는 정답지가 있는 성적서마다 시스템만 찾은 주장(짝이 없는 추출 주장, 회차를 합쳐 같은 문장·칸·종류·인용은
+  한 줄)을 판정표 `놓친주장_<태그>.csv` 로 출력 폴더에 쓴다(열: 번호·문장번호·칸·종류·인용 구절·진짜 주장인가(예/아니오)·메모). 사람이
+  판정 칸을 채워 정답지 폴더에 `<태그>.missed.csv` 로 두면, 다음 `report` 가 "예" 줄을 보탤 목록 `보탤주장_<태그>.csv`(정답지 주장 표
+  꼴)로 내고 `검증결과.json` 의 `missed_claims` 에도 싣는다. 정답지 자체는 고치지 않는다 — 보탤지는 사람이 정한다. 문장번호가 빈 줄을
+  "예"로 두면 멈춘다(사람이 문장번호를 적는다).
+
+**그 밖의 스크립트**
+
+| 스크립트 | 하는 일 |
+|---|---|
+| `scripts/judge_live.py` | 실호출 실행기. `--live` 가 없으면 진짜 클라이언트를 만들지 않고 `.env` 도 읽지 않는다. 한 실행 = 장부 한 줄. 하위 명령 `status`·`smoke`(합성 문장 실호출 확인)·`seal-generate`(검증용 판 4 요청마다 실제 작업 경로로 서술을 만들어 봉인 — 이미 봉인된 폴더면 거부)·`pilot`(개발 입력으로 채점 실측, `--narrative template\|ai`)·`job`(개발 판 4 입력 하나로 생성 + 사다리). 상한·확인 규칙은 위 "예산"과 같다(`judge_validate.py` 가 이 파일의 장부·상한·확인을 그대로 쓴다) |
+| `scripts/judge_cost_report.py` | 비용·시간 집계(읽기만). `--ledger <장부.csv> [--job <내부 기록.json> …] [--mode live] [--human-minutes N] [--json]`. 장부의 단계 이름 끝(`_judge` 채점·`_generate` 생성)으로 나누고, 작업 내부 기록으로 모듈별 시간·토큰·비용을 모은다. 비용 모르는 줄이 있으면 그 합은 비운다. 봉인 폴더 경로를 주면 멈춘다. 앱을 import 하지 않는다 |
+| `scripts/judge_annotate.py` | 봉인 서술의 주장 표시지(문장 표·빈 주장 표)·안내서 만들기. `--sealed <봉인 폴더> --out <정답지 폴더>`. 이미 채운 주장 표는 덮어쓰지 않는다 |
+| `scripts/judge_criteria_manifest.py` | 기준 묶음 지문 쓰기·고정(14.7) |
+
+### 14.10 가짜 LLM 개발 서버 (`scripts/dev_fake_llm_server.py`)
+
+브라우저에서 판 4 작업을 "검증 중 → 통과/보류"까지 실호출 없이 보려고 쓴다. 운영 진입점(`uvicorn app.main:app`)과 다르다.
+
+```bash
+venv/bin/python scripts/dev_fake_llm_server.py --port 8000 --judge pass [--judge-delay 3]
+```
+
+- 앱 시작 뒤 모든 LLM 클라이언트(서술 Anthropic, 매핑·심판 OpenAI)를 가짜로 바꾸고, 첫 요청 전에 모두 가짜인지 단정한다(아니면 종료).
+  키는 빈 문자열로 덮는다(지우면 `.env` 에서 다시 채워지므로). DB 는 임시 sqlite 만 받는다. 검증 기록 잠금을 끈다(`JUDGE_CRITERIA_LOCK=off`).
+- `--judge pass`(위반 0·모순 0 → 통과) · `error`(심판 호출이 늘 연결 끊김 → 보류 judge_error, 다시 만들기 있음) · `refuse`(심판 거절 →
+  보류 judge_error, 다시 만들기 없음). 매핑은 늘 실패해 규칙 매핑으로 강등된다.
+- `--judge-delay 초`: 가짜 심판이 너무 빨리 끝나 "검증 중" 단계가 화면에 안 잡힐 때 호출마다 기다린다(작업 마감보다 짧게).
+- `app/` 는 `scripts/` 를 import 하지 않는다(시험이 단정).
+
+### 14.11 심판 설정 (환경변수 — 코드 기본값 = 운영값)
+
+| 이름 | 기본 | 뜻 |
+|---|---|---|
+| `OPENAI_API_KEY` | (없음) | 매핑과 같은 키. 없으면 판 4 서술은 규칙 문장 + 보류(no_key) |
+| `JUDGE_MODEL` / `JUDGE_EFFORT` | `gpt-6.1-sol` / `medium` | 심판 4모듈 모델·추론 강도(모르는 강도는 기본값) |
+| `JUDGE_EXTRACT_MODEL` / `JUDGE_EXTRACT_EFFORT` | `gpt-6-luna` / `low` | 주장 추출 모델·추론 강도 |
+| `JUDGE_REPORTS_PER_HOUR` | 서술 지갑과 같은 값 | 심판 지갑(보고서 수). 소진이면 보류(budget) |
+| `JUDGE_SLOTS` | 2 | 동시 채점 수 |
+| `JUDGE_ALERT_WEBHOOK_URL` | (없음) | 운영자 알림 웹훅(http·https 만, 비면 로그만) |
+| `JUDGE_CRITERIA_LOCK` | (켜짐) | `off` 면 검증 기록 잠금을 끈다 — **시험·가짜 개발 서버 전용, 운영 금지** |
+
+- **모델·추론 강도는 기준 묶음(`criteria/model.json`)에도 적혀 지문에 든다.** 코드 기본값과 `model.json` 이 같은지는 시험이 보지만, 환경변수로
+  모델·강도를 바꾸면 검증 기록 잠금(지문)은 그 차이를 모른다 — 운영에서 바꾸면 검증하지 않은 모델로 채점하게 된다. 바꿀 때는 `model.json`
+  과 코드 기본값을 함께 고치고 버전을 올려 다시 검증한다(14.7).
+- 검증 도구 전용: `JUDGE_VALIDATION_DIR`(검증 폴더), `JUDGE_LIVE_BUDGET_USD`·`JUDGE_LIVE_MAX_RUNS`(실호출 상한).
+
+### 14.12 시험
+
+심판 시험은 `tests/test_judge_*.py` 다. 실호출은 하지 않는다(가짜 OpenAI는 `tests/judge_fakes.py`). 계약 사본 `tests/contract/judge_bundle_ed4.json`·
+`judge_material_ed4.json` 은 프론트 `src/test/contract/` 와 같은 바이트여야 하고(옆 저장소가 있을 때만 대조), 고칠 때는 두 저장소와 sha256 을
+함께 고친다. 판 3 정답 폴더(§13.5)는 심판 코드가 판 3 을 한 글자도 바꾸지 않았는지 지킨다.

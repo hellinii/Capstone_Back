@@ -5,10 +5,10 @@ KS X ISO/IEC TS 4213:2022 기반 AI 분류 모델 성능 시험성적서 자동 
 > - 코드 구조·설계 규칙: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 > - 지표·컬럼·검증 규칙(프론트/백 공통 단일 진실 문서): 프론트 저장소(Capstone_Front)의 `SPEC.md` — https://github.com/hwanginyong02/Capstone_Front/blob/main/SPEC.md
 > - 프로젝트 전체(프론트+백) 지도: [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md)
-> - 서술·발급·배포의 자세한 규칙과 이유: `docs/ARCHITECTURE.md` §10(서술) · §11(발급) · §12(배포·운영) · §13(성적서 판 4 — 서술 요청의 `report_edition`, 평가 엔진 버전, 정답 폴더)
+> - 서술·발급·배포의 자세한 규칙과 이유: `docs/ARCHITECTURE.md` §10(서술) · §11(발급) · §12(배포·운영) · §13(성적서 판 4 — 서술 요청의 `report_edition`, 평가 엔진 버전, 정답 폴더) · §14(판 4 심판 — 서술 검사·발급 보류·기준 묶음·검증 도구)
 
 ## 기술 스택
-Python 3.12 · FastAPI · pandas · scikit-learn · Anthropic(서술 `claude-sonnet-5-5`) · OpenAI(컬럼 매핑 `gpt-6-luna`) · SQLAlchemy(로컬 SQLite / 배포 Neon PostgreSQL) · Pydantic
+Python 3.12 · FastAPI · pandas · scikit-learn · Anthropic(서술 `claude-sonnet-5-5`) · OpenAI(컬럼 매핑 `gpt-6-luna`, 판 4 심판 `gpt-6.1-sol`) · SQLAlchemy(로컬 SQLite / 배포 Neon PostgreSQL) · Pydantic
 
 ## 구조 (요약, 자세히는 docs/ARCHITECTURE.md)
 `app/` 은 도메인별로 나뉘며, 각 도메인은 **라우터(얇은 HTTP) → 서비스(오케스트레이션) → 순수 로직** 계층을 따릅니다.
@@ -20,7 +20,8 @@ app/
 ├── analysis/     # 컬럼 자동 매핑(LLM/규칙 폴백) + 데이터 검증
 ├── evaluation/   # ISO4213 지표 계산 (engine · metrics/{common,binary,multiclass,multilabel})
 ├── narrative/    # LLM 서술(7·8·9절) — 작업 번호(job)·장별 생성·칸별 검문 사다리·규칙 템플릿(ARCHITECTURE §10)
-└── issuance/     # 성적서 발급/채번 (DB 사용)
+├── judge/        # 판 4 서술 심판 — 4축 검사·발급 보류 사다리·기준 묶음(criteria/)·검증 도구 함수(ARCHITECTURE §14)
+└── issuance/     # 성적서 발급/채번 (DB 사용, 판 4 발급 검사 judge_gate)
 ```
 
 ## 주요 API (prefix `/api`)
@@ -33,6 +34,8 @@ cp .env.example .env                  # ANTHROPIC_API_KEY(서술 — 없으면 �
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 또는 python -m app.main
 venv/bin/python -m pytest            # 테스트 (pytest.ini: asyncio_mode=auto)
 ```
+판 4 심판을 실호출 없이 화면에서 보려면 가짜 LLM 개발 서버 `venv/bin/python scripts/dev_fake_llm_server.py --port 8000 --judge pass`(§14.10). 심판 검증 도구는 `scripts/judge_*.py`(§14.9).
+
 첫 부팅 시 `init_db()` + `seed_organization()` 이 자동 실행됩니다(발급 표·서술 작업 표, 기관 표가 비어 있으면 기관 행 "리트머스" — 운영 DB 의 기관 이름 바꾸기는 `docs/ARCHITECTURE.md` §12). 키 없이도 기동되며 LLM 기능은 규칙 기반으로 대체됩니다.
 
 ## 배포
