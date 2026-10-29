@@ -476,8 +476,7 @@ async def pilot(runner: "Runner", clients: Clients, paths: list[Path], out_dir: 
                            "cost_usd": f"{cost:.6f}", "price_table": "anthropic-llm.py", "seconds": gen.trace.get("seconds", "")})
         refs = build_benchmark_refs(req.task_type.value, req.fact_sheet.metrics, edition=4)
         run = await judge_once(clients.openai, req, gen.response, gen.section_sources, refs)
-        calls = [c for m in ("extract", "faithfulness", "consistency", "coverage", "readability")
-                 for c in (run.record.get(m) or {}).get("calls", [])]
+        calls = judge_calls(run)
         cost = run.cost_usd()
         body = json.dumps({"tag": tag, "narrative": narrative, "sources": gen.section_sources,
                            "result": gen.response.model_dump(), "gate": run.gate, "failure": run.failure,
@@ -485,22 +484,37 @@ async def pilot(runner: "Runner", clients: Clients, paths: list[Path], out_dir: 
                           ensure_ascii=False, indent=1) + "\n"
         target = out_dir / f"{tag}.{narrative}.json"
         target.write_text(body, encoding="utf-8")
-        runner.record({**meta, "stage": "pilot_judge", "report": tag, "variant": narrative,
-                       "model_requested": "gpt-6.1-sol+gpt-6-luna",
-                       "model_served": ",".join(sorted({c.get("response_model") for c in calls if c.get("response_model")})),
-                       "effort": run.record.get("effort", ""),
-                       "input_tokens": sum(c.get("input_tokens") or 0 for c in calls),
-                       "cached_input_tokens": sum(c.get("cached_input_tokens") or 0 for c in calls),
-                       "output_tokens": sum(c.get("output_tokens") or 0 for c in calls),
-                       "reasoning_tokens": sum(c.get("reasoning_tokens") or 0 for c in calls),
-                       "cost_usd": "" if cost is None else f"{cost:.6f}", "price_table": "openai-2026-10-28",
-                       "seconds": (run.record.get("seconds") or {}).get("total", ""), "gate": run.gate or "",
-                       "result_file": str(target), "error": run.failure or ""})
+        runner.record({**meta, **judge_run_row(run), "stage": "pilot_judge", "report": tag, "variant": narrative,
+                       "result_file": str(target)})
         summaries.append({"tag": tag, "gate": run.gate, "failure": run.failure, "flagged": run.flagged_slots,
                           "cost_usd": cost, "seconds": run.record.get("seconds"), "calls": len(calls),
                           "counts": run.scorecard and {k: {kk: vv for kk, vv in v.items() if kk != "items"}
                                                        for k, v in run.scorecard.items()}})
     return summaries
+
+
+JUDGE_MODULES = ("extract", "faithfulness", "consistency", "coverage", "readability")
+
+
+def judge_calls(run) -> list[dict]:
+    """채점 한 번(JudgeRun)의 모든 LLM 호출 기록."""
+    return [c for m in JUDGE_MODULES for c in (run.record.get(m) or {}).get("calls", [])]
+
+
+def judge_run_row(run) -> dict:
+    """채점 한 번 → 장부 칸(모델·토큰·비용·시간·게이트·실패). 파일럿·검증 실행기가 같이 쓴다."""
+    calls = judge_calls(run)
+    cost = run.cost_usd()
+    return {"model_requested": "gpt-6.1-sol+gpt-6-luna",
+            "model_served": ",".join(sorted({c.get("response_model") for c in calls if c.get("response_model")})),
+            "effort": run.record.get("effort", ""),
+            "input_tokens": sum(c.get("input_tokens") or 0 for c in calls),
+            "cached_input_tokens": sum(c.get("cached_input_tokens") or 0 for c in calls),
+            "output_tokens": sum(c.get("output_tokens") or 0 for c in calls),
+            "reasoning_tokens": sum(c.get("reasoning_tokens") or 0 for c in calls),
+            "cost_usd": "" if cost is None else f"{cost:.6f}", "price_table": "openai-2026-10-28",
+            "seconds": (run.record.get("seconds") or {}).get("total", ""), "gate": run.gate or "",
+            "error": run.failure or ""}
 
 
 def job_live(runner: "Runner", req_path: Path, out_dir: Path, meta: dict, *, anthropic_client=None,
