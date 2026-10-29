@@ -44,6 +44,8 @@ from typing import Callable
 
 # 레포 루트를 sys.path 에 추가 (app.* 절대 import 를 위해)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:  # 같은 폴더의 judge_paths(경로 비교 한 곳)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 LEDGER_COLUMNS: tuple[str, ...] = (
     "run_id", "at", "stage", "report", "variant", "repeat", "mode",
@@ -214,7 +216,9 @@ def guard_read(path: Path, mode: str) -> Path:
         vdir = validation_dir()
         if vdir is None:
             raise RunnerError("dev 모드는 JUDGE_VALIDATION_DIR 를 알아야 한다(검증 폴더를 읽지 않음을 확인하려고).")
-        if resolved == vdir or vdir in resolved.parents:
+        import judge_paths  # 같은 폴더(scripts) — 철자·대소문자·자모 분해 우회까지 같은 비교
+
+        if judge_paths.inside(resolved, vdir):
             raise RunnerError(f"dev 모드는 검증 폴더를 읽지 않는다: {resolved}")
     return resolved
 

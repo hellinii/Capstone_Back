@@ -58,6 +58,7 @@ for _p in (str(ROOT), str(ROOT / "scripts")):
         sys.path.insert(0, _p)
 
 import judge_live as jl  # noqa: E402
+import judge_paths  # noqa: E402
 
 from app.judge import criteria  # noqa: E402
 from app.judge.validation import runs as R  # noqa: E402
@@ -79,18 +80,31 @@ HUMAN = "04_사람평가"
 # ── 읽기 경계 ─────────────────────────────────────────────────────────
 
 
+DEFAULT_VALIDATION = (ROOT.parent / "JUDGE_ROUND" / "검증").resolve()
+DEV_DIRS_ENV = "JUDGE_DEV_DIRS"  # dev 가 더 읽고 쓸 폴더(os.pathsep 로 여럿) — 허용 목록에 보탠다
+
+
 def validation_root() -> Path:
     """검증 폴더 — 환경변수 JUDGE_VALIDATION_DIR, 없으면 저장소 옆 JUDGE_ROUND/검증(없어도 경로로만 쓴다)."""
-    return jl.validation_dir() or (ROOT.parent / "JUDGE_ROUND" / "검증").resolve()
+    return jl.validation_dir() or DEFAULT_VALIDATION
+
+
+def dev_allowed_roots() -> list[Path]:
+    """dev 허용 목록 — 개발 입력(tests/data/judge_dev), 임시 폴더(시스템 임시·/tmp), JUDGE_DEV_DIRS 로 적은 폴더."""
+    extra = [Path(p) for p in os.getenv(DEV_DIRS_ENV, "").split(os.pathsep) if p.strip()]
+    return [DEV_INPUTS, Path(tempfile.gettempdir()), Path("/tmp"), *extra]
 
 
 def guard(path: Path | str, mode: str) -> Path:
-    """dev 모드는 검증 폴더 안 경로를 받지 않는다 — 열기 전에 거부한다."""
+    """dev 모드 읽기·쓰기 경계 — 열기 전에 거부한다. ① 검증 폴더(환경변수 값과 저장소 옆 기본 자리 둘 다) 안이면 거부,
+    ② 허용 목록(dev_allowed_roots) 밖이면 거부. 비교는 judge_paths(resolve·NFC·casefold·samefile — 철자 우회 막기)."""
     resolved = Path(path).resolve()
     if mode == "dev":
-        vdir = validation_root()
-        if resolved == vdir or vdir in resolved.parents:
-            raise RunnerError(f"dev 모드는 검증 폴더를 읽거나 쓰지 않는다: {resolved}")
+        for vdir in (validation_root(), DEFAULT_VALIDATION):
+            if judge_paths.inside(resolved, vdir):
+                raise RunnerError(f"dev 모드는 검증 폴더를 읽거나 쓰지 않는다: {resolved}")
+        if not any(judge_paths.inside(resolved, root) for root in dev_allowed_roots()):
+            raise RunnerError(f"dev 모드는 허용 목록 밖을 읽거나 쓰지 않는다: {resolved} — 개발 입력·임시 폴더·{DEV_DIRS_ENV}")
     return resolved
 
 
@@ -425,6 +439,8 @@ def collect_runs(ledger_rows: list[dict], *, fingerprint: str, mode: str, root: 
     for key, row in sorted(latest.items()):
         path = Path(row["result_file"])
         path = root / path if root and not path.is_absolute() else path
+        if mode == "dev":
+            path = guard(path, "dev")  # 장부가 가리키는 결과 원본도 dev 경계 안이어야(장부를 고쳐 검증 폴더를 읽히지 않게)
         body = path.read_bytes()
         if row.get("result_sha256") and hashlib.sha256(body).hexdigest() != row["result_sha256"]:
             raise RunnerError(f"결과 원본 해시가 장부와 다르다: {path}")

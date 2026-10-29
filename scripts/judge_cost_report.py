@@ -15,7 +15,7 @@
         [--human-minutes 30] [--json]
 
 상호작용
-- 의존(import): 표준 라이브러리만(csv, json, argparse) — 앱을 import 하지 않는다
+- 의존(import): 표준 라이브러리만(csv, json, argparse) + scripts/judge_paths(경로 비교, 표준 라이브러리만) — 앱을 import 하지 않는다
 - 사용처: 사람(V2 끝 8절 효용성 표 채우기), tests/test_judge_cost_report.py
 """
 from __future__ import annotations
@@ -23,9 +23,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import statistics
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import judge_paths  # noqa: E402 — 경로 비교 한 곳(표준 라이브러리만)
 
 SEALED = "00_봉인"
 TOKEN_COLUMNS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens")
@@ -84,7 +88,9 @@ def stage_kind(stage: str) -> str:
 
 
 def _refuse_sealed(path: Path) -> None:
-    if SEALED in Path(path).parts:
+    """봉인 폴더 경로면 멈춘다 — 마디 이름(자모 분해·대소문자·링크까지 judge_paths 로)과, 검증 폴더를 알면 그 00_봉인 안인지."""
+    vdir = os.getenv("JUDGE_VALIDATION_DIR", "").strip()
+    if judge_paths.has_part(path, SEALED) or (vdir and judge_paths.inside(path, Path(vdir) / SEALED)):
         raise SystemExit(f"봉인 폴더의 파일은 읽지 않는다(계획 §카-3): {path}")
 
 

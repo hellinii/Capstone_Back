@@ -194,3 +194,27 @@ def test_tool_does_not_import_the_app():
     mods = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | \
         {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     assert not any(m.startswith("app") for m in mods)
+
+
+def test_sealed_folder_refused_in_other_spellings(tmp_path, monkeypatch):
+    """자모 분해(NFD)·대소문자·링크로 적은 봉인 경로도 멈춘다(J10 검토 — judge_paths 한 곳)."""
+    import unicodedata
+    from pathlib import Path
+
+    sealed = tmp_path / "검증" / "00_봉인"
+    sealed.mkdir(parents=True)
+    (sealed / "x.json").write_text("{}", encoding="utf-8")
+    nfd = Path(unicodedata.normalize("NFD", str(sealed / "x.json")))
+    assert "00_봉인" not in nfd.parts  # 글자 비교로는 못 잡는 철자
+    for p in (nfd, Path(str(sealed / "x.json").replace("00_봉인", "00_봉인".upper()))):
+        with pytest.raises(SystemExit, match="봉인"):
+            R.read_job(p)
+    link = tmp_path / "보통이름"
+    link.symlink_to(sealed, target_is_directory=True)
+    with pytest.raises(SystemExit, match="봉인"):
+        R.read_job(link / "x.json")
+    monkeypatch.setenv("JUDGE_VALIDATION_DIR", str(tmp_path / "검증"))
+    other = tmp_path / "검증" / "00_다른"
+    other.mkdir()
+    (other / "y.json").write_text(json.dumps({"judge": {}}), encoding="utf-8")
+    R.read_job(other / "y.json")  # 봉인 밖은 읽는다

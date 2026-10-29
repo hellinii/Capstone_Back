@@ -645,3 +645,68 @@ def test_defects_batch_refuses_before_reproducibility_has_run(tmp_path, vdir):
         jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1), echo=_quiet()[1])
     assert jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1, base_repeats=2),
                       echo=_quiet()[1])["ran"] == 2
+
+
+# ── J10 ③ dev 허용 목록·철자 우회(P1-3) ──
+
+
+def _spellings(path: Path) -> list[Path]:
+    """같은 폴더의 다른 철자 — 자모 분해(NFD), 대소문자, '..' 우회."""
+    import unicodedata
+
+    text = str(path)
+    return [Path(unicodedata.normalize("NFD", text)), Path(text.upper()), path.parent / "x" / ".." / path.name]
+
+
+def test_dev_guard_refuses_validation_folder_in_every_spelling(tmp_path, vdir):
+    for p in _spellings(vdir / "00_봉인" / "미끼.json"):
+        with pytest.raises(jv.RunnerError, match="검증 폴더"):
+            jv.guard(p, "dev")
+
+
+def test_dev_guard_refuses_default_validation_place_even_with_env(tmp_path, vdir):
+    # 환경변수가 다른 곳을 가리켜도 저장소 옆 기본 자리(진짜 검증 폴더)는 거부 — 내용은 열지 않는다(경로만)
+    with pytest.raises(jv.RunnerError, match="검증 폴더"):
+        jv.guard(jv.DEFAULT_VALIDATION / "00_봉인" / "x.json", "dev")
+
+
+def test_dev_guard_refuses_outside_allow_list(tmp_path, vdir, monkeypatch):
+    outside = Path.home() / "j10_없는_폴더" / "장부.csv"
+    with pytest.raises(jv.RunnerError, match="허용 목록 밖"):
+        jv.guard(outside, "dev")
+    monkeypatch.setenv("JUDGE_DEV_DIRS", str(outside.parent))
+    assert jv.guard(outside, "dev") == outside.resolve()
+    monkeypatch.setenv("JUDGE_DEV_DIRS", str(vdir))  # 허용 목록에 적어도 검증 폴더는 거부
+    with pytest.raises(jv.RunnerError, match="검증 폴더"):
+        jv.guard(vdir / "00_봉인", "dev")
+    assert jv.guard(jv.DEV_INPUTS / "dev_binary.request.json", "dev")
+
+
+def test_dev_guard_follows_symlink_into_validation_folder(tmp_path, vdir):
+    link = tmp_path / "링크"
+    link.symlink_to(vdir, target_is_directory=True)
+    with pytest.raises(jv.RunnerError, match="검증 폴더"):
+        jv.guard(link / "00_봉인", "dev")
+
+
+def test_dev_sheets_reading_report_guard_every_path(tmp_path, vdir):
+    jv.execute(_dev(tmp_path, repeats=1), echo=_quiet()[1])
+    ledger = tmp_path / "work" / "장부.csv"
+    bad = vdir / "00_봉인"
+    with pytest.raises(jv.RunnerError, match="검증 폴더"):  # sheets 장부
+        jv.cmd_sheets("dev", ledger=bad / "장부.csv", out=tmp_path / "s1", echo=_quiet()[1])
+    with pytest.raises(jv.RunnerError, match="검증 폴더"):  # sheets 출력
+        jv.cmd_sheets("dev", ledger=ledger, out=bad / "s", echo=_quiet()[1])
+    with pytest.raises(jv.RunnerError, match="검증 폴더"):  # reading 출력
+        jv.cmd_reading("dev", out=bad / "r", defects=tmp_path / "없는결함", echo=_quiet()[1])
+    for kw in ({"answers": bad}, {"human": bad}):  # report 정답지·사람 채점
+        with pytest.raises(jv.RunnerError, match="검증 폴더"):
+            jv.cmd_report("dev", ledger=ledger, out=tmp_path / "o", api={}, **kw)
+    assert not (bad / "s").exists() and not (bad / "r").exists()
+
+
+def test_dev_collect_runs_refuses_result_file_pointing_into_validation_folder(tmp_path, vdir):
+    jv.execute(_dev(tmp_path, repeats=1), echo=_quiet()[1])
+    row = {**_rows(tmp_path / "work" / "장부.csv")[0], "result_file": str(vdir / "00_봉인" / "미끼.json")}
+    with pytest.raises(jv.RunnerError, match="검증 폴더"):
+        jv.collect_runs([row], fingerprint=criteria.fingerprint(), mode="dev", root=None)
