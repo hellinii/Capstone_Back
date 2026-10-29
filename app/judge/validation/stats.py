@@ -3,6 +3,9 @@
 - ICC(A,1): 두 방향 무작위, 절대 일치, 단일 측정(McGraw & Wong 1996 의 ICC(A,1) = Shrout & Fleiss 1979 의 ICC(2,1)) +
   95% 신뢰구간(McGraw & Wong 1996 Case 2A 식 — Satterthwaite 자유도 v 와 F 분포 분위).
 - 분산 0 규칙(Q10 추천): 한 축에서 모든 성적서의 모든 회차 점수가 같으면 그 축은 통과. ICC 는 None, 이유는 note 에.
+  대상 2개·회차 2회 이상일 때만 쓴다 — 그보다 적으면 그 축은 "계산 불가"(passed None)이지 통과가 아니다.
+- 판정 세 값: True(통과)·False(미달)·None(계산 불가 — 대상·회차가 모자람). 묶어 볼 때는 tri() — 미달이 하나라도 있으면 미달,
+  아니고 계산 불가가 있으면 계산 불가.
 - 축별 점수(Q10 추천): 사실 일치 부합 비율, 필수 내용 서술 비율, 일관성 모순 건수, 표기 위반 건수 — judge_once 의 scorecard
   (app.judge.aggregate.scorecard) 키에서 읽는다. 키가 없거나 분모가 0 이면 None.
 - 게이트 재현성: 같은 성적서 반복에서 게이트 판정이 모두 같음(실패 회차 None 은 다른 판정으로 본다).
@@ -74,12 +77,12 @@ def icc_a1(matrix, *, level: float = CI_LEVEL) -> dict:
     if n == 0 or k == 0:
         out["note"] = "빈 입력"
         return out
+    if n < 2 or k < 2:  # 분산 0 규칙도 여기서는 쓰지 않는다 — 1건·1회로는 "늘 같음"을 볼 수 없다(J10 검토)
+        out["note"] = "대상 2개·평가자 2명 이상이어야 계산된다(계산 불가)"
+        return out
     if np.all(x == x.flat[0]):
         out["zero_variance"] = True
         out["note"] = "분산 0 — 모든 대상·모든 회차 점수가 같다(Q10 규칙: 통과로 본다)"
-        return out
-    if n < 2 or k < 2:
-        out["note"] = "대상 2개·평가자 2명 이상이어야 계산된다"
         return out
     msr, msc, mse = _mean_squares(x)
     denom = msr + (k - 1) * mse + k * (msc - mse) / n
@@ -161,6 +164,16 @@ def gate_of(judge_result) -> str | None:
 
 # ---------------------------------------------------------------- 재현성
 
+def tri(values) -> bool | None:
+    """세 값 판정 묶기 — 미달(False)이 하나라도 있으면 False, 아니고 계산 불가(None)가 있으면 None, 모두 통과면 True."""
+    values = list(values)
+    if any(v is False for v in values):
+        return False
+    if any(v is None for v in values):
+        return None
+    return True
+
+
 def gate_stability(gates: list[str], *, expected_runs: int | None = None) -> bool:
     """같은 성적서 반복에서 게이트 판정이 모두 같은가(설계 7.6: 5회 중 5회, 줄인 V2: 3회 중 3회).
 
@@ -208,7 +221,12 @@ def reproducibility(per_report_runs: dict[str, list], threshold: float = ICC_THR
         if dropped:
             res["note"] = (res["note"] + f" / 빠진 성적서(점수 없음): {', '.join(dropped)}").lstrip(" /")
         res["dropped"] = dropped
-        res["passed"] = bool(not dropped and (res["zero_variance"] or (res["icc"] is not None and res["icc"] >= threshold)))
+        if dropped:
+            res["passed"] = False
+        elif res["zero_variance"] or res["icc"] is not None:
+            res["passed"] = bool(res["zero_variance"] or res["icc"] >= threshold)
+        else:
+            res["passed"] = None  # 계산 불가(대상·회차 부족) — 미달과 따로
         axes[axis] = res
     gates = {}
     for rep, runs in per_report_runs.items():
@@ -216,7 +234,7 @@ def reproducibility(per_report_runs: dict[str, list], threshold: float = ICC_THR
         gates[rep] = {"gates": g, "stable": gate_stability(g, expected_runs=expected_runs)}
     spreads = {rep: {axis: spread([s[axis] for s in runs]) for axis in AXES} for rep, runs in scores.items()}
     return {
-        "threshold": threshold, "n_runs": lengths.pop(), "axes": axes, "axes_passed": all(a["passed"] for a in axes.values()),
+        "threshold": threshold, "n_runs": lengths.pop(), "axes": axes, "axes_passed": tri(a["passed"] for a in axes.values()),
         "gates": gates, "gates_passed": all(v["stable"] for v in gates.values()), "spread": spreads,
     }
 

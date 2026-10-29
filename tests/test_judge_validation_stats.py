@@ -82,7 +82,17 @@ def test_icc_ci_level_and_bounds():
 def test_icc_zero_variance_rule():
     res = S.icc_a1([[3, 3, 3], [3, 3, 3]])
     assert res["zero_variance"] is True and res["icc"] is None and "분산 0" in res["note"]
-    assert S.icc_a1([[0.0]])["zero_variance"] is True  # 대상 1개라도 모두 같으면 분산 0
+    # 대상 1개·회차 1회면 분산 0 규칙을 쓰지 않는다 — 계산 불가(J10 검토)
+    for m in ([[0.0]], [[0.0, 0.0, 0.0]], [[0.0], [0.0]]):
+        r = S.icc_a1(m)
+        assert r["zero_variance"] is False and r["icc"] is None and "계산 불가" in r["note"], m
+
+
+def test_reproducibility_one_report_is_not_computable_not_passed():
+    one = {"A": [scores(f=1.0), scores(f=1.0), scores(f=1.0)]}
+    res = S.reproducibility(one)
+    assert all(a["passed"] is None for a in res["axes"].values()) and res["axes_passed"] is None
+    assert S.tri([True, None]) is None and S.tri([None, False]) is False and S.tri([True, True]) is True
 
 
 def test_icc_edges():

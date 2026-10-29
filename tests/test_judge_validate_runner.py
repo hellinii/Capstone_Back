@@ -378,6 +378,9 @@ def _fill_sheets(folder: Path) -> dict:
     return {"overlap": len(overlap), "total": sum(len(r) for r in sheets.values())}
 
 
+PLAN2 = {"reproducibility": R.BatchDefault(items=3, repeats=2)}  # 한 바퀴의 계획: 개발 입력 3건 × 2회
+
+
 def _full_loop(tmp_path) -> dict:
     """개발 입력 3건 × 2회 재현성 → 결함 2(표기·필수 내용)·sham 1 → 추출 → 채점지 → 합성 채점. 경로들을 돌려준다."""
     import asyncio
@@ -386,7 +389,7 @@ def _full_loop(tmp_path) -> dict:
     bases = asyncio.run(jv.dev_bases(jv.DEV_INPUTS))
     _plant_synthetic(work / "결함", bases)
     _answers(work / "정답지", bases["dev_binary"])
-    common = dict(mode="dev", ledger=work / "장부.csv", out=work / "runs", yes=True, seed=11, defects=work / "결함")
+    common = dict(mode="dev", ledger=work / "장부.csv", out=work / "runs", yes=True, seed=11, defects=work / "결함", base_repeats=2)
     ran = [jv.execute(jv.RunArgs(batch=b, reports=[], repeats=2 if b == "reproducibility" else None, **common),
                       echo=_quiet()[1])["ran"] for b in ("reproducibility", "defects", "sham", "extraction")]
     jv.cmd_sheets("dev", ledger=work / "장부.csv", out=work / "사람", n=16, overlap=2, seed=5, defects=work / "결함",
@@ -404,7 +407,7 @@ def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_pat
         loop = _full_loop(tmp_path)
         work = loop["work"]
         result = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", answers=work / "정답지", human=work / "사람",
-                               echo=_quiet()[1])
+                               echo=_quiet()[1], plan=PLAN2)
     finally:
         _AUDIT["on"] = False
     opened = [Path(p).resolve() for p in _AUDIT["paths"]]
@@ -445,7 +448,7 @@ def test_one_full_dev_loop_with_real_stats_gives_real_numbers(tmp_path, vdir):
     loop = _full_loop(tmp_path)
     work = loop["work"]
     r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", answers=work / "정답지", human=work / "사람",
-                      echo=_quiet()[1])
+                      echo=_quiet()[1], plan=PLAN2)
     repro = r["reproducibility"]
     assert set(repro["axes"]) == {"faithfulness", "coverage", "consistency", "readability"} and repro["n_runs"] == 2
     for axis, a in repro["axes"].items():  # 가짜 심판은 회차마다 같은 답 — ICC 대신 분산 0 표시(Q10)이거나 점수 없음
@@ -504,7 +507,7 @@ def test_blind_reading_bundle_and_effectiveness(tmp_path, vdir):
         w = _csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", human=work / "사람", echo=_quiet()[1])
+    r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", human=work / "사람", echo=_quiet()[1], plan=PLAN2)
     eff = r["effectiveness"]
     assert (eff["defects"], eff["human_read"], eff["human_found"], eff["human_false_alarms"]) == (2, 2, 1, 1)
     assert eff["system_found"] == sum(any(d["hits"]) for d in r["defects"].values()) >= 1
@@ -515,7 +518,8 @@ def test_report_uses_the_api_it_is_given(tmp_path, vdir):
     jv.execute(_dev(tmp_path, repeats=2), echo=_quiet()[1])
     fake = FakeStats()
     api = {name: fake._fn(name) for name in jv.STATS_API}
-    r = jv.cmd_report("dev", ledger=tmp_path / "work" / "장부.csv", out=tmp_path / "o", api=api, echo=_quiet()[1])
+    r = jv.cmd_report("dev", ledger=tmp_path / "work" / "장부.csv", out=tmp_path / "o", api=api, echo=_quiet()[1],
+                      plan={"reproducibility": R.BatchDefault(items=1, repeats=2)})
     assert fake.named("reproducibility") and r["reproducibility"] == FakeStats.RETURNS["reproducibility"]
 
 
@@ -568,3 +572,76 @@ def test_collect_runs_keeps_last_success_over_later_failure(tmp_path, vdir):
     assert [r["run_id"] for r in runs] == [ok["run_id"]]
     assert R.pending(R.plan_runs("reproducibility", [("dev_binary", "base")], 1), [late_fail],
                      fingerprint=criteria.fingerprint(), mode="dev") != []
+
+
+# ── J10 ② 계획 회차로 맞추기·덜 돎·계산 불가(P1-1), 결함·sham 전 바탕 확인(P1-2) ──
+
+
+def _run(batch, report, variant, repeat, gate="pass", meta=None):
+    return {"key": R.RunKey(batch, report, variant, repeat), "gate": gate, "run_id": f"{report}-{variant}-{repeat}",
+            "variant_meta": meta or {}, "scorecard": {}, "record": {}}
+
+
+def test_report_expected_runs_comes_from_plan_not_observed():
+    fake = FakeStats()
+    api = {name: fake._fn(name) for name in jv.STATS_API}
+    runs = [_run("reproducibility", t, "base", i) for t in ("a", "b", "c") for i in (1, 2)]
+    full = jv.report(runs, api, plan={"reproducibility": R.BatchDefault(3, 2)})
+    assert fake.named("reproducibility")[0][1] == {"expected_runs": 2} and full["gates_passed"] is True
+    fake.calls.clear()
+    short = jv.report(runs, api)  # 기본 계획 3회 — 2회만 돌았다
+    assert fake.named("reproducibility") == [] and short["reproducibility"]["verdict"] == "계산 불가"
+    assert short["gates_passed"] is None and short["verdicts"]["gates_passed"] == "계산 불가"
+    assert "덜 돎" in short["reproducibility"]["note"]
+
+
+def test_report_partial_mixed_batch_is_uncomputable_with_real_stats():
+    runs = [_run("reproducibility", "a", "base", i) for i in (1, 2, 3)] + [_run("reproducibility", "b", "base", 1)]
+    r = jv.report(runs, jv.load_stats_api(), plan={"reproducibility": R.BatchDefault(2, 3)})  # ValueError 로 죽지 않는다
+    assert r["reproducibility"]["verdict"] == "계산 불가" and r["verdicts"]["axes_passed"] == "계산 불가"
+
+
+def test_report_defect_on_unready_base_is_uncomputable_not_failed():
+    fake = FakeStats()
+    api = {name: fake._fn(name) for name in jv.STATS_API}
+    plan = {"reproducibility": R.BatchDefault(2, 2)}
+    runs = ([_run("reproducibility", "a", "base", i) for i in (1, 2)]
+            + [_run("reproducibility", "b", "base", 1), _run("reproducibility", "b", "base", 2, gate="blocked")]
+            + [_run("defects", "b", "D01", 1, meta={"axis": "readability", "after": "x"}),
+               _run("sham", "b", "S01", 1, meta={"axis": "sham"})])
+    r = jv.report(runs, api, plan=plan)
+    assert r["defects"]["D01"]["independence"] is None and "계산 불가" in r["defects"]["D01"]["note"]
+    assert r["independence_passed"] is None and r["sham_passed"] is None
+    assert r["verdicts"]["independence_passed"] == r["verdicts"]["sham_passed"] == "계산 불가"
+    assert fake.named("independence_ok") == [] and fake.named("sham_ok") == []
+    ok = [*runs[:2], _run("defects", "a", "D02", 1, meta={"axis": "readability", "after": "x"})]
+    assert jv.report(ok, api, plan={"reproducibility": R.BatchDefault(1, 2)})["independence_passed"] is True
+    assert fake.named("independence_ok")
+    assert jv.report(ok, api, plan=plan)["independence_passed"] is None  # 계획 2건인데 1건만 — 덜 돎이면 흔들림 폭도 없다
+
+
+def test_base_problems_needs_all_planned_runs_passed():
+    fp = "f" * 64
+    row = lambda rep, gate, rid="1": {"stage": "validate_reproducibility", "report": "a", "variant": "base", "repeat": str(rep),  # noqa: E731
+                                      "mode": "dev", "manifest_sha256": fp, "result_file": "x.json", "gate": gate, "run_id": rid}
+    assert "1/2회만" in jv.base_problems([row(1, "pass")], ["a"], fingerprint=fp, mode="dev", repeats=2)[0]
+    assert "모두 pass 가 아니다" in jv.base_problems([row(1, "pass"), row(2, "blocked")], ["a"], fingerprint=fp, mode="dev",
+                                                   repeats=2)[0]
+    assert "0/2회만" in jv.base_problems([row(1, "")], ["a"], fingerprint=fp, mode="dev", repeats=2)[0]  # 실패 줄은 안 셈
+    assert jv.base_problems([row(1, "pass"), row(2, "pass")], ["a"], fingerprint=fp, mode="dev", repeats=2) == []
+    assert jv.base_problems([row(1, "pass"), row(2, "pass")], ["a"], fingerprint="e" * 64, mode="dev", repeats=2)
+
+
+def test_defects_batch_refuses_before_reproducibility_has_run(tmp_path, vdir):
+    import asyncio
+
+    bases = asyncio.run(jv.dev_bases(jv.DEV_INPUTS))
+    _plant_synthetic(tmp_path / "결함", bases)
+    with pytest.raises(jv.RunnerError, match="바탕 성적서가 준비되지 않아"):
+        jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1), echo=_quiet()[1])
+    assert not (tmp_path / "work" / "runs").exists()
+    jv.execute(_dev(tmp_path, repeats=2), echo=_quiet()[1])  # dev_binary 2회 — 계획(기본 3회)보다 적다
+    with pytest.raises(jv.RunnerError, match="2/3회만"):
+        jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1), echo=_quiet()[1])
+    assert jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1, base_repeats=2),
+                      echo=_quiet()[1])["ran"] == 2

@@ -273,6 +273,24 @@ async def run_batch(ctx: Ctx, batch: str, *, client, bases: dict[str, Base], rep
     return {"batch": batch, "ran": len(order), "seed": seed, "gates": gates, "spent_usd": round(spent, 6)}
 
 
+def base_problems(rows: list[dict], tags: list[str], *, fingerprint: str, mode: str, repeats: int) -> list[str]:
+    """결함·sham 을 돌리기 전 조건(Q11 — 실행기 첫 단계에서 바탕이 게이트를 통과하는지): 바탕 성적서마다 재현성 회차가
+    계획 회차(repeats)만큼 끝났고(같은 모드·지문) 그 회차가 모두 pass. 흔들림 폭을 잴 바탕이 없으면 독립성·sham 은 셀 수 없다."""
+    done: dict[str, dict[int, str]] = {}
+    for row in rows:
+        key = R.finished_row(row, fingerprint=fingerprint, mode=mode)
+        if key is not None and key.batch == "reproducibility":
+            done.setdefault(key.report, {})[key.repeat] = row["gate"]  # 같은 회차가 여러 줄이면 마지막 성공 줄
+    out = []
+    for tag in sorted(set(tags)):
+        gates = done.get(tag, {})
+        if len(gates) < repeats:
+            out.append(f"바탕 {tag}: 재현성 회차가 {len(gates)}/{repeats}회만 끝났다 — 재현성 묶음을 먼저 다 돌린다")
+        elif any(g != "pass" for g in gates.values()):
+            out.append(f"바탕 {tag}: 재현성 회차가 모두 pass 가 아니다({sorted(gates.values())}) — 게이트를 통과한 바탕에만 결함을 심는다(Q11)")
+    return out
+
+
 def variant_problems(variants: dict[str, tuple[dict, dict]], bases: dict[str, Base], diffs: dict[str, str | None] | None = None,
                      ) -> list[str]:
     """변형마다 꼴 검사(variants.check_variant). diffs 를 주지 않으면 diff.txt 는 보지 않는다(실행 전 검사는 칸·문장만)."""
@@ -314,6 +332,7 @@ class RunArgs:
     seed: int | None = None
     reports: list[str] = field(default_factory=list)
     repeats: int | None = None
+    base_repeats: int | None = None  # 결함·sham 의 바탕 확인에 쓰는 재현성 계획 회차(기본 runs.DEFAULTS)
     max_runs: int | None = None
     batch_budget_usd: float | None = None
 
@@ -364,6 +383,14 @@ def execute(a: RunArgs, *, client=None, confirm: Callable[[str], str] = input, e
     bad = variant_problems(variants, bases, diffs)  # check-defects 와 같은 검사(diff.txt 까지)
     if bad:
         raise RunnerError("결함본·sham 꼴이 틀려 시작하지 않는다:\n  - " + "\n  - ".join(bad))
+    if a.batch in ("defects", "sham"):
+        prefix = "D" if a.batch == "defects" else "S"
+        tags = [m.get("base") for vid, (m, _) in variants.items() if vid.startswith(prefix)]
+        rows = jl.Ledger(ledger).rows() if Path(ledger).exists() else []
+        bad = base_problems(rows, tags, fingerprint=criteria.fingerprint(), mode="live" if a.mode == "verify" else "dev",
+                            repeats=a.base_repeats or R.DEFAULTS["reproducibility"].repeats)
+        if bad:
+            raise RunnerError("바탕 성적서가 준비되지 않아 시작하지 않는다:\n  - " + "\n  - ".join(bad))
     ctx = Ctx(a.mode, ledger, out, rel_root, confirm, echo, jl.run_meta())
     return asyncio.run(run_batch(ctx, a.batch, client=client, bases=bases, reports=reports, variants=variants,
                                  repeats=repeats, max_runs=max_runs, budget=jl.Budget.from_env(),
@@ -405,15 +432,37 @@ def collect_runs(ledger_rows: list[dict], *, fingerprint: str, mode: str, root: 
     return runs
 
 
+def _tri(values) -> bool | None:
+    """세 값 묶기(stats.tri 와 같은 규칙 — 계산 모듈을 report 배선 시험에서 가짜로 갈아 끼우므로 여기 따로 둔다).
+    값 None(계산 불가 칸)은 None 으로, dict 없는 칸(False·None)은 그대로."""
+    values = [None if v is None else bool(v) for v in values]
+    if any(v is False for v in values):
+        return False
+    if any(v is None for v in values):
+        return None
+    return True
+
+
 def planted_sentence(meta: dict) -> str | None:
     """탐지를 볼 심은 문장 — 바꾸거나 끼운 문장(after), 지우기면 지운 문장(before)."""
     return meta.get("after") or meta.get("before") or None
 
 
+UNCOMPUTABLE = "계산 불가"
+
+
+def verdict_word(value: bool | None) -> str:
+    return {True: "통과", False: "미달", None: UNCOMPUTABLE}[value]
+
+
 def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str, tuple[list, list]] | None = None,
-           human_scores: dict | None = None, human_reading: dict | None = None) -> dict:
+           human_scores: dict | None = None, human_reading: dict | None = None,
+           plan: dict[str, R.BatchDefault] | None = None) -> dict:
     """7.6 판정값(+ 8절 효용성 — human_reading = sheets.reading_hits 결과). runs = collect_runs 결과(판정은 장부 순서가 아니라 회차 번호 순).
-    human_claims = {성적서: (claims.csv 줄, sentences.csv 줄)}, human_scores = sheets.human_pairs 결과."""
+    human_claims = {성적서: (claims.csv 줄, sentences.csv 줄)}, human_scores = sheets.human_pairs 결과.
+    plan = 묶음별 계획 회차(기본 runs.DEFAULTS — V1 확정값은 인자로). 회차 수는 관측값이 아니라 이 계획값으로 맞춘다.
+    판정값은 세 값이다: True 통과 · False 미달 · None 계산 불가(덜 돎·바탕 미통과 등 — 이유는 그 칸의 note). verdicts 에 글로 모은다."""
+    plan = {**R.DEFAULTS, **(plan or {})}
     by_batch: dict[str, list[dict]] = {}
     for r in sorted(runs, key=lambda r: r["key"]):
         by_batch.setdefault(r["key"].batch, []).append(r)
@@ -422,12 +471,21 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
     base_runs: dict[str, list[dict]] = {}
     for r in by_batch.get("reproducibility", []):
         base_runs.setdefault(r["key"].report, []).append(r)
+    want = plan["reproducibility"]
     if base_runs:
-        counts = {len(v) for v in base_runs.values()}
-        repro = api["reproducibility"](base_runs, expected_runs=counts.pop() if len(counts) == 1 else None)
-        out["reproducibility"] = repro
-        out["gates_passed"] = repro["gates_passed"]
+        counts = {tag: len(v) for tag, v in sorted(base_runs.items())}
+        if len(counts) < want.items or any(c != want.repeats for c in counts.values()):
+            # 덜 돈 묶음(성적서·회차가 계획보다 적거나 섞임) — 통계를 부르지 않고 계산 불가(미달과 따로)
+            out["reproducibility"] = {"verdict": UNCOMPUTABLE, "axes_passed": None, "gates_passed": None,
+                                      "note": f"덜 돎 — 계획 {want.items}건 × {want.repeats}회, 돈 회차 {counts}"}
+            out["gates_passed"] = None
+        else:
+            repro = api["reproducibility"](base_runs, expected_runs=want.repeats)
+            out["reproducibility"] = repro
+            out["gates_passed"] = repro["gates_passed"]
         out["base_gate_pass"] = {tag: all(r.get("gate") == "pass" for r in rs) for tag, rs in base_runs.items()}  # Q11
+    base_ok = {tag: out.get("gates_passed") is not None and len(rs) == want.repeats and all(r.get("gate") == "pass" for r in rs)
+               for tag, rs in base_runs.items()}  # 흔들림 폭을 잴 수 있는 바탕(다 돌았고 모두 통과)
 
     def grouped(batch):
         per: dict[str, list[dict]] = {}
@@ -441,19 +499,25 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
         axis, base = meta.get("axis"), base_runs.get(rs[0]["key"].report, [])
         hits = [api["defect_detected"](r, axis, sentence=planted_sentence(meta), item_id=meta.get("item_id") or None)
                 for r in rs]
+        ok_base = base_ok.get(rs[0]["key"].report, False)
         defects[vid] = {"base": rs[0]["key"].report, "axis": axis, "hits": hits, "scores": [api["axis_scores"](r) for r in rs],
-                        "independence": api["independence_ok"](base, rs, axis) if base else None}
+                        "independence": api["independence_ok"](base, rs, axis) if ok_base else None}
+        if not ok_base:
+            defects[vid]["note"] = f"{UNCOMPUTABLE} — 바탕 {rs[0]['key'].report} 의 재현성 회차가 다 돌지 않았거나 모두 통과가 아니다"
     if defects:
         out["defects"] = defects
         out["detection"] = api["detection_passed"]({v: {"axis": d["axis"], "hits": d["hits"]} for v, d in defects.items()})
-        out["independence_passed"] = all(d["independence"] and d["independence"]["ok"] for d in defects.values())
+        out["independence_passed"] = _tri(d["independence"] and d["independence"]["ok"] for d in defects.values())
     shams = {}
     for vid, rs in sorted(grouped("sham").items()):
         base = base_runs.get(rs[0]["key"].report, [])
-        shams[vid] = {"base": rs[0]["key"].report, "sham": api["sham_ok"](base, rs) if base else None}
+        ok_base = base_ok.get(rs[0]["key"].report, False)
+        shams[vid] = {"base": rs[0]["key"].report, "sham": api["sham_ok"](base, rs) if ok_base else None}
+        if not ok_base:
+            shams[vid]["note"] = f"{UNCOMPUTABLE} — 바탕 {rs[0]['key'].report} 의 재현성 회차가 다 돌지 않았거나 모두 통과가 아니다"
     if shams:
         out["sham"] = shams
-        out["sham_passed"] = all(s["sham"] and s["sham"]["ok"] for s in shams.values())
+        out["sham_passed"] = _tri(s["sham"] and s["sham"]["ok"] for s in shams.values())
 
     if human_claims:
         extraction, pairs, gold_n, pred_n = {}, 0, 0, 0
@@ -492,6 +556,12 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
         out["agreement"] = {"system_human": all_sys, "human_human": all_hh, "by_axis": {"system_human": sys_h, "human_human": h_h},
                             "blank": human_scores["blank"],
                             "passed": api["human_agreement_ok"](all_sys["rate"], all_hh["rate"]) if all_sys and all_hh else None}
+    out["verdicts"] = {name: verdict_word(value) for name, value in (
+        ("gates_passed", out.get("gates_passed", None)),
+        ("axes_passed", (out.get("reproducibility") or {}).get("axes_passed")),
+        ("detection", (out.get("detection") or {}).get("passed")) if "detection" in out else ("detection", None),
+        ("independence_passed", out.get("independence_passed")), ("sham_passed", out.get("sham_passed")),
+        ("agreement", (out.get("agreement") or {}).get("passed")))}
     return out
 
 
@@ -545,7 +615,8 @@ def read_human_reading(folder: Path) -> dict | None:
 
 
 def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[str, Callable] | None = None,
-               answers: Path | None = None, human: Path | None = None, echo: Callable[[str], None] = print) -> dict:
+               answers: Path | None = None, human: Path | None = None, echo: Callable[[str], None] = print,
+               plan: dict[str, R.BatchDefault] | None = None) -> dict:
     vroot = validation_root()
     if mode == "dev":
         if ledger is None:
@@ -565,7 +636,7 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
     claims = read_human_claims(answers, tags) if answers and Path(answers).is_dir() else {}
     scores = read_human_scores(human) if human and Path(human).is_dir() else None
     reading = read_human_reading(human) if human and Path(human).is_dir() else None
-    result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores, human_reading=reading)
+    result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores, human_reading=reading, plan=plan)
     result.update({"mode": mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(), "tag": TAG})
     out.mkdir(parents=True, exist_ok=True)
     target = out / "검증결과.json"
@@ -814,6 +885,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out")
     run.add_argument("--reports", default="", help="재현성 성적서 태그(쉼표). verify 는 꼭 준다")
     run.add_argument("--repeats", type=int)
+    run.add_argument("--base-repeats", type=int, help="결함·sham 전 바탕 확인의 재현성 계획 회차(기본 줄인 V2 안)")
     run.add_argument("--max-runs", type=int, help="묶음 회차 상한(기본 = 줄인 V2 안)")
     run.add_argument("--batch-budget-usd", type=float, help="묶음 예산(기본 = 예상 × 1.5)")
     run.add_argument("--seed", type=int)
@@ -825,6 +897,8 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--out")
     rep.add_argument("--answers", help="정답지 폴더(기본 verify 는 검증/01_정답지)")
     rep.add_argument("--human", help="사람 채점 폴더(기본 verify 는 검증/04_사람평가)")
+    rep.add_argument("--reports-n", type=int, help="재현성 계획 성적서 수(기본 줄인 V2 안 — V1 확정값)")
+    rep.add_argument("--repeats", type=int, help="재현성 계획 회차(기본 줄인 V2 안 — V1 확정값)")
     for name, helptext in (("check-defects", "결함본·sham 꼴 검사(verify 는 V1 뒤 --allow-sealed)"),
                            ("make-diff", "결함본·sham 의 diff.txt 를 도구로 쓴다")):
         c = sub.add_parser(name, help=helptext)
@@ -887,8 +961,10 @@ def main(argv: list[str] | None = None) -> int:
             cmd_rescope(args.changed, args.since)
             return 0
         if args.command == "report":
+            d = R.DEFAULTS["reproducibility"]
             cmd_report(args.mode, ledger=Path(args.ledger) if args.ledger else None, out=Path(args.out) if args.out else None,
-                       answers=Path(args.answers) if args.answers else None, human=Path(args.human) if args.human else None)
+                       answers=Path(args.answers) if args.answers else None, human=Path(args.human) if args.human else None,
+                       plan={"reproducibility": R.BatchDefault(args.reports_n or d.items, args.repeats or d.repeats)})
             return 0
         if args.mode == "verify" and (args.inputs or args.defects):
             raise RunnerError("verify 는 입력·결함을 검증 폴더에서만 읽는다(--inputs·--defects 는 dev 전용)")
@@ -896,7 +972,8 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode, batch=args.batch, ledger=Path(args.ledger) if args.ledger else None,
             inputs=Path(args.inputs) if args.inputs else None, defects=Path(args.defects) if args.defects else None,
             out=Path(args.out) if args.out else None, live=args.live, yes=args.yes, seed=args.seed,
-            reports=[t for t in args.reports.split(",") if t], repeats=args.repeats, max_runs=args.max_runs,
+            reports=[t for t in args.reports.split(",") if t], repeats=args.repeats, base_repeats=args.base_repeats,
+            max_runs=args.max_runs,
             batch_budget_usd=args.batch_budget_usd))
         print(json.dumps({k: v for k, v in summary.items() if k != "gates"} | {"gates": summary.get("gates")},
                          ensure_ascii=False))
