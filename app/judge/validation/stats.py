@@ -4,14 +4,20 @@
   95% 신뢰구간(McGraw & Wong 1996 Case 2A 식 — Satterthwaite 자유도 v 와 F 분포 분위).
 - 분산 0 규칙(Q10 추천): 한 축에서 모든 성적서의 모든 회차 점수가 같으면 그 축은 통과. ICC 는 None, 이유는 note 에.
   대상 2개·회차 2회 이상일 때만 쓴다 — 그보다 적으면 그 축은 "계산 불가"(passed None)이지 통과가 아니다.
+- 분모 0(V1 결정 5, 2026-10-29): 사실 일치 checked 0·필수 내용 applicable 0 이 그 성적서의 **모든 회차**면 그 성적서는 그 축에서
+  '해당 없음'(not_applicable)으로 빼고 미달로 보지 않는다. 회차마다 다르면(어떤 회차는 0, 어떤 회차는 아님) 미달. 빼고 남은
+  대상이 2개 미만이면 그 축은 계산 불가(passed None — 위 규칙 그대로).
 - 판정 세 값: True(통과)·False(미달)·None(계산 불가 — 대상·회차가 모자람). 묶어 볼 때는 tri() — 미달이 하나라도 있으면 미달,
   아니고 계산 불가가 있으면 계산 불가.
 - 축별 점수(Q10 추천): 사실 일치 부합 비율, 필수 내용 서술 비율, 일관성 모순 건수, 표기 위반 건수 — judge_once 의 scorecard
   (app.judge.aggregate.scorecard) 키에서 읽는다. 키가 없거나 분모가 0 이면 None.
 - 게이트 재현성: 같은 성적서 반복에서 게이트 판정이 모두 같음(실패 회차 None 은 다른 판정으로 본다).
 - 결함 탐지·독립성·sham(Q11 추천): 탐지 = 심은 문장을 짚은 판정(사실 일치·일관성·표기는 그 문장을 인용한 위반, 필수 내용은
-  지운 항목이 "없음"). 흔들림 폭 = 바탕 성적서 자신의 재현성 범위(최대 − 최소). 독립성·sham = 회차 요약값(평균 또는 1회째)의
-  차가 흔들림 폭 이하.
+  지운 항목이 "없음"). 탐지 통과(V1 결정 4) = 결함 모두가 모든 회차에 탐지(축 구분 없음 — 줄인 V2 는 3개 × 1회). 7.6 원래
+  기준(게이트 축 모든 회차, 그 밖 6개 중 5개가 3/5 이상)은 rule="7.6" 으로 남겨 둔다.
+  흔들림 폭 = 바탕 성적서 자신의 재현성 범위(최대 − 최소). 독립성·sham = 회차 요약값(평균 또는 1회째)의 차가 여유 이하,
+  여유 = max(흔들림 폭, 최소 여유 MIN_MARGIN — 건수 축 1건·비율 축 0.05, V1 결정 6).
+- 사람 일치(V1 결정 7): 시스템↔사람 일치율이 사람↔사람보다 한 문항 넘게 낮지 않음 — 여유 = 1 / 겹침 문항 수(10문항이면 10%p).
 - 기준값·판정 방식은 상수·인자다 — V1 에서 답이 달라져도 함수 몸통은 바뀌지 않는다.
 
 LLM 을 부르지 않는다. 앱 실행 경로에서 import 되지 않는다(tests/test_judge_import_rules.py).
@@ -37,9 +43,14 @@ ICC_THRESHOLD = 0.75  # 설계 7.6: ICC 점추정 0.75 이상
 CI_LEVEL = 0.95
 SUMMARY_MODES = ("mean", "first")  # 독립성·sham 에서 회차를 하나로 줄이는 방식(카-4: 1회째 / 평균)
 DEFAULT_SUMMARY = "mean"  # Q11 추천
-OTHER_MIN_HIT_RATE = 3 / 5  # 7.6: 필수 내용·표기 결함은 5회 중 3회 이상 탐지
-OTHER_MIN_DEFECT_SHARE = 5 / 6  # 7.6: 필수 내용·표기 결함 6개 중 5개 이상(개수에 비례, 올림)
-HUMAN_MARGIN = 0.05  # 7.6: 시스템↔사람 일치율이 사람↔사람보다 5%p 넘게 낮지 않음
+DETECTION_RULES = ("all", "7.6")
+DETECTION_RULE = "all"  # V1 결정 4(2026-10-29): 결함 모두를 모든 회차에 탐지해야 통과(축 구분 없음)
+OTHER_MIN_HIT_RATE = 3 / 5  # 7.6 원래 기준(rule="7.6"): 필수 내용·표기 결함은 5회 중 3회 이상 탐지
+OTHER_MIN_DEFECT_SHARE = 5 / 6  # 7.6 원래 기준(rule="7.6"): 필수 내용·표기 결함 6개 중 5개 이상(개수에 비례, 올림)
+# 독립성·sham 최소 여유(V1 결정 6, 2026-10-29) — 여유 = max(바탕 흔들림 폭, 이 값). 건수 축 1건, 비율 축 0.05. 이 한 곳만 바꾼다.
+MIN_MARGIN = {"faithfulness": 0.05, "coverage": 0.05, "consistency": 1.0, "readability": 1.0}
+# 사람 일치(V1 결정 7): 시스템↔사람 일치율이 사람↔사람보다 '한 문항' 넘게 낮지 않음 — 여유 = 이 문항 수 / 겹침 문항 수
+HUMAN_MARGIN_ITEMS = 1
 FLOAT_TOL = 1e-9
 OVERLAP_MIN = 10  # 잘린 인용(표기 문장 규칙은 120자로 자른다)과 심은 문장의 앞뒤가 이만큼 겹치면 짚은 것으로 본다
 
@@ -221,23 +232,24 @@ def reproducibility(per_report_runs: dict[str, list], threshold: float = ICC_THR
     scores = {rep: [_scores(r) for r in runs] for rep, runs in per_report_runs.items()}
     axes: dict[str, dict] = {}
     for axis in AXES:
-        rows, dropped = [], []
+        rows, dropped, not_applicable = [], [], []
         for rep, runs in scores.items():
             vals = [s[axis] for s in runs]
             if any(v is None for v in vals):
-                dropped.append(rep)
+                # 분모 0 이 모든 회차면 '해당 없음'(V1 결정 5 — 빼고 미달 아님), 그 밖(실패 회차·회차마다 다른 분모 0)은 미달
+                if all(_zero_denominator(r, axis) for r in per_report_runs[rep]):
+                    not_applicable.append(rep)
+                else:
+                    dropped.append(rep)
             else:
                 rows.append(vals)
         res = icc_a1(rows) if rows else icc_a1([])
         if dropped:
-            res["note"] = (res["note"] + f" / 빠진 성적서(점수 없음): {', '.join(dropped)}").lstrip(" /")
+            res["note"] = (res["note"] + f" / 빠진 성적서(점수 없음 — 미달): {', '.join(dropped)}").lstrip(" /")
+        if not_applicable:
+            res["note"] = (res["note"] + f" / 해당 없음(모든 회차 분모 0 — 축에서 뺌): {', '.join(not_applicable)}").lstrip(" /")
         res["dropped"] = dropped
-        # 분모 0(사실 일치 checked 0·필수 내용 applicable 0)으로 모든 회차가 점수 없음인 성적서 — 실패 회차와 구별해 적는다.
-        # 판정은 그대로(빠진 성적서 → 미달, 닫힌 쪽). '해당 없음'으로 축에서 뺄지는 V1 결정 대기(J10 인계).
-        res["not_applicable"] = [rep for rep in dropped
-                                 if all(_zero_denominator(r, axis) for r in per_report_runs[rep])]
-        if res["not_applicable"]:
-            res["note"] += f" / 분모 0(해당 없음 — 결정 대기): {', '.join(res['not_applicable'])}"
+        res["not_applicable"] = not_applicable
         if dropped:
             res["passed"] = False
         elif res["zero_variance"] or res["icc"] is not None:
@@ -310,13 +322,17 @@ def defect_detected(judge_result, axis: str, *, sentence: str | None = None, ite
     return any(touches(q, sentence) for q in quotes)
 
 
-def detection_passed(by_defect: dict[str, dict], *, gate_axes=GATE_AXES, other_min_hit_rate: float = OTHER_MIN_HIT_RATE,
+def detection_passed(by_defect: dict[str, dict], *, rule: str = DETECTION_RULE, gate_axes=GATE_AXES,
+                     other_min_hit_rate: float = OTHER_MIN_HIT_RATE,
                      other_min_defect_share: float = OTHER_MIN_DEFECT_SHARE) -> dict:
-    """결함 탐지 기준(설계 7.6). by_defect = {결함 id: {"axis": 축, "hits": [회차별 탐지 bool ...]}}.
+    """결함 탐지 기준. by_defect = {결함 id: {"axis": 축, "hits": [회차별 탐지 bool ...]}}.
 
-    게이트 축 결함은 모든 회차 탐지. 그 밖의 결함은 회차의 other_min_hit_rate 이상 탐지한 결함이
-    ceil(개수 × other_min_defect_share) 개 이상.
+    rule="all"(기본, V1 결정 4): 결함 모두를 모든 회차에 탐지해야 통과 — 축 구분 없음.
+    rule="7.6"(설계 7.6 원래 기준): 게이트 축 결함은 모든 회차 탐지. 그 밖의 결함은 회차의 other_min_hit_rate 이상 탐지한
+    결함이 ceil(개수 × other_min_defect_share) 개 이상.
     """
+    if rule not in DETECTION_RULES:
+        raise ValueError(f"모르는 탐지 기준: {rule}")
     if not by_defect:
         raise ValueError("결함이 없다")
     gate_axes = {_axis(a) for a in gate_axes}
@@ -329,11 +345,15 @@ def detection_passed(by_defect: dict[str, dict], *, gate_axes=GATE_AXES, other_m
         rate = sum(bool(h) for h in hits) / len(hits)
         ok = rate == 1.0 if axis in gate_axes else rate >= other_min_hit_rate - FLOAT_TOL
         per[did] = {"axis": axis, "rate": rate, "ok": ok}
+    if rule == "all":
+        for p in per.values():
+            p["ok"] = p["rate"] == 1.0
+        return {"rule": rule, "defects": per, "passed": all(p["ok"] for p in per.values())}
     gate_ok = all(p["ok"] for p in per.values() if p["axis"] in gate_axes)
     others = [p for p in per.values() if p["axis"] not in gate_axes]
     need = math.ceil(len(others) * other_min_defect_share - FLOAT_TOL)
     others_ok = sum(p["ok"] for p in others) >= need
-    return {"defects": per, "gate_axes_ok": gate_ok, "others_needed": need, "others_ok": others_ok,
+    return {"rule": rule, "defects": per, "gate_axes_ok": gate_ok, "others_needed": need, "others_ok": others_ok,
             "passed": gate_ok and others_ok}
 
 
@@ -348,7 +368,12 @@ def summarize(values: list[float], mode: str = DEFAULT_SUMMARY) -> float:
     return float(values[0]) if mode == "first" else float(mean(values))
 
 
-def _shift(base_runs: list, other_runs: list, axes, mode: str) -> dict:
+def margin_of(axis: str, width: float, min_margin: dict[str, float] | None = None) -> float:
+    """독립성·sham 여유 = max(바탕 흔들림 폭, 그 축 최소 여유)(V1 결정 6)."""
+    return max(width, (MIN_MARGIN if min_margin is None else min_margin)[axis])
+
+
+def _shift(base_runs: list, other_runs: list, axes, mode: str, min_margin: dict[str, float] | None) -> dict:
     if not base_runs or not other_runs:
         raise ValueError("바탕 회차와 비교 회차가 모두 있어야 한다")
     base = [_scores(r) for r in base_runs]
@@ -358,29 +383,37 @@ def _shift(base_runs: list, other_runs: list, axes, mode: str) -> dict:
         b = [s[axis] for s in base]
         o = [s[axis] for s in other]
         if any(v is None for v in b + o):
-            out[axis] = {"base": None, "other": None, "diff": None, "spread": None, "ok": False, "note": "점수 없음(실패 회차 등)"}
+            if all(_zero_denominator(r, axis) for r in [*base_runs, *other_runs]):
+                # 바탕·비교 모든 회차가 분모 0 — 그 축은 해당 없음(V1 결정 5와 같은 규칙, 변화 없음으로 본다)
+                out[axis] = {"base": None, "other": None, "diff": None, "spread": None, "margin": None, "ok": True,
+                             "note": "해당 없음(모든 회차 분모 0)"}
+                continue
+            out[axis] = {"base": None, "other": None, "diff": None, "spread": None, "margin": None, "ok": False,
+                         "note": "점수 없음(실패 회차·회차마다 다른 분모 0 등)"}
             continue
         width = spread(b)
+        margin = margin_of(axis, width, min_margin)
         diff = abs(summarize(o, mode) - summarize(b, mode))
-        out[axis] = {"base": summarize(b, mode), "other": summarize(o, mode), "diff": diff, "spread": width,
-                     "ok": diff <= width + FLOAT_TOL}
+        out[axis] = {"base": summarize(b, mode), "other": summarize(o, mode), "diff": diff, "spread": width, "margin": margin,
+                     "ok": diff <= margin + FLOAT_TOL}
     return out
 
 
-def independence_ok(base_runs: list, defect_runs: list, defect_axis: str, *, mode: str = DEFAULT_SUMMARY) -> dict:
-    """결함을 심지 않은 축의 점수 변화가 흔들림 폭 이내인가(설계 7.6, Q11).
+def independence_ok(base_runs: list, defect_runs: list, defect_axis: str, *, mode: str = DEFAULT_SUMMARY,
+                    min_margin: dict[str, float] | None = None) -> dict:
+    """결함을 심지 않은 축의 점수 변화가 여유(max(흔들림 폭, 최소 여유)) 이내인가(설계 7.6, Q11, V1 결정 6).
 
     base_runs: 바탕 성적서의 재현성 회차들(judge_once 결과 또는 축 점수 dict) — 흔들림 폭도 여기서 잰다.
-    defect_runs: 결함본 회차들. 돌려주는 값: {"ok": bool, "axes": {축: {base, other, diff, spread, ok}}}.
+    defect_runs: 결함본 회차들. 돌려주는 값: {"ok": bool, "axes": {축: {base, other, diff, spread, margin, ok}}}.
     """
     defect_axis = _axis(defect_axis)
-    axes = _shift(base_runs, defect_runs, [a for a in AXES if a != defect_axis], mode)
+    axes = _shift(base_runs, defect_runs, [a for a in AXES if a != defect_axis], mode, min_margin)
     return {"ok": all(a["ok"] for a in axes.values()), "axes": axes}
 
 
-def sham_ok(base_runs: list, sham_runs: list, *, mode: str = DEFAULT_SUMMARY) -> dict:
-    """뜻을 안 바꾼 수정본에서 모든 축의 점수 변화가 흔들림 폭 이내인가(설계 7.6, Q11)."""
-    axes = _shift(base_runs, sham_runs, AXES, mode)
+def sham_ok(base_runs: list, sham_runs: list, *, mode: str = DEFAULT_SUMMARY, min_margin: dict[str, float] | None = None) -> dict:
+    """뜻을 안 바꾼 수정본에서 모든 축의 점수 변화가 여유(max(흔들림 폭, 최소 여유)) 이내인가(설계 7.6, Q11, V1 결정 6)."""
+    axes = _shift(base_runs, sham_runs, AXES, mode, min_margin)
     return {"ok": all(a["ok"] for a in axes.values()), "axes": axes}
 
 
@@ -395,6 +428,21 @@ def agreement_rate(a: list, b: list) -> float:
     return sum(x == y for x, y in zip(a, b)) / len(a)
 
 
-def human_agreement_ok(system_human: float, human_human: float, *, margin: float = HUMAN_MARGIN) -> bool:
-    """시스템↔사람 일치율이 사람↔사람 일치율보다 margin 넘게 낮지 않은가(설계 7.6)."""
+def human_margin(overlap_n: int, *, items: int = HUMAN_MARGIN_ITEMS) -> float:
+    """사람 일치 여유 = items 문항 / 겹침 문항 수(V1 결정 7 — 겹침 10문항이면 한 문항 = 0.10)."""
+    if not overlap_n or overlap_n < 1:
+        raise ValueError("겹침 문항 수가 1 이상이어야 여유를 정할 수 있다")
+    return items / overlap_n
+
+
+def human_agreement_ok(system_human: float, human_human: float, *, overlap_n: int | None = None,
+                       margin: float | None = None) -> bool:
+    """시스템↔사람 일치율이 사람↔사람 일치율보다 여유 넘게 낮지 않은가(설계 7.6, V1 결정 7).
+
+    여유는 margin 을 주면 그 값, 아니면 human_margin(overlap_n) — 한 문항(1 / 겹침 문항 수). 둘 다 없으면 ValueError.
+    """
+    if margin is None:
+        if overlap_n is None:
+            raise ValueError("overlap_n(겹침 문항 수) 또는 margin 을 준다")
+        margin = human_margin(overlap_n)
     return system_human >= human_human - margin - FLOAT_TOL

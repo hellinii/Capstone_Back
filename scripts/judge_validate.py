@@ -17,20 +17,28 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
     - 이어 하기: 같은 모드·같은 기준 지문으로 결과 파일까지 적히고 게이트 판정이 난 회차는 건너뛴다(멈춘 뒤 같은 명령을
       다시 치면 이어 간다). 채점이 실패한 회차(gate 빈칸)는 다시 돈다 — 실패 줄의 비용은 장부 누계에 그대로 남는다.
     - 순서 섞기: 남은 회차를 시드로 섞는다(--seed, 없으면 새로 뽑아 찍음). 시드·순서는 plan-<묶음>-<시드>.json 과 결과 원본에.
-    - 시작 때 예상 회차·비용(채점 1회 $0.15 실측)·장부 누계를 찍고 --yes 가 없으면 멈춘다. 묶음 회차 상한(기본 = 줄인 V2 안)을
-      넘거나 라운드 남은 상한(JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS)보다 크면 시작하지 않는다. 돌다가 묶음 예산
+    - 기본 회차(V1 결정 1·2, 2026-10-29): 재현성 3건(bc_strong·digits_weak·yeast_strong — verify 에서 --reports 를 안 주면
+      이것) × 2회, 결함 3개 × 1회, sham 1 → 채점 10회 ≈ $1.5. 시작 때 V2 전체 계획·이번 묶음 예상 회차·비용(채점 1회 $0.15
+      실측)·장부 누계를 찍고 --yes 가 없으면 멈춘다. 묶음 회차 상한(기본 = 위 회차)을 넘거나 라운드 남은 상한
+      (JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS, 장부 누계 포함 — V2 승인 $4.5·40회)보다 크면 시작하지 않는다. 돌다가 묶음 예산
       (예상 × 1.5)을 넘으면 멈춘다. 누계 $10 단위·비용 모름 20회마다 멈춰 확인(scripts/judge_live.py 의 Runner 그대로).
     - extraction 은 채점을 부르지 않는다(재현성 회차의 추출 기록을 report 가 정답지와 짝짓는다).
 - report     : 장부·결과 원본으로 7.6 판정값을 계산한다. 계산은 app.judge.validation 의 stats·extraction·agreement 가 하고,
                이 명령은 그 함수들을 부르는 얇은 층이다(STATS_API). 결과는 verify 면 05_결과/검증결과.json, dev 면 출력 폴더.
                정답지가 있는 성적서마다 사람이 놓친 주장 판정표(놓친주장_<태그>.csv — 시스템만 찾은 주장, 회차를 합쳐 한 줄씩)를
                같은 출력 폴더에 쓴다. 사람이 판정해 정답지 폴더에 <태그>.missed.csv 로 두면 "예" 줄을 보탤 목록
-               (보탤주장_<태그>.csv, claims.csv 꼴)으로 내고 검증결과.json 에도 싣는다. 정답지 자체는 고치지 않는다.
+               (보탤주장_<태그>.csv, claims.csv 꼴)으로 내고, 그 줄을 정답지에 보태 추출 재현율·정밀도를 다시 잰다(V1 결정
+               10④ — 검증결과.json 에 보태기 전 extraction.pooled 와 뒤 extraction.pooled_with_additions 둘 다). 정답지
+               파일 자체는 고치지 않는다.
+               판정 기준(V1 결정 4~7): 게이트 재현성 = 3건 모두 2회 같은 판정, 축 ICC 0.75, 결함 탐지 = 결함 모두 1회에 탐지
+               (계획 개수보다 적게 돌았으면 계산 불가), 독립성·sham 여유 = max(흔들림 폭, 건수 1건·비율 0.05), 사람 일치 여유 =
+               한 문항(1 / 겹침 문항 수).
 - check-defects : 결함본·sham 폴더 꼴 검사(meta 칸·심은 사람 역할·칸 하나·문장 하나·before/after·diff.txt). verify 는 V1 뒤
                --allow-sealed 로만(봉인 서술을 연다), dev 는 합성 바탕(개발 입력)으로.
 - make-diff <D01> : diff.txt 를 도구로 쓴다.
 - sheets     : 사람 일치도 채점지(블라인드 — 시스템 판정·결함 여부 없음, 결함본 문항은 7.2 역할대로 인용/민서), 열쇠(따로 + 해시,
-               읽기 전용), 읽을 문서(문서 번호만). 층 나눈 표본(--n 기본 80, --overlap 축마다 겹침 5, --seed 기록).
+               읽기 전용), 읽을 문서(문서 번호만). 층 나눈 표본(--n 기본 40 = 축마다 10, --overlap 겹침 모두 10 — 축마다
+               고르게 3·3·2·2, --seed 기록. V1 결정 7).
 - reading    : 8절 블라인드 읽기 묶음(P1) — 사람마다 문서(결함본은 심지 않은 사람에게만)·빈 읽기표·열쇠. report 가 효용성 표로 센다.
 - rescope    : 재검증 범위(정10) — 바뀐 파일(--changed 또는 --since <커밋>) → 다시 돌 모듈·묶음·사람 일치도 축.
 - status     : 장부 누계와 상한.
@@ -255,6 +263,7 @@ async def run_batch(ctx: Ctx, batch: str, *, client, bases: dict[str, Base], rep
     order = R.shuffled(todo, seed)
     est = R.estimate_usd(len(order)) if ctx.mode == "verify" else 0.0
     cap_usd = R.batch_budget_usd(len(order)) if batch_budget_usd is None else batch_budget_usd
+    ctx.echo(f"[{ctx.mode}] {R.plan_summary()}")
     ctx.echo(f"[{ctx.mode}] 검증 묶음 {batch}: 계획 {len(keys)}회 · 끝남 {len(keys) - len(todo)}회(건너뜀) · 남음 {len(order)}회"
              f" · 순서 시드 {seed} · 묶음 예산 ${cap_usd:.2f}·{max_runs}회")
     if len(keys) > max_runs:
@@ -389,11 +398,9 @@ def execute(a: RunArgs, *, client=None, confirm: Callable[[str], str] = input, e
 
             client = FakeOpenAI("pass")
     else:
-        if a.batch == "reproducibility" and not a.reports:
-            raise RunnerError("verify 재현성은 --reports 로 성적서 태그를 정한다(V1 에서 고른 3건)")
-        needed = sorted(set(a.reports) | {m.get("base") for m, _ in variants.values()})
+        reports = a.reports or (list(R.DEFAULT_REPORTS) if a.batch == "reproducibility" else [])  # V1 결정 2
+        needed = sorted(set(reports) | {m.get("base") for m, _ in variants.values()})
         bases = sealed_bases(inputs, needed)
-        reports = a.reports
         if client is None:
             client = jl.make_clients(live=True).openai
             if client is None:
@@ -432,6 +439,12 @@ STATS_API = {
 
 def load_stats_api() -> dict[str, Callable]:
     return {name: getattr(importlib.import_module(f"app.judge.validation.{mod}"), name) for name, mod in STATS_API.items()}
+
+
+def variant_axes() -> tuple[str, ...]:
+    from app.judge.validation.variants import AXES
+
+    return AXES
 
 
 def collect_runs(ledger_rows: list[dict], *, fingerprint: str, mode: str, root: Path | None) -> list[dict]:
@@ -541,6 +554,13 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
     if defects:
         out["defects"] = defects
         out["detection"] = api["detection_passed"]({v: {"axis": d["axis"], "hits": d["hits"]} for v, d in defects.items()})
+        want_d = plan["defects"]
+        short = [v for v, d in defects.items() if len(d["hits"]) != want_d.repeats]
+        if len(defects) < want_d.items or short:
+            # V1 결정 4 는 '결함 모두'다 — 계획보다 적게 돌았으면 통과로 세지 않는다(계산 불가, 미달과 따로)
+            out["detection"] = {**out["detection"], "passed": None,
+                                "note": f"덜 돎 — 계획 결함 {want_d.items}개 × {want_d.repeats}회, 돈 결함 "
+                                        f"{ {v: len(d['hits']) for v, d in defects.items()} }"}
         out["independence_passed"] = _tri(d["independence"] and d["independence"]["ok"] for d in defects.values())
     shams = {}
     for vid, rs in sorted(grouped("sham").items()):
@@ -555,6 +575,7 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
 
     if human_claims:
         extraction, missed, pairs, gold_n, pred_n = {}, {}, 0, 0, 0
+        pairs2, gold_n2, pred_n2, added = 0, 0, 0, 0  # 놓친 주장을 보탠 뒤(V1 결정 10④)
         for tag, (claim_rows, sentence_rows) in sorted(human_claims.items()):
             if tag not in base_runs:
                 continue
@@ -574,9 +595,23 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
                 raise RunnerError(f"{tag} 놓친 주장 판정표: {exc}") from exc
             missed[tag] = {"rows": merge_missed([api["missed_rows"](m) for m in matches]), "judged": bool(judged),
                            "additions": additions}
+            # V1 결정 10④ — "예" 줄을 정답지에 보태 다시 잰다(원 정답지 파일은 그대로, 보탠 줄은 보탤주장_<태그>.csv)
+            if additions:
+                gold2 = api["gold_from_csv"]([*claim_rows, *additions], sentence_rows)
+                per_run2 = [api["recall_precision"](api["match_claims"](gold2, p)) for p in preds]
+                extraction[tag]["with_additions"] = {"added": len(additions), "runs": per_run2,
+                                                     "distribution": api["runs_distribution"](gold2, preds)}
+            else:
+                per_run2 = per_run
+                extraction[tag]["with_additions"] = {"added": 0, "runs": per_run, "distribution": extraction[tag]["distribution"]}
+            for m in per_run2:
+                pairs2, gold_n2, pred_n2 = pairs2 + m["n_pairs"], gold_n2 + m["n_gold"], pred_n2 + m["n_pred"]
+            added += len(additions)
         out["extraction"] = {"reports": extraction, "pooled": {
             "recall": pairs / gold_n if gold_n else None, "precision": pairs / pred_n if pred_n else None,
-            "n_pairs": pairs, "n_gold": gold_n, "n_pred": pred_n}}
+            "n_pairs": pairs, "n_gold": gold_n, "n_pred": pred_n}, "pooled_with_additions": {
+            "recall": pairs2 / gold_n2 if gold_n2 else None, "precision": pairs2 / pred_n2 if pred_n2 else None,
+            "n_pairs": pairs2, "n_gold": gold_n2, "n_pred": pred_n2, "added": added}}
         if missed:
             out["missed_claims"] = missed
 
@@ -600,7 +635,9 @@ def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str
         all_hh = rates([p for ps in human_scores["human_human"].values() for p in ps])
         out["agreement"] = {"system_human": all_sys, "human_human": all_hh, "by_axis": {"system_human": sys_h, "human_human": h_h},
                             "blank": human_scores["blank"],
-                            "passed": api["human_agreement_ok"](all_sys["rate"], all_hh["rate"]) if all_sys and all_hh else None}
+                            # 여유 = 한 문항(1 / 겹침 문항 수 — V1 결정 7)
+                            "passed": api["human_agreement_ok"](all_sys["rate"], all_hh["rate"], overlap_n=all_hh["n"])
+                            if all_sys and all_hh else None}
     out["verdicts"] = {name: verdict_word(value) for name, value in (
         ("gates_passed", out.get("gates_passed", None)),
         ("axes_passed", (out.get("reproducibility") or {}).get("axes_passed")),
@@ -849,7 +886,12 @@ def doc_text(base: Base, slots: dict | None, label: str) -> str:
     return f"# {label}\n\n" + render(pieces) + "\n"
 
 
-def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80, overlap: int = 5, seed: int | None = None,
+SHEETS_N = 40  # V1 결정 7 — 사람 채점 40문항(축마다 10)
+SHEETS_OVERLAP = 10  # 그중 두 사람이 같이 채점할 문항(모두, 축마다 고르게)
+
+
+def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = SHEETS_N, overlap: int = SHEETS_OVERLAP,
+               seed: int | None = None,
                defects: Path | None = None, inputs: Path | None = None, allow_sealed: bool = False,
                echo: Callable[[str], None] = print) -> dict:
     """사람 일치도 채점지(블라인드, 역할대로)·열쇠(따로 + 해시)·읽을 문서. 표본은 검증 회차 결과에서 층 나눠 뽑는다(시드 기록).
@@ -882,7 +924,7 @@ def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80,
     types = criteria.load_json("contradictions.json")["types"]
     items = [i for r in first.values() for i in SH.items_from_run({**r, "key": r["key"].__dict__}, types)]
     seed = random.SystemRandom().randrange(1, 10**9) if seed is None else seed
-    assigned = SH.assign(SH.sample(items, n, seed), overlap_per_axis=overlap, seed=seed)
+    assigned = SH.assign(SH.sample(items, n, seed), overlap=overlap, seed=seed)
     sheets, key, docs = SH.build(assigned, seed)
     variants = {}
     if any(r["key"].variant != R.BASE_VARIANT for r in first.values()):
@@ -920,7 +962,10 @@ def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80,
     strata: dict[str, int] = {}
     for item in assigned:
         strata[SH.stratum(item)] = strata.get(SH.stratum(item), 0) + 1
-    draw = {"seed": seed, "n": n, "overlap_per_axis": overlap, "candidates": len(items), "drawn": len(assigned),
+    both = [i for i in assigned if len(i["scorers"]) == 2]
+    draw = {"seed": seed, "n": n, "overlap": overlap, "overlap_drawn": len(both),
+            "overlap_by_axis": {a: sum(i["axis"] == a for i in both) for a in variant_axes()},
+            "candidates": len(items), "drawn": len(assigned),
             "strata": dict(sorted(strata.items())), "per_scorer": {w: len(r) for w, r in sheets.items()}, "key_sha256": key_sha}
     (out / "뽑기.json").write_text(json.dumps(draw, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     for f in (key_dir / "열쇠.csv", key_dir / "열쇠.sha256"):
@@ -1014,10 +1059,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--inputs", help="dev 전용 — 개발 입력 폴더(기본 tests/data/judge_dev)")
     run.add_argument("--defects", help="dev 전용 — 합성 결함·sham 폴더")
     run.add_argument("--out")
-    run.add_argument("--reports", default="", help="재현성 성적서 태그(쉼표). verify 는 꼭 준다")
+    run.add_argument("--reports", default="", help="재현성 성적서 태그(쉼표). verify 기본 bc_strong,digits_weak,yeast_strong")
     run.add_argument("--repeats", type=int)
-    run.add_argument("--base-repeats", type=int, help="결함·sham 전 바탕 확인의 재현성 계획 회차(기본 줄인 V2 안)")
-    run.add_argument("--max-runs", type=int, help="묶음 회차 상한(기본 = 줄인 V2 안)")
+    run.add_argument("--base-repeats", type=int, help="결함·sham 전 바탕 확인의 재현성 계획 회차(기본 2)")
+    run.add_argument("--max-runs", type=int, help="묶음 회차 상한(기본 = V1 결정 회차: 재현성 6·결함 3·sham 1)")
     run.add_argument("--batch-budget-usd", type=float, help="묶음 예산(기본 = 예상 × 1.5)")
     run.add_argument("--seed", type=int)
     run.add_argument("--live", action="store_true")
@@ -1028,8 +1073,8 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--out")
     rep.add_argument("--answers", help="정답지 폴더(기본 verify 는 검증/01_정답지)")
     rep.add_argument("--human", help="사람 채점 폴더(기본 verify 는 검증/04_사람평가)")
-    rep.add_argument("--reports-n", type=int, help="재현성 계획 성적서 수(기본 줄인 V2 안 — V1 확정값)")
-    rep.add_argument("--repeats", type=int, help="재현성 계획 회차(기본 줄인 V2 안 — V1 확정값)")
+    rep.add_argument("--reports-n", type=int, help="재현성 계획 성적서 수(기본 3 — V1 결정 1)")
+    rep.add_argument("--repeats", type=int, help="재현성 계획 회차(기본 2 — V1 결정 1)")
     for name, helptext in (("check-defects", "결함본·sham 꼴 검사(verify 는 V1 뒤 --allow-sealed)"),
                            ("make-diff", "결함본·sham 의 diff.txt 를 도구로 쓴다")):
         c = sub.add_parser(name, help=helptext)
@@ -1050,8 +1095,9 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--mode", choices=MODES, required=True)
     sh.add_argument("--ledger")
     sh.add_argument("--out")
-    sh.add_argument("--n", type=int, default=80, help="표본 크기(기본 80 — 줄인 안에 맞게 바꿀 수 있다)")
-    sh.add_argument("--overlap", type=int, default=5, help="축마다 두 사람이 같이 채점할 문항 수")
+    sh.add_argument("--n", type=int, default=SHEETS_N, help="표본 크기(기본 40 = 축마다 10, V1 결정 7)")
+    sh.add_argument("--overlap", type=int, default=SHEETS_OVERLAP,
+                    help="두 사람이 같이 채점할 문항 수(모두, 축마다 고르게 — 기본 10)")
     sh.add_argument("--seed", type=int)
     sh.add_argument("--defects")
     sh.add_argument("--inputs")

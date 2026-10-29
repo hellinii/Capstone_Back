@@ -5,7 +5,8 @@
 
 채점지는 블라인드다: 시스템 판정·결함 여부·변형 이름이 보이지 않는다. 성적서는 문서 번호(무작위 이름)로만 가리킨다.
 결함본 문항은 7.2 역할대로 나눈다 — 사실 일치·일관성 결함은 민서가 심었으므로 인용 님이, 필수 내용·표기 결함은 인용 님이 심었으므로
-민서가 채점한다. 사람 간 일치도용 겹침 문항(축마다 몇 개)은 결함본이 아닌 문항에서 뽑아 두 사람 채점지에 모두 넣는다.
+민서가 채점한다. 사람 간 일치도용 겹침 문항(모두 몇 개 — 축마다 고르게 나눔)은 결함본이 아닌 문항에서 뽑아 두 사람 채점지에
+모두 넣는다. V1 결정 7(2026-10-29): 40문항(축마다 10), 그중 겹침 10문항(축마다 3·3·2·2).
 열쇠(문항 → 회차·성적서·변형·시스템 판정·층)는 채점지와 따로 둔다.
 
 상호작용
@@ -105,16 +106,34 @@ def sample(items: list[dict], n: int, seed: int) -> list[dict]:
     return chosen
 
 
-def assign(sampled: list[dict], *, overlap_per_axis: int, seed: int) -> list[dict]:
-    """채점자 나누기. 결함본 문항은 7.2 역할대로(심은 사람이 아닌 쪽), 겹침은 결함본이 아닌 문항에서 축마다."""
+def overlap_quota(overlap: int, available: dict[str, int]) -> dict[str, int]:
+    """겹침 문항 수(모두)를 축마다 나눈다 — 고르게(앞 축부터 하나씩 더), 후보가 모자란 축의 몫은 후보가 남은 축으로 넘긴다."""
+    quota = {a: 0 for a in AXES}
+    left = max(overlap, 0)
+    while left:
+        moved = False
+        for axis in AXES:
+            if left and quota[axis] < available.get(axis, 0):
+                quota[axis] += 1
+                left -= 1
+                moved = True
+        if not moved:
+            break
+    return quota
+
+
+def assign(sampled: list[dict], *, overlap: int, seed: int) -> list[dict]:
+    """채점자 나누기. 결함본 문항은 7.2 역할대로(심은 사람이 아닌 쪽), 겹침(모두 overlap 문항)은 결함본이 아닌 문항에서
+    축마다 고르게(overlap_quota)."""
     rng = random.Random(seed + 1)
     out = []
     for item in sampled:
         scorer = scorer_for(item["variant_axis"], item["variant_round"]) if item["kind"] == "defect" else "인용"
         out.append({**item, "scorers": [scorer]})
+    cands = {axis: [i for i in out if i["axis"] == axis and i["kind"] != "defect"] for axis in AXES}
+    quota = overlap_quota(overlap, {a: len(c) for a, c in cands.items()})
     for axis in AXES:
-        cand = [i for i in out if i["axis"] == axis and i["kind"] != "defect"]
-        for item in rng.sample(cand, min(overlap_per_axis, len(cand))):
+        for item in rng.sample(cands[axis], quota[axis]):
             item["scorers"] = ["인용", "민서"]
     return out
 

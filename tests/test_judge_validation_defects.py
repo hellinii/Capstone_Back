@@ -279,17 +279,28 @@ def test_smallest_sample_takes_the_planted_problem_item_first(seed):
 
 
 def test_assign_follows_roles_and_overlap_avoids_defects():
-    got = SH.assign(SH.sample(_items(), 40, seed=5), overlap_per_axis=2, seed=5)
+    got = SH.assign(SH.sample(_items(), 40, seed=5), overlap=10, seed=5)
     for i in got:
         if i["kind"] == "defect":
             assert i["scorers"] == [V.scorer_for(i["variant_axis"])]  # F·Cons → 인용, Cov·R → 민서
     assert {i["scorers"][0] for i in got if i["kind"] == "defect" and i["variant_axis"] == "coverage"} == {"민서"}
     both = [i for i in got if len(i["scorers"]) == 2]
-    assert len(both) == 8 and all(i["kind"] != "defect" for i in both)
+    assert len(both) == 10 and all(i["kind"] != "defect" for i in both)
+    # V1 결정 7: 겹침 10문항은 모두 합친 수 — 축마다 고르게 3·3·2·2
+    assert [sum(i["axis"] == a for i in both) for a in V.AXES] == [3, 3, 2, 2]
+
+
+def test_overlap_quota_spreads_and_moves_leftover():
+    assert SH.overlap_quota(10, {a: 10 for a in V.AXES}) == dict(zip(V.AXES, (3, 3, 2, 2)))
+    short = dict(zip(V.AXES, (1, 10, 10, 10)))  # 첫 축 후보가 1개 — 남는 몫은 다른 축으로
+    q = SH.overlap_quota(10, short)
+    assert q[V.AXES[0]] == 1 and sum(q.values()) == 10
+    assert sum(SH.overlap_quota(10, dict(zip(V.AXES, (1, 1, 1, 1)))).values()) == 4  # 후보가 모자라면 있는 만큼
+    assert SH.overlap_quota(0, {a: 5 for a in V.AXES}) == {a: 0 for a in V.AXES}
 
 
 def test_sheets_are_blind_and_key_is_separate():
-    assigned = SH.assign(SH.sample(_items(), 40, seed=5), overlap_per_axis=2, seed=5)
+    assigned = SH.assign(SH.sample(_items(), 40, seed=5), overlap=8, seed=5)
     sheets, key, docs = SH.build(assigned, seed=5)
     flat = json.dumps(sheets, ensure_ascii=False)
     for secret in ("D01", "D04", "S01", "R-1", "R-3", "violation", "match", "결함", "sham", "base"):
@@ -310,6 +321,7 @@ def test_cli_sheets_dev_writes_sheets_key_hash_and_docs(tmp_path, monkeypatch):
     draw = jv.cmd_sheets("dev", ledger=ledger, out=tmp_path / "사람", n=12, overlap=1, seed=9, echo=lines.append)
     out = tmp_path / "사람"
     assert draw["seed"] == 9 and draw["drawn"] <= 12 and (out / "뽑기.json").exists()
+    assert draw["overlap"] == 1 and draw["overlap_drawn"] == 1 and sum(draw["overlap_by_axis"].values()) == 1
     key = (out / "열쇠" / "열쇠.csv").read_bytes()
     import hashlib
 
@@ -356,3 +368,14 @@ def test_human_pairs_rejects_unknown_question_and_bad_verdict():
         SH.human_pairs(key, {"인용": [_sheet_row("Q999", "예")]})
     with pytest.raises(ValueError, match="판정은 예/아니오"):
         SH.human_pairs(key, {"인용": [_sheet_row("Q001", "맞음")]})
+
+
+def test_cli_sheets_defaults_are_forty_items_ten_overlap():
+    """V1 결정 7(2026-10-29): sheets 기본 --n 40(축마다 10), --overlap 10(모두)."""
+    jv = _jv()
+    args = jv.build_parser().parse_args(["sheets", "--mode", "dev"])
+    assert (args.n, args.overlap) == (40, 10) == (jv.SHEETS_N, jv.SHEETS_OVERLAP)
+    import inspect
+
+    sig = inspect.signature(jv.cmd_sheets).parameters
+    assert (sig["n"].default, sig["overlap"].default) == (40, 10)

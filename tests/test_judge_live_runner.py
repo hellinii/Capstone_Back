@@ -103,7 +103,7 @@ def test_start_refuses_batch_over_run_cap_even_when_cost_unknown(tmp_path):
 def test_budget_from_env(monkeypatch):
     monkeypatch.delenv("JUDGE_LIVE_BUDGET_USD", raising=False)
     monkeypatch.delenv("JUDGE_LIVE_MAX_RUNS", raising=False)
-    assert jl.Budget.from_env() == jl.Budget(4.0, 40)
+    assert jl.Budget.from_env() == jl.Budget(4.5, 40)  # V1 결정 1(2026-10-29) — 라운드 상한 $4.5·40회
     monkeypatch.setenv("JUDGE_LIVE_BUDGET_USD", "24.5")
     monkeypatch.setenv("JUDGE_LIVE_MAX_RUNS", "130")
     assert jl.Budget.from_env() == jl.Budget(24.5, 130)
@@ -225,7 +225,7 @@ def test_status_command(tmp_path, capsys, monkeypatch):
     path = tmp_path / "장부.csv"
     jl.Ledger(path).append({"stage": "smoke", "cost_usd": "0.25"})
     assert jl.main(["status", "--ledger", str(path)]) == 0
-    assert capsys.readouterr().out == "누계 $0.25·1회(비용 모름 0회) | 상한 $4.00·40회\n"
+    assert capsys.readouterr().out == "누계 $0.25·1회(비용 모름 0회) | 상한 $4.50·40회\n"
 
 
 # ── smoke(J1) — 가짜 OpenAI 로 흐름만 ──

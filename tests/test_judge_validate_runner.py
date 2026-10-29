@@ -154,11 +154,32 @@ def test_validation_root_defaults_next_to_repo(monkeypatch):
 # ── 회차 계획(순수) ──
 
 
-def test_plan_runs_defaults_are_the_reduced_v2():
+def test_plan_runs_defaults_are_the_v1_decision():
+    """V1 결정 1·2(2026-10-29): 재현성 3건 × 2회, 결함 3개 × 1회, sham 1 → 채점 10회 ≈ $1.5. 성적서 기본 3건."""
     d = R.DEFAULTS
-    assert (d["reproducibility"].items * d["reproducibility"].repeats, d["defects"].items * d["defects"].repeats,
-            d["sham"].items * d["sham"].repeats) == (9, 6, 3)
-    assert R.estimate_usd(18) == 2.7 and R.COST_PER_SCORING_USD == 0.15
+    assert [(d[b].items, d[b].repeats) for b in ("reproducibility", "defects", "sham")] == [(3, 2), (3, 1), (1, 1)]
+    assert R.plan_total_runs() == 10 and R.estimate_usd(10) == 1.5 and R.COST_PER_SCORING_USD == 0.15
+    assert R.DEFAULT_REPORTS == ("bc_strong", "digits_weak", "yeast_strong")
+    assert R.plan_summary() == ("V2 전체 계획: 재현성 3건 × 2회 + 결함 3개 × 1회 + sham 1 = 채점 10회 · 약 $1.50(1회 $0.15)")
+
+
+def test_verify_reproducibility_defaults_to_the_three_decided_reports(tmp_path, monkeypatch):
+    """verify 재현성에서 --reports 를 안 주면 V1 결정 2 의 3건을 봉인에서 읽는다(봉인은 합성 — 읽으려는 태그만 본다)."""
+    asked = []
+
+    def fake_sealed(folder, tags):
+        asked.append(list(tags))
+        raise jv.RunnerError("봉인 읽기 멈춤(시험)")
+
+    monkeypatch.setattr(jv, "sealed_bases", fake_sealed)
+    monkeypatch.setattr(jv, "verify_problems", lambda **kw: [])
+    with pytest.raises(jv.RunnerError, match="봉인 읽기 멈춤"):
+        jv.execute(jv.RunArgs(mode="verify", batch="reproducibility", ledger=tmp_path / "장부.csv", live=True, yes=True))
+    assert asked == [["bc_strong", "digits_weak", "yeast_strong"]]
+    with pytest.raises(jv.RunnerError, match="봉인 읽기 멈춤"):
+        jv.execute(jv.RunArgs(mode="verify", batch="reproducibility", ledger=tmp_path / "장부.csv", live=True, yes=True,
+                              reports=["bc_strong"]))
+    assert asked[-1] == ["bc_strong"]
 
 
 def test_plan_runs_and_pending_skip_only_same_mode_and_fingerprint():
@@ -201,11 +222,12 @@ def test_dev_reproducibility_writes_one_row_and_file_per_run_then_resume_skips(t
         assert body["order_seed"] == 7 and body["gate"] in ("pass", "blocked") and body["run_id"] == r["run_id"]
     plan = json.loads((tmp_path / "work" / "runs" / "plan-reproducibility-7.json").read_text(encoding="utf-8"))
     assert plan["seed"] == 7 and len(plan["order"]) == 2
-    assert lines[0].startswith("[dev] 검증 묶음 reproducibility: 계획 2회 · 끝남 0회(건너뜀) · 남음 2회 · 순서 시드 7")
+    assert lines[0] == "[dev] " + R.plan_summary()  # V2 전체 계획 안내가 먼저
+    assert lines[1].startswith("[dev] 검증 묶음 reproducibility: 계획 2회 · 끝남 0회(건너뜀) · 남음 2회 · 순서 시드 7")
     # 이어 하기: 같은 명령 → 끝난 회차는 건너뛰고 장부에 새 줄이 없다. 회차를 늘리면 늘린 만큼만.
     lines2, echo2 = _quiet()
     assert jv.execute(_dev(tmp_path), echo=echo2)["ran"] == 0
-    assert "끝남 2회(건너뜀) · 남음 0회" in lines2[0] and len(_rows(ledger)) == 2
+    assert "끝남 2회(건너뜀) · 남음 0회" in lines2[1] and len(_rows(ledger)) == 2
     assert jv.execute(_dev(tmp_path, repeats=3), echo=_quiet()[1])["ran"] == 1
     assert sorted(r["repeat"] for r in _rows(ledger)) == ["1", "2", "3"]
 
@@ -214,7 +236,7 @@ def test_start_without_yes_stops_before_any_run(tmp_path, vdir):
     lines, echo = _quiet()
     with pytest.raises(jv.RunnerError, match="--yes"):
         jv.execute(_dev(tmp_path, yes=False), echo=echo)
-    assert "예상 2회" in lines[1] and "누계 $0.00·0회" in lines[1]
+    assert "예상 2회" in lines[2] and "누계 $0.00·0회" in lines[2]
     assert _rows(tmp_path / "work" / "장부.csv") == []
 
 
@@ -336,6 +358,14 @@ def _plant_synthetic(defects: Path, bases):
     V.write_variant(defects, {"id": "D02", "base": "dev_binary", "axis": "coverage", "kind": "항목 지우기", "planted_by": "인용",
                               "slot": slot, "intent": "마지막 문장 지움(합성)", "before": gone, "after": "", "item_id": "분석-1"},
                     b.result, V.replace_sentence(text, len(V.sentences(text)) - 1, None))
+    ml = bases["dev_multilabel"]  # 사실 일치 결함(민서가 심음 — 7.2 역할) — V1 결정 3 의 결함 셋을 맞춘다
+    slot = "conclusion.narrative"
+    text = V.read_slot(ml.result, slot)
+    first = V.sentences(text)[0]
+    after = first[:-1] + " 양호하다."
+    V.write_variant(defects, {"id": "D03", "base": "dev_multilabel", "axis": "faithfulness", "kind": "정도 표현 극성 뒤집기",
+                              "planted_by": "민서", "slot": slot, "intent": "미달인데 양호(합성)", "before": first, "after": after},
+                    ml.result, V.replace_sentence(text, 0, after))
     m = bases["dev_multiclass"]
     slot = "conclusion.risks"
     text = V.read_slot(m.result, slot)
@@ -395,20 +425,21 @@ def _fill_sheets(folder: Path) -> dict:
     return {"overlap": len(overlap), "total": sum(len(r) for r in sheets.values())}
 
 
-PLAN2 = {"reproducibility": R.BatchDefault(items=3, repeats=2)}  # 한 바퀴의 계획: 개발 입력 3건 × 2회
+PLAN2 = {"reproducibility": R.BatchDefault(items=3, repeats=2)}  # 한 바퀴의 계획: 개발 입력 3건 × 2회(= V1 결정 기본값)
 
 
 def _full_loop(tmp_path) -> dict:
-    """개발 입력 3건 × 2회 재현성 → 결함 2(표기·필수 내용)·sham 1 → 추출 → 채점지 → 합성 채점. 경로들을 돌려준다."""
+    """새 기본 회차(V1 결정 1 — 회차·바탕 확인 인자를 주지 않는다): 개발 입력 3건 × 2회 재현성 → 결함 3(표기·필수 내용·사실
+    일치) × 1회·sham 1 → 추출 → 채점지 → 합성 채점. 경로들을 돌려준다."""
     import asyncio
 
     work = tmp_path / "work"
     bases = asyncio.run(jv.dev_bases(jv.DEV_INPUTS))
     _plant_synthetic(work / "결함", bases)
     _answers(work / "정답지", bases["dev_binary"])
-    common = dict(mode="dev", ledger=work / "장부.csv", out=work / "runs", yes=True, seed=11, defects=work / "결함", base_repeats=2)
-    ran = [jv.execute(jv.RunArgs(batch=b, reports=[], repeats=2 if b == "reproducibility" else None, **common),
-                      echo=_quiet()[1])["ran"] for b in ("reproducibility", "defects", "sham", "extraction")]
+    common = dict(mode="dev", ledger=work / "장부.csv", out=work / "runs", yes=True, seed=11, defects=work / "결함")
+    ran = [jv.execute(jv.RunArgs(batch=b, reports=[], **common), echo=_quiet()[1])["ran"]
+           for b in ("reproducibility", "defects", "sham", "extraction")]
     jv.cmd_sheets("dev", ledger=work / "장부.csv", out=work / "사람", n=16, overlap=2, seed=5, defects=work / "결함",
                   echo=_quiet()[1])
     filled = _fill_sheets(work / "사람")
@@ -433,9 +464,9 @@ def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_pat
     assert any(p == (work / "장부.csv").resolve() for p in opened)  # 감시가 실제로 잡는다(빈 감시는 늘 통과)
     assert [p for p in opened if p == vdir or vdir in p.parents] == []
 
-    assert loop["ran"] == [6, 2, 1, 0]
+    assert loop["ran"] == [6, 3, 1, 0]  # V1 결정 1 의 기본 회차 그대로(재현성 3×2, 결함 3×1, sham 1 — 채점 10회)
     rows = _rows(work / "장부.csv")
-    assert len(rows) == 9 and all(r["mode"] == "dev" and r["result_sha256"] for r in rows)
+    assert len(rows) == 10 and all(r["mode"] == "dev" and r["result_sha256"] for r in rows)
 
     ((per, kw),) = fake.named("reproducibility")
     assert sorted(per[0]) == ["dev_binary", "dev_multiclass", "dev_multilabel"] and kw == {"expected_runs": 2}
@@ -443,17 +474,28 @@ def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_pat
     det = {a[0]["key"].variant: (a[1], k) for a, k in fake.named("defect_detected")}
     assert det["D01"] == ("readability", {"sentence": V_after(work, "D01"), "item_id": None})
     assert det["D02"][0] == "coverage" and det["D02"][1]["item_id"] == "분석-1"
+    assert det["D03"] == ("faithfulness", {"sentence": V_after(work, "D03"), "item_id": None})
     ((by_defect,), _), = fake.named("detection_passed")
-    assert by_defect == {"D01": {"axis": "readability", "hits": [True]}, "D02": {"axis": "coverage", "hits": [True]}}
+    assert by_defect == {"D01": {"axis": "readability", "hits": [True]}, "D02": {"axis": "coverage", "hits": [True]},
+                         "D03": {"axis": "faithfulness", "hits": [True]}}
     indep = fake.named("independence_ok")
-    assert [(len(a[0]), len(a[1]), a[2]) for a, _ in indep] == [(2, 1, "readability"), (2, 1, "coverage")]
+    assert [(len(a[0]), len(a[1]), a[2]) for a, _ in indep] == [(2, 1, "readability"), (2, 1, "coverage"),
+                                                                  (2, 1, "faithfulness")]
     ((sham_args, _),) = fake.named("sham_ok")
     assert len(sham_args[0]) == 2 and sham_args[1][0]["key"].variant == "S01"
-    assert len(fake.named("gold_from_csv")) == 1 and len(fake.named("pred_from_extract")) == 2  # dev_binary 회차 2개
-    assert len(fake.named("match_claims")) == 2 and len(fake.named("runs_distribution")) == 1
-    assert fake.named("human_agreement_ok") and fake.named("cohen_kappa") and fake.named("gwet_ac1")
+    # dev_binary 회차 2개. 놓친 주장 "예" 줄이 있어(가짜 confirmed_additions) 보탠 정답지로 한 번 더 — V1 결정 10④
+    golds = fake.named("gold_from_csv")
+    assert len(golds) == 2 and len(fake.named("pred_from_extract")) == 2
+    assert golds[1][0][0] == [*golds[0][0][0], *FakeStats.RETURNS["confirmed_additions"]]  # 원 정답지 줄 + 보탠 줄
+    assert len(fake.named("match_claims")) == 4 and len(fake.named("runs_distribution")) == 2
+    ((hargs, hkw),) = fake.named("human_agreement_ok")
+    assert hkw == {"overlap_n": loop["overlap"]}  # 여유 = 한 문항(겹침 문항 수로 — V1 결정 7)
+    assert fake.named("cohen_kappa") and fake.named("gwet_ac1")
     assert result["detection"] == {"passed": True} and result["sham_passed"] and result["independence_passed"]
     assert result["extraction"]["pooled"] == {"recall": 1.0, "precision": 1.0, "n_pairs": 2, "n_gold": 2, "n_pred": 2}
+    assert result["extraction"]["pooled_with_additions"] == {"recall": 1.0, "precision": 1.0, "n_pairs": 2, "n_gold": 2,
+                                                             "n_pred": 2, "added": 1}
+    assert result["extraction"]["reports"]["dev_binary"]["with_additions"]["added"] == 1
     # 놓친 주장(Q12②) — 회차마다 match 결과를 missed_rows 에, 정답지 폴더의 판정표를 confirmed_additions 에 넘긴다
     assert [a for a, _ in fake.named("missed_rows")] == [({"pairs": [1]},), ({"pairs": [1]},)]
     ((judged_rows,), _), = fake.named("confirmed_additions")
@@ -465,7 +507,8 @@ def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_pat
     assert _rows(work / "결과" / "보탤주장_dev_binary.csv") == [{"문장번호": "3", "종류": "degree", "인용 구절": "몰려 있다",
                                                               "메모": "보탬"}]
     saved = json.loads((work / "결과" / "검증결과.json").read_text(encoding="utf-8"))
-    assert saved["fingerprint"] == criteria.fingerprint() and saved["runs"] == 9
+    assert saved["fingerprint"] == criteria.fingerprint() and saved["runs"] == 10
+    assert "pooled" in saved["extraction"] and "pooled_with_additions" in saved["extraction"]  # 보태기 전·후 둘 다
 
 
 def V_after(work: Path, vid: str) -> str:
@@ -480,16 +523,20 @@ def test_one_full_dev_loop_with_real_stats_gives_real_numbers(tmp_path, vdir):
                       echo=_quiet()[1], plan=PLAN2)
     repro = r["reproducibility"]
     assert set(repro["axes"]) == {"faithfulness", "coverage", "consistency", "readability"} and repro["n_runs"] == 2
-    for axis, a in repro["axes"].items():  # 가짜 심판은 회차마다 같은 답 — ICC 대신 분산 0 표시(Q10)이거나 점수 없음
-        assert a["zero_variance"] or a["dropped"], (axis, a)
-        assert a["passed"] == (a["zero_variance"] and not a["dropped"])
+    for axis, a in repro["axes"].items():  # 가짜 심판은 회차마다 같은 답 — 분산 0 표시(Q10)이거나 해당 없음(분모 0)
+        assert a["zero_variance"] or a["dropped"] or a["not_applicable"], (axis, a)
+        if a["not_applicable"] and a["n_targets"] < 2:
+            assert a["passed"] is None  # 해당 없음을 빼고 남은 대상이 2개 미만 — 계산 불가(V1 결정 5)
+        else:
+            assert a["passed"] == (a["zero_variance"] and not a["dropped"])
     assert repro["gates_passed"] is True and r["gates_passed"] is True
     assert all(g["gates"] == ["pass", "pass"] for g in repro["gates"].values())
     assert r["base_gate_pass"] == {"dev_binary": True, "dev_multiclass": True, "dev_multilabel": True}
     assert r["defects"]["D01"]["hits"] == [True]  # 'worse' 를 표기 코드 규칙이 그 문장에서 잡는다
     assert isinstance(r["defects"]["D02"]["hits"][0], bool)
     assert r["detection"]["defects"]["D01"] == {"axis": "readability", "rate": 1.0, "ok": True}
-    assert set(r["detection"]) >= {"gate_axes_ok", "others_ok", "passed"}
+    assert r["detection"]["rule"] == "all" and isinstance(r["detection"]["passed"], bool)  # V1 결정 4 — 결함 모두
+    assert r["detection"]["passed"] == all(all(d["hits"]) for d in r["defects"].values())
     ind = r["defects"]["D01"]["independence"]
     assert set(ind["axes"]) == {"faithfulness", "coverage", "consistency"} and isinstance(ind["ok"], bool)
     sham = r["sham"]["S01"]["sham"]
@@ -504,7 +551,7 @@ def test_one_full_dev_loop_with_real_stats_gives_real_numbers(tmp_path, vdir):
     assert (agr["blank"], agr["system_human"]["n"], agr["human_human"]["n"]) == (1, n, k)
     assert agr["system_human"]["rate"] == pytest.approx((n - 1) / n)
     assert agr["human_human"]["rate"] == pytest.approx((k - 1) / k)
-    assert agr["passed"] is ((n - 1) / n >= (k - 1) / k - 0.05)
+    assert agr["passed"] is ((n - 1) / n >= (k - 1) / k - 1 / k)  # 여유 = 한 문항(V1 결정 7)
     assert agr["system_human"]["kappa"] is not None or agr["system_human"]["ac1"] is not None
 
 
@@ -514,17 +561,18 @@ def test_blind_reading_bundle_and_effectiveness(tmp_path, vdir):
     work = loop["work"]
     lines: list[str] = []
     got = jv.cmd_reading("dev", out=work / "사람" / "읽기", seed=4, defects=work / "결함", echo=lines.append)
-    # 바탕 성적서 2건(dev_binary·dev_multiclass) — 사람마다 2문서. D01·D02(인용 님이 심음, dev_binary)는 민서만 읽을 수 있고
-    # 민서는 dev_binary 를 한 판본만 받으므로 둘 중 하나는 자리가 없다. S01(민서가 심음, dev_multiclass)은 인용 님에게.
-    assert got["docs"] == {"인용": 2, "민서": 2} and "시드 4" in lines[0]
+    # 바탕 성적서 3건(dev_binary·dev_multiclass·dev_multilabel) — 사람마다 3문서. D01·D02(인용 님이 심음, dev_binary)는 민서만
+    # 읽을 수 있고 민서는 dev_binary 를 한 판본만 받으므로 둘 중 하나는 자리가 없다. S01(민서가 심음, dev_multiclass)과
+    # D03(민서가 심음, dev_multilabel)은 인용 님에게.
+    assert got["docs"] == {"인용": 3, "민서": 3} and "시드 4" in lines[0]
     assert len(got["unplaced"]) == 1 and got["unplaced"][0] in ("D01", "D02") and "자리가 없는 결함본" in lines[1]
     key = _rows(work / "사람" / "읽기" / "열쇠" / "읽기_열쇠.csv")
     placed = ({"D01", "D02"} - set(got["unplaced"])).pop()
     assert {(k["읽는_사람"], k["성적서"], k["변형"]) for k in key} == {
-        ("민서", "dev_binary", placed), ("민서", "dev_multiclass", "base"),
-        ("인용", "dev_binary", "base"), ("인용", "dev_multiclass", "S01")}
+        ("민서", "dev_binary", placed), ("민서", "dev_multiclass", "base"), ("민서", "dev_multilabel", "base"),
+        ("인용", "dev_binary", "base"), ("인용", "dev_multiclass", "S01"), ("인용", "dev_multilabel", "D03")}
     docs = sorted(p.name for p in (work / "사람" / "읽기" / "민서" / "문서").iterdir())
-    assert len(docs) == 2 and not any("D0" in d or "base" in d for d in docs)
+    assert len(docs) == 3 and not any("D0" in d or "base" in d for d in docs)
     sheet = work / "사람" / "읽기" / "민서" / "읽기표.csv"
     head, rows = _read_keyed(sheet)
     doc_of = {k["변형"]: k["문서"] for k in key if k["읽는_사람"] == "민서"}
@@ -536,7 +584,7 @@ def test_blind_reading_bundle_and_effectiveness(tmp_path, vdir):
     _write_keyed(sheet, head, rows)
     r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", human=work / "사람", echo=_quiet()[1], plan=PLAN2)
     eff = r["effectiveness"]
-    assert (eff["defects"], eff["human_read"], eff["human_found"], eff["human_false_alarms"]) == (2, 1, 0, 1)
+    assert (eff["defects"], eff["human_read"], eff["human_found"], eff["human_false_alarms"]) == (3, 2, 0, 1)
     assert eff["system_found"] == sum(any(d["hits"]) for d in r["defects"].values()) >= 1
     for row in rows:  # 이번엔 심은 문장을 그대로 옮김 → 찾음
         if row["문서"] == doc_of[placed]:
@@ -601,6 +649,15 @@ def test_report_missed_claims_with_real_extraction(tmp_path):
     r = jv.report(runs, api, human_claims={"T1": (gold_rows, _SENT)}, human_missed={"T1": judged})
     added = r["missed_claims"]["T1"]["additions"]
     assert [(a["문장번호"], a["인용 구절"], a["added"]) for a in added] == [(2, "몰려 있다", True)]
+    # V1 결정 10④ — 보탠 정답지로 다시 잰 값(뒤)과 원 정답지 값(앞)이 둘 다. 정밀도가 오른다(놓친 주장이 진짜였다).
+    ext = r["extraction"]
+    assert ext["pooled"] == {"recall": 1.0, "precision": 2 / 5, "n_pairs": 2, "n_gold": 2, "n_pred": 5}
+    assert ext["pooled_with_additions"] == {"recall": 1.0, "precision": 4 / 5, "n_pairs": 4, "n_gold": 4, "n_pred": 5, "added": 1}
+    after = ext["reports"]["T1"]["with_additions"]
+    assert after["added"] == 1 and [m["n_gold"] for m in after["runs"]] == [2, 2]
+    assert [m["n_gold"] for m in ext["reports"]["T1"]["runs"]] == [1, 1]  # 앞 값은 원 정답지 그대로
+    assert gold_rows == [{"문장번호": "1", "종류": "number", "인용 구절": "0.912", "메모": ""}]  # 원 정답지 줄은 고치지 않는다
+    assert after["distribution"]["precision"]["max"] == 1.0
     paths = jv.write_missed(tmp_path, r["missed_claims"])
     assert [p.name for p in paths] == ["놓친주장_T1.csv", "보탤주장_T1.csv"]
     assert [row["인용 구절"] for row in _rows(tmp_path / "보탤주장_T1.csv")] == ["몰려 있다"]
@@ -608,6 +665,30 @@ def test_report_missed_claims_with_real_extraction(tmp_path):
     judged[1]["진짜 주장인가(예/아니오)"] = "예"  # 문장번호 없는 줄을 "예" — 실행기는 멈춤 사유로
     with pytest.raises(jv.RunnerError, match="T1 놓친 주장 판정표"):
         jv.report(runs, api, human_claims={"T1": (gold_rows, _SENT)}, human_missed={"T1": judged})
+
+
+def test_report_detection_needs_every_planned_defect():
+    """V1 결정 4 는 '결함 3개 모두' — 계획보다 적게 돈 결함 묶음은 통과로 세지 않는다(계산 불가). 계획만큼이면 통계 판정 그대로."""
+    api = jv.load_stats_api()
+    base = [_run("reproducibility", t, "base", i) for t in ("a", "b", "c") for i in (1, 2)]
+    for r in base:
+        r["scorecard"] = {"faithfulness": {"checked": 1, "matched": 1}, "coverage": {"applicable": 1, "described": 1},
+                          "consistency": {"contradictions": 0}, "readability": {"violations": 0}}
+    hit = {"faithfulness": {"verdicts": [{"verdict": "violation", "quote": "심은 문장"}]}}
+
+    def defect(vid, tag):
+        r = _run("defects", tag, vid, 1, meta={"axis": "faithfulness", "after": "심은 문장"})
+        r["record"], r["scorecard"] = hit, base[0]["scorecard"]
+        return r
+
+    two = jv.report([*base, defect("D01", "a"), defect("D02", "b")], api)
+    assert two["detection"]["passed"] is None and "덜 돎" in two["detection"]["note"]
+    assert two["verdicts"]["detection"] == "계산 불가"
+    three = jv.report([*base, defect("D01", "a"), defect("D02", "b"), defect("D03", "c")], api)
+    assert three["detection"]["passed"] is True and three["verdicts"]["detection"] == "통과"
+    miss = defect("D03", "c")
+    miss["record"] = {"faithfulness": {"verdicts": []}}
+    assert jv.report([*base, defect("D01", "a"), defect("D02", "b"), miss], api)["verdicts"]["detection"] == "미달"
 
 
 def test_stats_api_names_exist_in_real_modules():
@@ -625,19 +706,19 @@ def test_resume_reruns_failed_scoring_and_keeps_failed_cost(tmp_path, vdir):
     sys.path.insert(0, str(ROOT / "scripts"))
     from dev_fake_llm_server import FakeOpenAI
 
-    args = _dev(tmp_path, reports=[], repeats=None)  # 기본 회차(줄인 V2 — 3건 × 3회)
+    args = _dev(tmp_path, reports=[], repeats=None)  # 기본 회차(V1 결정 1 — 3건 × 2회)
     first = jv.execute(args, client=FakeOpenAI("error"), echo=_quiet()[1])
-    assert first["ran"] == 9 and set(first["gates"]) == {None}
+    assert first["ran"] == 6 and set(first["gates"]) == {None}
     ledger = tmp_path / "work" / "장부.csv"
     failed = _rows(ledger)
-    assert len(failed) == 9 and all(r["gate"] == "" and r["error"] and r["result_file"] for r in failed)
+    assert len(failed) == 6 and all(r["gate"] == "" and r["error"] and r["result_file"] for r in failed)
     second = jv.execute(args, client=FakeOpenAI("pass"), echo=_quiet()[1])
-    assert second["ran"] == 9 and set(second["gates"]) <= {"pass", "blocked"}
+    assert second["ran"] == 6 and set(second["gates"]) <= {"pass", "blocked"}
     rows = _rows(ledger)
-    assert len(rows) == 18 and rows[:9] == failed  # 실패 줄은 지우지 않는다(비용 누계)
+    assert len(rows) == 12 and rows[:6] == failed  # 실패 줄은 지우지 않는다(비용 누계)
     assert jv.execute(args, client=FakeOpenAI("error"), echo=_quiet()[1])["ran"] == 0  # 이제는 끝났다
     runs = jv.collect_runs(rows, fingerprint=criteria.fingerprint(), mode="dev", root=None)
-    assert len(runs) == 9 and all(r["gate"] in ("pass", "blocked") for r in runs)
+    assert len(runs) == 6 and all(r["gate"] in ("pass", "blocked") for r in runs)
 
 
 def test_collect_runs_keeps_last_success_over_later_failure(tmp_path, vdir):
@@ -668,7 +749,7 @@ def test_report_expected_runs_comes_from_plan_not_observed():
     full = jv.report(runs, api, plan={"reproducibility": R.BatchDefault(3, 2)})
     assert fake.named("reproducibility")[0][1] == {"expected_runs": 2} and full["gates_passed"] is True
     fake.calls.clear()
-    short = jv.report(runs, api)  # 기본 계획 3회 — 2회만 돌았다
+    short = jv.report([r for r in runs if r["key"].repeat == 1], api)  # 기본 계획 2회(V1 결정 1) — 1회만 돌았다
     assert fake.named("reproducibility") == [] and short["reproducibility"]["verdict"] == "계산 불가"
     assert short["gates_passed"] is None and short["verdicts"]["gates_passed"] == "계산 불가"
     assert "덜 돎" in short["reproducibility"]["note"]
@@ -719,11 +800,11 @@ def test_defects_batch_refuses_before_reproducibility_has_run(tmp_path, vdir):
     with pytest.raises(jv.RunnerError, match="바탕 성적서가 준비되지 않아"):
         jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1), echo=_quiet()[1])
     assert not (tmp_path / "work" / "runs").exists()
-    jv.execute(_dev(tmp_path, repeats=2), echo=_quiet()[1])  # dev_binary 2회 — 계획(기본 3회)보다 적다
-    with pytest.raises(jv.RunnerError, match="2/3회만"):
+    jv.execute(_dev(tmp_path, reports=["dev_binary", "dev_multilabel"], repeats=1), echo=_quiet()[1])  # 계획(기본 2회)보다 적다
+    with pytest.raises(jv.RunnerError, match="1/2회만"):
         jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1), echo=_quiet()[1])
-    assert jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1, base_repeats=2),
-                      echo=_quiet()[1])["ran"] == 2
+    assert jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1, base_repeats=1),
+                      echo=_quiet()[1])["ran"] == 3
 
 
 # ── J10 ③ dev 허용 목록·철자 우회(P1-3) ──

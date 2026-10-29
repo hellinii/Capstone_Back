@@ -6,8 +6,6 @@
 """
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
 
@@ -233,25 +231,41 @@ def test_touches_truncated_quote():
     assert S.touches("", PLANTED) is False
 
 
-def test_detection_passed():
+def test_detection_passed_original_7_6_rule():
+    """설계 7.6 원래 기준 — 설정값 rule="7.6" 으로 남겨 둔다."""
     full = {"F1": {"axis": "F", "hits": [True] * 3}, "C1": {"axis": "Cons", "hits": [True] * 3}}
     others = {f"V{i}": {"axis": "Cov", "hits": [True, True, False]} for i in range(6)}
-    res = S.detection_passed(full | others)
-    assert res["passed"] and res["others_needed"] == 5
+    res = S.detection_passed(full | others, rule="7.6")
+    assert res["passed"] and res["others_needed"] == 5 and res["rule"] == "7.6"
     one_miss = full | {"F1": {"axis": "F", "hits": [True, True, False]}} | others
-    assert S.detection_passed(one_miss)["gate_axes_ok"] is False
+    assert S.detection_passed(one_miss, rule="7.6")["gate_axes_ok"] is False
     weak = dict(others, V0={"axis": "R", "hits": [True, False, False]}, V1={"axis": "R", "hits": [False] * 3})
-    assert S.detection_passed(full | weak)["others_ok"] is False  # 6개 중 4개만
+    assert S.detection_passed(full | weak, rule="7.6")["others_ok"] is False  # 6개 중 4개만
     weak1 = dict(others, V0={"axis": "R", "hits": [True, False, False]})
-    assert S.detection_passed(full | weak1)["others_ok"] is True  # 6개 중 5개
-    # 줄인 V2(결함마다 1회, 필수 내용·표기 3개): ceil(3 × 5/6) = 3 → 모두
+    assert S.detection_passed(full | weak1, rule="7.6")["others_ok"] is True  # 6개 중 5개
     small = {"V1": {"axis": "Cov", "hits": [True]}, "V2": {"axis": "R", "hits": [True]}, "V3": {"axis": "R", "hits": [False]}}
-    assert S.detection_passed(small)["others_needed"] == 3 and not S.detection_passed(small)["passed"]
-    assert S.detection_passed(small, other_min_defect_share=2 / 3)["passed"]
+    assert S.detection_passed(small, rule="7.6")["others_needed"] == 3 and not S.detection_passed(small, rule="7.6")["passed"]
+    assert S.detection_passed(small, rule="7.6", other_min_defect_share=2 / 3)["passed"]
     with pytest.raises(ValueError):
         S.detection_passed({})
     with pytest.raises(ValueError):
         S.detection_passed({"F1": {"axis": "F", "hits": []}})
+    with pytest.raises(ValueError):
+        S.detection_passed(full, rule="most")
+
+
+def test_detection_passed_default_is_all_defects_every_run():
+    """V1 결정 4(2026-10-29): 결함 3개 모두 1회에 탐지해야 통과 — 축 구분 없음. 7.6 이면 통과할 묶음도 하나 놓치면 미달."""
+    assert S.DETECTION_RULE == "all"
+    three = {"D1": {"axis": "F", "hits": [True]}, "D2": {"axis": "Cons", "hits": [True]}, "D3": {"axis": "Cov", "hits": [True]}}
+    res = S.detection_passed(three)
+    assert res["passed"] is True and res["rule"] == "all" and all(d["ok"] for d in res["defects"].values())
+    miss_cov = three | {"D3": {"axis": "Cov", "hits": [False]}}
+    assert S.detection_passed(miss_cov)["passed"] is False  # 비게이트 축 하나 놓쳐도 미달
+    assert S.detection_passed(miss_cov)["defects"]["D3"]["ok"] is False
+    # 7.6 원래 기준이면 통과하는 묶음(게이트 축 모두, 그 밖 6개 중 5개가 3/5 이상) — 기본 기준은 모든 회차라 미달
+    many = {"F": {"axis": "F", "hits": [True] * 5}} | {f"V{i}": {"axis": "R", "hits": [True] * 4 + [False]} for i in range(6)}
+    assert S.detection_passed(many, rule="7.6")["passed"] is True and S.detection_passed(many)["passed"] is False
 
 
 # ---------------------------------------------------------------- 독립성·sham
@@ -264,8 +278,9 @@ def test_independence_uses_base_spread_and_skips_defect_axis():
     assert res["axes"]["coverage"]["spread"] == pytest.approx(0.05)
     outside = [scores(f=0.60, cov=0.70)]
     assert S.independence_ok(base, outside, "F")["ok"] is False
-    # 코드로만 정해지는 점수는 흔들림 폭 0 → 작은 변화도 실패(Q11 이 미리 알린 성질)
-    assert S.independence_ok([scores()] * 3, [scores(r=1.0)], "coverage")["ok"] is False
+    # 코드로만 정해지는 점수는 흔들림 폭 0 — 최소 여유(건수 1건)까지는 통과, 넘으면 실패(V1 결정 6)
+    assert S.independence_ok([scores()] * 3, [scores(r=1.0)], "coverage")["ok"] is True
+    assert S.independence_ok([scores()] * 3, [scores(r=2.0)], "coverage")["ok"] is False
 
 
 def test_independence_mode_mean_vs_first():
@@ -302,10 +317,21 @@ def test_agreement_rate_and_human_rule():
         S.agreement_rate([], [])
     with pytest.raises(ValueError):
         S.agreement_rate(["a"], ["a", "b"])
-    assert S.human_agreement_ok(0.80, 0.85) is True  # 정확히 5%p 낮음 → 통과
-    assert S.human_agreement_ok(0.79, 0.85) is False
+    assert S.human_agreement_ok(0.80, 0.85, margin=0.05) is True  # 정확히 여유만큼 낮음 → 통과
+    assert S.human_agreement_ok(0.79, 0.85, margin=0.05) is False
     assert S.human_agreement_ok(0.79, 0.85, margin=0.10) is True
-    assert math.isclose(S.HUMAN_MARGIN, 0.05)
+
+
+def test_human_agreement_margin_is_one_overlap_item():
+    """V1 결정 7(2026-10-29): 사람끼리보다 '한 문항' 넘게 낮지 않음 — 겹침 10문항이면 10%p, 20문항이면 5%p."""
+    assert S.HUMAN_MARGIN_ITEMS == 1 and S.human_margin(10) == pytest.approx(0.10) and S.human_margin(20) == pytest.approx(0.05)
+    assert S.human_agreement_ok(0.80, 0.90, overlap_n=10) is True  # 정확히 한 문항(10%p) 낮음
+    assert S.human_agreement_ok(0.79, 0.90, overlap_n=10) is False
+    assert S.human_agreement_ok(0.80, 0.90, overlap_n=20) is False  # 겹침이 늘면 한 문항 = 5%p
+    assert S.human_agreement_ok(0.80, 0.90, overlap_n=10, margin=0.0) is False  # margin 을 주면 그것
+    for bad in ({}, {"overlap_n": 0}):
+        with pytest.raises(ValueError):
+            S.human_agreement_ok(0.8, 0.9, **bad)
 
 
 # ---------------------------------------------------------------- 일치도 계수(agreement.py, 계획 17-7)
@@ -367,13 +393,66 @@ def test_kappa_ac1_edges():
         A.cohen_kappa(["y"], ["y", "n"])
 
 
-def test_zero_denominator_is_noted_apart_from_failed_runs():
-    """사실 일치 checked 0(주장 없음)이 모든 회차면 '해당 없음 — 결정 대기'로 적는다. 판정은 그대로 미달(닫힌 쪽, J10 인계)."""
-    def card(checked):
-        return {"gate": "pass", "scorecard": {"faithfulness": {"checked": checked, "matched": checked},
-                                              "coverage": {"applicable": 1, "described": 1},
-                                              "consistency": {"contradictions": 0}, "readability": {"violations": 0}}}
-    runs = {"A": [card(0), card(0)], "B": [card(2), card(2)], "C": [card(0), {"gate": None}]}
+def _card(checked, applicable=1, matched=None):
+    return {"gate": "pass", "scorecard": {"faithfulness": {"checked": checked, "matched": checked if matched is None else matched},
+                                          "coverage": {"applicable": applicable, "described": applicable},
+                                          "consistency": {"contradictions": 0}, "readability": {"violations": 0}}}
+
+
+def test_zero_denominator_every_run_is_not_applicable_not_failed():
+    """V1 결정 5(2026-10-29): 분모 0 이 그 성적서의 모든 회차면 그 축에서 '해당 없음'으로 빼고 미달 아님.
+    실패 회차가 섞이면(C) 미달 그대로."""
+    runs = {"A": [_card(0), _card(0)], "B": [_card(2), _card(2)], "C": [_card(0), {"gate": None}], "D": [_card(3), _card(3)]}
     f = S.reproducibility(runs)["axes"]["faithfulness"]
-    assert f["dropped"] == ["A", "C"] and f["not_applicable"] == ["A"] and f["passed"] is False
-    assert "분모 0(해당 없음 — 결정 대기): A" in f["note"]
+    assert f["dropped"] == ["C"] and f["not_applicable"] == ["A"] and f["passed"] is False
+    assert "해당 없음(모든 회차 분모 0 — 축에서 뺌): A" in f["note"]
+    ok = S.reproducibility({k: v for k, v in runs.items() if k != "C"})["axes"]["faithfulness"]
+    assert ok["not_applicable"] == ["A"] and ok["dropped"] == [] and ok["n_targets"] == 2
+    assert ok["zero_variance"] and ok["passed"] is True  # 남은 B·D 2건 × 2회 — 분산 0 규칙 그대로
+    cov = S.reproducibility({"A": [_card(1, 0), _card(1, 0)], "B": [_card(1), _card(1)], "D": [_card(1), _card(1)]})
+    assert cov["axes"]["coverage"]["not_applicable"] == ["A"] and cov["axes"]["coverage"]["passed"] is True  # 필수 내용도
+
+
+def test_zero_denominator_mixed_across_runs_fails():
+    """회차마다 다르면(어떤 회차는 0, 어떤 회차는 아님 — 추출이 흔들림) 해당 없음이 아니라 미달."""
+    runs = {"A": [_card(0), _card(2)], "B": [_card(2), _card(2)], "D": [_card(3), _card(3)]}
+    f = S.reproducibility(runs)["axes"]["faithfulness"]
+    assert f["dropped"] == ["A"] and f["not_applicable"] == [] and f["passed"] is False
+
+
+def test_zero_denominator_leaving_fewer_than_two_targets_is_uncomputable():
+    """빼고 남은 대상이 2개 미만이면 그 축은 계산 불가(passed None) — 통과도 미달도 아니다. 모두 빠지면 빈 입력도 계산 불가.
+    묶음 판정(axes_passed)은 다른 축이 모두 통과여도 계산 불가가 된다."""
+    one_left = S.reproducibility({"A": [_card(0), _card(0)], "B": [_card(0), _card(0)], "C": [_card(2), _card(2)]})
+    f = one_left["axes"]["faithfulness"]
+    assert f["not_applicable"] == ["A", "B"] and f["n_targets"] == 1 and f["passed"] is None
+    assert one_left["axes_passed"] is None and all(one_left["axes"][a]["passed"] for a in S.AXES if a != "faithfulness")
+    none_left = S.reproducibility({"A": [_card(0), _card(0)], "B": [_card(0), _card(0)]})["axes"]["faithfulness"]
+    assert none_left["n_targets"] == 0 and none_left["passed"] is None
+
+
+def test_independence_and_sham_minimum_margin():
+    """V1 결정 6(2026-10-29): 여유 = max(바탕 흔들림 폭, 최소 여유) — 건수 축 1건, 비율 축 0.05. 상수 한 곳(MIN_MARGIN)."""
+    assert S.MIN_MARGIN == {"faithfulness": 0.05, "coverage": 0.05, "consistency": 1.0, "readability": 1.0}
+    base = [scores(f=0.90, cov=0.80), scores(f=0.90, cov=0.80)]  # 흔들림 폭 0
+    assert S.sham_ok(base, [scores(f=0.95, cov=0.75)])["ok"] is True  # 비율 0.05 까지
+    assert S.sham_ok(base, [scores(f=0.96, cov=0.80)])["ok"] is False
+    assert S.sham_ok(base, [scores(f=0.90, cov=0.80, cons=1.0, r=1.0)])["ok"] is True  # 건수 1건까지
+    assert S.sham_ok(base, [scores(f=0.90, cov=0.80, cons=2.0)])["ok"] is False
+    got = S.sham_ok(base, [scores(f=0.90, cov=0.80)])["axes"]
+    assert got["faithfulness"]["margin"] == 0.05 and got["consistency"]["margin"] == 1.0
+    wide = [scores(f=0.70, cov=0.80), scores(f=0.90, cov=0.80)]  # 흔들림 폭 0.2 > 최소 여유 → 폭이 여유
+    res = S.independence_ok(wide, [scores(f=0.99, cov=0.80)], "consistency")
+    assert res["axes"]["faithfulness"]["margin"] == pytest.approx(0.2) and res["ok"] is True
+    assert S.independence_ok(wide, [scores(f=1.0, cov=0.86)], "faithfulness")["ok"] is False  # 결함 아닌 축 0.06
+    assert S.sham_ok(base, [scores(f=0.96, cov=0.80)], min_margin={a: 0.1 for a in S.AXES})["ok"] is True  # 값은 인자로도
+    assert S.margin_of("readability", 0.0) == 1.0 and S.margin_of("coverage", 0.3) == 0.3
+
+
+def test_independence_and_sham_zero_denominator_every_run_is_not_applicable():
+    """바탕·비교 모든 회차가 분모 0 이면 그 축은 해당 없음(ok). 한쪽만 0 이면 점수 없음 → 미달."""
+    base = [_card(0), _card(0)]
+    assert S.sham_ok(base, [_card(0)])["axes"]["faithfulness"]["ok"] is True
+    assert S.sham_ok(base, [_card(0)])["ok"] is True
+    assert S.sham_ok(base, [_card(2)])["axes"]["faithfulness"]["ok"] is False
+    assert S.independence_ok([_card(2), _card(2)], [_card(0)], "coverage")["ok"] is False

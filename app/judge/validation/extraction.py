@@ -5,10 +5,13 @@
 짝이 될 수 있는 조건(다섯 — 결과를 보기 전에 정한 규칙, 카-4):
   ① 같은 칸(slot)
   ② 원문 위치 겹침: 같은 문장 번호. 두 쪽 모두 문장 안 글자 범위를 알면 그 범위도 겹쳐야 한다
-  ③ 숫자면 값 같음: 어느 한쪽이 number 주장이면 둘 다 number 이고 글에서 읽은 숫자 값이 하나 이상 같다
-  ④ 대상 같음: 두 쪽 모두 target 이 있으면 같아야 한다(지금 claims.csv 에는 대상 열이 없어 비교하지 않는다)
+  ③ 숫자·비교는 종류 같음(V1 결정 10③): 어느 한쪽이 number 나 comparison 주장이면 두 쪽 종류가 같아야 한다.
+     number 는 더해 글에서 읽은 숫자 값이 하나 이상 같아야 한다. 이름·정도·추론끼리는 종류가 달라도 짝이 될 수 있다(덧점만 다름)
+  ④ 대상 같음: 두 쪽 모두 target 이 있으면 같아야 한다. 정답지 claims.csv 에는 대상 열을 두지 않는다(V1 결정 10②) — 정답 쪽
+     target 이 늘 빈칸이라 이 조건은 돌지 않고, 짝은 ①②③⑤ 로만 정해진다
   ⑤ 일대일: 짝 수가 가장 많은 짝짓기(헝가리안, scipy linear_sum_assignment). 짝 수가 같으면 같은 종류·더 많이 겹침을 고른다
-재현율 = 짝 수 / 정답지 주장 수, 정밀도 = 짝 수 / 추출 주장 수.
+재현율 = 짝 수 / 정답지 주장 수, 정밀도 = 짝 수 / 추출 주장 수. 사람이 "예"로 판정한 놓친 주장을 보탠 정답지로 다시 잰 값도
+report 가 함께 낸다(V1 결정 10④ — 원 정답지 파일은 그대로).
 0·1·2번 시점 = 첫 추출(round 0)까지 / 자기 점검 1번(round ≤ 1)까지 / 2번(round ≤ 2)까지의 누적 주장(extract.py 의 round).
 시스템만 찾은 주장은 사람 판정용 표(MISSED_COLUMNS)로 내보낸다(Q12②) — "예" 로 판정한 것만 보탠 목록으로 정답지에 더한다.
 
@@ -29,6 +32,7 @@ from app.judge.validation.annotation import CLAIM_COLUMNS, SENTENCE_COLUMNS
 from app.judge.validation.stats import touches
 
 ROUNDS = (0, 1, 2)
+STRICT_KINDS = ("number", "comparison")  # ③ 이 종류는 같은 종류끼리만 짝(V1 결정 10③)
 MISSED_COLUMNS = ("번호", "문장번호", "칸", "종류", "인용 구절", "진짜 주장인가(예/아니오)", "메모")
 ADDED_MEMO = "시스템 추출에서 보탬(Q12②)"
 _SPACE = re.compile(r"\s+")
@@ -129,8 +133,10 @@ def compatible(g: dict, p: dict, *, same_kind: bool = False) -> bool:
         return False
     if _overlap(g, p) == 0.0:  # ② 글자 범위를 알면 겹쳐야
         return False
-    if g.get("kind") == "number" or p.get("kind") == "number":  # ③ 숫자면 값 같음
-        if g.get("kind") != p.get("kind") or not (_values(g) & _values(p)):
+    if g.get("kind") in STRICT_KINDS or p.get("kind") in STRICT_KINDS:  # ③ 숫자·비교는 종류 같음
+        if g.get("kind") != p.get("kind"):
+            return False
+        if g.get("kind") == "number" and not (_values(g) & _values(p)):  # 숫자는 값도 같음
             return False
     if g.get("target") and p.get("target") and g["target"] != p["target"]:  # ④ 대상 같음
         return False

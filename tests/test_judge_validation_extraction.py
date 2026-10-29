@@ -99,6 +99,27 @@ def test_condition_number_value_and_kind():
     assert X.match_claims(gold((1, "comparison", "Recall 0.984")), preds(pred("number", "0.984")))["pairs"] == []
 
 
+def test_condition_comparison_kind_must_match():
+    """V1 결정 10③(2026-10-29): 숫자·비교 주장은 종류가 같아야 짝. 이름·정도·추론끼리는 종류가 달라도 짝(덧점만 다름)."""
+    g = gold((1, "comparison", "Recall이 0.015 높다"))
+    assert len(X.match_claims(g, preds(pred("comparison", "Recall이 0.015 높다")))["pairs"]) == 1
+    assert X.match_claims(g, preds(pred("degree", "Recall이 0.015 높다")))["pairs"] == []
+    assert X.match_claims(gold((2, "degree", "몰려 있다")), preds(pred("comparison", "몰려 있다")))["pairs"] == []
+    assert len(X.match_claims(gold((2, "degree", "몰려 있다")), preds(pred("name", "몰려 있다")))["pairs"]) == 1
+    assert X.STRICT_KINDS == ("number", "comparison")
+
+
+def test_gold_has_no_target_column_so_target_condition_never_runs():
+    """V1 결정 10②: 정답지 claims.csv 에 '대상' 열이 없다 — 정답 쪽 target 은 늘 빈칸이라 추출 쪽 target 이 무엇이든
+    조건 ④는 돌지 않는다(짝은 칸·문장 겹침·숫자 값·종류·일대일로만)."""
+    assert "대상" not in CLAIM_COLUMNS
+    g = gold((1, "number", "0.969"))
+    assert g[0]["target"] == ""
+    p = preds(pred("number", "0.969"))
+    p[0]["target"] = "recall"
+    assert len(X.match_claims(g, p)["pairs"]) == 1
+
+
 def test_condition_target():
     g = gold((1, "number", "0.969"))
     p = preds(pred("number", "0.969"))

@@ -1,8 +1,9 @@
 """app/judge/validation/runs.py — 검증 실행(V2)의 회차 계획·이어 하기·순서 섞기(계획 17-3, 설계 7.2). 순수 함수.
 
-묶음 넷과 기본 회차는 줄인 V2 안(민서 결정 2026-10-29: 재현성 3건 × 3회 = 9, 결함 6개 × 1회 = 6, sham 3 → 채점 18회).
-정확한 회차는 V1 끝에 확정한다 — 실행기 인자로 바꿀 수 있다. 추출(재현율·정밀도) 묶음은 채점을 따로 부르지 않는다:
-재현성 회차의 채점 기록에 전처리(주장 추출) 결과가 들어 있어 그것을 정답지와 짝짓는다(같은 3건 — Q9 답).
+묶음 넷과 기본 회차는 V1 결정 1·2(민서 2026-10-29): 재현성 3건(bc_strong·digits_weak·yeast_strong) × 2회 = 6,
+결함 3개 × 1회 = 3, sham 1 → 채점 10회, 약 $1.5(채점 1회 $0.15). 실행기 인자로 바꿀 수 있다. 라운드 상한은 장부 누계를 포함한
+JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS(V2 승인 $4.5·40회 — scripts/judge_live.py 기본값). 추출(재현율·정밀도) 묶음은 채점을
+따로 부르지 않는다: 재현성 회차의 채점 기록에 전처리(주장 추출) 결과가 들어 있어 그것을 정답지와 짝짓는다(같은 3건 — 추가 비용 0).
 
 회차 하나 = RunKey(묶음, 성적서, 변형, 회차 번호). 장부 한 줄과 1:1 이다(stage = "validate_<묶음>", report, variant, repeat).
 이어 하기: 같은 모드·같은 기준 지문으로 결과 파일까지 적히고 **게이트 판정이 난**(pass·blocked) 장부 줄이 있으면 끝난 회차로
@@ -36,12 +37,29 @@ class BatchDefault:
     repeats: int
 
 
-DEFAULTS: dict[str, BatchDefault] = {
-    "reproducibility": BatchDefault(items=3, repeats=3),
-    "defects": BatchDefault(items=6, repeats=1),
-    "sham": BatchDefault(items=3, repeats=1),
+DEFAULTS: dict[str, BatchDefault] = {  # V1 결정 1(2026-10-29) — 채점 10회
+    "reproducibility": BatchDefault(items=3, repeats=2),
+    "defects": BatchDefault(items=3, repeats=1),
+    "sham": BatchDefault(items=1, repeats=1),
     "extraction": BatchDefault(items=0, repeats=0),  # 채점 없음 — 재현성 기록을 쓴다
 }
+# 검증 성적서 3건(V1 결정 2 — 유형 셋, 꽉 찬 입력 2 + 부실 입력 1). verify 재현성에서 --reports 를 주지 않으면 이것.
+DEFAULT_REPORTS: tuple[str, ...] = ("bc_strong", "digits_weak", "yeast_strong")
+
+
+def plan_total_runs(defaults: dict[str, BatchDefault] | None = None) -> int:
+    """V2 전체 계획 채점 회차(기본 10)."""
+    d = DEFAULTS if defaults is None else defaults
+    return sum(b.items * b.repeats for b in d.values())
+
+
+def plan_summary() -> str:
+    """실행 시작 때 찍는 V2 전체 계획 안내 한 줄."""
+    d = DEFAULTS
+    n = plan_total_runs()
+    return (f"V2 전체 계획: 재현성 {d['reproducibility'].items}건 × {d['reproducibility'].repeats}회 + "
+            f"결함 {d['defects'].items}개 × {d['defects'].repeats}회 + sham {d['sham'].items * d['sham'].repeats} = 채점 {n}회"
+            f" · 약 ${estimate_usd(n):.2f}(1회 ${COST_PER_SCORING_USD})")
 
 
 @dataclass(frozen=True, order=True)
