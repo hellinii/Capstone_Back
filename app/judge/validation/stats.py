@@ -151,6 +151,17 @@ def axis_scores(judge_result) -> dict[str, float | None]:
     }
 
 
+_DENOMINATORS = {"faithfulness": "checked", "coverage": "applicable"}
+
+
+def _zero_denominator(judge_result, axis: str) -> bool:
+    """이 회차의 이 축이 '분모 0'(검사할 주장·해당 항목이 없음)이라 점수가 없는가. 실패 회차(scorecard 없음)는 아니다."""
+    den = _DENOMINATORS.get(axis)
+    _, card, _ = _parts(judge_result)
+    sub = card.get(axis) if isinstance(card, dict) else None
+    return bool(den and isinstance(sub, dict) and den in sub and not sub[den])
+
+
 def _scores(x) -> dict[str, float | None]:
     """이미 축 점수 dict 이면 그대로, 아니면 judge_once 결과로 보고 축 점수를 뽑는다."""
     if isinstance(x, dict) and set(x) == set(AXES):
@@ -221,6 +232,12 @@ def reproducibility(per_report_runs: dict[str, list], threshold: float = ICC_THR
         if dropped:
             res["note"] = (res["note"] + f" / 빠진 성적서(점수 없음): {', '.join(dropped)}").lstrip(" /")
         res["dropped"] = dropped
+        # 분모 0(사실 일치 checked 0·필수 내용 applicable 0)으로 모든 회차가 점수 없음인 성적서 — 실패 회차와 구별해 적는다.
+        # 판정은 그대로(빠진 성적서 → 미달, 닫힌 쪽). '해당 없음'으로 축에서 뺄지는 V1 결정 대기(J10 인계).
+        res["not_applicable"] = [rep for rep in dropped
+                                 if all(_zero_denominator(r, axis) for r in per_report_runs[rep])]
+        if res["not_applicable"]:
+            res["note"] += f" / 분모 0(해당 없음 — 결정 대기): {', '.join(res['not_applicable'])}"
         if dropped:
             res["passed"] = False
         elif res["zero_variance"] or res["icc"] is not None:

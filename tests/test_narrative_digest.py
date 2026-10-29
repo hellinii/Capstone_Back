@@ -116,3 +116,34 @@ def test_broken_content_never_matches(broken):
 def test_empty_result_does_not_match_empty_content():
     """둘 다 비어 있어도 같은 지문이 되지 않는다(서술 없는 content 가 서술 없는 작업을 통과하지 않게)."""
     assert digest.of_result({}) != digest.of_content({})
+
+
+# ── J10 검토 ⑧: 자바스크립트 trim 과 같은 글자 집합, 짝 없는 대리 글자 ──
+
+
+@pytest.mark.parametrize("pid, front", [
+    ("﻿P1﻿", "P1"),            # JS trim 은 BOM 을 뗀다(파이썬 strip 은 안 뗌)
+    ("　P1 ", "P1"),
+    ("\x1cP1\x1f", "\x1cP1\x1f"),        # 파이썬 strip 은 떼지만 JS trim 은 안 뗀다
+    ("\x85P1", "\x85P1"),
+])
+def test_problem_id_trim_uses_the_javascript_set(pid, front):
+    r = copy.deepcopy(RESULT)
+    r["recommendations"][0]["problem_id"] = pid
+    c = copy.deepcopy(CONTENT)
+    c["recommendations"][0]["problemId"] = front
+    assert _same(r, c)
+
+
+def test_javascript_trim_set_matches_ecma262():
+    ws = {"\t", "\v", "\f", " ", " ", "﻿"} | {chr(c) for c in range(0x10000) if chr(c).isspace()
+                                                        and __import__("unicodedata").category(chr(c)) == "Zs"}
+    lt = {"\n", "\r", " ", " "}
+    assert set(digest.JS_TRIM) == ws | lt
+
+
+def test_lone_surrogate_gives_a_digest_not_an_exception():
+    c = copy.deepcopy(CONTENT)
+    c["conclusion"]["narrative"] = "총평 \ud800 글"
+    got = digest.of_content(c)
+    assert len(got) == 64 and got != digest.of_result(RESULT)

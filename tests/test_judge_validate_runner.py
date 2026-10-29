@@ -795,3 +795,66 @@ def test_build_reading_gives_one_edition_per_report_to_each_reader():
         read = {v for docs in lists.values() for _, _, v in docs}
         assert read >= {v for v in variants if v.startswith("D")} - set(unplaced)
         assert unplaced == []  # 성적서마다 두 사람이 하나씩 읽을 결함이 있다 — 6개 모두 자리
+
+
+# ── J10 ⑧ 생존 변이 보강 — 순서 섞기 배선(M2)·봉인 해시(M4)·열쇠 읽기 전용(M6) ──
+
+
+def test_run_order_is_the_seeded_shuffle_of_pending(tmp_path, vdir):
+    args = _dev(tmp_path, reports=[], repeats=2, seed=3)
+    jv.execute(args, echo=_quiet()[1])
+    plan = json.loads((tmp_path / "work" / "runs" / "plan-reproducibility-3.json").read_text(encoding="utf-8"))
+    keys = R.plan_runs("reproducibility", [(t, "base") for t in ("dev_binary", "dev_multiclass", "dev_multilabel")], 2)
+    want = [k.__dict__ for k in R.shuffled(keys, 3)]
+    assert want != [k.__dict__ for k in keys]  # 이 시드는 정렬 순서와 다르다(섞지 않으면 걸린다)
+    assert plan["order"] == want
+    rows = _rows(tmp_path / "work" / "장부.csv")
+    assert [(r["report"], int(r["repeat"])) for r in rows] == [(k["report"], k["repeat"]) for k in want]  # 실제로 그 순서로 돌았다
+
+
+def _sealed_vdir(vdir: Path, tags=("t1",)) -> None:
+    """합성 봉인 폴더 — 개발 입력의 규칙 문장 서술을 봉인 꼴({request, view.result})로 + SHA256SUMS."""
+    import asyncio
+    import hashlib
+
+    bases = asyncio.run(jv.dev_bases(jv.DEV_INPUTS))
+    sealed = vdir / "00_봉인"
+    lines = []
+    for tag, src in zip(tags, sorted(bases)):
+        body = json.dumps({"request": bases[src].request, "view": {"result": bases[src].result}}, ensure_ascii=False).encode()
+        (sealed / f"{tag}.json").write_bytes(body)
+        lines.append(f"{hashlib.sha256(body).hexdigest()}  {tag}.json")
+    (sealed / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_verify_reads_sealed_only_when_hash_matches(tmp_path, vdir, frozen):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from dev_fake_llm_server import FakeOpenAI
+
+    _sealed_vdir(vdir)
+    args = jv.RunArgs(mode="verify", batch="reproducibility", live=True, yes=True, seed=1, reports=["t1"], repeats=1,
+                      max_runs=1)
+    git = _git_ok(criteria.recorded_manifest())
+    got = jv.execute(args, client=FakeOpenAI("pass"), echo=_quiet()[1], git=git)
+    assert got["ran"] == 1
+    row = _rows(vdir / "장부.csv")[0]
+    assert row["mode"] == "live" and row["result_file"].startswith("03_실행/")  # 검증 폴더 기준 상대 경로
+    sealed = vdir / "00_봉인" / "t1.json"
+    sealed.write_bytes(sealed.read_bytes().replace(b"}", b" }", 1))  # 한 바이트만 바꿈
+    with pytest.raises(jv.RunnerError, match="봉인 파일 해시가 SHA256SUMS 와 다르다: t1.json"):
+        jv.execute(jv.RunArgs(**{**args.__dict__, "repeats": 2, "max_runs": 2}), client=FakeOpenAI("pass"),
+                   echo=_quiet()[1], git=git)
+    assert len(_rows(vdir / "장부.csv")) == 1
+
+
+def test_keys_are_read_only(tmp_path, vdir):
+    import stat
+
+    loop = _full_loop(tmp_path)
+    human = loop["work"] / "사람"
+    jv.cmd_reading("dev", out=human / "읽기", seed=4, defects=loop["work"] / "결함", echo=_quiet()[1])
+    keys = [human / "열쇠" / "열쇠.csv", human / "열쇠" / "열쇠.sha256",
+            human / "읽기" / "열쇠" / "읽기_열쇠.csv", human / "읽기" / "열쇠" / "읽기_열쇠.sha256"]
+    for f in keys:
+        mode = f.stat().st_mode
+        assert not mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH), (f, oct(mode))

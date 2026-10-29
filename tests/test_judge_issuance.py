@@ -418,3 +418,13 @@ def test_issuance_messages_have_no_internal_words(code):
 
 def test_new_reason_code_is_in_the_pending_wording_check():
     assert "judge_criteria_unverified" in judge_gate.MESSAGES  # 새 사유 글도 위 xfail 대상(같은 꼴의 문안)
+
+
+def test_lone_surrogate_in_content_is_rejected_not_500(passed_job):
+    """서술 칸에 짝 없는 대리 글자가 있어도 발급 검사는 예외가 아니라 거절 사유(닫힌 쪽). API 앞단(요청 JSON 해석)은 이 글자를
+    422 로 막는데, 그 오류 응답을 만들 때 프레임워크가 500 을 낸다 — 발급 검사와 별개라 J10 인계에 따로 적었다."""
+    client, factory, job_id, content = passed_job
+    bad = {**content, "conclusion": {**content["conclusion"], "narrative": "총평 \ud800"}}
+    with factory() as db:
+        assert judge_gate.reject_reason(db, bad, job_id) == "judge_narrative_mismatch"
+        assert judge_gate.reject_reason(db, content, job_id) is None

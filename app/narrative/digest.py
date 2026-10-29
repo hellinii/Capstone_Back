@@ -15,7 +15,8 @@ mapNarrativeResult → src/hooks/useReportData.ts mergeNarrative)을 그대로 �
 2. 글자는 바이트 그대로 — 공백·줄바꿈·유니코드 정규화를 하지 않는다(프론트도 하지 않음). 작업 쪽에서 글 칸이 없거나 null 이면 ""
    (프론트 `?? ""`).
 3. 권고 행: priority 는 대문자로, HIGH·MEDIUM·LOW 밖이면 MEDIUM(프론트 normalizePriority). category·action·expected_impact 는 없으면
-   ""(프론트 `String(x ?? "")`). problem_id 는 문자열이고 앞뒤 공백을 뗀 뒤 비어 있지 않을 때만 싣는다(프론트는 그때만 problemId 키를 둠).
+   ""(프론트 `String(x ?? "")`). problem_id 는 문자열이고 앞뒤 공백(자바스크립트 trim 과 같은 글자 집합 JS_TRIM)을 뗀 뒤 비어 있지 않을 때만 싣는다
+   (프론트는 그때만 problemId 키를 둠).
 4. content 쪽은 프론트가 저장한 값을 **그대로** 읽는다(다시 고치지 않는다) — 키가 없거나 문자열이 아니면 그 값 그대로 지문에 들어가
    작업 쪽과 달라진다(닫힌 쪽).
 
@@ -42,8 +43,14 @@ def _priority(value) -> str:
     return s if s in PRIORITIES else "MEDIUM"
 
 
+# 자바스크립트 String.prototype.trim 이 떼는 글자(WhiteSpace + LineTerminator, ECMA-262). 파이썬 str.strip() 과 다르다 —
+# 파이썬은 \x1c~\x1f·\x85 도 떼고 \ufeff 는 떼지 않는다. 프론트와 같은 지문이 나오게 이 집합으로만 뗀다.
+JS_TRIM = ("\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+           "\u2028\u2029\u202f\u205f\u3000\ufeff")
+
+
 def _problem_id(value):
-    return value.strip() if isinstance(value, str) and value.strip() != "" else None
+    return value.strip(JS_TRIM) if isinstance(value, str) and value.strip(JS_TRIM) != "" else None
 
 
 def from_result(result: dict) -> dict:
@@ -112,8 +119,10 @@ def from_content(content: dict) -> dict:
 
 
 def sha256(shape: dict) -> str:
+    """짝 없는 대리 글자(JSON 의 "\\ud800" 처럼 UTF-8 로 못 적는 글자)는 surrogatepass 로 그 바이트 그대로 적는다 — 예외(500)
+    대신 지문이 나오고, 작업 쪽 글과 다르면 발급 검사가 judge_narrative_mismatch 로 거절한다(닫힌 쪽 그대로)."""
     text = json.dumps(shape, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def of_result(result: dict) -> str:

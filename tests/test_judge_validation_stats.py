@@ -365,3 +365,15 @@ def test_kappa_ac1_edges():
     assert A.cohen_kappa(["y", N, "n"], ["y", "n", "n"]) == 1.0  # 빈칸 쌍은 뺀다
     with pytest.raises(ValueError):
         A.cohen_kappa(["y"], ["y", "n"])
+
+
+def test_zero_denominator_is_noted_apart_from_failed_runs():
+    """사실 일치 checked 0(주장 없음)이 모든 회차면 '해당 없음 — 결정 대기'로 적는다. 판정은 그대로 미달(닫힌 쪽, J10 인계)."""
+    def card(checked):
+        return {"gate": "pass", "scorecard": {"faithfulness": {"checked": checked, "matched": checked},
+                                              "coverage": {"applicable": 1, "described": 1},
+                                              "consistency": {"contradictions": 0}, "readability": {"violations": 0}}}
+    runs = {"A": [card(0), card(0)], "B": [card(2), card(2)], "C": [card(0), {"gate": None}]}
+    f = S.reproducibility(runs)["axes"]["faithfulness"]
+    assert f["dropped"] == ["A", "C"] and f["not_applicable"] == ["A"] and f["passed"] is False
+    assert "분모 0(해당 없음 — 결정 대기): A" in f["note"]
