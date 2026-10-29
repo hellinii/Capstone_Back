@@ -6,13 +6,23 @@
 채점 한 번(judge_once)은 늘 네 축을 함께 돌리므로 "다시 돌 모듈"은 다시 비교할 결과의 범위이고, 다시 부르는 채점 횟수는 묶음
 회차 그대로다. 표에 없는 심판 코드(app/judge 아래 새 파일)는 모르는 것이라 공통으로 본다(덜 돌리는 쪽으로 틀리지 않게).
 
+표 밖 app/ 파일(J10 검토): 채점 입구(app/judge/core.py — judge_once)에서 import 를 따라 닿는 app/ 파일은 채점에 들어가는 코드다
+(예: app/narrative/wording_ed4.py — 읽는 범위 조각의 고정 문구). 표에 줄이 없으면 공통으로 본다. import 그래프는 소스를 읽어(ast)
+계산한다 — 함수 안의 늦은 import·상대 import·패키지 __init__ 까지. 표에 줄이 있는 파일은 표가 먼저다.
+
 상호작용
-- 의존(import): fnmatch
+- 의존(import): fnmatch, ast, functools, pathlib
 - 사용처: scripts/judge_validate.py rescope, 시험 tests/test_judge_validation_rescope.py
 """
 from __future__ import annotations
 
+import ast
 from fnmatch import fnmatch
+from functools import lru_cache
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[3]
+JUDGE_ENTRIES = ("app/judge/core.py",)  # 채점 한 번(judge_once)의 입구
 
 AXES = ("faithfulness", "consistency", "coverage", "readability")
 ALL_BATCHES = ("reproducibility", "defects", "sham", "extraction")
@@ -63,12 +73,71 @@ TABLE: tuple[tuple[str, tuple[str, ...]], ...] = (
 DOWNSTREAM = {"extract": ("faithfulness", "consistency")}
 
 
-def modules_of(path: str) -> tuple[str, ...]:
+def _module_file(root: Path, dotted: str) -> str | None:
+    """app.x.y → 'app/x/y.py' 또는 'app/x/y/__init__.py'(있는 것). app 밖이면 None."""
+    if dotted != "app" and not dotted.startswith("app."):
+        return None
+    base = root / Path(*dotted.split("."))
+    for cand in (base.with_suffix(".py"), base / "__init__.py"):
+        if cand.is_file():
+            return cand.relative_to(root).as_posix()
+    return None
+
+
+def _imports_of(root: Path, rel: str) -> set[str]:
+    """한 파일이 import 하는 app/ 파일들(패키지 __init__ 포함)."""
+    path = root / rel
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return set()
+    package = rel.removesuffix(".py").replace("/", ".")
+    package = package.removesuffix(".__init__") if rel.endswith("__init__.py") else package.rsplit(".", 1)[0]
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                parts = package.split(".")
+                base = ".".join(parts[: len(parts) - node.level + 1]) if node.level <= len(parts) else ""
+                mod = f"{base}.{node.module}" if node.module else base
+            else:
+                mod = node.module or ""
+            names.add(mod)
+            names.update(f"{mod}.{a.name}" for a in node.names)  # from pkg import 모듈
+    out: set[str] = set()
+    for name in names:
+        parts = name.split(".")
+        for i in range(1, len(parts) + 1):  # 패키지 __init__ 들도 실행된다
+            f = _module_file(root, ".".join(parts[:i]))
+            if f:
+                out.add(f)
+    return out
+
+
+@lru_cache(maxsize=4)
+def judge_import_closure(root: Path = REPO) -> frozenset[str]:
+    """채점 입구(JUDGE_ENTRIES)에서 import 를 따라 닿는 app/ 파일 전부(입구 포함)."""
+    seen: set[str] = set()
+    todo = [e for e in JUDGE_ENTRIES if (root / e).is_file()]
+    while todo:
+        rel = todo.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        todo.extend(_imports_of(root, rel) - seen)
+    return frozenset(seen)
+
+
+def modules_of(path: str, *, root: Path = REPO) -> tuple[str, ...]:
     path = path.strip().removeprefix("./")
     for pattern, mods in TABLE:
         if fnmatch(path, pattern):
             return mods
-    return ()  # 저장소의 다른 곳(시험·문서·프론트·스크립트·서술 생성) — 이미 만든 서술의 채점에 닿지 않는다
+    if path in judge_import_closure(root):
+        return ("common",)  # 표에 없어도 채점이 import 하는 앱 코드 — 공통(보수적으로)
+    return ()  # 저장소의 다른 곳(시험·문서·프론트·스크립트·채점이 쓰지 않는 서술 생성) — 이미 만든 서술의 채점에 닿지 않는다
 
 
 def rescope(changed: list[str]) -> dict:

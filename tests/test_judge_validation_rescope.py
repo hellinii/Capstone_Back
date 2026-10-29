@@ -76,3 +76,41 @@ def test_cli_rescope_prints_and_uses_git_since(capsys):
     assert got["batches"] == RUN3 and lines[0] == "다시 돌 모듈: aggregate, coverage"
     with pytest.raises(jv.RunnerError, match="바뀐 파일이 없다"):
         jv.cmd_rescope([], None, echo=lines.append)
+
+
+# ── J10 검토: 표 밖이라도 채점이 import 하는 앱 코드는 공통(P1-9) ──
+
+
+@pytest.mark.parametrize("path", ["app/narrative/wording_ed4.py", "app/narrative/wording.py", "app/evaluation/labels.py"])
+def test_app_file_imported_by_the_judge_reruns_everything(path):
+    got = RS.rescope([path])
+    assert (got["modules"], got["batches"]) == (EVERY, ALL4)
+    assert got["by_file"][path] == ["common"]
+
+
+@pytest.mark.parametrize("path", ["app/narrative/jobs.py", "app/narrative/generator.py", "app/issuance/judge_gate.py"])
+def test_app_file_the_judge_does_not_import_is_untouched(path):
+    assert path not in RS.judge_import_closure()
+    assert RS.rescope([path])["batches"] == []
+
+
+def test_import_closure_follows_late_relative_and_package_imports(tmp_path):
+    files = {
+        "app/__init__.py": "",
+        "app/judge/__init__.py": "",
+        "app/judge/core.py": "from . import helper\n\ndef f():\n    from app.narrative import late\n",
+        "app/judge/helper.py": "from ..narrative.deep import x\n",
+        "app/narrative/__init__.py": "",
+        "app/narrative/late.py": "import app.other.mod\n",
+        "app/narrative/deep.py": "x = 1\n",
+        "app/other/__init__.py": "",
+        "app/other/mod.py": "",
+        "app/narrative/unused.py": "",
+    }
+    for rel, body in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(body, encoding="utf-8")
+    got = RS.judge_import_closure(tmp_path)
+    assert got == frozenset(files) - {"app/narrative/unused.py"}
+    assert RS.modules_of("app/other/mod.py", root=tmp_path) == ("common",)
+    assert RS.modules_of("app/narrative/unused.py", root=tmp_path) == ()
