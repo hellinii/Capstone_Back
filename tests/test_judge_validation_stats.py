@@ -294,3 +294,60 @@ def test_agreement_rate_and_human_rule():
     assert S.human_agreement_ok(0.79, 0.85) is False
     assert S.human_agreement_ok(0.79, 0.85, margin=0.10) is True
     assert math.isclose(S.HUMAN_MARGIN, 0.05)
+
+
+# ---------------------------------------------------------------- 일치도 계수(agreement.py, 계획 17-7)
+
+from app.judge.validation import agreement as A  # noqa: E402
+
+N = None
+# Krippendorff(2011) "Computing Krippendorff's Alpha-Reliability" — 평가자 4 × 단위 12, 빈칸 있음: 명목 0.743, 구간 0.849
+K2011 = [[1, 2, 3, 3, 2, 1, 4, 1, 2, N, N, N],
+         [1, 2, 3, 3, 2, 2, 4, 1, 2, 5, N, 3],
+         [N, 3, 3, 3, 2, 3, 4, 2, 2, 5, 1, N],
+         [1, 2, 3, 3, 2, 4, 4, 1, 2, 5, 1, N]]
+# 같은 글의 두 평가자 이진 예: 0.095
+K2011_BINARY = [[0, 1, 0, 0, 0, 0, 0, 0, 1, 0], [1, 1, 1, 0, 0, 1, 0, 0, 0, 0]]
+# 두 평가자 50항목: 예/예 20, 예/아니오 5, 아니오/예 10, 아니오/아니오 15 → 관측 0.7, κ 우연 0.5 → κ 0.4
+# AC1 손 계산: π_예 = (25+30)/100 = 0.55 → 우연 = 2·0.55·0.45 / 1 = 0.495 → (0.7 − 0.495)/0.505 = 0.40594
+RATER_A = ["y"] * 25 + ["n"] * 25
+RATER_B = ["y"] * 20 + ["n"] * 5 + ["y"] * 10 + ["n"] * 15
+
+
+def test_krippendorff_published_examples():
+    assert round(A.krippendorff_alpha(K2011), 3) == 0.743
+    assert round(A.krippendorff_alpha(K2011, "interval"), 3) == 0.849
+    assert round(A.krippendorff_alpha(K2011_BINARY), 3) == 0.095
+
+
+def test_krippendorff_edges():
+    assert A.krippendorff_alpha([]) is None
+    assert A.krippendorff_alpha([[1, N], [N, 2]]) is None  # 값이 둘인 단위가 없다
+    assert A.krippendorff_alpha([[3, 3], [3, 3]]) is None  # 변이 없음
+    assert A.krippendorff_alpha([[1, 2, 3], [1, 2, 3]]) == 1.0
+    with pytest.raises(ValueError):
+        A.krippendorff_alpha(K2011, "ordinal")
+    with pytest.raises(ValueError):
+        A.krippendorff_alpha([[1, 2], [1]])
+
+
+def test_cohen_kappa_and_gwet_ac1():
+    assert A.cohen_kappa(RATER_A, RATER_B) == pytest.approx(0.4)
+    assert A.gwet_ac1(RATER_A, RATER_B) == pytest.approx(0.205 / 0.505)
+    # 한쪽으로 쏠린 자료(18/20 일치, 둘 다 y 19·n 1): κ 는 낮게, AC1 은 높게(역설)
+    # κ 우연 = (19·19 + 1·1)/400 = 0.905 → (0.9 − 0.905)/0.095. AC1 우연 = 2·0.95·0.05 = 0.095 → (0.9 − 0.095)/0.905
+    a = ["y"] * 18 + ["n", "y"]
+    b = ["y"] * 18 + ["y", "n"]
+    assert A.cohen_kappa(a, b) == pytest.approx(-0.005 / 0.095)
+    assert A.gwet_ac1(a, b) == pytest.approx(0.805 / 0.905)
+    # 관측되지 않은 범주를 categories 로 주면 q = 3: 우연 = 0.095 / 2 = 0.0475
+    assert A.gwet_ac1(a, b, categories=["y", "n", "?"]) == pytest.approx(0.8525 / 0.9525)
+
+
+def test_kappa_ac1_edges():
+    assert A.cohen_kappa([], []) is None and A.gwet_ac1([], []) is None
+    assert A.cohen_kappa(["y", "y"], ["y", "y"]) is None  # 우연 일치 1
+    assert A.gwet_ac1(["y", "y"], ["y", "y"]) is None  # 범주 1개
+    assert A.cohen_kappa(["y", N, "n"], ["y", "n", "n"]) == 1.0  # 빈칸 쌍은 뺀다
+    with pytest.raises(ValueError):
+        A.cohen_kappa(["y"], ["y", "n"])
