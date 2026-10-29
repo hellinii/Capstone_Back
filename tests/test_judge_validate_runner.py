@@ -497,6 +497,8 @@ def test_blind_reading_bundle_and_effectiveness(tmp_path, vdir):
             r["문제 문장(글자 그대로)"] = V_after(work, "D01")
         if r["문서"] == doc_of["base"]:
             r["문제 문장(글자 그대로)"] = "괜찮은 문장을 잘못 짚음"
+        if r["문서"] == doc_of["D02"]:  # 결함 문서지만 엉뚱한 곳을 짚음 → 찾은 것 아님
+            r["문제 문장(글자 그대로)"] = "엉뚱한 곳을 짚은 글"
     with sheet.open("w", newline="", encoding="utf-8") as f:
         w = _csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
@@ -505,6 +507,15 @@ def test_blind_reading_bundle_and_effectiveness(tmp_path, vdir):
     eff = r["effectiveness"]
     assert (eff["defects"], eff["human_read"], eff["human_found"], eff["human_false_alarms"]) == (2, 2, 1, 1)
     assert eff["system_found"] == sum(any(d["hits"]) for d in r["defects"].values()) >= 1
+
+
+def test_report_uses_the_api_it_is_given(tmp_path, vdir):
+    # 넘긴 api 를 쓴다(모듈을 다시 읽지 않는다) — 시험·합칠 때 가짜를 꽂는 길.
+    jv.execute(_dev(tmp_path, repeats=2), echo=_quiet()[1])
+    fake = FakeStats()
+    api = {name: fake._fn(name) for name in jv.STATS_API}
+    r = jv.cmd_report("dev", ledger=tmp_path / "work" / "장부.csv", out=tmp_path / "o", api=api, echo=_quiet()[1])
+    assert fake.named("reproducibility") and r["reproducibility"] == FakeStats.RETURNS["reproducibility"]
 
 
 def test_report_refuses_tampered_result_file(tmp_path, vdir):
