@@ -60,6 +60,7 @@ from app.core import database, llm_budget
 from app.core.concurrency import judge_slot, run_cpu_bound
 from app.judge import alert, bundle, criteria_lock, ladder
 from app.judge.core import JudgeRun, judge_once
+from app.narrative import digest
 from app.narrative import sections
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.models import NarrativeJob, _utcnow
@@ -755,6 +756,9 @@ async def run_job_ed4(
     if failure is None:
         judge_rec.setdefault("judge_budget", judge_state)
         judge_rec["summary"] = ladder.summary(judge_rec)
+        if verdict is not None and verdict["gate"] == "passed" and narrative is not None:
+            # 서술 글 지문(14-9b) — 발급·정정 때 content 의 서술과 맞댄다(app.issuance.judge_gate). 통과한 글만 남긴다.
+            judge_rec["narrative_sha256"] = digest.of_result(narrative)
     judge_record = _serializable_judge(judge_rec, job_id)
     if judge_record.get("serialize_error") and narrative is not None:
         verdict = bundle.held("judge_error", retry_allowed=False)

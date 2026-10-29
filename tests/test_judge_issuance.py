@@ -80,6 +80,33 @@ def _code(resp) -> str:
 ED4 = {"contentSchema": 4, "title": "판 4 성적서"}
 
 
+def _content(client, job_id: str) -> dict:
+    """작업 응답을 프론트가 성적서 데이터로 옮기는 대로(narrativeJobApi.mapNarrativeResult → useReportData.mergeNarrative) 손으로 옮긴
+    판 4 content. app.narrative.digest 를 쓰지 않는다(같은 코드로 만들면 대조에 이빨이 없다). 서술 밖 칸은 지문과 상관없음을 보이려고 둔다."""
+    n = client.get(f"/api/narrative/jobs/{job_id}").json()["result"]
+    return {
+        **ED4,
+        "meta": {"reportId": ""},
+        "interpretation": {
+            "confusionAnalysis": n["interpretation"]["confusion_analysis"],
+            "distributionAnalysis": n["interpretation"]["distribution_analysis"],
+            "additionalObservations": n["interpretation"].get("additional_observations") or "",
+        },
+        "conclusion": {"verdict": "FAIL", "score": 50, "benchmarkRefs": [],
+                       **{k: n["conclusion"][k] for k in ("benchmark", "narrative", "risks")}},
+        "recommendationNarrative": {"dataQuality": n["recommendation_narrative"]["data_quality"],
+                                    "modelOps": n["recommendation_narrative"]["model_ops"]},
+        "recommendations": [
+            {"priority": r["priority"].upper(), "category": r["category"], "action": r["action"],
+             "expectedImpact": r["expected_impact"],
+             **({"problemId": r["problem_id"].strip()} if (r.get("problem_id") or "").strip() else {})}
+            for r in n["recommendations"]
+        ],
+        "narrativeSections": n["section_sources"],
+        "judge": n.get("judge"),
+    }
+
+
 # ── 판 판정(프론트 규칙과 같게, 닫힌 쪽) ──
 
 
@@ -116,7 +143,8 @@ def test_passed_edition4_job_issues_and_every_other_case_is_rejected(shared, jud
     assert _code(_issue(client, run_id="b", content=ED4, job_id="  ")) == "judge_job_missing"
     assert _code(_issue(client, run_id="c", content=ED4, job_id="no-such-job")) == "judge_job_not_found"
     assert _code(_issue(client, run_id="d", content=ED4, job_id=ed3_job)) == "judge_job_not_edition4"
-    ok = _issue(client, run_id="e", content=ED4, job_id=passed)
+    assert _code(_issue(client, run_id="e0", content=ED4, job_id=passed)) == "judge_narrative_mismatch"  # 서술 없는 content
+    ok = _issue(client, run_id="e", content=_content(client, passed), job_id=passed)
     assert ok.status_code == 200 and ok.json()["report_no"]
 
 
@@ -151,10 +179,11 @@ def test_result_text_expiry_does_not_lose_the_gate(shared, judge_passes, monkeyp
     """결과 글은 24시간 뒤 지워져도 gate 는 내부 기록에 남는다(계획 사-4) — 발급은 된다."""
     client, factory = shared
     passed = _job(client, _ed4())
+    content = _content(client, passed)  # 프론트는 서술을 run 에 저장해 둔다 — 결과 글이 지워져도 content 에 있다
     with factory() as db:
         db.get(NarrativeJob, passed).result_json = None
         db.commit()
-    assert _issue(client, content=ED4, job_id=passed).status_code == 200
+    assert _issue(client, content=content, job_id=passed).status_code == 200
 
 
 # ── 정정 발급(14-9a) ──
@@ -163,10 +192,11 @@ def test_result_text_expiry_does_not_lose_the_gate(shared, judge_passes, monkeyp
 def test_reissue_has_the_same_check(shared, judge_passes):
     client, factory = shared
     passed = _job(client, _ed4())
-    issued = _issue(client, run_id="run-r", content=ED4, job_id=passed).json()
+    good = _content(client, passed)
+    issued = _issue(client, run_id="run-r", content=good, job_id=passed).json()
     no = issued["report_no"]
 
-    def reissue(job_id=None, content=ED4):
+    def reissue(job_id=None, content=good):
         body = {"run_id": "run-r", "note": "정정", "content": content}
         if job_id is not None:
             body["narrative_job_id"] = job_id
@@ -177,6 +207,8 @@ def test_reissue_has_the_same_check(shared, judge_passes):
     app.state.openai_client = None
     held = _job(client, _ed4())
     assert _code(reissue(held)) == "judge_not_passed"
+    assert _code(reissue(passed, _tampered(good, ("conclusion", "narrative")))) == "judge_narrative_mismatch"
+    assert _code(reissue(passed, ED4)) == "judge_narrative_mismatch"
     assert reissue(passed).status_code == 200
     assert reissue(None, {"contentSchema": 3}).status_code == 200  # 판 3 내용은 검사하지 않는다
 
@@ -188,3 +220,142 @@ def test_job_id_field_is_optional_and_bounded():
     with pytest.raises(Exception):
         IssueRequest(run_id="x", narrative_job_id="j" * 65)
     assert ReissueRequest(run_id="x", note="n").narrative_job_id is None
+
+
+# ── 서술 글 지문 대조(14-9b, J9) — 같은 공유 DB 장치 ──
+
+
+def _tampered(content: dict, path: tuple, value="바뀐 글") -> dict:
+    """content 를 깊게 복사해 path 의 값만 바꾼다(정수는 목록 자리)."""
+    out = json.loads(json.dumps(content))
+    node = out
+    for key in path[:-1]:
+        node = node[key]
+    if value is _DROP:
+        del node[path[-1]]
+    else:
+        node[path[-1]] = value
+    return out
+
+
+_DROP = object()
+
+NARRATIVE_PATHS = [
+    ("interpretation", "confusionAnalysis"), ("interpretation", "distributionAnalysis"),
+    ("interpretation", "additionalObservations"),
+    ("conclusion", "benchmark"), ("conclusion", "narrative"), ("conclusion", "risks"),
+    ("recommendationNarrative", "dataQuality"), ("recommendationNarrative", "modelOps"),
+    ("recommendations", 0, "priority"), ("recommendations", 0, "category"), ("recommendations", 0, "action"),
+    ("recommendations", 0, "expectedImpact"), ("recommendations", 0, "problemId"),
+]
+
+
+@pytest.fixture
+def passed_job(shared, judge_passes):
+    client, factory = shared
+    job_id = _job(client, _ed4())
+    content = _content(client, job_id)
+    assert content["recommendations"] and "problemId" in content["recommendations"][0]  # 권고 칸까지 대조가 닿는 픽스처
+    assert content["interpretation"]["additionalObservations"] is not None
+    return client, factory, job_id, content
+
+
+def test_digest_is_recorded_only_for_passed_jobs(shared, judge_passes):
+    client, factory = shared
+    passed = _job(client, _ed4())
+    with factory() as db:
+        rec = json.loads(db.get(NarrativeJob, passed).internal_json)["judge"]
+    assert isinstance(rec["narrative_sha256"], str) and len(rec["narrative_sha256"]) == 64
+    assert "narrative_sha256" not in client.get(f"/api/narrative/jobs/{passed}").json()["result"]["judge"]  # 고객 묶음엔 없음
+    app.state.openai_client = None
+    held = _job(client, _ed4())
+    with factory() as db:
+        assert "narrative_sha256" not in json.loads(db.get(NarrativeJob, held).internal_json)["judge"]
+
+
+@pytest.mark.parametrize("path", NARRATIVE_PATHS, ids=lambda p: ".".join(map(str, p)))
+def test_any_narrative_change_is_rejected(passed_job, path):
+    client, _, job_id, content = passed_job
+    assert _code(_issue(client, run_id="t", content=_tampered(content, path), job_id=job_id)) == "judge_narrative_mismatch"
+
+
+@pytest.mark.parametrize("path", NARRATIVE_PATHS[:8], ids=lambda p: ".".join(map(str, p)))
+def test_missing_narrative_field_is_rejected(passed_job, path):
+    client, _, job_id, content = passed_job
+    assert _code(_issue(client, run_id="t", content=_tampered(content, path, _DROP), job_id=job_id)) == "judge_narrative_mismatch"
+
+
+@pytest.mark.parametrize("change", [
+    lambda c: _tampered(c, ("conclusion", "narrative"), c["conclusion"]["narrative"] + " "),  # 끝 공백 하나
+    lambda c: _tampered(c, ("conclusion", "narrative"), c["conclusion"]["narrative"].replace("다", "다\n", 1)),
+    lambda c: _tampered(c, ("recommendations",), c["recommendations"][::-1] if len(c["recommendations"]) > 1
+                        else c["recommendations"] * 2),  # 순서·개수
+    lambda c: _tampered(c, ("recommendations",), c["recommendations"][:-1]),
+    lambda c: _tampered(c, ("recommendations", 0, "priority"), c["recommendations"][0]["priority"].lower()),
+    lambda c: _tampered(c, ("recommendations", 0, "problemId"), " " + c["recommendations"][0]["problemId"]),
+], ids=["끝공백", "줄바꿈", "권고순서", "권고빠짐", "우선순위소문자", "문제번호공백"])
+def test_content_side_is_not_normalized(passed_job, change):
+    """content 쪽은 프론트가 저장한 값 그대로 — 공백·줄바꿈·순서·대소문자를 너그럽게 보지 않는다."""
+    client, _, job_id, content = passed_job
+    assert _code(_issue(client, run_id="t", content=change(content), job_id=job_id)) == "judge_narrative_mismatch"
+
+
+def test_non_narrative_fields_do_not_matter(passed_job):
+    """판정·점수·8.1 표·칸 출처·심판 묶음·제목 같은 서술 밖 칸은 지문에 들지 않는다(그건 코드 값이고 다른 검사 몫)."""
+    client, _, job_id, content = passed_job
+    other = _tampered(_tampered(_tampered(content, ("conclusion", "verdict"), "PASS"), ("title",), "다른 제목"),
+                      ("narrativeSections",), {})
+    other.pop("judge")
+    assert _issue(client, run_id="t", content=other, job_id=job_id).status_code == 200
+
+
+def test_other_passed_jobs_narrative_is_rejected(shared, judge_passes):
+    """핵심 갈래 — 통과한 다른 작업의 번호를 붙여도 서술이 다르면 거절(J5b 의 남은 구멍)."""
+    client, _ = shared
+    a = _job(client, _ed4())
+    b = _job(client, json.loads((DEV / "dev_multiclass.request.json").read_text(encoding="utf-8")))
+    ca, cb = _content(client, a), _content(client, b)
+    assert ca["conclusion"]["narrative"] != cb["conclusion"]["narrative"]
+    assert _code(_issue(client, run_id="x", content=cb, job_id=a)) == "judge_narrative_mismatch"
+    assert _code(_issue(client, run_id="y", content=ca, job_id=b)) == "judge_narrative_mismatch"
+    assert _issue(client, run_id="x", content=ca, job_id=a).status_code == 200
+    assert _issue(client, run_id="y", content=cb, job_id=b).status_code == 200
+
+
+def test_passed_record_without_digest_is_rejected(shared):
+    client, factory = shared
+    jobs._db_insert(factory, "job-old", [], {"report_edition": 4}, _utcnow())
+    jobs._db_finish(factory, "job-old", status="done", narrative=None,
+                    internal={"report_edition": 4, "judge": {"gate": "passed"}}, now=_utcnow())
+    assert _code(_issue(client, content=ED4, job_id="job-old")) == "judge_narrative_unrecorded"
+    jobs._db_insert(factory, "job-bad", [], {"report_edition": 4}, _utcnow())
+    jobs._db_finish(factory, "job-bad", status="done", narrative=None,
+                    internal={"report_edition": 4, "judge": {"gate": "passed", "narrative_sha256": 7}}, now=_utcnow())
+    assert _code(_issue(client, run_id="z", content=ED4, job_id="job-bad")) == "judge_narrative_unrecorded"
+
+
+def test_reissue_rejects_other_jobs_narrative(shared, judge_passes):
+    client, _ = shared
+    a = _job(client, _ed4())
+    b = _job(client, json.loads((DEV / "dev_multiclass.request.json").read_text(encoding="utf-8")))
+    no = _issue(client, run_id="run-q", content=_content(client, a), job_id=a).json()["report_no"]
+
+    def reissue(job_id, content):
+        return client.post(f"/api/reports/{no}/reissue",
+                           json={"run_id": "run-q", "note": "정정", "content": content, "narrative_job_id": job_id})
+
+    assert _code(reissue(a, _content(client, b))) == "judge_narrative_mismatch"
+    assert reissue(b, _content(client, b)).status_code == 200  # 다시 만든 서술로 정정 — 그 작업 번호와 그 글이면 받는다
+
+
+def test_smoke_and_edition3_do_not_touch_the_digest(shared, monkeypatch):
+    """판 3 내용·{"smoke": true} 는 지문 대조를 타지 않는다(대조 함수가 불리지 않음)."""
+    from app.narrative import digest
+
+    def boom(_c):
+        raise AssertionError("판 3·스모크에서 지문을 만들었다")
+
+    monkeypatch.setattr(digest, "of_content", boom)
+    client, _ = shared
+    assert _issue(client, run_id="s", content={"smoke": True}).status_code == 200
+    assert _issue(client, run_id="e3", content={"contentSchema": 3, "interpretation": {}}).status_code == 200
