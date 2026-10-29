@@ -103,3 +103,21 @@ def test_app_does_not_import_scripts():
             if any(n == "scripts" or n.startswith("scripts.") for n in names):
                 bad.append(str(path.relative_to(ROOT)))
     assert bad == []
+
+
+def test_judge_delay_waits_before_each_judge_answer_and_is_bounded():
+    """--judge-delay(심판 라운드 J6 스모크용) — 심판 호출마다 기다린 뒤 답하고, 범위 밖 값은 받지 않는다."""
+    import asyncio
+    import time
+
+    from scripts.dev_fake_llm_server import FakeOpenAI
+
+    fake = FakeOpenAI("error", 0.2)
+    start = time.monotonic()
+    with pytest.raises(Exception):
+        asyncio.run(fake.responses.create(model="m", input=[]))
+    assert time.monotonic() - start >= 0.2
+    assert FakeOpenAI("pass").delay == 0.0
+    for bad in (-1, 61):
+        with pytest.raises(ValueError):
+            FakeOpenAI("pass", bad)

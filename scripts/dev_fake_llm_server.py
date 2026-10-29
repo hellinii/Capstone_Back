@@ -13,8 +13,10 @@
 - error : 심판 호출이 늘 연결 끊김 → 보류(judge_error, 일시적 — 다시 만들기 줌)
 - refuse: 심판이 거절 → 보류(judge_error, 다시 만들기 없음)
 매핑(OpenAI chat)은 늘 연결 끊김 — 앱이 규칙 매핑으로 강등한다.
+--judge-delay 초: 심판 호출마다 이만큼 기다린 뒤 답한다(기본 0). 가짜 심판은 바로 끝나 화면의 "검증 중" 단계가 조회에 잡히지 않으므로,
+브라우저 스모크(J6)에서 그 단계를 보려고 쓴다. 호출 제한(작업 마감)보다 짧게 준다.
 
-쓰는 법: venv/bin/python scripts/dev_fake_llm_server.py --port 8000 --judge pass
+쓰는 법: venv/bin/python scripts/dev_fake_llm_server.py --port 8000 --judge pass [--judge-delay 3]
 """
 from __future__ import annotations
 
@@ -108,10 +110,13 @@ def _judge_answer(kwargs) -> dict:
 class FakeOpenAI:
     """매핑(chat)은 늘 연결 끊김, 심판(responses)은 모드대로."""
 
-    def __init__(self, mode: str):
+    def __init__(self, mode: str, delay: float = 0.0):
         if mode not in JUDGE_MODES:
             raise ValueError(mode)
+        if not 0 <= delay <= 60:
+            raise ValueError(f"심판 지연은 0~60초: {delay}")
         self.mode = mode
+        self.delay = delay
         self.responses = _Responses(self)
         self.chat = self
         self.completions = self
@@ -137,6 +142,10 @@ class _Responses:
         from openai.types.responses import Response
 
         self.owner.calls += 1
+        if self.owner.delay:
+            import asyncio
+
+            await asyncio.sleep(self.owner.delay)
         if self.owner.mode == "error":
             raise openai.APIConnectionError(request=httpx.Request("POST", "https://dev-fake.invalid/responses"))
         part = ({"type": "refusal", "refusal": "개발용 가짜 거절"} if self.owner.mode == "refuse"
@@ -169,7 +178,7 @@ def temp_sqlite_only(url: str) -> None:
         raise SystemExit(f"개발 서버는 임시 sqlite 만 쓴다(지금 {url!r}) — 운영·로컬 DB 를 건드리지 않게 멈춘다")
 
 
-def build_app(mode: str):
+def build_app(mode: str, judge_delay: float = 0.0):
     """키를 빈 문자열로 덮고 임시 DB 를 정한 뒤 앱을 import 해 가짜 클라이언트를 끼운 앱을 돌려준다."""
     os.environ["OPENAI_API_KEY"] = ""
     os.environ["ANTHROPIC_API_KEY"] = ""
@@ -185,7 +194,7 @@ def build_app(mode: str):
     async def fake_lifespan(a):
         async with original(a) as state:
             a.state.anthropic_client = FakeAnthropic()
-            a.state.openai_client = FakeOpenAI(mode)
+            a.state.openai_client = FakeOpenAI(mode, judge_delay)
             assert_all_fake(a.state)
             yield state
 
@@ -198,8 +207,9 @@ def main(argv=None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--judge", choices=JUDGE_MODES, default="pass")
+    parser.add_argument("--judge-delay", type=float, default=0.0, help="심판 호출마다 기다릴 초(0~60, 스모크에서 '검증 중'을 보려고)")
     args = parser.parse_args(argv)
-    app = build_app(args.judge)
+    app = build_app(args.judge, args.judge_delay)
     import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port)
