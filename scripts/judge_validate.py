@@ -3,8 +3,9 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
 
 두 모드
 - dev    : 가짜 LLM(scripts/dev_fake_llm_server 의 가짜 OpenAI, 심판 '문제 없음' 답)으로 흐름만 돈다. 입력은 개발 판 4 입력
-           (tests/data/judge_dev — 규칙 문장 서술을 키 없이 만든다)과 합성 결함·sham 뿐. 검증 폴더(JUDGE_VALIDATION_DIR, 없으면
-           저장소 옆 JUDGE_ROUND/검증) 안의 경로는 입력·결함·장부·출력 어느 것으로도 받지 않는다(오염 방지 규칙 2). 결과는 임시 폴더.
+           (tests/data/judge_dev — 규칙 문장 서술을 키 없이 만든다)과 합성 결함·sham 뿐. 결과는 임시 폴더. 읽고 쓰는 경로는 허용 목록
+           (개발 입력·임시 폴더·JUDGE_DEV_DIRS) 안이어야 하고, 검증 폴더(JUDGE_VALIDATION_DIR 와 저장소 옆 JUDGE_ROUND/검증 둘 다) 안이면
+           어떤 철자로 적어도(scripts/judge_paths) 거부한다(오염 방지 규칙 2) — 입력·결함·장부·출력·정답지·사람 채점·결과 원본 경로.
 - verify : 진짜 검증(V2). 아래 다섯이 모두 맞아야 시작한다 — 사유는 하나씩 따로 찍는다.
            ① 작업 트리가 깨끗하다(git status 빈칸)  ② 기준 버전이 고정 버전이고 기록된 지문과 같다(1.0-dev 면 거부)
            ③ 지금 MANIFEST == 태그 judge-criteria-v1.0 의 MANIFEST(파일 ↔ MANIFEST 도)  ④ --live  ⑤ 장부에 쓸 수 있다
