@@ -189,7 +189,9 @@ def test_defect_detected_faithfulness_and_consistency():
     miss = run(violations=1, viol_quote="다른 문장의 0.3")
     assert S.defect_detected(hit, "faithfulness", sentence=PLANTED) is True
     assert S.defect_detected(miss, "F", sentence=PLANTED) is False
-    assert S.defect_detected(run(matched=3, viol_quote="0.015 높다"), "faithfulness", sentence=PLANTED) is False  # 부합은 탐지 아님
+    matched_only = run(matched=1)
+    matched_only.record["faithfulness"]["verdicts"][0]["quote"] = "0.015 높다"
+    assert S.defect_detected(matched_only, "faithfulness", sentence=PLANTED) is False  # 그 문장을 짚었어도 부합은 탐지 아님
     assert S.defect_detected(run(contradictions=[("앞 문장", PLANTED)]), "consistency", sentence=PLANTED) is True
     assert S.defect_detected(run(contradictions=[("앞 문장", "뒤 문장")]), "Cons", sentence=PLANTED) is False
     assert S.defect_detected(failed(), "faithfulness", sentence=PLANTED) is False
@@ -333,6 +335,8 @@ def test_krippendorff_edges():
 
 def test_cohen_kappa_and_gwet_ac1():
     assert A.cohen_kappa(RATER_A, RATER_B) == pytest.approx(0.4)
+    # 주변 비율이 서로 다른 손 계산: A y3·n1, B y1·n3, 관측 0.5, 우연 = .75·.25 + .25·.75 = .375 → .125/.625 = 0.2
+    assert A.cohen_kappa(["y", "y", "y", "n"], ["y", "n", "n", "n"]) == pytest.approx(0.2)
     assert A.gwet_ac1(RATER_A, RATER_B) == pytest.approx(0.205 / 0.505)
     # 한쪽으로 쏠린 자료(18/20 일치, 둘 다 y 19·n 1): κ 는 낮게, AC1 은 높게(역설)
     # κ 우연 = (19·19 + 1·1)/400 = 0.905 → (0.9 − 0.905)/0.095. AC1 우연 = 2·0.95·0.05 = 0.095 → (0.9 − 0.095)/0.905

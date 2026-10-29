@@ -5,10 +5,15 @@
 2. app.judge 는 서술 쪽 판정 규칙(checks·grounding·required_items)을 import 하지 않는다 — 서술 검문이 바뀌면 심판 기준이 몰래
    바뀌어 기준 고정(7.5)이 깨진다. 서술 쪽 데이터(schemas·sections·generator 의 GenerationSession)는 써도 된다.
 3. app 은 scripts 를 import 하지 않는다(가짜 LLM 개발 서버·실호출 실행기가 운영 경로에 끼지 않게).
+4. 검증 도구(app.judge.validation)는 앱 실행 경로에서 import 되지 않는다 — validation 밖의 app 모듈은 그것을 import 하지 않고,
+   app.main 을 띄워도 sys.modules 에 실리지 않는다(운영 서버에 검증 코드가 실리지 않게, 계획 17-2).
 """
 from __future__ import annotations
 
 import ast
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,6 +59,26 @@ def test_app_does_not_import_scripts():
     assert len(files) > 50
     bad = {str(f.relative_to(APP)): _hits(imported_modules(f), ["scripts"]) for f in files}
     assert {k: v for k, v in bad.items() if v} == {}
+
+
+VALIDATION = APP / "judge" / "validation"
+
+
+def test_app_runtime_does_not_import_validation():
+    files = [f for f in sorted(APP.rglob("*.py")) if VALIDATION not in f.parents]
+    assert len(files) > 50
+    bad = {str(f.relative_to(APP)): _hits(imported_modules(f), ["app.judge.validation"]) for f in files}
+    assert {k: v for k, v in bad.items() if v} == {}
+
+
+def test_app_main_does_not_load_validation():
+    # 실제로 띄워 본다 — 동적 import·__init__ 재수출로 끼어들어도 잡힌다.
+    code = ("import sys, json, app.main; "
+            "print(json.dumps(sorted(m for m in sys.modules if m.startswith('app.'))))")
+    out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, check=True)
+    loaded = json.loads(out.stdout.strip().splitlines()[-1])
+    assert "app.judge.core" in loaded  # 이빨: 심판 본체는 실린다(검사가 헛돌지 않음)
+    assert [m for m in loaded if m == "app.judge.validation" or m.startswith("app.judge.validation.")] == []
 
 
 def test_detector_sees_every_import_form(tmp_path):
