@@ -53,6 +53,8 @@ TABLE: tuple[tuple[str, tuple[str, ...]], ...] = (
     # 채점 밖 — 작업 흐름·사다리·알림·고객 묶음, 검증 계산(결과만 다시 계산)
     ("app/judge/ladder.py", ()), ("app/judge/alert.py", ()), ("app/judge/bundle.py", ()), ("app/judge/validation/*", ()),
     ("app/judge/__init__.py", ()),
+    # 검증 기록 잠금(J9): 판 4 작업이 심판을 부를지 정하는 운영 장치 — judge_once 의 판정·점수에 닿지 않는다. 기록 파일도 같다.
+    ("app/judge/criteria_lock.py", ()), ("app/judge/validated.json", ()),
     # 표에 없는 심판 코드·기준 파일 → 공통(보수적으로)
     (C + "*", ("common",)), ("app/judge/*", ("common",)),
 )
