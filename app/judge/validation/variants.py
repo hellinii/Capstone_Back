@@ -134,6 +134,8 @@ def check_variant(folder_name: str, meta: dict, slots: dict, diff_text: str | No
                             f"{', 다시 잼' if _round(meta) >= 2 else ''}) — 적힌 것: {meta['planted_by']}")
     elif meta["axis"] != SHAM:
         problems.append(f"sham 의 축은 '{SHAM}' 이다: {meta['axis']}")
+    if meta["axis"] == "coverage" and not str(meta.get("item_id") or "").strip():
+        problems.append("필수 내용 결함은 meta.item_id(지운 체크리스트 항목, 예: 분석-7)가 있어야 탐지를 셀 수 있다")
     if meta["planted_by"] not in ("민서", "인용"):
         problems.append(f"심은 사람은 민서·인용 중 하나다: {meta['planted_by']}")
     if list(slots) != [meta["slot"]]:

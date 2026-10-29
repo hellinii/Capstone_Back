@@ -85,7 +85,8 @@ def test_slot_paths_and_apply_leave_base_untouched():
 def test_valid_replace_delete_insert_pass():
     assert _check() == []
     gone = V.replace_sentence(synthetic_result()["interpretation"]["confusion_analysis"], 1, None)
-    assert _check(_meta(axis="coverage", planted_by="인용", after=""), {"interpretation.confusion_analysis": gone}) == []
+    assert _check(_meta(axis="coverage", planted_by="인용", after="", item_id="분석-7"),
+                  {"interpretation.confusion_analysis": gone}) == []
     meta = _meta(id="S01", axis="sham", planted_by="인용", slot="conclusion.narrative", before="", after="총평 합성 셋.")
     assert _check(meta, {"conclusion.narrative": "총평 합성 하나. 총평 합성 둘. 총평 합성 셋."}) == []
 
@@ -105,7 +106,8 @@ def test_empty_meta_field():
     (_meta(id="D02"), "D01", "폴더 이름과 meta.id"),
     (_meta(id="X1"), "X1", "폴더 이름과 meta.id"),
     (_meta(axis="truth"), None, "네 축 중 하나가 아니다"),
-    (_meta(axis="coverage", planted_by="민서"), None, "coverage 결함은 인용 이 심는다"),
+    (_meta(axis="coverage", planted_by="민서", item_id="분석-7"), None, "coverage 결함은 인용 이 심는다"),
+    (_meta(axis="coverage", planted_by="인용"), None, "meta.item_id"),
     (_meta(planted_by="인용"), None, "faithfulness 결함은 민서 이 심는다"),
     (_meta(round=2), None, "faithfulness 결함은 인용 이 심는다(설계 7.2 역할, 다시 잼)"),
     (_meta(id="S01", axis="faithfulness"), None, "sham 의 축은 'sham'"),
@@ -320,3 +322,33 @@ def test_cli_sheets_dev_writes_sheets_key_hash_and_docs(tmp_path, monkeypatch):
     assert "dev_binary" not in "".join(docs)
     assert "시드 9" in lines[0]
     assert "| 분석-1 |" in (out / "필수내용_항목.md").read_text(encoding="utf-8")
+
+
+# ── 사람 채점 → 일치도 짝(sheets.human_pairs) ──
+
+
+def _key_row(q, axis, system):
+    return {"문항": q, "축": axis, "시스템_문제": system}
+
+
+def _sheet_row(q, v):
+    return {"문항": q, SH.SHEET_COLUMNS[6]: v}
+
+
+def test_human_pairs_by_axis_with_overlap_and_blank():
+    key = [_key_row("Q001", "faithfulness", "예"), _key_row("Q002", "coverage", "아니오"), _key_row("Q003", "coverage", "예")]
+    filled = {"인용": [_sheet_row("Q001", "예"), _sheet_row("Q002", "예"), _sheet_row("Q003", "")],
+              "민서": [_sheet_row("Q002", "아니오")]}
+    got = SH.human_pairs(key, filled)
+    assert got["blank"] == 1
+    assert got["system_human"]["faithfulness"] == [("예", "예")]
+    assert got["system_human"]["coverage"] == [("아니오", "아니오"), ("아니오", "예")]  # 민서·인용 순(이름 정렬)
+    assert got["human_human"]["coverage"] == [("예", "아니오")] and got["human_human"]["faithfulness"] == []
+
+
+def test_human_pairs_rejects_unknown_question_and_bad_verdict():
+    key = [_key_row("Q001", "faithfulness", "예")]
+    with pytest.raises(ValueError, match="열쇠에 없는 문항"):
+        SH.human_pairs(key, {"인용": [_sheet_row("Q999", "예")]})
+    with pytest.raises(ValueError, match="판정은 예/아니오"):
+        SH.human_pairs(key, {"인용": [_sheet_row("Q001", "맞음")]})

@@ -138,3 +138,36 @@ def build(assigned: list[dict], seed: int) -> tuple[dict[str, list[tuple]], list
         key.append((qid, doc, item["run_id"], item["report"], item["variant"], item["variant_axis"], item["axis"], item["unit"],
                     "예" if item["problem"] else "아니오", stratum(item), "+".join(item["scorers"])))
     return sheets, key, {label: run for run, label in doc_of.items()}
+
+
+def human_pairs(key_rows: list[dict], filled: dict[str, list[dict]]) -> dict:
+    """채운 채점지(채점자 → 줄) + 열쇠 → 일치도 짝(축별).
+
+    system_human[축] = [(시스템, 사람) …] — 각 채점자의 판정마다 한 짝(겹침 문항은 두 짝). human_human[축] = [(인용, 민서) …]
+    — 두 사람이 모두 판정한 겹침 문항. 판정은 예/아니오, 빈칸은 짝에서 빼고 blank 로 센다. 그 밖의 글이나 열쇠에 없는 문항이면 ValueError.
+    """
+    verdict_col = SHEET_COLUMNS[6]
+    key = {r["문항"]: r for r in key_rows}
+    judged: dict[str, dict[str, str]] = {}
+    blank = 0
+    for who, rows in filled.items():
+        for row in rows:
+            qid = row["문항"]
+            if qid not in key:
+                raise ValueError(f"열쇠에 없는 문항: {qid} ({who})")
+            v = (row.get(verdict_col) or "").strip()
+            if v not in ("예", "아니오", ""):
+                raise ValueError(f"판정은 예/아니오: {qid} ({who}) {v!r}")
+            if not v:
+                blank += 1
+                continue
+            judged.setdefault(qid, {})[who] = v
+    system_human: dict[str, list] = {a: [] for a in AXES}
+    human_human: dict[str, list] = {a: [] for a in AXES}
+    for qid, by in sorted(judged.items()):
+        axis, system = key[qid]["축"], key[qid]["시스템_문제"]
+        for who in sorted(by):
+            system_human[axis].append((system, by[who]))
+        if len(by) == 2:
+            human_human[axis].append((by["인용"], by["민서"]))
+    return {"system_human": system_human, "human_human": human_human, "blank": blank}

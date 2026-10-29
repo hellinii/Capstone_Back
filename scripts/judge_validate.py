@@ -370,12 +370,13 @@ def execute(a: RunArgs, *, client=None, confirm: Callable[[str], str] = input, e
 
 # ── report — 계산은 다른 모듈, 여기는 모아 넘기는 얇은 층 ─────────────────────
 
-# 함수 이름 → 모듈(app.judge.validation.<모듈>). 실제 모듈과 합칠 때 서명이 다르면 이 표와 아래 report() 만 고친다.
+# 함수 이름 → 모듈(app.judge.validation.<모듈>). 서명은 그 모듈 머리말(stats·extraction·agreement 갈래, 세션 5).
 STATS_API = {
-    "icc_a1": "stats", "axis_scores": "stats", "reproducibility": "stats", "gate_stability": "stats",
-    "defect_detected": "stats", "independence_ok": "stats", "sham_ok": "stats",
-    "match_claims": "extraction", "recall_precision": "extraction",
-    "agreement_rate": "agreement",
+    "axis_scores": "stats", "reproducibility": "stats", "defect_detected": "stats", "detection_passed": "stats",
+    "independence_ok": "stats", "sham_ok": "stats", "agreement_rate": "stats", "human_agreement_ok": "stats",
+    "gold_from_csv": "extraction", "pred_from_extract": "extraction", "match_claims": "extraction",
+    "recall_precision": "extraction", "runs_distribution": "extraction",
+    "cohen_kappa": "agreement", "gwet_ac1": "agreement",
 }
 
 
@@ -401,77 +402,125 @@ def collect_runs(ledger_rows: list[dict], *, fingerprint: str, mode: str, root: 
     return runs
 
 
-def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str, list[dict]] | None = None,
-           human_pairs: list | None = None) -> dict:
-    """7.6 판정값. runs = collect_runs 결과. human_claims = {성적서: 정답지 주장 목록}, human_pairs = 사람 일치도 짝."""
+def planted_sentence(meta: dict) -> str | None:
+    """탐지를 볼 심은 문장 — 바꾸거나 끼운 문장(after), 지우기면 지운 문장(before)."""
+    return meta.get("after") or meta.get("before") or None
+
+
+def report(runs: list[dict], api: dict[str, Callable], *, human_claims: dict[str, tuple[list, list]] | None = None,
+           human_scores: dict | None = None) -> dict:
+    """7.6 판정값. runs = collect_runs 결과(판정은 장부 순서가 아니라 회차 번호 순).
+    human_claims = {성적서: (claims.csv 줄, sentences.csv 줄)}, human_scores = sheets.human_pairs 결과."""
     by_batch: dict[str, list[dict]] = {}
-    for r in runs:
+    for r in sorted(runs, key=lambda r: r["key"]):
         by_batch.setdefault(r["key"].batch, []).append(r)
     out: dict = {"runs": len(runs)}
 
-    def scores(r):
-        return api["axis_scores"](r["scorecard"]) if r.get("scorecard") else None
+    base_runs: dict[str, list[dict]] = {}
+    for r in by_batch.get("reproducibility", []):
+        base_runs.setdefault(r["key"].report, []).append(r)
+    if base_runs:
+        counts = {len(v) for v in base_runs.values()}
+        repro = api["reproducibility"](base_runs, expected_runs=counts.pop() if len(counts) == 1 else None)
+        out["reproducibility"] = repro
+        out["gates_passed"] = repro["gates_passed"]
+        out["base_gate_pass"] = {tag: all(r.get("gate") == "pass" for r in rs) for tag, rs in base_runs.items()}  # Q11
 
-    repro = by_batch.get("reproducibility", [])
-    base_scores: dict[str, list[dict]] = {}
-    base_gates: dict[str, list] = {}
-    for r in sorted(repro, key=lambda r: (r["key"].report, r["key"].repeat)):
-        base_scores.setdefault(r["key"].report, []).append(scores(r))
-        base_gates.setdefault(r["key"].report, []).append(r.get("gate"))
-    if repro:
-        axes = sorted({a for s in base_scores.values() for x in s if x for a in x})
-        out["reproducibility"] = {
-            axis: api["reproducibility"]([[x[axis] if x else None for x in s] for s in base_scores.values()]) for axis in axes}
-        out["gate_stability"] = api["gate_stability"](list(base_gates.values()))
-        out["base_gate_pass"] = {tag: all(g == "pass" for g in gs) for tag, gs in base_gates.items()}  # Q11 바탕 통과 확인
-    for batch in ("defects", "sham"):
-        rows = by_batch.get(batch, [])
-        if not rows:
-            continue
-        per = {}
-        for r in rows:
-            vid, meta = r["key"].variant, r.get("variant_meta") or {}
-            base = [s for s in base_scores.get(r["key"].report, []) if s]
-            entry = per.setdefault(vid, {"base": r["key"].report, "axis": meta.get("axis"), "runs": []})
-            entry["runs"].append({"gate": r.get("gate"), "failure": r.get("failure"), "scores": scores(r),
-                                  **({"detected": api["defect_detected"](meta, r)} if batch == "defects" else {})})
-            run_scores = [x["scores"] for x in entry["runs"] if x["scores"]]
-            if batch == "defects":
-                entry["independence"] = api["independence_ok"](meta.get("axis"), run_scores, base)
-            else:
-                entry["sham"] = api["sham_ok"](run_scores, base)
-        out[batch] = per
+    def grouped(batch):
+        per: dict[str, list[dict]] = {}
+        for r in by_batch.get(batch, []):
+            per.setdefault(r["key"].variant, []).append(r)
+        return per
+
+    defects = {}
+    for vid, rs in sorted(grouped("defects").items()):
+        meta = rs[0].get("variant_meta") or {}
+        axis, base = meta.get("axis"), base_runs.get(rs[0]["key"].report, [])
+        hits = [api["defect_detected"](r, axis, sentence=planted_sentence(meta), item_id=meta.get("item_id") or None)
+                for r in rs]
+        defects[vid] = {"base": rs[0]["key"].report, "axis": axis, "hits": hits, "scores": [api["axis_scores"](r) for r in rs],
+                        "independence": api["independence_ok"](base, rs, axis) if base else None}
+    if defects:
+        out["defects"] = defects
+        out["detection"] = api["detection_passed"]({v: {"axis": d["axis"], "hits": d["hits"]} for v, d in defects.items()})
+        out["independence_passed"] = all(d["independence"] and d["independence"]["ok"] for d in defects.values())
+    shams = {}
+    for vid, rs in sorted(grouped("sham").items()):
+        base = base_runs.get(rs[0]["key"].report, [])
+        shams[vid] = {"base": rs[0]["key"].report, "sham": api["sham_ok"](base, rs) if base else None}
+    if shams:
+        out["sham"] = shams
+        out["sham_passed"] = all(s["sham"] and s["sham"]["ok"] for s in shams.values())
+
     if human_claims:
-        extraction = {}
-        for r in repro:
-            tag = r["key"].report
-            if tag not in human_claims:
+        extraction, pairs, gold_n, pred_n = {}, 0, 0, 0
+        for tag, (claim_rows, sentence_rows) in sorted(human_claims.items()):
+            if tag not in base_runs:
                 continue
-            system = ((r.get("record") or {}).get("extract") or {}).get("claims") or []
-            matches = api["match_claims"](human_claims[tag], system)
-            extraction.setdefault(tag, []).append(api["recall_precision"](matches, len(human_claims[tag]), len(system)))
-        out["extraction"] = extraction
-    if human_pairs:
-        out["agreement"] = api["agreement_rate"](human_pairs)
+            gold = api["gold_from_csv"](claim_rows, sentence_rows)
+            preds = [api["pred_from_extract"](((r.get("record") or {}).get("extract") or {}).get("claims") or [], sentence_rows)
+                     for r in base_runs[tag]]
+            per_run = [api["recall_precision"](api["match_claims"](gold, p)) for p in preds]
+            for m in per_run:
+                pairs, gold_n, pred_n = pairs + m["n_pairs"], gold_n + m["n_gold"], pred_n + m["n_pred"]
+            extraction[tag] = {"runs": per_run, "distribution": api["runs_distribution"](gold, preds)}
+        out["extraction"] = {"reports": extraction, "pooled": {
+            "recall": pairs / gold_n if gold_n else None, "precision": pairs / pred_n if pred_n else None,
+            "n_pairs": pairs, "n_gold": gold_n, "n_pred": pred_n}}
+
+    if human_scores:
+        def rates(pairs: list[tuple]) -> dict | None:
+            if not pairs:
+                return None
+            a, b = [x for x, _ in pairs], [y for _, y in pairs]
+            return {"n": len(pairs), "rate": api["agreement_rate"](a, b), "kappa": api["cohen_kappa"](a, b),
+                    "ac1": api["gwet_ac1"](a, b, ["예", "아니오"])}
+
+        sys_h = {axis: rates(p) for axis, p in human_scores["system_human"].items()}
+        h_h = {axis: rates(p) for axis, p in human_scores["human_human"].items()}
+        all_sys = rates([p for ps in human_scores["system_human"].values() for p in ps])
+        all_hh = rates([p for ps in human_scores["human_human"].values() for p in ps])
+        out["agreement"] = {"system_human": all_sys, "human_human": all_hh, "by_axis": {"system_human": sys_h, "human_human": h_h},
+                            "blank": human_scores["blank"],
+                            "passed": api["human_agreement_ok"](all_sys["rate"], all_hh["rate"]) if all_sys and all_hh else None}
     return out
 
 
-def read_human_claims(folder: Path, tags: list[str]) -> dict[str, list[dict]]:
+def _csv_rows(path: Path) -> list[dict]:
     import csv
 
+    with Path(path).open(newline="", encoding="utf-8") as f:
+        return [r for r in csv.DictReader(f) if any((v or "").strip() for v in r.values())]
+
+
+def read_human_claims(folder: Path, tags: list[str]) -> dict[str, tuple[list, list]]:
+    """정답지(01_정답지) — 주장 표시가 있는 성적서만 {태그: (claims 줄, sentences 줄)}."""
     found = {}
     for tag in tags:
-        path = Path(folder) / f"{tag}.claims.csv"
-        if path.exists():
-            with path.open(newline="", encoding="utf-8") as f:
-                rows = [r for r in csv.DictReader(f) if any(v.strip() for v in r.values() if v)]
+        claims, sentences = Path(folder) / f"{tag}.claims.csv", Path(folder) / f"{tag}.sentences.csv"
+        if claims.exists() and sentences.exists():
+            rows = _csv_rows(claims)
             if rows:
-                found[tag] = rows
+                found[tag] = (rows, _csv_rows(sentences))
     return found
 
 
+def read_human_scores(folder: Path) -> dict | None:
+    """사람 채점(04_사람평가) — 채점지 두 장과 열쇠가 있고 판정이 하나라도 적혔을 때만 짝으로."""
+    from app.judge.validation import sheets as SH
+
+    key = Path(folder) / "열쇠" / "열쇠.csv"
+    sheets = {who: Path(folder) / f"채점지_{who}.csv" for who in ("인용", "민서")}
+    if not key.exists() or not all(p.exists() for p in sheets.values()):
+        return None
+    filled = {who: _csv_rows(p) for who, p in sheets.items()}
+    if not any((r.get(SH.SHEET_COLUMNS[6]) or "").strip() for rows in filled.values() for r in rows):
+        return None
+    return SH.human_pairs(_csv_rows(key), filled)
+
+
 def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[str, Callable] | None = None,
-               answers: Path | None = None, echo: Callable[[str], None] = print) -> dict:
+               answers: Path | None = None, human: Path | None = None, echo: Callable[[str], None] = print) -> dict:
     vroot = validation_root()
     if mode == "dev":
         if ledger is None:
@@ -479,15 +528,18 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
         ledger = guard(ledger, "dev")
         out = guard(out or Path(tempfile.mkdtemp(prefix="judge_validate_report_")), "dev")
         answers = guard(answers, "dev") if answers else None
+        human = guard(human, "dev") if human else None
         root = None
     else:
         ledger, out, root = Path(ledger or vroot / "장부.csv"), Path(out or vroot / RESULTS_OUT), vroot
         answers = Path(answers) if answers else vroot / ANSWERS
+        human = Path(human) if human else vroot / HUMAN
     runs = collect_runs(jl.Ledger(ledger).rows(), fingerprint=criteria.fingerprint(),
                         mode="live" if mode == "verify" else "dev", root=root)
     tags = sorted({r["key"].report for r in runs if r["key"].batch == "reproducibility"})
-    human = read_human_claims(answers, tags) if answers and Path(answers).is_dir() else {}
-    result = report(runs, api or load_stats_api(), human_claims=human)
+    claims = read_human_claims(answers, tags) if answers and Path(answers).is_dir() else {}
+    scores = read_human_scores(human) if human and Path(human).is_dir() else None
+    result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores)
     result.update({"mode": mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(), "tag": TAG})
     out.mkdir(parents=True, exist_ok=True)
     target = out / "검증결과.json"
@@ -610,10 +662,10 @@ def cmd_sheets(mode: str, *, ledger: Path | None, out: Path | None, n: int = 80,
     sheets, key, docs = SH.build(assigned, seed)
     variants = {}
     if any(r["key"].variant != R.BASE_VARIANT for r in first.values()):
-        variants, bases, _, _ = _variant_inputs(mode, defects=defects, inputs=inputs, allow_sealed=allow_sealed)
-    else:
-        bases = (sealed_bases(vroot / SEALED, sorted({r["key"].report for r in first.values()})) if mode == "verify"
-                 else asyncio.run(dev_bases(guard(inputs or DEV_INPUTS, "dev"))))
+        variants, _, _, _ = _variant_inputs(mode, defects=defects, inputs=inputs, allow_sealed=allow_sealed)
+    needed = sorted({r["key"].report for r in first.values()})  # 변형의 바탕도 회차의 성적서다
+    bases = (sealed_bases(vroot / SEALED, needed) if mode == "verify"
+             else asyncio.run(dev_bases(guard(inputs or DEV_INPUTS, "dev"))))
     by_run = {r["run_id"]: r for r in first.values()}
 
     def table(columns, rows) -> str:
@@ -701,7 +753,8 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--mode", choices=MODES, required=True)
     rep.add_argument("--ledger")
     rep.add_argument("--out")
-    rep.add_argument("--answers")
+    rep.add_argument("--answers", help="정답지 폴더(기본 verify 는 검증/01_정답지)")
+    rep.add_argument("--human", help="사람 채점 폴더(기본 verify 는 검증/04_사람평가)")
     for name, helptext in (("check-defects", "결함본·sham 꼴 검사(verify 는 V1 뒤 --allow-sealed)"),
                            ("make-diff", "결함본·sham 의 diff.txt 를 도구로 쓴다")):
         c = sub.add_parser(name, help=helptext)
@@ -754,7 +807,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "report":
             cmd_report(args.mode, ledger=Path(args.ledger) if args.ledger else None, out=Path(args.out) if args.out else None,
-                       answers=Path(args.answers) if args.answers else None)
+                       answers=Path(args.answers) if args.answers else None, human=Path(args.human) if args.human else None)
             return 0
         if args.mode == "verify" and (args.inputs or args.defects):
             raise RunnerError("verify 는 입력·결함을 검증 폴더에서만 읽는다(--inputs·--defects 는 dev 전용)")

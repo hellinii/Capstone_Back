@@ -282,28 +282,38 @@ sys.addaudithook(_audit)
 
 
 class FakeStats:
-    """다른 갈래(stats)가 만드는 함수 자리 — 받은 인자를 적고 정해 둔 값을 돌려준다(배선만 본다)."""
+    """통계 함수 자리 — 받은 인자를 적고 그럴듯한 값을 돌려준다(배선만 본다)."""
+
+    RETURNS = {
+        "axis_scores": {"faithfulness": 1.0, "coverage": 0.5, "consistency": 0.0, "readability": 0.0},
+        "reproducibility": {"gates_passed": True, "axes_passed": True}, "defect_detected": True,
+        "detection_passed": {"passed": True}, "independence_ok": {"ok": True, "axes": {}}, "sham_ok": {"ok": True, "axes": {}},
+        "agreement_rate": 0.9, "human_agreement_ok": True, "gold_from_csv": [{"id": "G1"}], "pred_from_extract": [{"id": "P1"}],
+        "match_claims": {"pairs": [1]}, "recall_precision": {"recall": 1.0, "precision": 1.0, "n_pairs": 1, "n_gold": 1, "n_pred": 1},
+        "runs_distribution": {"recall": {}}, "cohen_kappa": 0.5, "gwet_ac1": 0.6,
+    }
 
     def __init__(self):
         self.calls: list[tuple] = []
 
-    def module(self, names):
+    def install(self, monkeypatch):
         import types
 
-        mod = types.ModuleType("fake")
-        for name in names:
-            setattr(mod, name, self._fn(name))
-        return mod
+        for mod in sorted(set(jv.STATS_API.values())):
+            m = types.ModuleType(f"fake_{mod}")
+            for name, owner in jv.STATS_API.items():
+                if owner == mod:
+                    setattr(m, name, self._fn(name))
+            monkeypatch.setitem(sys.modules, f"app.judge.validation.{mod}", m)
 
     def _fn(self, name):
-        def fn(*args):
-            self.calls.append((name, args))
-            if name == "axis_scores":
-                return {"faithfulness": 1.0, "coverage": 0.5, "consistency": 0.0, "readability": 0.0}
-            if name == "match_claims":
-                return [("짝", 1)]
-            return {"fn": name}
+        def fn(*args, **kw):
+            self.calls.append((name, args, kw))
+            return self.RETURNS[name]
         return fn
+
+    def named(self, name):
+        return [(a, k) for n, a, k in self.calls if n == name]
 
 
 def _plant_synthetic(defects: Path, bases):
@@ -317,6 +327,12 @@ def _plant_synthetic(defects: Path, bases):
     V.write_variant(defects, {"id": "D01", "base": "dev_binary", "axis": "readability", "kind": "영어 코드값 노출",
                               "planted_by": "인용", "slot": slot, "intent": "코드값 노출(합성)", "before": first, "after": after},
                     b.result, V.replace_sentence(text, 0, after))
+    slot = "interpretation.confusion_analysis"
+    text = V.read_slot(b.result, slot)
+    gone = V.sentences(text)[-1]
+    V.write_variant(defects, {"id": "D02", "base": "dev_binary", "axis": "coverage", "kind": "항목 지우기", "planted_by": "인용",
+                              "slot": slot, "intent": "마지막 문장 지움(합성)", "before": gone, "after": "", "item_id": "분석-1"},
+                    b.result, V.replace_sentence(text, len(V.sentences(text)) - 1, None))
     m = bases["dev_multiclass"]
     slot = "conclusion.risks"
     text = V.read_slot(m.result, slot)
@@ -326,64 +342,137 @@ def _plant_synthetic(defects: Path, bases):
                     m.result, V.replace_sentence(text, 0, "즉, " + first))
 
 
-def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_path, vdir, monkeypatch):
+def _answers(folder: Path, base) -> None:
+    """합성 정답지 — 개발 서술의 표시지(annotation 꼴)와 숫자가 든 첫 문장의 첫 숫자 낱말 하나."""
+    from app.judge.validation import annotation as A
+
+    rows = A.sentence_rows(A.pieces_from_sealed({"request": base.request, "view": {"result": base.result}}))
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{base.tag}.sentences.csv").write_text(A.to_csv(A.SENTENCE_COLUMNS, rows), encoding="utf-8")
+    no, text = next((r[0], r[5]) for r in rows if any(ch.isdigit() for ch in r[5]))
+    tok = next(t for t in text.split() if any(ch.isdigit() for ch in t))
+    (folder / f"{base.tag}.claims.csv").write_text(A.to_csv(A.CLAIM_COLUMNS, [(no, "number", tok, "")]), encoding="utf-8")
+
+
+def _fill_sheets(folder: Path) -> dict:
+    """합성 사람 채점 — 인용 님은 열쇠의 시스템 판정 그대로, 민서는 겹침 문항 하나를 뒤집고 인용 님 판정 하나를 비운다."""
+    import csv as _csv
+
+    key = {r["문항"]: r["시스템_문제"] for r in _rows(folder / "열쇠" / "열쇠.csv")}
+    sheets = {who: _rows(folder / f"채점지_{who}.csv") for who in ("인용", "민서")}
+    overlap = sorted({r["문항"] for r in sheets["인용"]} & {r["문항"] for r in sheets["민서"]})
+    flipped, blanked = overlap[0], next(r["문항"] for r in sheets["인용"] if r["문항"] not in overlap)
+    for who, rows in sheets.items():
+        for r in rows:
+            v = key[r["문항"]]
+            if who == "민서" and r["문항"] == flipped:
+                v = "아니오" if v == "예" else "예"
+            if who == "인용" and r["문항"] == blanked:
+                v = ""
+            r["판정(예/아니오)"] = v
+        with (folder / f"채점지_{who}.csv").open("w", newline="", encoding="utf-8") as f:
+            w = _csv.DictWriter(f, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+    return {"overlap": len(overlap), "total": sum(len(r) for r in sheets.values())}
+
+
+def _full_loop(tmp_path) -> dict:
+    """개발 입력 3건 × 2회 재현성 → 결함 2(표기·필수 내용)·sham 1 → 추출 → 채점지 → 합성 채점. 경로들을 돌려준다."""
     import asyncio
 
     work = tmp_path / "work"
-    defects = work / "결함"
-    ledger = work / "장부.csv"
-    _plant_synthetic(defects, asyncio.run(jv.dev_bases(jv.DEV_INPUTS)))
-    answers = work / "정답지"
-    answers.mkdir()
-    (answers / "dev_binary.claims.csv").write_text("문장번호,종류,인용 구절,메모\n1,number,0.505,\n", encoding="utf-8")
-    fake = FakeStats()
-    for mod, names in (("stats", ["icc_a1", "axis_scores", "reproducibility", "gate_stability", "defect_detected",
-                                  "independence_ok", "sham_ok"]),
-                       ("extraction", ["match_claims", "recall_precision"]), ("agreement", ["agreement_rate"])):
-        monkeypatch.setitem(sys.modules, f"app.judge.validation.{mod}", fake.module(names))
+    bases = asyncio.run(jv.dev_bases(jv.DEV_INPUTS))
+    _plant_synthetic(work / "결함", bases)
+    _answers(work / "정답지", bases["dev_binary"])
+    common = dict(mode="dev", ledger=work / "장부.csv", out=work / "runs", yes=True, seed=11, defects=work / "결함")
+    ran = [jv.execute(jv.RunArgs(batch=b, reports=[], repeats=2 if b == "reproducibility" else None, **common),
+                      echo=_quiet()[1])["ran"] for b in ("reproducibility", "defects", "sham", "extraction")]
+    jv.cmd_sheets("dev", ledger=work / "장부.csv", out=work / "사람", n=16, overlap=2, seed=5, defects=work / "결함",
+                  echo=_quiet()[1])
+    filled = _fill_sheets(work / "사람")
+    return {"work": work, "ran": ran, **filled}
 
+
+def test_one_full_dev_loop_with_fake_llm_never_touches_validation_folder(tmp_path, vdir, monkeypatch):
+    """배선 — 통계 함수를 가짜로 꽂아 report 가 무엇을 어떤 꼴로 넘기는지 본다. 한 바퀴 동안 검증 폴더는 한 번도 열지 않는다."""
+    fake = FakeStats()
+    fake.install(monkeypatch)
     _AUDIT.update(on=True, paths=[])
     try:
-        common = dict(mode="dev", ledger=ledger, out=work / "runs", yes=True, seed=11, defects=defects)
-        repro = jv.execute(jv.RunArgs(batch="reproducibility", reports=[], repeats=2, **common), echo=_quiet()[1])
-        dfx = jv.execute(jv.RunArgs(batch="defects", **common), echo=_quiet()[1])
-        sham = jv.execute(jv.RunArgs(batch="sham", **common), echo=_quiet()[1])
-        ext = jv.execute(jv.RunArgs(batch="extraction", **common), echo=_quiet()[1])
-        result = jv.cmd_report("dev", ledger=ledger, out=work / "결과", answers=answers, echo=_quiet()[1])
+        loop = _full_loop(tmp_path)
+        work = loop["work"]
+        result = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", answers=work / "정답지", human=work / "사람",
+                               echo=_quiet()[1])
     finally:
         _AUDIT["on"] = False
-    # 검증 폴더(미끼 포함)는 한 번도 열지 않았다 — 열린 파일이 실제로 잡히는지도 본다(빈 감시는 늘 통과).
     opened = [Path(p).resolve() for p in _AUDIT["paths"]]
-    assert any(p == ledger.resolve() for p in opened)
+    assert any(p == (work / "장부.csv").resolve() for p in opened)  # 감시가 실제로 잡는다(빈 감시는 늘 통과)
     assert [p for p in opened if p == vdir or vdir in p.parents] == []
 
-    assert (repro["ran"], dfx["ran"], sham["ran"], ext["ran"]) == (6, 1, 1, 0)
-    rows = _rows(ledger)
-    assert [(r["stage"], r["report"], r["variant"]) for r in rows].count(("validate_defects", "dev_binary", "D01")) == 1
-    assert {r["stage"] for r in rows} == {"validate_reproducibility", "validate_defects", "validate_sham"}
-    assert all(r["mode"] == "dev" and r["result_sha256"] for r in rows) and len(rows) == 8
+    assert loop["ran"] == [6, 2, 1, 0]
+    rows = _rows(work / "장부.csv")
+    assert len(rows) == 9 and all(r["mode"] == "dev" and r["result_sha256"] for r in rows)
 
-    # report 배선: 축마다 재현성(성적서 3 × 회차 2), 게이트 안정, 결함 탐지·독립성(심은 축), sham, 추출 짝짓기
-    names = [c[0] for c in fake.calls]
-    assert names.count("axis_scores") == 8
-    repro_calls = [c[1][0] for c in fake.calls if c[0] == "reproducibility"]
-    assert len(repro_calls) == 4 and all(len(m) == 3 and all(len(row) == 2 for row in m) for m in repro_calls)
-    (gates,) = [c[1][0] for c in fake.calls if c[0] == "gate_stability"]
-    assert len(gates) == 3 and all(len(g) == 2 for g in gates)
-    (detect,) = [c[1] for c in fake.calls if c[0] == "defect_detected"]
-    assert detect[0]["id"] == "D01" and detect[1]["key"].variant == "D01"
-    (indep,) = [c[1] for c in fake.calls if c[0] == "independence_ok"]
-    assert indep[0] == "readability" and len(indep[1]) == 1 and len(indep[2]) == 2
-    (sham_call,) = [c[1] for c in fake.calls if c[0] == "sham_ok"]
-    assert len(sham_call[0]) == 1 and len(sham_call[1]) == 2
-    assert names.count("match_claims") == 2 and names.count("recall_precision") == 2  # dev_binary 회차 2개만 정답지가 있다
-    (human, system) = [c[1] for c in fake.calls if c[0] == "match_claims"][0]
-    assert human[0]["인용 구절"] == "0.505" and isinstance(system, list)
-    assert "agreement_rate" not in names  # 사람 일치도 짝이 없으면 부르지 않는다
-    assert set(result) >= {"reproducibility", "gate_stability", "base_gate_pass", "defects", "sham", "extraction"}
-    assert result["defects"]["D01"]["axis"] == "readability" and result["sham"]["S01"]["base"] == "dev_multiclass"
+    ((per, kw),) = fake.named("reproducibility")
+    assert sorted(per[0]) == ["dev_binary", "dev_multiclass", "dev_multilabel"] and kw == {"expected_runs": 2}
+    assert all([r["key"].repeat for r in v] == [1, 2] for v in per[0].values())
+    det = {a[0]["key"].variant: (a[1], k) for a, k in fake.named("defect_detected")}
+    assert det["D01"] == ("readability", {"sentence": V_after(work, "D01"), "item_id": None})
+    assert det["D02"][0] == "coverage" and det["D02"][1]["item_id"] == "분석-1"
+    ((by_defect,), _), = fake.named("detection_passed")
+    assert by_defect == {"D01": {"axis": "readability", "hits": [True]}, "D02": {"axis": "coverage", "hits": [True]}}
+    indep = fake.named("independence_ok")
+    assert [(len(a[0]), len(a[1]), a[2]) for a, _ in indep] == [(2, 1, "readability"), (2, 1, "coverage")]
+    ((sham_args, _),) = fake.named("sham_ok")
+    assert len(sham_args[0]) == 2 and sham_args[1][0]["key"].variant == "S01"
+    assert len(fake.named("gold_from_csv")) == 1 and len(fake.named("pred_from_extract")) == 2  # dev_binary 회차 2개
+    assert len(fake.named("match_claims")) == 2 and len(fake.named("runs_distribution")) == 1
+    assert fake.named("human_agreement_ok") and fake.named("cohen_kappa") and fake.named("gwet_ac1")
+    assert result["detection"] == {"passed": True} and result["sham_passed"] and result["independence_passed"]
+    assert result["extraction"]["pooled"] == {"recall": 1.0, "precision": 1.0, "n_pairs": 2, "n_gold": 2, "n_pred": 2}
     saved = json.loads((work / "결과" / "검증결과.json").read_text(encoding="utf-8"))
-    assert saved["fingerprint"] == criteria.fingerprint() and saved["runs"] == 8
+    assert saved["fingerprint"] == criteria.fingerprint() and saved["runs"] == 9
+
+
+def V_after(work: Path, vid: str) -> str:
+    return json.loads((work / "결함" / vid / "meta.json").read_text(encoding="utf-8"))["after"]
+
+
+def test_one_full_dev_loop_with_real_stats_gives_real_numbers(tmp_path, vdir):
+    """실제 통계 모듈로 한 바퀴 — report 가 7.6 의 숫자를 낸다(가짜 LLM 이라 값의 좋고 나쁨이 아니라 꼴과 셈을 본다)."""
+    loop = _full_loop(tmp_path)
+    work = loop["work"]
+    r = jv.cmd_report("dev", ledger=work / "장부.csv", out=work / "결과", answers=work / "정답지", human=work / "사람",
+                      echo=_quiet()[1])
+    repro = r["reproducibility"]
+    assert set(repro["axes"]) == {"faithfulness", "coverage", "consistency", "readability"} and repro["n_runs"] == 2
+    for axis, a in repro["axes"].items():  # 가짜 심판은 회차마다 같은 답 — ICC 대신 분산 0 표시(Q10)이거나 점수 없음
+        assert a["zero_variance"] or a["dropped"], (axis, a)
+        assert a["passed"] == (a["zero_variance"] and not a["dropped"])
+    assert repro["gates_passed"] is True and r["gates_passed"] is True
+    assert all(g["gates"] == ["pass", "pass"] for g in repro["gates"].values())
+    assert r["base_gate_pass"] == {"dev_binary": True, "dev_multiclass": True, "dev_multilabel": True}
+    assert r["defects"]["D01"]["hits"] == [True]  # 'worse' 를 표기 코드 규칙이 그 문장에서 잡는다
+    assert isinstance(r["defects"]["D02"]["hits"][0], bool)
+    assert r["detection"]["defects"]["D01"] == {"axis": "readability", "rate": 1.0, "ok": True}
+    assert set(r["detection"]) >= {"gate_axes_ok", "others_ok", "passed"}
+    ind = r["defects"]["D01"]["independence"]
+    assert set(ind["axes"]) == {"faithfulness", "coverage", "consistency"} and isinstance(ind["ok"], bool)
+    sham = r["sham"]["S01"]["sham"]
+    assert set(sham["axes"]) == {"faithfulness", "coverage", "consistency", "readability"} and isinstance(r["sham_passed"], bool)
+    ext = r["extraction"]
+    assert ext["pooled"]["n_gold"] == 2 and ext["pooled"]["n_pred"] >= 2  # 정답 1개 × 회차 2
+    assert 0.0 <= ext["pooled"]["recall"] <= 1.0 and 0.0 <= ext["pooled"]["precision"] <= 1.0
+    assert ext["reports"]["dev_binary"]["distribution"]["recall"]["n"] == 2
+    agr = r["agreement"]
+    # 짝 셈: 판정마다 시스템 짝 하나(빈칸 하나 뺌), 사람끼리는 겹침 문항마다 하나. 민서가 겹침 하나를 뒤집었다.
+    n, k = loop["total"] - 1, loop["overlap"]
+    assert (agr["blank"], agr["system_human"]["n"], agr["human_human"]["n"]) == (1, n, k)
+    assert agr["system_human"]["rate"] == pytest.approx((n - 1) / n)
+    assert agr["human_human"]["rate"] == pytest.approx((k - 1) / k)
+    assert agr["passed"] is ((n - 1) / n >= (k - 1) / k - 0.05)
+    assert agr["system_human"]["kappa"] is not None or agr["system_human"]["ac1"] is not None
 
 
 def test_report_refuses_tampered_result_file(tmp_path, vdir):
@@ -394,6 +483,7 @@ def test_report_refuses_tampered_result_file(tmp_path, vdir):
         jv.cmd_report("dev", ledger=tmp_path / "work" / "장부.csv", out=tmp_path / "o", api={})
 
 
-def test_stats_api_names_are_the_agreed_ten():
-    assert sorted(jv.STATS_API) == sorted(["icc_a1", "axis_scores", "reproducibility", "gate_stability", "defect_detected",
-                                           "independence_ok", "sham_ok", "agreement_rate", "match_claims", "recall_precision"])
+def test_stats_api_names_exist_in_real_modules():
+    api = jv.load_stats_api()
+    assert set(api) == set(jv.STATS_API) and all(callable(f) for f in api.values())
+    assert set(jv.STATS_API.values()) == {"stats", "extraction", "agreement"}
