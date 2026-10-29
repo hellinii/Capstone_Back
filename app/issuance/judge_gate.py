@@ -36,15 +36,15 @@ from app.issuance.service import IssuanceError
 from app.narrative import digest
 from app.narrative.models import NarrativeJob, _utcnow
 
-MESSAGES = {
-    "judge_job_missing": "판 4 성적서는 심판을 통과한 서술 작업 번호가 있어야 발급할 수 있습니다",
-    "judge_job_not_found": "서술 작업을 찾을 수 없어 판 4 성적서를 발급할 수 없습니다",
-    "judge_job_not_edition4": "판 4 서술 작업이 아니어서 판 4 성적서를 발급할 수 없습니다",
-    "judge_record_expired": "서술 작업 기록의 보관 기간이 지나 판 4 성적서를 발급할 수 없습니다",
-    "judge_not_passed": "심판을 통과하지 않은 서술이어서 판 4 성적서를 발급할 수 없습니다(발급 보류)",
-    "judge_narrative_unrecorded": "서술 작업에 서술 글 기록이 없어 판 4 성적서를 발급할 수 없습니다",
-    "judge_narrative_mismatch": "성적서의 서술이 심판을 통과한 서술과 달라 판 4 성적서를 발급할 수 없습니다",
-    "judge_criteria_unverified": "검증된 심판 기준으로 채점된 서술이 아니어서 판 4 성적서를 발급할 수 없습니다",
+MESSAGES = {  # 고객에게 그대로 보이는 글(프론트 "서버가 발급을 거절했습니다: {글} (코드)") — 사용자 결정 문안(2026-10-29), 내부 낱말 금지
+    "judge_job_missing": "자동 검증을 거친 서술인지 확인할 서술 작업 번호가 요청에 없어 발급할 수 없습니다. 화면을 새로 고친 뒤 다시 발급해 주세요.",
+    "judge_job_not_found": "이 성적서의 서술을 만든 작업을 찾을 수 없어 발급할 수 없습니다. 서술을 다시 만든 뒤 발급해 주세요.",
+    "judge_job_not_edition4": "요청에 담긴 서술 작업이 이 성적서 양식에 맞는 작업이 아니어서 발급할 수 없습니다. 서술을 다시 만든 뒤 발급해 주세요.",
+    "judge_record_expired": "서술 작업 기록을 보관하는 기간이 지나 자동 검증 결과를 확인할 수 없습니다. 서술을 다시 만든 뒤 발급해 주세요.",
+    "judge_not_passed": "이 서술은 자동 검증을 통과하지 못해 발급이 보류되었습니다. 성적서 화면 위쪽의 안내를 확인해 주세요.",
+    "judge_narrative_unrecorded": "자동 검증을 통과한 서술의 내용이 기록되어 있지 않아, 지금 성적서의 서술과 같은지 확인할 수 없습니다. 서술을 다시 만든 뒤 발급해 주세요.",
+    "judge_narrative_mismatch": "성적서의 서술이 자동 검증을 통과한 서술과 달라 발급할 수 없습니다. 검증을 통과한 뒤 서술이 바뀌었다면 서술을 다시 만들어 검증을 다시 받아 주세요.",
+    "judge_criteria_unverified": "이 서술은 아직 검증을 마치지 않은 점검 기준으로 확인되어 발급할 수 없습니다. 운영자에게 문의해 주세요.",
 }
 
 

@@ -406,18 +406,32 @@ def _row_internal(factory, job_id) -> str:
         return db.get(NarrativeJob, job_id).internal_json
 
 
-# ── P1-7(J10 검토): 고객 글에 내부 낱말('심판'·'판 4') — 문안은 사용자 결정이라 지금은 고치지 않는다 ──
+# ── P1-7(J10 검토): 고객 글에 내부 낱말 금지 — 사용자 결정 문안(2026-10-29)으로 바꾼 뒤 보통 시험 ──
+
+INTERNAL_WORDS = ("심판", "판 4", "판4", "ai", "llm", "gpt", "claude", "sonnet", "opus", "haiku", "모델")
 
 
 @pytest.mark.parametrize("code", sorted(judge_gate.MESSAGES))
-@pytest.mark.xfail(strict=True, reason="문안 결정 대기 — 서버 발급 거절 글(MESSAGES)이 내부 낱말 '심판'·'판 4'를 담고 있다(P1-7)")
 def test_issuance_messages_have_no_internal_words(code):
     msg = judge_gate.MESSAGES[code]
-    assert "심판" not in msg and "판 4" not in msg, msg
+    low = msg.lower()
+    for word in INTERNAL_WORDS:
+        assert word not in low, (word, msg)
+    assert msg.endswith("주세요.") or msg.endswith("습니다."), msg  # 합니다체 문장으로 끝남
 
 
-def test_new_reason_code_is_in_the_pending_wording_check():
-    assert "judge_criteria_unverified" in judge_gate.MESSAGES  # 새 사유 글도 위 xfail 대상(같은 꼴의 문안)
+def test_new_reason_code_is_in_the_wording_check():
+    assert set(judge_gate.MESSAGES) == {
+        "judge_job_missing", "judge_job_not_found", "judge_job_not_edition4", "judge_record_expired",
+        "judge_not_passed", "judge_narrative_unrecorded", "judge_narrative_mismatch", "judge_criteria_unverified",
+    }
+
+
+def test_rejection_detail_is_the_message_then_code(passed_job):
+    """고객에게 보이는 글 꼴: "{MESSAGES[code]} ({code})" — 프론트 B48 이 이 글을 그대로 싣는다."""
+    client, _factory, _job_id, content = passed_job
+    resp = _issue(client, content=content, job_id=None)
+    assert resp.json()["detail"] == f"{judge_gate.MESSAGES['judge_job_missing']} (judge_job_missing)"
 
 
 def test_lone_surrogate_in_content_is_rejected_not_500(passed_job):
