@@ -140,6 +140,14 @@ def test_two_sentences_changed_or_nothing_changed():
     assert "문장 하나만 바뀐 것이 아니다" in _check(slots={"interpretation.confusion_analysis": text})[0]
 
 
+def test_two_neighbouring_sentences_replaced_is_not_one():
+    # 붙은 두 문장을 한 번에 바꾸면(difflib 바꿈 한 덩어리, 2→2) 문장 하나가 아니다.
+    text = synthetic_result()["interpretation"]["confusion_analysis"]
+    both = V.replace_sentence(V.replace_sentence(text, 0, "바꾼 가."), 1, "바꾼 나.")
+    assert V.sentence_change(text, both) is None
+    assert "문장 하나만 바뀐 것이 아니다" in _check(slots={"interpretation.confusion_analysis": both})[0]
+
+
 def test_before_after_must_match_letter_for_letter():
     assert _check(_meta(before="합성 문장 나는 0.9 이다.")) == [
         "meta.before 가 바탕 칸에서 바뀐(지운) 문장과 글자 그대로 같지 않다"]
@@ -258,6 +266,14 @@ def test_sample_is_seeded_stratified_and_keeps_planted_items():
     assert any(i["kind"] == "defect" and i["axis"] == "coverage" for i in a)
     for ax in V.AXES:  # 축마다 '문제' 층이 있으면 뽑힌다
         assert any(i["problem"] for i in a if i["axis"] == ax)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_smallest_sample_takes_the_planted_problem_item_first(seed):
+    # 축마다 한 문항이면 심은 자리에서 시스템이 문제라고 한 문항이 뽑힌다(탐지한 결함 사례를 표본에 꼭 넣는다).
+    got = {i["axis"]: i for i in SH.sample(_items(), 4, seed=seed)}
+    assert (got["faithfulness"]["run_id"], got["faithfulness"]["unit"]) == ("R-3", "C0")
+    assert (got["coverage"]["run_id"], got["coverage"]["unit"], got["coverage"]["problem"]) == ("R-4", "분석-1", True)
 
 
 def test_assign_follows_roles_and_overlap_avoids_defects():

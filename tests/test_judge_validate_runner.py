@@ -240,6 +240,23 @@ def test_batch_budget_stops_mid_batch_and_resume_finishes(tmp_path, vdir):
     assert len(_rows(ledger)) == 3
 
 
+def test_defects_batch_refuses_malformed_variant_before_any_run(tmp_path, vdir):
+    import asyncio
+
+    from app.judge.validation import variants as V
+
+    base = asyncio.run(jv.dev_bases(jv.DEV_INPUTS))["dev_binary"]
+    slot = "conclusion.narrative"
+    text = V.read_slot(base.result, slot)
+    first = V.sentences(text)[0]
+    meta = {"id": "D01", "base": "dev_binary", "axis": "faithfulness", "kind": "숫자", "planted_by": "인용",  # 역할 틀림
+            "slot": slot, "intent": "합성", "before": first, "after": first + " 덧"}
+    V.write_variant(tmp_path / "결함", meta, base.result, V.replace_sentence(text, 0, meta["after"]))
+    with pytest.raises(jv.RunnerError, match="결함본·sham 꼴이 틀려 시작하지 않는다"):
+        jv.execute(_dev(tmp_path, batch="defects", defects=tmp_path / "결함", repeats=1), echo=_quiet()[1])
+    assert not (tmp_path / "work" / "장부.csv").exists() and not (tmp_path / "work" / "runs").exists()
+
+
 def test_extraction_batch_calls_nothing(tmp_path, vdir):
     lines, echo = _quiet()
 
