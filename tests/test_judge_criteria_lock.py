@@ -181,3 +181,46 @@ def test_dev_server_turns_the_lock_off():
     assert 'os.environ["JUDGE_CRITERIA_LOCK"] = "off"' in text
     main = (criteria.HERE.parents[2] / "app" / "main.py").read_text(encoding="utf-8")
     assert "JUDGE_CRITERIA_LOCK" not in main  # 운영 진입점은 끄지 않는다
+
+
+# ── J10 검토: 환경변수로 바꾼 심판 모델·추론 강도(P1-10) ──
+
+
+@pytest.mark.parametrize("env, value, field", [
+    ("JUDGE_MODEL", "gpt-6.1-sol-mini", "judge_model"), ("JUDGE_EXTRACT_MODEL", "gpt-6.1-sol", "extract_model"),
+    ("JUDGE_EFFORT", "high", "effort"), ("JUDGE_EXTRACT_EFFORT", "medium", "extract_effort"),
+])
+def test_env_model_or_effort_change_locks(lock_on, fixed_version, tmp_path, monkeypatch, env, value, field):
+    path = _record(tmp_path, version="1.0", fingerprint=_current_fp())
+    assert criteria_lock.problem(path) is None and criteria_lock.model_drift() == {}  # 양성 대조
+    monkeypatch.setenv(env, value)
+    assert criteria_lock.problem(path) == criteria_lock.MODEL_MISMATCH
+    drift = criteria_lock.model_drift()
+    assert list(drift) == [field] and drift[field]["actual"] == value
+    assert drift[field]["criteria"] == criteria.load_json("model.json")[field]
+
+
+def test_env_same_as_criteria_does_not_lock(lock_on, fixed_version, tmp_path, monkeypatch):
+    monkeypatch.setenv("JUDGE_MODEL", criteria.load_json("model.json")["judge_model"])
+    monkeypatch.setenv("JUDGE_EFFORT", "  MEDIUM ")  # config 가 실제로 쓸 값(medium)으로 본다
+    assert criteria_lock.problem(_record(tmp_path, version="1.0", fingerprint=_current_fp())) is None
+
+
+def test_model_drift_job_is_held_and_records_what_differed(shared, judge_passes, lock_on, fixed_version, tmp_path, monkeypatch):
+    monkeypatch.setattr(criteria_lock, "RECORD_PATH", _record(tmp_path, version="1.0", fingerprint=_current_fp()))
+    monkeypatch.setenv("JUDGE_MODEL", "검증안한-모델")
+    client, factory = shared
+    job_id = _job(client, _ed4())
+    assert client.get(f"/api/narrative/jobs/{job_id}").json()["result"]["judge"]["held_kind"] == "judge_error"
+    rec = _internal(factory, job_id)["judge"]
+    assert rec["criteria_lock"] == criteria_lock.MODEL_MISMATCH and judge_passes == []
+    assert rec["model_drift"] == {"judge_model": {"criteria": "gpt-6.1-sol", "actual": "검증안한-모델"}}
+
+
+def test_model_drift_with_lock_off_is_only_recorded(shared, judge_passes, monkeypatch):
+    monkeypatch.setenv("JUDGE_EFFORT", "high")
+    client, factory = shared
+    job_id = _job(client, _ed4())
+    assert client.get(f"/api/narrative/jobs/{job_id}").json()["result"]["judge"]["gate"] == "passed"
+    rec = _internal(factory, job_id)["judge"]
+    assert rec["criteria_lock"] == "off" and rec["model_drift"]["effort"] == {"criteria": "medium", "actual": "high"}

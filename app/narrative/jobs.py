@@ -811,7 +811,18 @@ def _lock_problem() -> str | None:
         return f"error:{type(exc).__name__}"
 
 
+def _note_model_drift(judge_rec: dict) -> None:
+    """실제로 쓰일 심판 모델·추론 강도가 기준 묶음(model.json)과 다르면 무엇이 달랐는지 기록에 남긴다(잠금이 꺼져 있어도)."""
+    try:
+        drift = criteria_lock.model_drift()
+    except Exception as exc:  # noqa: BLE001 — 기록만 하는 자리
+        drift = {"error": type(exc).__name__}
+    if drift:
+        judge_rec["model_drift"] = drift
+
+
 def _lock_held(judge_rec: dict, locked: str) -> dict:
+    _note_model_drift(judge_rec)
     allowed = ladder.retry_allowed("judge_error", failure="criteria_lock", ever_blocked=False)
     logger.error("검증 기록 잠금(%s) → 심판을 부르지 않고 발급 보류(judge_error)", locked)
     judge_rec.update({"criteria_lock": locked, "gate": "held", "held_kind": "judge_error", "failure": "criteria_lock",
@@ -836,6 +847,7 @@ async def _judge_branch(session, judge, judge_state, deadline_at, clock, judge_r
     if locked:
         return _lock_held(judge_rec, locked)
     judge_rec["criteria_lock"] = "ok" if criteria_lock.enabled() else "off"
+    _note_model_drift(judge_rec)
     if judge_rec["criteria_lock"] == "off":
         logger.warning("검증 기록 잠금이 꺼져 있다(%s=off) — 개발·시험 전용, 운영에 두면 안 된다", criteria_lock.ENV)
     try:
