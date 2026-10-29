@@ -21,6 +21,7 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
     - extraction 은 채점을 부르지 않는다(재현성 회차의 추출 기록을 report 가 정답지와 짝짓는다).
 - report     : 장부·결과 원본으로 7.6 판정값을 계산한다. 계산은 app.judge.validation 의 stats·extraction·agreement 가 하고,
                이 명령은 그 함수들을 부르는 얇은 층이다(STATS_API). 결과는 verify 면 05_결과/검증결과.json, dev 면 출력 폴더.
+- rescope    : 재검증 범위(정10) — 바뀐 파일(--changed 또는 --since <커밋>) → 다시 돌 모듈·묶음·사람 일치도 축.
 - status     : 장부 누계와 상한.
 
 상호작용
@@ -463,6 +464,30 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
     return result
 
 
+# ── 재검증 범위(정10) ─────────────────────────────────────────────────
+
+
+def cmd_rescope(changed: list[str] | None, since: str | None, *, git: Callable[..., tuple[int, str]] = _git,
+                echo: Callable[[str], None] = print) -> dict:
+    from app.judge.validation.rescope import rescope
+
+    files = list(changed or [])
+    if since:
+        code, out = git("diff", "--name-only", since, "HEAD")
+        if code != 0:
+            raise RunnerError(f"git diff 실패: {since}")
+        files += [line for line in out.splitlines() if line.strip()]
+    if not files:
+        raise RunnerError("바뀐 파일이 없다(--changed 또는 --since)")
+    result = rescope(files)
+    echo(f"다시 돌 모듈: {', '.join(result['modules']) or '없음'}")
+    echo(f"다시 돌 묶음: {', '.join(result['batches']) or '없음'}")
+    echo(f"사람 일치도 다시 볼 축(그 축 LLM 판정이 달라졌으면): {', '.join(result['human_axes']) or '없음'}")
+    for path, mods in result["by_file"].items():
+        echo(f"  {path} → {', '.join(mods) or '영향 없음'}")
+    return result
+
+
 # ── 명령줄 ───────────────────────────────────────────────────────────
 
 
@@ -488,6 +513,9 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--ledger")
     rep.add_argument("--out")
     rep.add_argument("--answers")
+    rs = sub.add_parser("rescope", help="재검증 범위(정10): 바뀐 파일 → 다시 돌 모듈·묶음")
+    rs.add_argument("--changed", nargs="*", default=[])
+    rs.add_argument("--since", help="이 커밋(예: judge-criteria-v1.0)부터 HEAD 까지 바뀐 파일")
     st = sub.add_parser("status", help="장부 누계와 상한")
     st.add_argument("--ledger", required=True)
     return parser
@@ -498,6 +526,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             return jl.main(["status", "--ledger", args.ledger])
+        if args.command == "rescope":
+            cmd_rescope(args.changed, args.since)
+            return 0
         if args.command == "report":
             cmd_report(args.mode, ledger=Path(args.ledger) if args.ledger else None, out=Path(args.out) if args.out else None,
                        answers=Path(args.answers) if args.answers else None)
