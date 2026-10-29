@@ -5,8 +5,9 @@
 재현성 회차의 채점 기록에 전처리(주장 추출) 결과가 들어 있어 그것을 정답지와 짝짓는다(같은 3건 — Q9 답).
 
 회차 하나 = RunKey(묶음, 성적서, 변형, 회차 번호). 장부 한 줄과 1:1 이다(stage = "validate_<묶음>", report, variant, repeat).
-이어 하기: 같은 모드·같은 기준 지문으로 결과 파일까지 적힌 장부 줄이 있으면 끝난 회차로 보고 건너뛴다. 기준 지문이 다르면
-(버전을 올린 재검증) 끝나지 않은 것으로 본다.
+이어 하기: 같은 모드·같은 기준 지문으로 결과 파일까지 적히고 **게이트 판정이 난**(pass·blocked) 장부 줄이 있으면 끝난 회차로
+보고 건너뛴다. 채점이 실패한 회차(judge_once 가 gate=None·failure 로 끝남 — 결과 파일·장부 줄은 써진다)는 끝나지 않은 것이라
+다시 돈다(실패 줄의 비용은 장부에 그대로 남아 누계에 든다). 기준 지문이 다르면(버전을 올린 재검증) 끝나지 않은 것으로 본다.
 
 상호작용
 - 의존(import): random, dataclasses
@@ -20,6 +21,8 @@ from dataclasses import dataclass
 BATCHES = ("reproducibility", "defects", "sham", "extraction")
 STAGE_PREFIX = "validate_"
 BASE_VARIANT = "base"
+# 판정이 난 회차의 게이트 값(app.judge.core.JudgeRun.gate). 빈칸·그 밖의 값(실패 회차)은 끝나지 않은 것.
+DONE_GATES = ("pass", "blocked")
 
 # 채점 1회 비용(계획 §마-2 J4 끝 실측 — AI 서술 채점 $0.15). 묶음 예상 비용 = 회차 × 이 값.
 COST_PER_SCORING_USD = 0.15
@@ -73,14 +76,19 @@ def key_of_row(row: dict) -> RunKey | None:
     return RunKey(stage[len(STAGE_PREFIX):], row.get("report", ""), row.get("variant", ""), int(row["repeat"]))
 
 
+def finished_row(row: dict, *, fingerprint: str, mode: str) -> RunKey | None:
+    """이 장부 줄이 끝난 회차면 그 RunKey, 아니면 None — 같은 모드·같은 기준 지문, 결과 파일이 적혔고 게이트 판정이 난 줄.
+    예외로 끝나 결과 파일이 없는 줄·채점이 실패한 줄(gate 빈칸)은 끝나지 않은 것. 이어 하기와 report 가 같은 규칙을 쓴다."""
+    key = key_of_row(row)
+    if (key and row.get("mode") == mode and row.get("manifest_sha256") == fingerprint
+            and row.get("result_file", "").strip() and row.get("gate", "") in DONE_GATES):
+        return key
+    return None
+
+
 def done_keys(rows: list[dict], *, fingerprint: str, mode: str) -> set[RunKey]:
-    """끝난 회차 — 같은 모드·같은 기준 지문, 결과 파일이 적힌 줄. 예외로 끝나 결과 파일이 없는 줄은 끝나지 않은 것."""
-    done = set()
-    for row in rows:
-        key = key_of_row(row)
-        if key and row.get("mode") == mode and row.get("manifest_sha256") == fingerprint and row.get("result_file", "").strip():
-            done.add(key)
-    return done
+    """끝난 회차(finished_row 규칙)."""
+    return {k for row in rows if (k := finished_row(row, fingerprint=fingerprint, mode=mode)) is not None}
 
 
 def pending(keys: list[RunKey], rows: list[dict], *, fingerprint: str, mode: str) -> list[RunKey]:

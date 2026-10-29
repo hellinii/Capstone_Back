@@ -13,7 +13,8 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
 
 하위 명령(레포 루트에서)
 - run <묶음> : reproducibility | defects | sham | extraction. 회차마다 장부 한 줄 + 결과 원본 파일 하나.
-    - 이어 하기: 같은 모드·같은 기준 지문으로 결과 파일까지 적힌 회차는 건너뛴다(멈춘 뒤 같은 명령을 다시 치면 이어 간다).
+    - 이어 하기: 같은 모드·같은 기준 지문으로 결과 파일까지 적히고 게이트 판정이 난 회차는 건너뛴다(멈춘 뒤 같은 명령을
+      다시 치면 이어 간다). 채점이 실패한 회차(gate 빈칸)는 다시 돈다 — 실패 줄의 비용은 장부 누계에 그대로 남는다.
     - 순서 섞기: 남은 회차를 시드로 섞는다(--seed, 없으면 새로 뽑아 찍음). 시드·순서는 plan-<묶음>-<시드>.json 과 결과 원본에.
     - 시작 때 예상 회차·비용(채점 1회 $0.15 실측)·장부 누계를 찍고 --yes 가 없으면 멈춘다. 묶음 회차 상한(기본 = 줄인 V2 안)을
       넘거나 라운드 남은 상한(JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS)보다 크면 시작하지 않는다. 돌다가 묶음 예산
@@ -386,11 +387,12 @@ def load_stats_api() -> dict[str, Callable]:
 
 
 def collect_runs(ledger_rows: list[dict], *, fingerprint: str, mode: str, root: Path | None) -> list[dict]:
-    """끝난 검증 회차의 결과 원본(같은 모드·같은 지문). 같은 회차가 여러 줄이면 마지막 것."""
+    """끝난 검증 회차의 결과 원본(같은 모드·같은 지문, 판정이 난 줄 — runs.finished_row). 같은 회차가 여러 줄이면 마지막
+    성공 줄(실패 뒤 다시 돈 회차는 다시 돈 결과, 성공 뒤에 남은 실패 줄은 무시)."""
     latest: dict = {}
     for row in ledger_rows:
-        key = R.key_of_row(row)
-        if key and row.get("mode") == mode and row.get("manifest_sha256") == fingerprint and row.get("result_file"):
+        key = R.finished_row(row, fingerprint=fingerprint, mode=mode)
+        if key is not None:
             latest[key] = row
     runs = []
     for key, row in sorted(latest.items()):

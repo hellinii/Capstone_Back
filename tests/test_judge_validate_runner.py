@@ -165,8 +165,9 @@ def test_plan_runs_and_pending_skip_only_same_mode_and_fingerprint():
     keys = R.plan_runs("reproducibility", [("a", "base"), ("b", "base")], 2)
     assert len(keys) == 4 and keys[0] == R.RunKey("reproducibility", "a", "base", 1)
     row = {"stage": "validate_reproducibility", "report": "a", "variant": "base", "repeat": "1", "mode": "live",
-           "manifest_sha256": "f" * 64, "result_file": "03_실행/R-0001.json"}
+           "manifest_sha256": "f" * 64, "result_file": "03_실행/R-0001.json", "gate": "blocked"}
     assert R.pending(keys, [row], fingerprint="f" * 64, mode="live") == keys[1:]
+    assert R.pending(keys, [{**row, "gate": ""}], fingerprint="f" * 64, mode="live") == keys  # 채점 실패 줄(P0-1)
     assert R.pending(keys, [row], fingerprint="e" * 64, mode="live") == keys  # 지문이 다르면(버전 올림) 다시
     assert R.pending(keys, [row], fingerprint="f" * 64, mode="dev") == keys
     assert R.pending(keys, [{**row, "result_file": ""}], fingerprint="f" * 64, mode="live") == keys  # 결과 없는 줄
@@ -530,3 +531,40 @@ def test_stats_api_names_exist_in_real_modules():
     api = jv.load_stats_api()
     assert set(api) == set(jv.STATS_API) and all(callable(f) for f in api.values())
     assert set(jv.STATS_API.values()) == {"stats", "extraction", "agreement"}
+
+
+# ── J10 검토 반영 ① 이어 하기는 판정이 난 회차만 끝난 것으로(P0-1) ──
+
+
+def test_resume_reruns_failed_scoring_and_keeps_failed_cost(tmp_path, vdir):
+    """채점이 실패한 회차(gate None·failure, 결과 파일·장부 줄은 써짐)는 끝난 것이 아니다 — 같은 명령으로 다시 돈다.
+    실패 줄은 장부에 그대로 남고(비용 누계에 든다), report 는 다시 돈 성공 줄만 본다."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from dev_fake_llm_server import FakeOpenAI
+
+    args = _dev(tmp_path, reports=[], repeats=None)  # 기본 회차(줄인 V2 — 3건 × 3회)
+    first = jv.execute(args, client=FakeOpenAI("error"), echo=_quiet()[1])
+    assert first["ran"] == 9 and set(first["gates"]) == {None}
+    ledger = tmp_path / "work" / "장부.csv"
+    failed = _rows(ledger)
+    assert len(failed) == 9 and all(r["gate"] == "" and r["error"] and r["result_file"] for r in failed)
+    second = jv.execute(args, client=FakeOpenAI("pass"), echo=_quiet()[1])
+    assert second["ran"] == 9 and set(second["gates"]) <= {"pass", "blocked"}
+    rows = _rows(ledger)
+    assert len(rows) == 18 and rows[:9] == failed  # 실패 줄은 지우지 않는다(비용 누계)
+    assert jv.execute(args, client=FakeOpenAI("error"), echo=_quiet()[1])["ran"] == 0  # 이제는 끝났다
+    runs = jv.collect_runs(rows, fingerprint=criteria.fingerprint(), mode="dev", root=None)
+    assert len(runs) == 9 and all(r["gate"] in ("pass", "blocked") for r in runs)
+
+
+def test_collect_runs_keeps_last_success_over_later_failure(tmp_path, vdir):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from dev_fake_llm_server import FakeOpenAI
+
+    jv.execute(_dev(tmp_path, repeats=1), client=FakeOpenAI("pass"), echo=_quiet()[1])
+    ok = _rows(tmp_path / "work" / "장부.csv")[0]
+    late_fail = {**ok, "run_id": "X", "gate": "", "error": "transport", "result_file": "없는파일.json"}
+    runs = jv.collect_runs([ok, late_fail], fingerprint=criteria.fingerprint(), mode="dev", root=None)
+    assert [r["run_id"] for r in runs] == [ok["run_id"]]
+    assert R.pending(R.plan_runs("reproducibility", [("dev_binary", "base")], 1), [late_fail],
+                     fingerprint=criteria.fingerprint(), mode="dev") != []
