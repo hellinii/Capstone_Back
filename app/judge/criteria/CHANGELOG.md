@@ -26,3 +26,20 @@
     두 글자 묶음 60%), 양성 클래스 ↔ '양성', 선언은 facts.declarations 칸 먼저, '…ㅂ니다'만 합니다체('아니다' 아님).
 - 심판 라운드 J4 끝(2026-10-29): **주장 규칙 잠금** — claims.json sha256 2fd85afecccda1bea6a3d3270c55c1068e06ab589915b7457e5d546cb6403a65. 사람 정답지 표시는 이 규칙으로 한다
   (바꾸면 표시를 다시 — tests/test_judge_criteria_manifest.py CLAIMS_LOCK).
+
+## 1.0
+
+- 심판 라운드 V1(2026-10-29): **기준 고정** — 1.0-dev 의 마지막 모습을 그대로 1.0 으로 잠근다. 파일 내용은 바꾸지 않고
+  VERSION 만 "1.0" 으로 바꿨다(`scripts/judge_criteria_manifest.py freeze 1.0`). 지문은 `VERSIONS.json` 의 "1.0" 줄,
+  태그 `judge-criteria-v1.0`.
+  - 잠그는 것(MANIFEST 20개 파일): 체크리스트(`checklist.json`), 주장 규칙(`claims.json`), 모순 유형(`contradictions.json`),
+    정도 표현(`degree.json`), 이름 표(`names.json`), 표기 규칙(`readability.json`), 판정 규칙 기준값(`rule_constants.json`),
+    모델 설정(`model.json` — 심판·추출 모델, 추론 강도), 프롬프트 6개(`prompts/` — 추출·추출 자기 점검·사실 일치·일관성·
+    필수 내용·표기), 작은 코드 규칙 4개(`rules_*.py`), 로더(`__init__.py`), `VERSION`.
+  - 주장 규칙은 J4 끝에 먼저 잠갔다(위 1.0-dev 절의 claims.json sha256). 1.0 의 claims.json 은 그 값 그대로다 — 사람 정답지
+    표시가 이 규칙으로 되어 있다.
+  - 왜: 검증 V2(설계 7절)는 고정한 버전 하나에 대해 한다. V2 의 모든 회차가 이 기준(1.0)으로 돌고, 검증을 통과하면 검증 기록
+    (validated.json)이 이 버전·지문을 적어 판 4 잠금을 연다.
+  - 다음: 1.0 뒤에 위 파일을 하나라도 바꾸면(프롬프트 한 글자, 모델 설정 포함) 시험이 빨개진다. 그때는 버전을 올리고(1.1 등)
+    이 파일에 새 절로 이유를 적은 뒤 다시 고정하고 다시 검증한다(설계 7.4·7.5). `VERSIONS.json` 의 1.0 줄은 지우거나 고치지
+    않는다(덧붙이기만).

@@ -18,7 +18,9 @@ from app.judge import config, criteria
 # 고정한 버전 → 기준 지문. 덧붙이기만 한다(V1 에서 "1.0" 을 처음 적는다 — scripts/judge_criteria_manifest.py freeze 가 찍는 줄).
 # 왜 시험에 사본을 박나(git 이력·태그 대신): CI 는 저장소를 얕게 받고 태그를 받지 않아 이력을 읽는 시험은 CI 에서 깨진다.
 # 사본이 시험 파일에 있으면 VERSIONS.json 의 기록 줄을 지우거나 바꾸려면 두 파일을 함께 고쳐야 하고, 그 diff 가 검토에 드러난다.
-KNOWN: dict[str, str] = {}
+KNOWN: dict[str, str] = {
+    "1.0": "2cbc32785d6deec818f417a193711d7242a6defcab86c17123c4d348d9e18e58",
+}
 
 
 def append_only_problems(known: dict[str, str], recorded: dict[str, str]) -> list[str]:
