@@ -986,3 +986,28 @@ def test_v115_extraction_effort_stays_low_for_time():
 ])
 def test_v116_negated_client_option(actual, named, want):
     assert fa.client_text_matches(actual, named) is want
+
+
+# ── 1.18(V2 1.17 R-0058 — 넓힌 추출이 뽑은 단위 이름·'○○되지 않음' 선택지) ─────────
+
+
+@pytest.mark.parametrize("actual, named, want", [
+    ("label_cell", "합친 수는 사람 단위가 아니라 레이블 칸(사람 수 × 레이블 수)", True),
+    ("label_cell", "합계의 단위는 표본 단위이다", False),  # 다른 코드의 이름만
+    ("sample", "합계의 단위는 표본 단위이다", True),
+    ("sample", "모두 레이블 칸으로 센 값", False),
+])
+def test_v118_error_unit_code_names(actual, named, want):
+    assert fa.name_matches(actual, named) is want
+
+
+@pytest.mark.parametrize("actual, named, want", [
+    ("제공되지 않음", "학습 데이터의 건수도 제공하지 않았다", True),
+    ("제공되지 않음", "학습 데이터의 건수는 제공되지 않았다", True),
+    ("제공되지 않음", "학습 데이터의 건수는 제공되지 않아", True),  # R-0058 C56 — 1.18 첫 고침이 이 꼴을 깼다(부정 목록에 '되지 않')
+    ("제공되지 않음", "학습 데이터의 건수를 제공했다", False),  # 부정 없음 — 반대 말
+    ("기록하지 않음", "보정 내역은 기록하지 않았다", True),
+    ("수행 안 함", "편향 감소 노력을 수행하지 않았음", True),  # 1.16 그대로
+])
+def test_v118_negated_client_option_variants(actual, named, want):
+    assert fa.client_text_matches(actual, named) is want

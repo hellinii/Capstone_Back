@@ -261,9 +261,11 @@ def client_text_matches(actual: str, named: str) -> bool | None:
         if said(choice):
             return True
     neg = criteria.load_json("names.json").get("client_negated_option")
-    if neg and choice.endswith(neg["suffix"]):
-        # '○○ 안 함' 선택지 — 같은 동사와 부정 표현이 함께 있으면 맞고, 동사만 있고 부정이 없으면 아니다(1.16)
-        verb = _norm_name(choice[: -len(neg["suffix"])])
+    suffix = next((x for x in (neg or {}).get("suffixes", []) if choice.endswith(x)), None)
+    if suffix:
+        # '○○ 안 함'(1.16)·'○○되지 않음'·'○○하지 않음'(1.18) 선택지 — 같은 동사와 부정 표현이 함께 있으면 맞고, 동사만 있고 부정이
+        # 없으면 아니다
+        verb = _norm_name(choice[: -len(suffix)])
         if verb and verb in n:
             return any(_norm_name(w) in n for w in neg["negations"])
     note = re.search(r"\(의뢰자 제공:(.*)\)\s*$", full)

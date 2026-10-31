@@ -139,6 +139,13 @@
     "label_occurrences": [
       "등장 횟수"
     ],
+    "sample": [
+      "표본 단위",
+      "단위는 표본"
+    ],
+    "label_cell": [
+      "레이블 칸"
+    ],
     "pass": [
       "충족",
       "통과",
@@ -179,7 +186,7 @@
   "positive_class_labels": [
     "양성"
   ],
-  "code_labels_note": "선언 코드값(facts.declarations — risk_direction·class_priority·usage_mode)은 생성기 화면 글자(app/narrative/fact_view RISK_KO·PRIORITY_DECL_KO·USAGE_KO)와 같은 낱말과 흔한 바꿔 말하기로 본다. 문장에 든 이름 가운데 가장 긴 것이 가리키는 코드로 대조한다(1.1, V2 1차 — '배치 방식'↔batch, '거짓 음성'↔fn, '모든 레이블이 동등'↔all_equal 을 위반으로 봤다). 1.3(2026-10-31, V2 1.2 2회차 — '분류 유형의 기본값'↔default): 1.1 은 선언 칸만 넣었다. 이번에는 사실 시트의 코드값 칸(Literal) 가운데 서술에 이름으로 나올 수 있는 것 전부(핵심 지표 출처·불균형 영향·평균 차이 종류·참고 평균·분포 비교 상태·판정 불가 사유·비율 기준)를 생성기 화면 글자(app/narrative/fact_view·required_items·prompt)에서 옮겼다. 단위·우선순위·문제 종류 코드는 서술에 이름으로 나오지 않아 뺐다. 1.8(V2 1.7 R-0041 — '목표를 충족했다'↔metric.M15.status pass): 1.3 은 스키마 Literal 칸만 찾아 지표 상태(str, 설명에 'pass | fail | warning | info')와 예측 파생 방식을 놓쳤다 — 설명에 값 목록이 적힌 칸도 넣었다(생성기 STATUS_KO·DERIVATION_KO).",
+  "code_labels_note": "선언 코드값(facts.declarations — risk_direction·class_priority·usage_mode)은 생성기 화면 글자(app/narrative/fact_view RISK_KO·PRIORITY_DECL_KO·USAGE_KO)와 같은 낱말과 흔한 바꿔 말하기로 본다. 문장에 든 이름 가운데 가장 긴 것이 가리키는 코드로 대조한다(1.1, V2 1차 — '배치 방식'↔batch, '거짓 음성'↔fn, '모든 레이블이 동등'↔all_equal 을 위반으로 봤다). 1.3(2026-10-31, V2 1.2 2회차 — '분류 유형의 기본값'↔default): 1.1 은 선언 칸만 넣었다. 이번에는 사실 시트의 코드값 칸(Literal) 가운데 서술에 이름으로 나올 수 있는 것 전부(핵심 지표 출처·불균형 영향·평균 차이 종류·참고 평균·분포 비교 상태·판정 불가 사유·비율 기준)를 생성기 화면 글자(app/narrative/fact_view·required_items·prompt)에서 옮겼다. 단위·우선순위·문제 종류 코드는 서술에 이름으로 나오지 않아 뺐다. 1.8(V2 1.7 R-0041 — '목표를 충족했다'↔metric.M15.status pass): 1.3 은 스키마 Literal 칸만 찾아 지표 상태(str, 설명에 'pass | fail | warning | info')와 예측 파생 방식을 놓쳤다 — 설명에 값 목록이 적힌 칸도 넣었다(생성기 STATUS_KO·DERIVATION_KO). 1.18(V2 1.17 R-0058 — '단위는 표본이 아니라 레이블 칸'↔facts.error_totals.unit label_cell): 1.17 이 주장 범위를 넓혀 단위 이름도 뽑게 되어 오류 합계 단위 코드(sample·label_cell)를 넣었다(생성기 required_items '레이블 칸'). '표본' 한 낱말은 어디에나 나와 넣지 않았다.",
   "client_option_labels": {
     "같은 출처": [
       "같은 출처",
@@ -247,6 +254,10 @@
       "label_occurrences"
     ],
     [
+      "sample",
+      "label_cell"
+    ],
+    [
       "pass",
       "fail",
       "warning",
@@ -267,9 +278,14 @@
   ],
   "negation_window": 6,
   "client_negated_option": {
-    "suffix": "안 함",
+    "suffixes": [
+      "안 함",
+      "되지 않음",
+      "하지 않음"
+    ],
     "negations": [
       "하지 않",
+      "되지 않",
       "하지 못",
       "안 했",
       "않았",
@@ -278,5 +294,5 @@
       "없다"
     ]
   },
-  "client_negated_option_note": "고객 선택지 '○○ 안 함'(수행 안 함·보정 안 함·측정 안 함)은 문장에 같은 동사(○○)와 부정 표현이 함께 있으면 맞다 — '수행하지 않았다'(1.16, V2 1.15 R-0056). 부정 없이 '○○했다'면 맞지 않다."
+  "client_negated_option_note": "고객 선택지 '○○ 안 함'(수행 안 함·보정 안 함·측정 안 함)은 문장에 같은 동사(○○)와 부정 표현이 함께 있으면 맞다 — '수행하지 않았다'(1.16, V2 1.15 R-0056). 부정 없이 '○○했다'면 맞지 않다. 1.18(V2 1.17 R-0058 — 선택지 '제공되지 않음'↔'제공하지 않았다'): '○○되지 않음'·'○○하지 않음' 선택지도 같은 방식(동사 ○○ + 부정 표현)."
 }
