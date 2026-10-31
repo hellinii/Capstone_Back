@@ -63,9 +63,20 @@ def _sentence_table(sentence_rows) -> dict[int, dict]:
 
 
 def _span(quote: str, sentence: str) -> list[int] | None:
+    """인용이 문장에 나오는 글자 범위. 숫자로 시작·끝나는 인용은 다른 숫자의 일부에서 찾지 않는다('171건' 안의 '1건' —
+    2026-10-31 세션 7, 짧은 숫자 인용이 앞 문장에 붙어 맞게 뽑은 주장이 놓친 것으로 셌다)."""
     q = _norm(quote)
-    i = sentence.find(q) if q else -1
-    return [i, i + len(q)] if i >= 0 else None
+    if not q:
+        return None
+    i = sentence.find(q)
+    while i >= 0:
+        before = sentence[i - 1] if i > 0 else ""
+        after = sentence[i + len(q)] if i + len(q) < len(sentence) else ""
+        if not ((q[0].isdigit() and (before.isdigit() or before == ".")) or
+                (q[-1].isdigit() and (after.isdigit() or after == "."))):
+            return [i, i + len(q)]
+        i = sentence.find(q, i + 1)
+    return None
 
 
 def gold_from_csv(claim_rows: list[dict], sentence_rows) -> list[dict]:
@@ -84,16 +95,26 @@ def gold_from_csv(claim_rows: list[dict], sentence_rows) -> list[dict]:
     return out
 
 
-def _locate(piece: str, quote: str, table: dict[int, dict]) -> tuple[int | None, list[int] | None]:
+def _candidates(piece: str, quote: str, table: dict[int, dict]) -> dict[int, list[int] | None]:
+    """인용이 나오는 문장 후보 전부(문장 번호 → 범위). 같은 인용이 여러 문장에 나오면('1건') 정답지 문장과 맞는 후보로 짝을
+    짓는다(2026-10-31 세션 7 — 처음 나온 문장 하나로 정해 다른 문장의 주장과 어긋났다). 문장 경계를 넘은 인용은 처음 걸친
+    문장 하나(범위 모름)."""
     rows = [s for s in table.values() if s["piece"] == piece]
+    found = {s["no"]: span for s in rows if (span := _span(quote, s["text"]))}
+    if found:
+        return found
     for s in rows:
-        span = _span(quote, s["text"])
-        if span:
-            return s["no"], span
-    for s in rows:  # 문장 경계를 넘은 인용 — 처음 걸친 문장, 범위는 모름
         if touches(quote, s["text"]):
-            return s["no"], None
-    return None, None
+            return {s["no"]: None}
+    return {}
+
+
+def _locate(piece: str, quote: str, table: dict[int, dict]) -> tuple[int | None, list[int] | None]:
+    cands = _candidates(piece, quote, table)
+    if not cands:
+        return None, None
+    no = min(cands)
+    return no, cands[no]
 
 
 def pred_from_extract(claims: list, sentence_rows) -> list[dict]:
@@ -102,8 +123,11 @@ def pred_from_extract(claims: list, sentence_rows) -> list[dict]:
     out = []
     for i, c in enumerate(claims, 1):
         c = asdict(c) if is_dataclass(c) else dict(c)
-        no, span = _locate(c.get("piece_id", ""), c.get("quote", ""), table)
+        cands = _candidates(c.get("piece_id", ""), c.get("quote", ""), table)
+        no = min(cands) if cands else None
+        span = cands.get(no) if cands else None
         out.append({"id": c.get("id") or f"P{i}", "slot": c.get("slot", ""), "piece": c.get("piece_id", ""), "sentence": no,
+                    "candidates": cands,
                     "span": span, "kind": c.get("kind", ""), "quote": c.get("quote", ""),
                     "number_text": c.get("number_text", ""), "target": c.get("target", ""), "round": int(c.get("round", 0))})
     return out
@@ -129,8 +153,12 @@ def _overlap(g: dict, p: dict) -> float | None:
 def compatible(g: dict, p: dict, *, same_kind: bool = False) -> bool:
     if g.get("slot") != p.get("slot"):  # ① 같은 칸
         return False
-    if g.get("sentence") is None or g.get("sentence") != p.get("sentence"):  # ② 같은 문장
+    if g.get("sentence") is None:
         return False
+    cands = p.get("candidates") or ({p["sentence"]: p.get("span")} if p.get("sentence") is not None else {})
+    if g["sentence"] not in cands:  # ② 같은 문장(추출 인용이 여러 문장에 나오면 그 후보 가운데)
+        return False
+    p = {**p, "sentence": g["sentence"], "span": cands[g["sentence"]]}
     if _overlap(g, p) == 0.0:  # ② 글자 범위를 알면 겹쳐야
         return False
     if g.get("kind") in STRICT_KINDS or p.get("kind") in STRICT_KINDS:  # ③ 숫자·비교는 종류 같음
@@ -157,7 +185,9 @@ def match_claims(gold: list[dict], predicted: list[dict], *, same_kind: bool = F
         for j, p in enumerate(predicted):
             if compatible(g, p, same_kind=same_kind):
                 # 짝 하나 = 1, 덧점(같은 종류·겹침)은 모두 합쳐도 1 보다 작다 → 짝 수가 먼저다
-                bonus = 0.5 * (g.get("kind") == p.get("kind")) + 0.5 * (_overlap(g, p) or 0.0)
+                cands = p.get("candidates") or {}
+                q = {**p, "span": cands.get(g["sentence"], p.get("span"))}
+                bonus = 0.5 * (g.get("kind") == p.get("kind")) + 0.5 * (_overlap(g, q) or 0.0)
                 weight[i, j] = 1.0 + bonus / (n + 1)
     rows, cols = linear_sum_assignment(weight, maximize=True)
     pairs = [(i, j) for i, j in zip(rows, cols) if weight[i, j] > 0]

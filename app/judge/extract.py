@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 
 from app.judge import config, criteria, llm
@@ -133,13 +134,27 @@ def _not_inference(sentence: str) -> str | None:
     return None
 
 
+def occurrences(quote: str, text: str) -> int:
+    """인용이 글에 나오는 횟수(띄어쓰기 정리 뒤). 숫자로 시작·끝나는 인용은 다른 숫자의 일부를 세지 않는다('171건' 안의 '1건')."""
+    q, t = _norm(quote), _norm(text)
+    count, i = 0, t.find(q) if q else -1
+    while i >= 0:
+        before = t[i - 1] if i > 0 else ""
+        after = t[i + len(q)] if i + len(q) < len(t) else ""
+        if not ((q[0].isdigit() and (before.isdigit() or before == ".")) or
+                (q[-1].isdigit() and (after.isdigit() or after == "."))):
+            count += 1
+        i = t.find(q, i + 1)
+    return max(count, 1)
+
+
 def _found_text(claims: list[Claim]) -> str:
     return "\n".join(f"- [{c.piece_id}] {c.kind}: {c.quote}" for c in claims) or "(없음)"
 
 
 def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry], have: list[Claim], round_no: int,
             rejected: list[dict]) -> list[Claim]:
-    seen = {(c.piece_id, _norm(c.quote), c.kind) for c in have}
+    seen = Counter((c.piece_id, _norm(c.quote), c.kind) for c in have)
     new: list[Claim] = []
     for item in raw:
         if not isinstance(item, dict) or item.get("kind") not in KINDS:
@@ -159,9 +174,12 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
                 rejected.append({"round": round_no, "reason": reason, "piece_id": piece.id, "quote": quote[:200]})
                 continue
         key = (piece.id, _norm(quote), item["kind"])
-        if key in seen:
+        # 같은 인용은 칸 글에 나오는 횟수만큼 받는다 — 주장 규칙 "같은 숫자를 두 번 쓰면 두 번 센다"(claims.json unit_rules).
+        # 예전엔 하나만 남겨 되풀이 숫자('1건'·'0.984')를 놓쳤다(1.11, 검증 추출 미달 분석: 놓친 244건 중 56건).
+        if seen[key] >= occurrences(quote, piece.text):
+            rejected.append({"round": round_no, "reason": "duplicate", "piece_id": piece.id, "quote": quote[:200]})
             continue
-        seen.add(key)
+        seen[key] += 1
         fld, fld_b = str(item.get("field") or ""), str(item.get("field_b") or "")
         unresolved = (fld and fld not in catalog) or (fld_b and fld_b not in catalog)
         polarity = item.get("polarity") if item.get("polarity") in POLARITIES else ""

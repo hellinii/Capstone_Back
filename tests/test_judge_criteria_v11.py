@@ -833,3 +833,22 @@ def test_v110_unverifiable_name_does_not_block():
     v = judge(claim("C1", "name", "같은 분포인지는 확인할 수 없다"),
               ans(name_field="facts.distribution_shift_status", named="확인할 수 없다"))
     assert v.verdict == "unverifiable"
+
+
+# ── 1.11(검증 추출 미달 분석 — 되풀이 인용) ────────────────────────────
+
+
+def test_v111_repeated_quote_is_kept_as_many_times_as_it_appears():
+    piece = Piece("slot:7.1", "7.1", "5.2", "ai", "가상 FP 는 1건이다. 가상 FN 도 1건이다. 표본 171건.")
+    raw = [{"kind": "number", "quote": "1건", "piece_id": piece.id, "number_text": "1"} for _ in range(3)]
+    rejected: list[dict] = []
+    got = ex._accept(raw, {piece.id: piece}, {}, [], 0, rejected)
+    assert len(got) == 2  # '1건' 은 두 번(171건 안의 1건은 세지 않는다) — 세 번째는 버림
+    assert [r["reason"] for r in rejected] == ["duplicate"]  # 버린 것도 기록에 남는다
+    again = ex._accept(raw[:1], {piece.id: piece}, {}, got, 1, [])  # 자기 점검 회차에서 또 내도 넘치지 않는다
+    assert again == []
+
+
+@pytest.mark.parametrize("quote, text, n", [("1건", "1건과 1건, 171건", 2), ("0.984", "0.984 와 0.9841", 1), ("없음", "글", 1)])
+def test_v111_occurrences(quote, text, n):
+    assert ex.occurrences(quote, text) == n

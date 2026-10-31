@@ -218,3 +218,31 @@ def test_missed_rows_and_confirmed_additions():
     with pytest.raises(ValueError):
         X.confirmed_additions(judged)
     assert X.missed_rows(X.match_claims([], [])) == []
+
+
+# ── 2026-10-31 세션 7: 짧은 숫자 인용의 문장 위치 ──────────────────────
+
+S2 = [(1, "slot:7.1", "7.1", "5.2", "ai", "가상 표본 171건 중 3건이 틀렸다."),
+      (2, "slot:7.1", "7.1", "5.2", "ai", "가상 FP 는 2건, FN 은 1건이다."),
+      (3, "slot:7.1", "7.1", "5.2", "ai", "가상 클래스 3 은 약하고 클래스 3 의 표본은 3건이다.")]
+
+
+def _pred(quote, kind="number", number_text=""):
+    return X.pred_from_extract([Claim("C1", kind, quote, "slot:7.1", "7.1", "5.2", "ai", "", "", number_text, "", 0)], S2)[0]
+
+
+def test_number_quote_is_not_found_inside_another_number():
+    assert X._span("1건", "가상 표본 171건 중 3건이 틀렸다.") is None
+    assert X._span("1건", "가상 FP 는 2건, FN 은 1건이다.") is not None
+    assert X._span("3", "가상 0.3 과 3.5") is None and X._span("3", "가상 3 과 4") == [3, 4]
+    p = _pred("1건", number_text="1")
+    assert p["sentence"] == 2 and set(p["candidates"]) == {2}
+
+
+def test_quote_in_several_sentences_pairs_with_gold_sentence():
+    p = _pred("3건", number_text="3")
+    assert set(p["candidates"]) == {1, 3}
+    gold = X.gold_from_csv([{"문장번호": "3", "종류": "number", "인용 구절": "3건", "메모": ""}],
+                           [dict(zip(SENTENCE_COLUMNS, (str(r[0]), *r[1:]))) for r in S2])
+    m = X.match_claims(gold, [p])
+    assert len(m["pairs"]) == 1 and m["unmatched_gold"] == [] and m["unmatched_pred"] == []
