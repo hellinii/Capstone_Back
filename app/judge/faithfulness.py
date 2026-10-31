@@ -177,7 +177,9 @@ def name_matches(actual: str, named: str) -> bool | None:
         if occ:
             window = int(names.get("negation_window", 6))
             neg_words = [_norm_name(w) for w in names.get("negation_after", [])]
-            negated = lambda o: any(w in target[o[1]: o[1] + window] for w in neg_words)  # noqa: E731
+            # 이름 자체가 부정형('제공되지 않')이면 뒤의 부정은 다음 말의 것이다(1.3)
+            negated = lambda o: (not any(w in target[o[0]: o[1]] for w in neg_words)  # noqa: E731
+                                 and any(w in target[o[1]: o[1] + window] for w in neg_words))
             if any(negated(o) and o[2] == str(actual) for o in occ):
                 return False
             said = {o[2] for o in occ if not negated(o)}
@@ -304,7 +306,11 @@ def _name(v: ClaimVerdict, ans: dict, sources: Sources) -> None:
 
 
 def is_definition(sentence: str) -> bool:
-    """용어 뜻풀이 문장인가 — 뜻풀이 어미(inference_rules.json definition_markers)가 있고 숫자가 없다."""
+    """용어 뜻풀이 문장인가 — 뜻풀이 어미(inference_rules.json definition_markers)가 있고, 숫자가 없고, 앞 문장·데이터를 가리키는
+    말(definition_not_after — 이는·이 결과는·그래서 등)로 시작하지 않는다('이는 모델이 취약함을 뜻한다'는 해석이다, 1.3)."""
+    head = sentence.strip()
+    if any(head.startswith(w) for w in criteria.claim_markers("definition_not_after")):
+        return False
     return any(m in sentence for m in criteria.claim_markers("definition_markers")) and not re.search(r"\d", sentence)
 
 
@@ -341,6 +347,12 @@ def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: S
             _name(v, ans, sources)
         if v.verdict in ("match", "violation"):
             return v
+    if not marked and not causal and is_definition(sentence) and not v.detail.get("not_claim_refused"):
+        # 뜻풀이 문장은 에이전트 답과 상관없이 코드가 주장이 아님으로 정한다 — 같은 문장에 회차마다 답이 갈렸다(1.3, V2 1.2 2회차:
+        # 1회차는 not_claim, 2회차는 ③). 에이전트가 데이터 대조로 옮겨 판정이 났으면 위에서 이미 돌아갔다.
+        v.verdict = "not_claim"
+        v.detail["by"] = "code"
+        return v
     v.verdict = "inference_ok" if marked else "inference_violation"
     return v
 

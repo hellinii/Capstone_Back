@@ -64,12 +64,86 @@
     "realtime": [
       "실시간",
       "대화형"
+    ],
+    "default": [
+      "분류 유형의 기본값",
+      "유형의 기본값",
+      "기본 핵심 지표"
+    ],
+    "client": [
+      "의뢰자가 지정",
+      "의뢰자 지정"
+    ],
+    "affected": [
+      "왜곡이 관찰",
+      "왜곡이 나타"
+    ],
+    "no_distortion": [
+      "왜곡은 관찰되지 않",
+      "왜곡이 관찰되지 않",
+      "왜곡은 없"
+    ],
+    "mild": [
+      "불균형이 경미",
+      "경미한 불균형"
+    ],
+    "macro_vs_weighted": [
+      "매크로 평균과 가중 평균",
+      "가중 평균과 매크로 평균"
+    ],
+    "macro_vs_micro": [
+      "매크로 평균과 마이크로 평균",
+      "마이크로 평균과 매크로 평균"
+    ],
+    "weighted": [
+      "가중 평균"
+    ],
+    "micro": [
+      "마이크로 평균"
+    ],
+    "compared": [
+      "분포를 비교",
+      "비교하였",
+      "비교했"
+    ],
+    "not_provided": [
+      "학습 분포를 받지 않",
+      "학습 분포가 제공되지 않",
+      "학습 클래스 분포가 제공되지 않"
+    ],
+    "uncovered": [
+      "모두 덮지 않"
+    ],
+    "training_samples_not_provided": [
+      "학습 표본 수를 받지 않",
+      "학습 표본 수가 제공되지 않"
+    ],
+    "core_not_computed": [
+      "산출 실패",
+      "산출되지 않",
+      "계산되지 않"
+    ],
+    "no_target": [
+      "목표값 없음",
+      "목표값이 없",
+      "목표값이 주어지지 않"
+    ],
+    "no_judged": [
+      "판정 대상 지표가 없",
+      "판정할 지표가 없"
+    ],
+    "samples": [
+      "표본 수 기준",
+      "표본 기준"
+    ],
+    "label_occurrences": [
+      "등장 횟수"
     ]
   },
   "positive_class_labels": [
     "양성"
   ],
-  "code_labels_note": "선언 코드값(facts.declarations — risk_direction·class_priority·usage_mode)은 생성기 화면 글자(app/narrative/fact_view RISK_KO·PRIORITY_DECL_KO·USAGE_KO)와 같은 낱말과 흔한 바꿔 말하기로 본다. 문장에 든 이름 가운데 가장 긴 것이 가리키는 코드로 대조한다(1.1, V2 1차 — '배치 방식'↔batch, '거짓 음성'↔fn, '모든 레이블이 동등'↔all_equal 을 위반으로 봤다).",
+  "code_labels_note": "선언 코드값(facts.declarations — risk_direction·class_priority·usage_mode)은 생성기 화면 글자(app/narrative/fact_view RISK_KO·PRIORITY_DECL_KO·USAGE_KO)와 같은 낱말과 흔한 바꿔 말하기로 본다. 문장에 든 이름 가운데 가장 긴 것이 가리키는 코드로 대조한다(1.1, V2 1차 — '배치 방식'↔batch, '거짓 음성'↔fn, '모든 레이블이 동등'↔all_equal 을 위반으로 봤다). 1.3(2026-10-31, V2 1.2 2회차 — '분류 유형의 기본값'↔default): 1.1 은 선언 칸만 넣었다. 이번에는 사실 시트의 코드값 칸(Literal) 가운데 서술에 이름으로 나올 수 있는 것 전부(핵심 지표 출처·불균형 영향·평균 차이 종류·참고 평균·분포 비교 상태·판정 불가 사유·비율 기준)를 생성기 화면 글자(app/narrative/fact_view·required_items·prompt)에서 옮겼다. 단위·우선순위·문제 종류 코드는 서술에 이름으로 나오지 않아 뺐다.",
   "client_option_labels": {
     "같은 출처": [
       "같은 출처",
@@ -103,6 +177,38 @@
     [
       "batch",
       "realtime"
+    ],
+    [
+      "default",
+      "client"
+    ],
+    [
+      "affected",
+      "no_distortion",
+      "mild"
+    ],
+    [
+      "macro_vs_weighted",
+      "macro_vs_micro"
+    ],
+    [
+      "weighted",
+      "micro"
+    ],
+    [
+      "compared",
+      "not_provided",
+      "uncovered",
+      "training_samples_not_provided"
+    ],
+    [
+      "core_not_computed",
+      "no_target",
+      "no_judged"
+    ],
+    [
+      "samples",
+      "label_occurrences"
     ]
   ],
   "code_groups_note": "한 칸의 코드값 묶음(판정·위험 방향·클래스 중요도·사용 방식). 대조는 실제 값이 든 묶음의 이름만 본다 — 다른 칸 낱말('실시간 서비스에서 FP 가…')이 섞여도 흔들리지 않게. 같은 묶음의 서로 다른 코드가 둘 다 나오면('FN 이 FP 보다') 검증 불가, 이름 바로 뒤에 부정(negation_after)이 오면 그 이름은 지목이 아니다 — 실제 값을 부정하면 위반(1.1 검토).",

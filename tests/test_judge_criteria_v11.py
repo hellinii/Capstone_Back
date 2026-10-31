@@ -386,3 +386,39 @@ def test_v12_metric_average_kind_is_checked_by_equal_values(avg, verdict):
 def test_v12_inference_detail_records_agent_resolution(resolution):
     v = judge(claim("C1", "inference", "경계 오류는 두 확률이 비슷한 경우를 뜻한다"), ans(resolution=resolution))
     assert v.detail["resolution"] == resolution
+
+
+# ── 1.3(V2 1.2 2회차) ────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("actual, named, want", [
+    ("default", "핵심 지표는 분류 유형의 기본값이다", True),
+    ("client", "핵심 지표는 분류 유형의 기본값이다", False),
+    ("client", "의뢰자가 지정한 핵심 지표", True),
+    ("no_distortion", "불균형은 있으나 성능 왜곡은 관찰되지 않았다", True),
+    ("affected", "불균형은 있으나 성능 왜곡은 관찰되지 않았다", False),  # 긴 이름이 짧은 이름을 덮는다
+    ("affected", "불균형 때문에 지표 왜곡이 관찰되었다", True),
+    ("not_provided", "학습 분포가 제공되지 않아 비교하지 않았다", True),
+    ("no_target", "핵심 지표 목표값이 없어 판정 불가", True),
+    ("weighted", "의뢰자 관점에 맞춘 마이크로 평균", False),
+])
+def test_v13_every_named_code_field_has_korean_names(actual, named, want):
+    assert fa.name_matches(actual, named) is want
+
+
+def test_v13_code_groups_cover_every_labelled_code_once():
+    names = criteria.load_json("names.json")
+    grouped = [c for g in names["code_groups"] for c in g]
+    assert sorted(grouped) == sorted(names["code_labels"]) and len(grouped) == len(set(grouped))
+
+
+@pytest.mark.parametrize("sentence, agent, verdict", [
+    ("결정 경계 근처의 오류는 두 확률이 가까운 경우로, 모델이 두 클래스를 가르지 못했음을 뜻한다", "resolved", "not_claim"),
+    ("결정 경계 근처의 오류는 두 확률이 가까운 경우로, 모델이 두 클래스를 가르지 못했음을 뜻한다", "not_claim", "not_claim"),
+    ("이는 모델이 두 클래스를 가르지 못했음을 뜻한다", "resolved", "inference_violation"),  # 앞 말을 해석
+    ("이는 모델이 두 클래스를 가르지 못했음을 뜻한다", "not_claim", "inference_violation"),
+])
+def test_v13_definition_is_decided_by_code_whatever_the_agent_says(sentence, agent, verdict):
+    piece = Piece("slot:7.1", "7.1", "5.2", "ai", sentence + ".")
+    v = fa.judge_answer(claim("C1", "inference", sentence), ans(resolution=agent), SOURCES, [], [], piece)
+    assert v.verdict == verdict
