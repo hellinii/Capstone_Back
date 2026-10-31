@@ -135,6 +135,19 @@ def test_job_modules_and_extract_calls():
     assert rep["round_total_seconds"]["sum"] == 60.0
 
 
+def test_fill_call_seconds_are_counted_and_labelled(tmp_path, capsys):
+    # 기준 1.17 문장마다 판정의 채우기 호출(extract_0_fill)도 전처리 호출별 시간에 든다
+    rnd = _round(1, SECS1, 0.05)
+    rnd["record"]["extract"]["calls"].insert(1, _call("extract_0_fill", 7.0, 0.001))
+    job = {**INTERNAL, "judge": {**INTERNAL["judge"], "rounds": [rnd]}}
+    rep = R.job_summary([job])
+    assert rep["extract_calls_seconds"]["extract_0_fill"]["mean"] == 7.0
+    ledger, path = _write(tmp_path, ROWS), tmp_path / "j.json"
+    path.write_text(json.dumps(job), encoding="utf-8")
+    assert R.main(["--ledger", str(ledger), "--job", str(path), "--mode", "live"]) == 0
+    assert "채우기 7" in capsys.readouterr().out
+
+
 def test_job_file_shapes(tmp_path):
     a = tmp_path / "a.json"
     a.write_text(json.dumps({"tag": "x", "internal": INTERNAL}), encoding="utf-8")

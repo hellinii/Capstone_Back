@@ -902,21 +902,26 @@ def test_v113_is_threshold_number(quote, want):
     assert ex.is_threshold_number(_c("C1", "number", quote, quote), T_PIECE.text) is want
 
 
-def test_v113_empty_sentences_lists_sentences_without_claims():
-    text = ex.empty_sentences([T_PIECE], [_c("C1", "number", "3.0", "3.0")])
-    assert "불균형 비율은 3.0" not in text and "두 값 모두 0.1 미만이다." in text and "비율 차가 10%p" in text
-    assert ex.empty_sentences([T_PIECE], [_c("C1", "number", "3.0"), _c("C2", "number", "0.1"), _c("C3", "number", "10%p")]) == "(없음)"
+def test_v113_by_sentence_marks_sentences_without_claims():
+    # 1.17: 1.13 의 '빈 문장 목록'을 문장마다 이미 뽑은 주장을 붙인 목록으로 바꿈 — 빈 문장은 여전히 드러난다
+    sents = ex.sentences_of([T_PIECE])
+    text = ex.by_sentence(sents, [_c("C1", "number", "3.0", "3.0")])
+    assert "[s1] (slot:7.2) 불균형 비율은 3.0 이다.\n    이미 뽑은 것: number: 3.0" in text
+    assert "[s2] (slot:7.2) 두 값 모두 0.1 미만이다.\n    이미 뽑은 것: (아직 없음)" in text
+    full = ex.by_sentence(sents, [_c("C1", "number", "3.0"), _c("C2", "number", "0.1"), _c("C3", "number", "10%p")])
+    assert "(아직 없음)" not in full
 
 
 async def test_v113_self_check_round_shows_empty_sentences():
-    fake = F.FakeOpenAI([F.json_response({"claims": [{"kind": "number", "quote": "3.0", "piece_id": T_PIECE.id,
-                                                       "number_text": "3.0", "field": "", "field_b": "", "polarity": ""}]}),
-                         F.json_response({"claims": []})])
+    item = {"kind": "number", "quote": "3.0", "piece_id": T_PIECE.id, "number_text": "3.0", "field": "", "field_b": "", "polarity": ""}
+    sents = [{"sid": "s1", "n_claims": 1, "none_reason": ""}, {"sid": "s2", "n_claims": 0, "none_reason": "기준 설명"},
+             {"sid": "s3", "n_claims": 0, "none_reason": "기준 설명"}]
+    fake = F.FakeOpenAI([F.json_response({"sentences": sents, "claims": [item]}), F.json_response({"claims": []})])
     res = await ex.extract_claims(fake, [T_PIECE], {})
     assert res.failure is None and len(fake.calls) == 2
     second = fake.calls[1]["instructions"]
-    assert "아직 주장을 하나도 뽑지 않은 문장" in second and "두 값 모두 0.1 미만이다." in second
-    assert "불균형 비율은 3.0 이다." not in second.split("아직 주장을 하나도 뽑지 않은 문장")[1]
+    assert "두 값 모두 0.1 미만이다.\n    이미 뽑은 것: (아직 없음)" in second
+    assert "불균형 비율은 3.0 이다.\n    이미 뽑은 것: number: 3.0" in second
 
 
 def test_v112_core_metric_fits_declared_risk_via_risk_side_name():
@@ -957,10 +962,11 @@ def test_v115_extract_prompt_names_often_missed_claims():
         assert word in text
 
 
-def test_v115_empty_sentence_list_is_not_cut_short():
+def test_v115_sentence_list_is_not_cut_short():
     long = Piece("slot:9:6.2", "9", "6.2", "ai", " ".join(f"가상 문장 {i} 이다." for i in range(120)))
-    listed = ex.empty_sentences([long], [])
-    assert "가상 문장 119 이다." in listed
+    sents = ex.sentences_of([long])
+    assert len(sents) == 120 and "[s120] (slot:9:6.2) 가상 문장 119 이다." in ex.by_sentence(sents, [])
+    assert "[s120] (slot:9:6.2) 가상 문장 119 이다." in ex.render_sentences(sents)
 
 
 def test_v115_extraction_effort_stays_low_for_time():
