@@ -227,7 +227,9 @@ class Sources:
             note = field_note(name)
             return {**out, "note": note} if note else out
         if name in self.texts:
-            return {"field": name, "value": self.texts[name], "source": SOURCE_LABELS[_source_of(name)]}
+            out = {"field": name, "value": self.texts[name], "source": SOURCE_LABELS[_source_of(name)]}
+            note = field_note(name)  # 글 칸도 설명을 싣는다(1.2 — 의뢰자 참고 평균 이름 칸을 지표의 평균으로 읽었다)
+            return {**out, "note": note} if note else out
         return {"field": name, "found": False, "near": self.find(name.split(".")[-1])[:10]}
 
     def find(self, query: str, limit: int = 40) -> list[str]:

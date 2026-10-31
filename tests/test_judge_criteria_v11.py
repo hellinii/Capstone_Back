@@ -200,7 +200,7 @@ async def test_agent_schema_offers_not_claim_and_prompt_explains_three_ways():
     schema = fa.answer_schema(["C1"])
     assert "not_claim" in schema["properties"]["claims"]["items"]["properties"]["resolution"]["enum"]
     prompt = criteria.load_text("prompts/faithfulness.md")
-    for word in ("not_claim", "①", "②", "③", "전체 표본 수가 아니다", "이름에 붙은 숫자", "판정 기준값 칸(rule.*"):
+    for word in ("not_claim", "①", "②", "③", "전체 표본 수가 아니다", "이름에 붙은 숫자", "판정 기준값 칸(rule.*", "facts.declared_average 는"):
         assert word in prompt
     # 배선: 에이전트 답의 not_claim 이 판정까지 간다
     c = claim("C1", "inference", "경계 오류는 두 확률이 비슷한 경우를 뜻한다")
@@ -352,3 +352,37 @@ def test_interpretation_of_average_gap_is_checked_against_rule_threshold(gap_hig
     v = fa.judge_answer(c, ans(expr="{per_class.7.f1} - {per_class.8.f1}", expr_b="{rule.imbalance_gap_threshold}", relation="ge"),
                         src, [], [], PIECE)
     assert v.verdict == verdict
+
+
+# ── 1.2(V2 1.1 1회차에서 막힌 것) ────────────────────────────────────
+
+
+@pytest.mark.parametrize("sentence, reason", [
+    ("자료가 한쪽으로 몰리는지 매주 확인할 것을 권고한다.", "normative"),
+    ("이 오류가 적다고 모든 예측을 믿어도 된다는 뜻은 아니다.", "scope"),
+    ("이 값이 낮다고 쓸모없다는 의미는 아니다.", "scope"),
+])
+def test_v12_recommendation_and_denial_endings(sentence, reason):
+    assert ex._not_inference(sentence) == reason
+
+
+def test_v12_text_field_lookup_carries_note():
+    fs = {**FS, "facts": {**FS["facts"], "declared_average": {"class_priority": "larger_first", "average": "weighted", "f1": 0.5}}}
+    got = Sources(fs, [], {}, CLIENT).lookup("facts.declared_average.average")
+    assert got["value"] == "weighted" and "성적서 지표" in got["note"] and "평균이 아니다" in got["note"]
+
+
+@pytest.mark.parametrize("avg, verdict", [("매크로 평균", "match"), ("가중 평균", "violation")])
+def test_v12_metric_average_kind_is_checked_by_equal_values(avg, verdict):
+    fs = {**FS, "class_averages": [{"label": "매크로 평균", "precision": 0.5, "recall": 0.5, "f1": 0.61, "support": 400},
+                                   {"label": "가중 평균", "precision": 0.5, "recall": 0.5, "f1": 0.66, "support": 400}]}
+    src = Sources(fs, [], {}, CLIENT)
+    c = claim("C1", "inference", "이 성적서의 F1 은 클래스별 값을 같은 무게로 평균한 매크로 평균이다")
+    v = fa.judge_answer(c, ans(expr="{metric.M2.value}", expr_b="{class_averages." + avg + ".f1}", relation="eq"), src, [], [], PIECE)
+    assert v.verdict == verdict
+
+
+@pytest.mark.parametrize("resolution", ["not_claim", "resolved", "no_data"])
+def test_v12_inference_detail_records_agent_resolution(resolution):
+    v = judge(claim("C1", "inference", "경계 오류는 두 확률이 비슷한 경우를 뜻한다"), ans(resolution=resolution))
+    assert v.detail["resolution"] == resolution

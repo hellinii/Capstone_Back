@@ -320,8 +320,9 @@ def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: S
     sentence = sentence_of(claim.quote, piece)
     marked = inference_marked(sentence)
     causal = any(m in sentence for m in criteria.claim_markers("causal_markers"))
-    v.detail = {"marked": marked, "basis": ans.get("inference_basis", "")}
     resolution = ans.get("resolution")
+    # 에이전트가 고른 갈래도 남긴다 — 기록만 보고 다시 판정·검토할 수 있게(1.2)
+    v.detail = {"marked": marked, "basis": ans.get("inference_basis", ""), "resolution": resolution or ""}
     if resolution == "not_claim":
         # 코드가 확인한다(1.1 검토): 뜻풀이 어미가 있고 숫자·인과 낱말이 없을 때만. 아니면 어미 판정으로.
         if is_definition(sentence) and not causal:
