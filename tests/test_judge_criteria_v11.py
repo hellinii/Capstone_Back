@@ -200,7 +200,7 @@ async def test_agent_schema_offers_not_claim_and_prompt_explains_three_ways():
     schema = fa.answer_schema(["C1"])
     assert "not_claim" in schema["properties"]["claims"]["items"]["properties"]["resolution"]["enum"]
     prompt = criteria.load_text("prompts/faithfulness.md")
-    for word in ("not_claim", "①", "②", "③", "전체 표본 수가 아니다", "이름에 붙은 숫자"):
+    for word in ("not_claim", "①", "②", "③", "전체 표본 수가 아니다", "이름에 붙은 숫자", "판정 기준값 칸(rule.*"):
         assert word in prompt
     # 배선: 에이전트 답의 not_claim 이 판정까지 간다
     c = claim("C1", "inference", "경계 오류는 두 확률이 비슷한 경우를 뜻한다")
@@ -339,3 +339,16 @@ def test_extraction_filter_is_wired_to_the_quoted_clause():
     rejected: list[dict] = []
     got = ex._accept(raw, {piece.id: piece}, {}, [], 0, rejected)
     assert [c.quote for c in got] == ["성능 문제는 없다"] and [r["reason"] for r in rejected] == ["scope"]
+
+
+@pytest.mark.parametrize("gap_high, verdict", [(0.75, "match"), (0.65, "violation")])
+def test_interpretation_of_average_gap_is_checked_against_rule_threshold(gap_high, verdict):
+    # 평균 차이를 풀이한 문장(1.1 사용자 결정): '크다'를 판정 기준값(0.1)과 비교 — 실제 차이가 작으면 위반으로 잡힌다
+    fs = {**FS, "per_class": [{"label": "7", "f1": gap_high, "precision": 0.5, "recall": 0.5, "support": 100},
+                              {"label": "8", "f1": 0.6, "precision": 0.5, "recall": 0.5, "support": 300}]}
+    src = Sources(fs, [], {}, CLIENT)
+    assert "크다" in src.lookup("rule.imbalance_gap_threshold")["note"]
+    c = claim("C1", "inference", "두 평균이 벌어진 것은 클래스마다 성능이 고르지 않다는 뜻이다")
+    v = fa.judge_answer(c, ans(expr="{per_class.7.f1} - {per_class.8.f1}", expr_b="{rule.imbalance_gap_threshold}", relation="ge"),
+                        src, [], [], PIECE)
+    assert v.verdict == verdict
