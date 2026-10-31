@@ -162,7 +162,8 @@ async def test_first_call_lists_sentences_and_asks_verdict_before_claims():
     assert "## 문장 목록\n[s1] (slot:7.1) Recall 은 0.912" in user and "[s3] (slot:8.2) 경계 근처 표본이 많음을 시사한다." in user
     assert MARK not in user  # 고정 문구·표는 문장 목록에도 없다
     schema = fake.calls[0]["text"]["format"]["schema"]
-    assert list(schema["properties"]) == ["sentences", "claims"] and schema["required"] == ["sentences", "claims"]
+    # 1.19: 주장이 먼저, 문장 판정은 점검표로 뒤에(1.18 R-0059 — 판정을 먼저 쓰게 하자 주장 목록을 비운 채 끝났다)
+    assert list(schema["properties"]) == ["claims", "sentences"] and schema["required"] == ["claims", "sentences"]
     assert schema["properties"]["sentences"]["items"]["properties"]["sid"]["enum"] == ["s1", "s2", "s3"]
     assert "문장마다 판정" in fake.calls[0]["instructions"]
     # 자기 점검은 문장 판정을 받지 않는다
@@ -210,6 +211,8 @@ async def test_fill_is_asked_at_most_once():
     ({"s1": (0, "")}, [item("0.912")], {}),  # '0개'라 했어도 주장이 들어갔으면 됐다
     ({"s1": (1, "")}, [item("FN 이 FP 보다 많다", kind="comparison")] * 2, {}),  # 되풀이로 버린 것도 본 것
     ({"s1": ("2", "")}, [], {"s1": "missing"}),  # 수가 정수가 아니면 판정이 없는 것과 같다
+    ({"s1": (0, "빠뜨림")}, [], {"s1": "missed"}),  # 1.19 점검표에서 모델이 스스로 빠뜨렸다고 적음
+    ({"s1": (0, "빠뜨림")}, [item("0.912")], {}),  # 그래도 주장이 들어갔으면 됐다
     ({"s1": (True, "")}, [], {"s1": "missing"}),
 ])
 async def test_sentence_gaps(said, items, want):
@@ -293,7 +296,8 @@ def test_extract_prompt_widens_and_narrows_claims():
     assert "n_claims" in text and "맨 지표 이름" in text and "억지로 뽑지 않는다" in text and "적은 수만큼" not in text
     assert "어떻게 계산되는지만 풀이하는 말은 주장이 아니다" in text
     for word in ("명사를 꾸미는 말", "'~중 ~개'", "확인 대상은 계산값만이 아니다", "의뢰자가 적은 값(용도, 운영 방식, 데이터 출처", "지시어 그대로",
-                 "이것이 보류의 사유이다", "같은 구절을 비교로 또 뽑지 않는다", "분야 일반론", "claims 보다 먼저"):
+                 "이것이 보류의 사유이다", "같은 구절을 비교로 또 뽑지 않는다", "분야 일반론", "먼저 claims 에 주장을 모두 적는다",
+                 "none_reason 에 '빠뜨림'"):
         assert word in text, word
 
 

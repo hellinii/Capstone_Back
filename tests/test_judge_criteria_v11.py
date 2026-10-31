@@ -1011,3 +1011,40 @@ def test_v118_error_unit_code_names(actual, named, want):
 ])
 def test_v118_negated_client_option_variants(actual, named, want):
     assert fa.client_text_matches(actual, named) is want
+
+
+# ── 1.19(V2 1.18 R-0059 — 일반 말 '약한 레이블', 칸 이름을 부정한 의뢰자 선택지) ─────────
+
+
+@pytest.mark.parametrize("named, want", [
+    ("약한 레이블", None),  # 어떤 클래스도 지목하지 않음 — 검증 불가(위반 아님)
+    ("가장 약한 클래스 7", "match"),
+    ("가장 약한 클래스 8", "violation"),  # 다른 클래스를 지목하면 여전히 위반
+])
+def test_v119_generic_class_phrase_is_not_a_violation(named, want):
+    fs = {**FS, "facts": {**FS["facts"], "weakest_class": {"label": "7", "f1": 0.3}}}
+    src = Sources(fs, [], {}, CLIENT)
+    assert fa.class_labels(src) == {"7", "8"} and src.texts["facts.weakest_class.label"] == "7"
+    q = named + "의 부진"
+    v = fa.judge_answer(claim("C1", "name", q), ans(name_field="facts.weakest_class.label", named=named), src, [], [],
+                        Piece(PIECE.id, PIECE.slot, PIECE.place, PIECE.source, q + "."))
+    assert v.verdict == want if want else v.verdict not in ("violation", "match")
+
+
+@pytest.mark.parametrize("actual, named, label, want", [
+    ("수행 안 함 (의뢰자 제공: 그대로 학습했다.)", "편향 감소 노력이 없었던 상태", "편향 감소 노력", True),
+    ("수행 안 함", "편향 감소 노력을 기울였다", "편향 감소 노력", False),  # 칸 이름만 있고 부정이 없으면 반대 말
+    ("수행 안 함", "편향 감소 노력이 없었던 상태", "", None),  # 칸 이름을 모르면 전처럼 글자 겹침으로(여기선 판단 못 함)
+])
+def test_v119_negated_option_by_field_label(actual, named, label, want):
+    got = fa.client_text_matches(actual, named, label)
+    assert got is want if want is not None else got is not True
+
+
+def test_v119_field_label_reaches_client_match_through_judge():
+    # 배선: 사실 일치가 의뢰자 칸 이름('편향 감소 노력')을 client_text_matches 에 넘긴다
+    src = Sources(FS, [], {}, {"training_data": {"편향 감소 노력": "수행 안 함 (의뢰자 제공: 그대로 학습했다.)"}})
+    q = "편향 감소 노력이 없었던 상태"
+    v = fa.judge_answer(claim("C1", "name", q), ans(name_field="client.training_data.편향 감소 노력", named=q), src, [], [],
+                        Piece(PIECE.id, PIECE.slot, PIECE.place, PIECE.source, q + "에서 학습했다."))
+    assert v.verdict == "match"

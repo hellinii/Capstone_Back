@@ -241,7 +241,7 @@ def _bigrams(t: str) -> set[str]:
     return {t[i:i + 2] for i in range(len(t) - 1)}
 
 
-def client_text_matches(actual: str, named: str) -> bool | None:
+def client_text_matches(actual: str, named: str, field_label: str = "") -> bool | None:
     """고객 입력 칸은 다시 말한 글도 맞다(설계 6.1 "고객 입력을 다시 말하는 문장은 그 입력과 맞으면 통과").
     - 의뢰자 참고 글 '(의뢰자 제공: …)' 은 떼고 본다.
     - 한쪽이 다른 쪽에 들어 있거나(6자 이상 — 앞부분만 옮김, J4 2차 파일럿),
@@ -266,7 +266,9 @@ def client_text_matches(actual: str, named: str) -> bool | None:
         # '○○ 안 함'(1.16)·'○○되지 않음'·'○○하지 않음'(1.18) 선택지 — 같은 동사와 부정 표현이 함께 있으면 맞고, 동사만 있고 부정이
         # 없으면 아니다
         verb = _norm_name(choice[: -len(suffix)])
-        if verb and verb in n:
+        # 동사 대신 칸 이름('편향 감소 노력이 없었던 상태' ↔ 편향 감소 노력: 수행 안 함)을 부정해도 같다(1.19, V2 1.18 R-0059)
+        label = _norm_name(field_label)
+        if (verb and verb in n) or (label and len(label) >= 4 and label in n):
             return any(_norm_name(w) in n for w in neg["negations"])
     note = re.search(r"\(의뢰자 제공:(.*)\)\s*$", full)
     # 선택 값만·참고 글 붙은 전체·참고 글만 — 문장이 참고 글을 말할 수도 있다(J4 AI 파일럿)
@@ -352,16 +354,31 @@ def _compare(v: ClaimVerdict, ans: dict, sources: Sources) -> None:
         v.verdict = "match" if holds else "violation"
 
 
+def class_labels(sources: Sources) -> set[str]:
+    """데이터의 클래스·레이블 이름(클래스별 칸 per_class.<이름>.* 과 분포 칸 distribution.class_distribution.<이름>)."""
+    out = set()
+    for k in sources.numbers:
+        for pre in ("per_class.", "distribution.class_distribution."):
+            if k.startswith(pre):
+                out.add(k[len(pre):].split(".")[0])
+    return out
+
+
 def _name(v: ClaimVerdict, ans: dict, sources: Sources) -> None:
     actual = sources.texts.get(ans.get("name_field", "").strip())
     if actual is None or not ans.get("named"):
         return
     v.detail["data"] = actual
     if ans.get("name_field", "").strip().startswith("client."):
-        ok = client_text_matches(actual, ans["named"])
+        ok = client_text_matches(actual, ans["named"], ans["name_field"].strip().rsplit(".", 1)[-1])
         if ok is None:
             return
     else:
+        labels = class_labels(sources)
+        if str(actual) in labels and not any(_norm_name(lab) in _norm_name(ans["named"]) for lab in labels):
+            # 클래스 칸인데 문장이 어떤 클래스 이름도 지목하지 않았다('약한 레이블의 부진') — 무엇을 가리키는지 모르니 검증 불가
+            # (1.19, V2 1.18 R-0059: 일반 말을 가장 약한 클래스 Class9 와 대조해 위반으로 봤다)
+            return
         ok = name_matches(actual, ans["named"])
         if ok is None:
             return

@@ -88,7 +88,8 @@ def instructions(catalog: dict[str, FieldEntry]) -> str:
 
 
 def response_schema(piece_ids: list[str], sentence_ids: list[str] | None = None) -> dict:
-    """주장 목록. sentence_ids 를 주면 문장마다 판정(sentences)을 주장보다 먼저 내게 한다(1.17 — 순서가 곧 생성 순서다)."""
+    """주장 목록. sentence_ids 를 주면 주장 다음에 문장마다 판정(sentences)을 점검표로 내게 한다. 1.17 은 판정을 먼저 내게 했는데
+    1.18 R-0059 에서 판정 목록만 쓰고 주장 목록을 비운 채 끝났다(79문장 '있다'고 하고 주장 0개) — 1.19 부터 주장이 먼저다."""
     props: dict = {}
     if sentence_ids is not None:
         props["sentences"] = {"type": "array", "items": {
@@ -97,8 +98,8 @@ def response_schema(piece_ids: list[str], sentence_ids: list[str] | None = None)
                            "none_reason": {"type": "string"}},
         }}
     return {
-        "type": "object", "additionalProperties": False, "required": [*props, "claims"],
-        "properties": {**props, "claims": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["claims", *props],
+        "properties": {"claims": {"type": "array", "items": {
             "type": "object", "additionalProperties": False,
             "required": ["kind", "quote", "piece_id", "field", "field_b", "number_text", "polarity"],
             "properties": {
@@ -110,7 +111,7 @@ def response_schema(piece_ids: list[str], sentence_ids: list[str] | None = None)
                 "number_text": {"type": "string"},
                 "polarity": {"type": "string", "enum": list(POLARITIES)},
             },
-        }}},
+        }}, **props},
     }
 
 
@@ -249,13 +250,14 @@ def place(sents: list[Sentence], items: list[tuple[str, str]]) -> list[str | Non
     return out
 
 
+MISSED_WORD = "빠뜨림"  # 점검표의 none_reason 에 이 낱말이 있으면 그 문장을 다시 묻는다(prompts/extract.md 문장마다 판정, 1.19)
 # 모델이 냈지만 코드가 주장 규칙으로 버린 것 — 그 문장을 본 것으로 친다(다시 물어도 같은 답이 온다). 인용·조각이 틀린 것은 치지 않는다.
 _LOOKED = ("normative", "scope", "recommendation", "duplicate")
 
 
 def sentence_gaps(sents: list[Sentence], verdicts: list, claims: list[Claim], rejected: list[dict]) -> dict[str, str]:
     """다시 물을 문장 {sid: 까닭}(1.17). 까닭: missing(판정도 주장도 없음) · lost(주장이 있다고 했는데 하나도 안 들어감 — 인용이
-    틀려 버려진 것 등) · no_reason(이유 없는 '없음').
+    틀려 버려진 것 등) · missed(까닭에 '빠뜨림', 1.19) · no_reason(이유 없는 '없음').
     판정이 없어도 주장이 들어간 문장은 본 것으로 친다. 1.18: '적은 수보다 덜 뽑힘'(short)으로는 다시 묻지 않는다 — R-0058 에서 109문장 중
     51문장이 short 로 불려 채우기가 21초를 더했고, 수를 채우려 설명·한계 문장까지 뽑게 했다(정밀도 0.789). 적은 수는 기록에만 남는다."""
     said: dict[str, dict] = {}
@@ -275,6 +277,8 @@ def sentence_gaps(sents: list[Sentence], verdicts: list, claims: list[Claim], re
                 gaps[s.sid] = "missing"
         elif n >= 1 and not got:
             gaps[s.sid] = "lost"
+        elif not got and MISSED_WORD in str(v.get("none_reason") or ""):
+            gaps[s.sid] = "missed"  # 점검표를 쓰다 빠뜨린 것을 모델이 스스로 적음(1.19)
         elif n <= 0 and not got and not str(v.get("none_reason") or "").strip():
             gaps[s.sid] = "no_reason"
     return gaps
