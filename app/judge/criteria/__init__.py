@@ -57,6 +57,12 @@ def load_json(name: str) -> dict:
     return json.loads((HERE / name).read_text(encoding="utf-8"))
 
 
+def claim_markers(key: str) -> list[str]:
+    """주장 규칙 표시 낱말(inference_markers·normative_markers·scope_markers) — claims.json(사람 정답지 규칙, J4 끝 잠금) 목록 뒤에
+    1.1 보탬(inference_rules.json)을 붙인다."""
+    return [*load_json("claims.json")[key], *load_json("inference_rules.json").get(key, [])]
+
+
 def load_text(name: str) -> str:
     return (HERE / name).read_text(encoding="utf-8")
 

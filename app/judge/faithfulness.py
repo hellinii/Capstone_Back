@@ -9,7 +9,7 @@
 받는 범위: AI·규칙 문장 조각만(reading.for_module "faithfulness"), 주장 목록(공용 전처리).
 
 판정 종류: match · violation(데이터와 어긋남) · unverifiable(데이터 없음) · target_unclear(대상 불명) · inference_ok ·
-inference_violation(단정형 추론). 점수 = match ÷ (match + violation). 게이트는 violation + inference_violation ≥ 1.
+inference_violation(단정형 추론) · not_claim(추론으로 뽑혔지만 용어 뜻풀이·일반 원리 설명 — 1.1). 점수 = match ÷ (match + violation). 게이트는 violation + inference_violation ≥ 1.
 
 상호작용
 - 의존(import): app.judge.llm·config·criteria(rules_*)·reading·sources·extract(Claim)
@@ -24,18 +24,18 @@ from dataclasses import asdict, dataclass, field
 from app.judge import config, criteria, llm
 from app.judge.criteria.rules_calc import CalcError, calculate
 from app.judge.criteria.rules_degree import degree_verdict
-from app.judge.criteria.rules_numbers import matches, parse_printed
+from app.judge.criteria.rules_numbers import first_quantity, fraction_value, matches, parse_printed
 from app.judge.extract import Claim
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import Sources
 
 CALL_TIMEOUT_SECONDS = 180.0
 RELATIONS = ("gt", "lt", "ge", "le", "eq", "")
+# not_claim 은 추론 주장에만 받는다(1.1) — 용어 뜻풀이·일반 원리 설명이라 이 데이터에 대한 주장이 아님. 다른 종류면 검증 불가로 둔다.
+RESOLUTIONS = ("resolved", "no_data", "target_unclear", "not_claim")
 EQ_TOLERANCE = 0.0005 + 1e-9
 BASES = ("data", "client_input", "other", "")
 _FIELD = re.compile(r"\{([^{}]+)\}")
-# 낱말에 붙은 숫자('F1'·'M4'·'Class9')는 숫자 주장이 아니다(J4 AI 파일럿 — 'F1 Score' 의 1 을 숫자로 읽었다)
-_NUMBER_IN_TEXT = re.compile(r"(?<![A-Za-z0-9.])[+\-−]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])\s*(?:%p|%)?")
 _SENTENCE = re.compile(r"(?<=[.?!])\s+|\n+")
 
 TOOLS = [
@@ -87,7 +87,7 @@ def answer_schema(claim_ids: list[str]) -> dict:
                          "inference_basis"],
             "properties": {
                 "claim_id": {"type": "string", "enum": claim_ids},
-                "resolution": {"type": "string", "enum": ["resolved", "no_data", "target_unclear"]},
+                "resolution": {"type": "string", "enum": list(RESOLUTIONS)},
                 "expr": s, "expr_b": s,
                 "relation": {"type": "string", "enum": list(RELATIONS)},
                 "name_field": s, "named": s, "metric_id": s,
@@ -121,10 +121,10 @@ def eval_expr(expr: str, sources: Sources) -> float | None:
 
 
 def printed_number(claim: Claim) -> str | None:
-    if claim.number_text and parse_printed(claim.number_text):
+    """대조할 찍힌 숫자 — 추출이 적은 숫자 글(분수 말 포함), 없으면 문장의 첫 수량(이름에 붙은 숫자는 건너뜀, criteria/rules_numbers)."""
+    if claim.number_text and (parse_printed(claim.number_text) or fraction_value(claim.number_text) is not None):
         return claim.number_text
-    m = _NUMBER_IN_TEXT.search(claim.quote)
-    return m.group(0).strip() if m and parse_printed(m.group(0).strip()) else None
+    return first_quantity(claim.quote)
 
 
 def sentence_of(quote: str, piece: Piece | None) -> str:
@@ -138,8 +138,7 @@ def sentence_of(quote: str, piece: Piece | None) -> str:
 
 
 def inference_marked(sentence: str) -> bool:
-    markers = criteria.load_json("claims.json")["inference_markers"]
-    return any(m in sentence for m in markers)
+    return any(m in sentence for m in criteria.claim_markers("inference_markers"))
 
 
 def _relation_holds(a: float, b: float, rel: str) -> bool | None:
@@ -178,6 +177,13 @@ def client_text_matches(actual: str, named: str) -> bool:
     - 두 글자 묶음이 어느 한쪽 기준으로 60% 이상 겹치면(어미만 바꿔 말함 — '쓴다'↔'쓰려는 것', J4 AI 파일럿) 맞다."""
     n = _norm_name(named)
     full = str(actual)
+    # 선택지 값을 바꿔 말한 것(names.json client_option_labels — '같은 출처'↔'같은 조건', 1.1). 반대 값의 말이 같이 있으면 아니다.
+    options = criteria.load_json("names.json").get("client_option_labels", {})
+    choice = _CLIENT_NOTE.sub("", full).strip()
+    if choice in options:
+        said = lambda opt: any(_norm_name(lab) in n for lab in options[opt])  # noqa: E731
+        if said(choice) and not any(said(other) for other in options if other != choice):
+            return True
     note = re.search(r"\(의뢰자 제공:(.*)\)\s*$", full)
     # 선택 값만·참고 글 붙은 전체·참고 글만 — 문장이 참고 글을 말할 수도 있다(J4 AI 파일럿)
     for cand in {_norm_name(_CLIENT_NOTE.sub("", full)), _norm_name(full), _norm_name(note.group(1)) if note else ""}:
@@ -197,10 +203,7 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
     """에이전트 답(없으면 None)과 자료로 주장 하나를 판정한다(코드)."""
     v = ClaimVerdict(claim.id, claim.kind, "unverifiable", claim.slot, claim.piece_id, claim.quote)
     if claim.kind == "inference":
-        marked = inference_marked(sentence_of(claim.quote, piece))
-        v.verdict = "inference_ok" if marked else "inference_violation"
-        v.detail = {"marked": marked, "basis": (ans or {}).get("inference_basis", "")}
-        return v
+        return _judge_inference(v, claim, ans, sources, piece)
     if ans is None:
         return v
     v.detail = {k: ans.get(k) for k in ("resolution", "expr", "expr_b", "relation", "name_field", "named", "metric_id")}
@@ -209,34 +212,78 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
         return v
     if ans.get("resolution") != "resolved":
         return v
-    if claim.kind == "number":
+    if claim.kind == "number" and _is_comparison(ans):
+        # 숫자로 뽑혔지만 두 값의 관계를 말하는 문장('예측된 표본이 실제 표본보다 많이') — 에이전트가 두 식과 관계를 주면 비교로
+        # 대조한다(1.1, V2 1차 — 숫자 하나로 대조해 이름 속 숫자 '클래스 3' 을 예측 건수와 맞댔다)
+        v.detail["as"] = "comparison"
+        _compare(v, ans, sources)
+    elif claim.kind == "number":
         text, value = printed_number(claim), eval_expr(ans.get("expr", ""), sources)
         if text is None or value is None:
             return v
         v.detail["data"] = value
         v.verdict = "match" if matches(text, value) else "violation"
     elif claim.kind == "comparison":
-        a, b = eval_expr(ans.get("expr", ""), sources), eval_expr(ans.get("expr_b", ""), sources)
-        holds = None if a is None or b is None else _relation_holds(a, b, ans.get("relation", ""))
-        if holds is not None:
-            v.detail.update({"a": a, "b": b})
-            v.verdict = "match" if holds else "violation"
+        _compare(v, ans, sources)
     elif claim.kind == "name":
-        actual = sources.texts.get(ans.get("name_field", "").strip())
-        if actual is not None and ans.get("named"):
-            v.detail["data"] = actual
-            field_name = ans.get("name_field", "").strip()
-            if field_name.startswith("client."):
-                ok = client_text_matches(actual, ans["named"])
-            else:
-                ok = name_matches(actual, ans["named"])
-                positive = sources.texts.get("facts.positive_class")
-                if not ok and positive is not None and str(actual) == positive:  # 양성 클래스를 '양성'으로 부름
-                    ok = any(lab in ans["named"] for lab in criteria.load_json("names.json")["positive_class_labels"])
-            v.verdict = "match" if ok else "violation"
+        _name(v, ans, sources)
     elif claim.kind == "degree":
         result = degree_verdict(claim.polarity, ans.get("metric_id", "").strip(), claim.quote, metrics, refs)
         v.verdict = {"ok": "match", "violation": "violation", "target_unclear": "target_unclear"}[result]
+    return v
+
+
+def _is_comparison(ans: dict) -> bool:
+    return bool(ans.get("expr", "").strip() and ans.get("expr_b", "").strip() and ans.get("relation"))
+
+
+def _compare(v: ClaimVerdict, ans: dict, sources: Sources) -> None:
+    a, b = eval_expr(ans.get("expr", ""), sources), eval_expr(ans.get("expr_b", ""), sources)
+    holds = None if a is None or b is None else _relation_holds(a, b, ans.get("relation", ""))
+    if holds is not None:
+        v.detail.update({"a": a, "b": b})
+        v.verdict = "match" if holds else "violation"
+
+
+def _name(v: ClaimVerdict, ans: dict, sources: Sources) -> None:
+    actual = sources.texts.get(ans.get("name_field", "").strip())
+    if actual is None or not ans.get("named"):
+        return
+    v.detail["data"] = actual
+    if ans.get("name_field", "").strip().startswith("client."):
+        ok = client_text_matches(actual, ans["named"])
+    else:
+        ok = name_matches(actual, ans["named"])
+        positive = sources.texts.get("facts.positive_class")
+        if not ok and positive is not None and str(actual) == positive:  # 양성 클래스를 '양성'으로 부름
+            ok = any(lab in ans["named"] for lab in criteria.load_json("names.json")["positive_class_labels"])
+    v.verdict = "match" if ok else "violation"
+
+
+def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: Sources, piece: Piece | None) -> ClaimVerdict:
+    """추론 주장. 기본은 추론 표시 어미(코드)로 inference_ok / inference_violation.
+    1.1(V2 1차 — 사실·판정·고객 입력을 옮긴 문장과 용어 뜻풀이가 단정형 추론으로 걸렸다):
+    - 에이전트가 그 문장을 데이터 대조로 옮기면(두 식과 관계, 또는 이름 칸과 이름) 코드가 비교·이름 주장처럼 대조한다 — 맞으면
+      match, 틀리면 violation. 대조할 수 없으면(칸 없음) 어미 판정으로 돌아간다. 맞다·틀리다는 여전히 코드가 정한다.
+    - 에이전트가 not_claim(용어 뜻풀이·일반 원리 설명)으로 답하면 주장이 아니다(not_claim — 분모·게이트 밖, 기록에 남는다)."""
+    ans = ans or {}
+    marked = inference_marked(sentence_of(claim.quote, piece))
+    v.detail = {"marked": marked, "basis": ans.get("inference_basis", "")}
+    resolution = ans.get("resolution")
+    if resolution == "not_claim":
+        v.verdict = "not_claim"
+        return v
+    if resolution == "resolved" and (_is_comparison(ans) or (ans.get("name_field", "").strip() and ans.get("named"))):
+        v.detail.update({k: ans.get(k) for k in ("expr", "expr_b", "relation", "name_field", "named")})
+        if _is_comparison(ans):
+            v.detail["as"] = "comparison"
+            _compare(v, ans, sources)
+        else:
+            v.detail["as"] = "name"
+            _name(v, ans, sources)
+        if v.verdict in ("match", "violation"):
+            return v
+    v.verdict = "inference_ok" if marked else "inference_violation"
     return v
 
 
@@ -265,7 +312,7 @@ def _count(verdicts: list[ClaimVerdict]) -> dict:
     return {
         "claims": len(verdicts), "checked": by("match") + by("violation"), "matched": by("match"), "violations": by("violation"),
         "unverifiable": by("unverifiable"), "target_unclear": by("target_unclear"),
-        "inference_ok": by("inference_ok"), "inference_violation": by("inference_violation"),
+        "inference_ok": by("inference_ok"), "inference_violation": by("inference_violation"), "not_claim": by("not_claim"),
         "client_input_assertive": sum(1 for v in verdicts if v.verdict == "inference_violation"
                                       and v.detail.get("basis") == "client_input"),
     }

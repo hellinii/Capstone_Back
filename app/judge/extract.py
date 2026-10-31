@@ -68,7 +68,7 @@ def claim_rules_text() -> dict[str, str]:
         "kinds": "\n".join(f"- {k['id']}({k['name']}): {k['what']} 예: {k['example']}" for k in rules["kinds"]),
         "unit_rules": "\n".join(f"- {r}" for r in rules["unit_rules"]),
         "not_claims": "\n".join(f"- {r}" for r in rules["not_claims"]),
-        "inference_markers": ", ".join(rules["inference_markers"]),
+        "inference_markers": ", ".join(criteria.claim_markers("inference_markers")),
     }
 
 
@@ -106,11 +106,10 @@ def _sentence_of(quote: str, piece: Piece) -> str:
 
 
 def _not_inference(sentence: str) -> str | None:
-    """추론으로 뽑혔지만 규범 문장이거나 시험 범위 문장이면 그 사유(claims.json normative_markers·scope_markers)."""
-    rules = criteria.load_json("claims.json")
-    if any(m in sentence for m in rules["normative_markers"]):
+    """추론으로 뽑혔지만 규범 문장이거나 시험 범위 문장이면 그 사유(claims.json + inference_rules.json 의 normative_markers·scope_markers)."""
+    if any(m in sentence for m in criteria.claim_markers("normative_markers")):
         return "normative"
-    if any(m in sentence for m in rules["scope_markers"]):
+    if any(m in sentence for m in criteria.claim_markers("scope_markers")):
         return "scope"
     return None
 

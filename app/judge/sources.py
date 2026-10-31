@@ -74,10 +74,36 @@ def _rename(path: str) -> str:
     return "metric." + path[len("metrics."):] if path.startswith("metrics.") else path
 
 
+def field_note(name: str) -> str | None:
+    """기준 묶음 칸 설명(criteria/field_notes.json, 1.1). 같은 이름, 또는 '.*' 로 끝나는 이름의 앞부분으로 시작하면."""
+    from app.judge import criteria
+
+    notes = criteria.load_json("field_notes.json")["notes"]
+    if name in notes:
+        return notes[name]
+    for key, note in notes.items():
+        if key.endswith(".*") and name.startswith(key[:-1]):
+            return note
+    return None
+
+
+def _class_shares(fact_sheet: dict, raw: dict[str, float | int]) -> None:
+    """클래스(레이블)별 표본 비율 = 건수 ÷ 평가 샘플 수(1.1 — 분포를 백분율로 말한 문장을 대볼 칸이 없었다). 멀티레이블도
+    분모는 표본 수다(schemas.DistributionFact 설명)."""
+    n = fact_sheet.get("n_samples") or 0
+    dist = (fact_sheet.get("distribution") or {}).get("class_distribution") or {}
+    if not _is_number(n) or n <= 0:
+        return
+    for label, count in dist.items():
+        if _is_number(count):
+            raw[f"distribution.class_share.{label}"] = count / n
+
+
 def field_catalog(fact_sheet: dict, benchmark_refs: list[dict] | None = None) -> dict[str, FieldEntry]:
     """칸 이름 → FieldEntry. 사실 시트는 model_dump() dict."""
     raw: dict[str, float | int] = {}
     _walk({k: v for k, v in fact_sheet.items() if k != "confusion"}, "", raw)
+    _class_shares(fact_sheet, raw)
     conf = fact_sheet.get("confusion") or {}
     labels, matrix = conf.get("labels") or [], conf.get("matrix") or []
     for i, row in enumerate(matrix):
@@ -92,6 +118,9 @@ def field_catalog(fact_sheet: dict, benchmark_refs: list[dict] | None = None) ->
         if name.startswith("metric."):
             mid = name.split(".")[1]
             desc = f"{names.get(mid, mid)}({mid}) {name.split('.', 2)[2]}"
+        note = field_note(name)
+        if note:
+            desc = note if desc == name else f"{desc} — {note}"
         out[name] = FieldEntry(name, desc, v)
     for r in benchmark_refs or []:
         for key, field in (("model_value", "model_value"), ("ref_low", "ref_low"), ("ref_high", "ref_high"), ("target_value", "target")):
@@ -194,7 +223,9 @@ class Sources:
 
     def lookup(self, name: str) -> dict:
         if name in self.numbers:
-            return {"field": name, "value": self.numbers[name].value, "source": SOURCE_LABELS[_source_of(name)]}
+            out = {"field": name, "value": self.numbers[name].value, "source": SOURCE_LABELS[_source_of(name)]}
+            note = field_note(name)
+            return {**out, "note": note} if note else out
         if name in self.texts:
             return {"field": name, "value": self.texts[name], "source": SOURCE_LABELS[_source_of(name)]}
         return {"field": name, "found": False, "near": self.find(name.split(".")[-1])[:10]}

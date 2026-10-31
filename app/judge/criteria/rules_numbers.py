@@ -6,6 +6,10 @@
 - 표기 자릿수 자체는 보지 않는다(설계 6.5). 천 단위 쉼표, 부호(+, −, U+2212), %p 를 읽는다.
 - 부호 없이 쓴 숫자는 크기로도 본다 — "Recall 이 0.066 높다"처럼 방향을 말로 쓴 차이가 음수 데이터(−0.066)와 맞는다(J4 파일럿).
   부호를 붙여 쓴 숫자(+13, −0.275)는 부호까지 맞아야 한다. 방향이 맞는지는 비교 주장이 따로 본다.
+- 분수 말('3분의 1')은 그 몫(1 ÷ 3)으로 읽고 셋째 자리 반 칸(FRACTION_TOLERANCE) 안이면 일치(1.1, V2 1차 — '3분의 1' 의 3 을 읽어
+  0.333 과 어긋났다).
+- 문장에서 숫자를 찾을 때 이름에 붙은 숫자('클래스 3'·'레이블 14'·'Class 9')는 수량이 아니다(NAME_BEFORE_NUMBER, 1.1 — '클래스 3
+  으로 예측된 표본이 … 많이' 의 3 을 예측 건수와 대조했다).
 기준 묶음에 둔다 — 대조 규칙이 바뀌면 판정이 바뀐다.
 """
 from __future__ import annotations
@@ -16,6 +20,11 @@ from decimal import Decimal, InvalidOperation
 
 _NUM = re.compile(r"^([+\-−]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?\s*(%p|%|퍼센트포인트|퍼센트)?$")
 EPS = Decimal("1e-9")
+_FRACTION = re.compile(r"(\d+)\s*분의\s*(\d+)")
+FRACTION_TOLERANCE = 0.0005 + 1e-9
+# 문장에서 수량 숫자를 찾는 꼴(낱말에 붙은 숫자 'F1'·'M4'·'Class9' 는 숫자가 아니다 — J4 AI 파일럿)
+_NUMBER_IN_TEXT = re.compile(r"(?<![A-Za-z0-9.])[+\-−]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])\s*(?:%p|%)?")
+NAME_BEFORE_NUMBER = ("클래스", "레이블", "라벨", "class", "label")
 
 
 @dataclass(frozen=True)
@@ -42,6 +51,28 @@ def parse_printed(text: str) -> Printed | None:
     return Printed(value, len(frac or ""), bool(unit), signed)
 
 
+def fraction_value(text: str) -> float | None:
+    """'N분의 M' 꼴이면 M ÷ N, 아니면 None."""
+    m = _FRACTION.search(text)
+    if not m or int(m.group(1)) == 0:
+        return None
+    return int(m.group(2)) / int(m.group(1))
+
+
+def first_quantity(text: str) -> str | None:
+    """문장에서 대조할 첫 수량 글자 — 분수 말이 있으면 그것, 아니면 이름에 붙지 않은 첫 숫자. 없으면 None."""
+    m = _FRACTION.search(text)
+    if m:
+        return m.group(0)
+    for m in _NUMBER_IN_TEXT.finditer(text):
+        before = text[: m.start()].rstrip().lower()
+        if any(before.endswith(w) for w in NAME_BEFORE_NUMBER):
+            continue
+        if parse_printed(m.group(0).strip()):
+            return m.group(0).strip()
+    return None
+
+
 def _close(printed: Printed, data: Decimal) -> bool:
     half = Decimal(5) * Decimal(10) ** (-(printed.decimals + 1))
     return abs(data - printed.value) <= half + EPS
@@ -49,6 +80,9 @@ def _close(printed: Printed, data: Decimal) -> bool:
 
 def matches(text: str, data: float | int) -> bool | None:
     """찍힌 숫자가 데이터 값과 맞나. 찍힌 글이 숫자가 아니면 None."""
+    frac = fraction_value(text)
+    if frac is not None:
+        return abs(float(data) - frac) <= FRACTION_TOLERANCE
     p = parse_printed(text)
     if p is None:
         return None

@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from app.judge import config, criteria, llm
-from app.judge.criteria.rules_numbers import matches, same_quantity
+from app.judge.criteria.rules_numbers import matches, parse_printed, same_quantity
 from app.judge.extract import Claim
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import ALIASES
@@ -65,14 +65,24 @@ def value_groups(pieces: list[Piece], claims: list[Claim]) -> dict[str, list[tup
 
 
 def _misassigned(text: str, piece: Piece, fld: str, data: dict | None) -> bool:
-    """서술 쪽 숫자가 묶인 칸의 데이터와는 다르지만 다른 칸의 데이터 값과는 맞나 — 추출이 칸을 잘못 짚은 것으로 본다(J4 파일럿).
+    """서술 쪽 숫자가 묶인 칸의 데이터와는 다르지만 다른 칸의 데이터 값과는 맞나, 또는 그 칸 값의 표기일 수 없나(비율 칸에 1보다
+    큰 수, 1.1) — 추출이 칸을 잘못 짚은 것으로 본다(J4 파일럿).
     표·고정 문구 숫자는 프론트가 칸을 알고 찍으므로 보지 않는다."""
     if not data or piece.source not in ("ai", "template"):
         return False
     own = data.get(fld)
     if own is not None and matches(text, own):
         return False
+    if own is not None and _not_a_ratio_print(text, own):
+        return True
     return any(matches(text, v) for name, v in data.items() if name != fld)
+
+
+def _not_a_ratio_print(text: str, own) -> bool:
+    """칸 값이 비율(0~1)인데 서술 숫자가 백분율도 아닌 1보다 큰 수 — 그 칸 값을 어떻게 찍어도 나올 수 없는 숫자라 칸을 잘못
+    붙인 것이다(1.1, V2 1차 — '2,000회' 를 신뢰수준 0.95 칸에 붙여 '95%' 와 모순으로 셌다)."""
+    p = parse_printed(text)
+    return p is not None and not p.percent and 0 <= own <= 1 and abs(p.value) > 1
 
 
 def value_mismatches(groups: dict[str, list[tuple[str, Piece]]], data: dict | None = None) -> tuple[list[Contradiction], int, list[dict]]:

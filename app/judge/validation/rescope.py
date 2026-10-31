@@ -37,6 +37,8 @@ TABLE: tuple[tuple[str, tuple[str, ...]], ...] = (
     (C + "model.json", ("common",)),
     # 주장 추출(공용 전처리)
     (C + "claims.json", ("extract",)), (C + "prompts/extract*.md", ("extract",)), ("app/judge/extract.py", ("extract",)),
+    # 1.1 보탬 — 추론 표시·규범·범위 낱말(추출이 걸러내고 사실 일치가 어미를 본다), 칸 설명(추출 칸 목록과 조회 답에 실린다)
+    (C + "inference_rules.json", ("extract", "faithfulness")), (C + "field_notes.json", ("extract", "faithfulness")),
     # 사실 일치
     (C + "degree.json", ("faithfulness",)), (C + "names.json", ("faithfulness",)),
     (C + "rule_constants.json", ("faithfulness",)), (C + "rules_calc.py", ("faithfulness",)),
