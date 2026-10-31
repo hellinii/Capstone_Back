@@ -27,6 +27,7 @@ KNOWN: dict[str, str] = {
     "1.5": "4a8bff76cc5d0a8d5fdec8ee69ea0a4524fde7301d330502c95320903e78aa88",
     "1.6": "cc68b6ed2d27f63bc476e42a27cfcc86630397ffde2ab8f1974f401c6210b1bf",
     "1.7": "1093a56d30a14fb4706aef939d4fbab05c492e49c585b76309b65ac6a4f50fd4",
+    "1.8": "8aea98bca2e1350f83384dd11481bfb66d0e726f0adfa28a819dea3b1a503f9e",
 }
 
 
