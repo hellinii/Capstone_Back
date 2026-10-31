@@ -34,6 +34,7 @@ KNOWN: dict[str, str] = {
     "1.12": "7e95790ea2eaea68829b86d1fa8cfc885a714d7fb139a9f5d9bf7f5f1191e205",
     "1.13": "742c21ee75ae8e31a0f85b5ea35fa2e051abe39b6bfe0f06ccc984cf6daf5ca1",
     "1.14": "37dc2e231e60b806da8bb40db624ef3af0f8be3fb5872794a23c93a8d81d4038",
+    "1.15": "cd037e9bac9cae64f985acbecd396b5c50dd3d5fc2e172a7bf6f711d291e7c1f",
 }
 
 
