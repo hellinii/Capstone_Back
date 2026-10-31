@@ -708,3 +708,62 @@ def test_v17_margin_without_flag_falls_back_to_usual_rule():
     assert degree_verdict("negative", "M3", "판정의 여유가 작다", [m], []) == "violation"
     failed = M(metric_id="M3", display_name="Recall", value=0.9, threshold=0.97, status="fail", is_core=True)
     assert degree_verdict("negative", "M3", "판정의 여유가 작다", [failed], []) == "ok"  # 미달 지표에 부정은 보통 규칙대로 허용
+
+
+# ── 1.8(V2 1.7 R-0041 — 지표 상태 pass ↔ '충족') ─────────────────────
+
+
+@pytest.mark.parametrize("actual, named, want", [
+    ("pass", "Hamming Loss 와 Jaccard Index 는 모두 목표를 충족했다", True),
+    ("fail", "모두 목표를 충족했다", False),
+    ("fail", "목표를 충족하지 못했다", True),
+    ("pass", "목표를 충족하지 못했다", False),
+    ("pass", "목표를 충족하지 않았다", False),
+    ("info", "목표값이 없는 참고 지표", True),
+    ("argmax", "가장 큰 클래스를 예측으로 골랐다", True),
+    ("threshold", "레이블마다 결정 임계값을 적용했다", False),
+    ("threshold", "확률에 결정 임계값을 적용해 예측을 만들었다", True),
+])
+def test_v18_metric_status_and_derivation_codes(actual, named, want):
+    assert fa.name_matches(actual, named) is want
+
+
+def test_v18_every_enumerated_str_field_in_schema_is_named():
+    # 스키마에서 값 목록(Literal 이거나 설명의 'a | b')을 가진 칸의 값이 이름 표에 모두 있다 — 1.3 은 Literal 만 보아 놓쳤다.
+    # 서술에 이름으로 나오지 않는 칸(문제 목록·단위·경계 메모)만 경로로 뺀다.
+    import re
+    import typing
+
+    from pydantic import BaseModel
+
+    from app.narrative import schemas as S
+
+    labels = criteria.load_json("names.json")["code_labels"]
+    not_named = {".problems.kind", ".problems.priority", ".problems.recommend_section", ".error_ratios.unit",
+                 ".error_ratios.boundary_note", ".facts.error_totals.unit", ".facts.prediction_bias.unit"}
+    missing, seen = [], set()
+
+    def walk(model, path):
+        if model in seen:
+            return
+        seen.add(model)
+        for name, f in model.model_fields.items():
+            here = f"{path}.{name}"
+            vals = []
+            for t in [f.annotation, *typing.get_args(f.annotation)]:
+                if typing.get_origin(t) is typing.Literal:
+                    vals += list(typing.get_args(t))
+            m = re.fullmatch(r"\s*(\w+(?:\s*\|\s*\w+)+)\s*(?:\(.*\))?\s*", f.description or "")
+            if m:
+                vals += [v.strip() for v in m.group(1).split("|")]
+            if here not in not_named:
+                missing.extend(f"{here}={v}" for v in vals if isinstance(v, str) and v not in labels)
+
+            def inner(t):
+                if isinstance(t, type) and issubclass(t, BaseModel):
+                    walk(t, here)
+                for a in typing.get_args(t) or []:
+                    inner(a)
+            inner(f.annotation)
+    walk(S.FactSheet, "")
+    assert missing == [], missing
