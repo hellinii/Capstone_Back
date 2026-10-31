@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+import json
 from types import SimpleNamespace as M
 
 from app.judge import consistency as co
@@ -442,3 +443,71 @@ def test_v14_bound_numbers_are_checked_as_bounds(quote, value, verdict):
     src = Sources(fs, [], {}, CLIENT)
     v = fa.judge_answer(claim("C1", "number", quote), ans(expr="{facts.weakest_class.gap_from_macro}"), src, [], [], PIECE)
     assert v.verdict == verdict
+
+
+# ── 1.5 재확인(민서 결정 2026-10-31) ──────────────────────────────────
+
+R_PIECES = [Piece("slot:8.2", "8.2", "5.1", "ai", "가상 결론. 이 결과로는 목표 수준에 이르렀다고 보기 어렵다."),
+            Piece("slot:7.1", "7.1", "5.2", "ai", "가상 분석. 성능이 낮은 것은 라벨 품질 때문이다."),
+            Piece("slot:9:6.1", "9", "6.1", "ai", "가상 권고 칸. 재확인과 상관없는 글이다.")]
+GOAL = Claim("C1", "inference", "목표 수준에 이르렀다고 보기 어렵다", "slot:8.2", "8.2", "5.1", "ai", "", "", "", "", 0)
+CAUSE = Claim("C2", "inference", "성능이 낮은 것은 라벨 품질 때문이다", "slot:7.1", "7.1", "5.2", "ai", "", "", "", "", 0)
+
+
+def first_pass(*cids):
+    return F.json_response({"claims": [{"claim_id": c, **ans()} for c in cids]})
+
+
+def second(cid, **kw):
+    return F.json_response({"claims": [{"claim_id": cid, **ans(**kw)}]})
+
+
+async def run_recheck(claims, *replies):
+    fake = F.FakeOpenAI(list(replies))
+    return fake, await fa.judge_faithfulness(fake, R_PIECES, claims, SOURCES, [], [])
+
+
+@pytest.mark.parametrize("relation, verdict", [("lt", "match"), ("gt", "violation")])
+async def test_recheck_turns_blocking_inference_into_code_checked_comparison(relation, verdict):
+    fake, res = await run_recheck([GOAL], first_pass("C1"),
+                                  second("C1", expr="{metric.M2.value}", expr_b="{metric.M2.threshold}", relation=relation))
+    v = res.verdicts[0]
+    assert v.verdict == verdict and v.detail["recheck"]["first"] == "inference_violation" and res.counts["rechecked"] == 1
+    assert len(fake.calls) == 2 and "faithfulness_recheck" in json.dumps(fake.calls[1]["text"], ensure_ascii=False)
+
+
+async def test_recheck_sends_only_pieces_of_rechecked_claims():
+    fake, _ = await run_recheck([GOAL], first_pass("C1"), second("C1"))
+    sent = json.dumps(fake.calls[1]["input"], ensure_ascii=False)
+    assert "목표 수준에 이르렀다고" in sent and "재확인과 상관없는" not in sent and "라벨 품질" not in sent
+    assert "다시 묻는다" not in fake.calls[0]["instructions"] and "하나씩 다시 본다" in fake.calls[1]["instructions"]
+
+
+async def test_recheck_without_mapping_keeps_the_block():
+    _, res = await run_recheck([GOAL], first_pass("C1"), second("C1", inference_basis="data"))
+    assert [v.verdict for v in res.verdicts] == ["inference_violation"] and len(res.violations()) == 1
+
+
+async def test_recheck_failure_keeps_first_verdict_without_failing_the_module():
+    _, res = await run_recheck([GOAL], first_pass("C1"), F.response([F.message_item("x", refusal=True)]))
+    assert res.failure is None and res.verdicts[0].verdict == "inference_violation"
+    assert res.verdicts[0].detail["recheck"] == {"failure": "refusal"}
+
+
+async def test_causal_sentence_is_not_rechecked():
+    fake, res = await run_recheck([CAUSE], first_pass("C2"))
+    assert len(fake.calls) == 1 and res.verdicts[0].verdict == "inference_violation" and res.counts["rechecked"] == 0
+
+
+async def test_no_recheck_when_nothing_blocks():
+    fake, res = await run_recheck([GOAL], F.json_response({"claims": [{"claim_id": "C1", **ans(
+        expr="{metric.M2.value}", expr_b="{metric.M2.threshold}", relation="lt")}]}))
+    assert len(fake.calls) == 1 and res.counts["rechecked"] == 0 and res.verdicts[0].verdict == "match"
+
+
+@pytest.mark.parametrize("sentence, reason", [
+    ("이 점검은 낮은 성능의 원인을 확정하려는 것이 아니라 후보를 좁힌다.", "scope"),
+    ("이 표는 오류 사례를 다시 보기 위한 것이다.", "normative"),
+])
+def test_v15_purpose_and_not_intended_endings(sentence, reason):
+    assert ex._not_inference(sentence) == reason

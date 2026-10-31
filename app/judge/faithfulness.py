@@ -334,7 +334,7 @@ def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: S
     causal = any(m in sentence for m in criteria.claim_markers("causal_markers"))
     resolution = ans.get("resolution")
     # 에이전트가 고른 갈래도 남긴다 — 기록만 보고 다시 판정·검토할 수 있게(1.2)
-    v.detail = {"marked": marked, "basis": ans.get("inference_basis", ""), "resolution": resolution or ""}
+    v.detail = {"marked": marked, "basis": ans.get("inference_basis", ""), "resolution": resolution or "", "causal": causal}
     if resolution == "not_claim":
         # 코드가 확인한다(1.1 검토): 뜻풀이 어미가 있고 숫자·인과 낱말이 없을 때만. 아니면 어미 판정으로.
         if is_definition(sentence) and not causal:
@@ -395,6 +395,49 @@ def _count(verdicts: list[ClaimVerdict]) -> dict:
     }
 
 
+async def _ask_agent(client, content: str, ask: list[Claim], instructions: str, purpose: str, sources: Sources,
+                     scope: list[Piece], *, deadline: float | None, kw: dict) -> tuple[dict[str, dict], list[dict], int, str | None]:
+    """에이전트(도구 4개)에게 주장 목록의 대상을 묻는다. (답, 호출 기록, 도구 호출 수, 실패 사유)."""
+    max_turns = int(criteria.load_json("model.json")["faithfulness_max_turns"])
+    convo: list = [{"role": "user", "content": content}]
+    schema = llm.json_schema_format(purpose, answer_schema([c.id for c in ask]))
+    calls: list[dict] = []
+    tool_calls = 0
+    for _turn in range(max_turns):
+        out = await llm.create_response(
+            client, purpose=purpose, model=config.judge_model(), instructions=instructions, input=convo,
+            timeout_s=CALL_TIMEOUT_SECONDS, deadline=deadline, tools=TOOLS, text_format=schema, **kw,
+        )
+        calls.append(out.record.as_dict())
+        if out.failure:
+            return {}, calls, tool_calls, out.failure
+        fcalls = llm.function_calls(out.response)
+        if not fcalls:
+            data, failure = llm.parse_json(out)
+            if failure:
+                return {}, calls, tool_calls, failure
+            answers = {a["claim_id"]: a for a in data.get("claims") or [] if isinstance(a, dict) and "claim_id" in a}
+            return answers, calls, tool_calls, None
+        tool_calls += len(fcalls)
+        convo = convo + llm.next_turn_items(out.response) + [
+            {"type": "function_call_output", "call_id": fc.call_id,
+             "output": json.dumps(_tool_output(fc.name, _safe_args(fc.arguments), sources, scope), ensure_ascii=False)}
+            for fc in fcalls
+        ]
+    return {}, calls, tool_calls, "agent_turns"
+
+
+def _listing(claims: list[Claim]) -> str:
+    return "\n".join(f"- {c.id} [{c.kind}] (조각 {c.piece_id}) {c.quote}"
+                     + (f" — 칸 후보 {c.field}" if c.field else "") + (f" / {c.field_b}" if c.field_b else "")
+                     for c in claims)
+
+
+def recheck_targets(verdicts: list[ClaimVerdict]) -> list[str]:
+    """재확인할 주장 — 발급을 막는 단정형 추론 가운데 인과 문장이 아닌 것(1.5). 인과 문장은 데이터 대조로 옮기지 않는다."""
+    return [v.claim_id for v in verdicts if v.verdict == "inference_violation" and not v.detail.get("causal")]
+
+
 async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], sources: Sources, metrics, refs, *,
                              deadline: float | None = None, clock=None) -> FaithResult:
     scope = for_module(pieces, "faithfulness")
@@ -414,41 +457,39 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
     calls: list[dict] = []
     tool_calls = 0
     if pending:
-        max_turns = int(criteria.load_json("model.json")["faithfulness_max_turns"])
-        listing = "\n".join(f"- {c.id} [{c.kind}] (조각 {c.piece_id}) {c.quote}"
-                            + (f" — 칸 후보 {c.field}" if c.field else "") + (f" / {c.field_b}" if c.field_b else "")
-                            for c in pending)
-        convo: list = [{"role": "user", "content": f"## 서술\n{render(scope)}\n\n## 조사할 주장\n{listing}"}]
-        schema = llm.json_schema_format("faithfulness", answer_schema([c.id for c in pending]))
-        finished = False
-        for _turn in range(max_turns):
-            out = await llm.create_response(
-                client, purpose="faithfulness", model=config.judge_model(),
-                instructions=criteria.load_text("prompts/faithfulness.md"), input=convo, timeout_s=CALL_TIMEOUT_SECONDS,
-                deadline=deadline, tools=TOOLS, text_format=schema, **kw,
-            )
-            calls.append(out.record.as_dict())
-            if out.failure:
-                return FaithResult([], {}, calls, tool_calls, out.failure)
-            fcalls = llm.function_calls(out.response)
-            if not fcalls:
-                data, failure = llm.parse_json(out)
-                if failure:
-                    return FaithResult([], {}, calls, tool_calls, failure)
-                answers = {a["claim_id"]: a for a in data.get("claims") or [] if isinstance(a, dict) and "claim_id" in a}
-                finished = True
-                break
-            tool_calls += len(fcalls)
-            convo = convo + llm.next_turn_items(out.response) + [
-                {"type": "function_call_output", "call_id": fc.call_id,
-                 "output": json.dumps(_tool_output(fc.name, _safe_args(fc.arguments), sources, scope), ensure_ascii=False)}
-                for fc in fcalls
-            ]
-        if not finished:
-            return FaithResult([], {}, calls, tool_calls, "agent_turns")
+        answers, calls, tool_calls, failure = await _ask_agent(
+            client, f"## 서술\n{render(scope)}\n\n## 조사할 주장\n{_listing(pending)}", pending,
+            criteria.load_text("prompts/faithfulness.md"), "faithfulness", sources, scope, deadline=deadline, kw=kw)
+        if failure:
+            return FaithResult([], {}, calls, tool_calls, failure)
     verdicts = [direct.get(c.id) or judge_answer(c, answers.get(c.id), sources, metrics, refs, by_piece.get(c.piece_id))
                 for c in claims]
-    return FaithResult(verdicts, _count(verdicts), calls, tool_calls)
+    # 재확인(1.5, 민서 결정 2026-10-31 "서술이 맞으면 통과, 틀리거나 확인할 수 없으면 막는다"): 첫 답에서 발급을 막게 된 단정형
+    # 추론만 그 조각과 함께 다시 묻는다. 같은 문장에 회차마다 답이 갈렸다(V2 1.1~1.4). 다시 물어 데이터 대조를 받으면 코드가
+    # 맞다·틀리다를 정하고, 대조를 못 받으면 그대로 막는다. 재확인 호출이 실패하면 첫 판정(막음)을 그대로 둔다.
+    targets = recheck_targets(verdicts)
+    if targets:
+        ask = [c for c in claims if c.id in targets]
+        near = [p for p in scope if p.id in {c.piece_id for c in ask}]
+        again, more_calls, more_tools, failure = await _ask_agent(
+            client, f"## 조각\n{render(near)}\n\n## 다시 볼 주장\n{_listing(ask)}", ask,
+            criteria.load_text("prompts/faithfulness_recheck.md"), "faithfulness_recheck", sources, scope,
+            deadline=deadline, kw=kw)
+        calls += more_calls
+        tool_calls += more_tools
+        by_id = {c.id: c for c in ask}
+        for i, v in enumerate(verdicts):
+            if v.claim_id not in by_id:
+                continue
+            if failure:
+                v.detail["recheck"] = {"failure": failure}
+                continue
+            second = judge_answer(by_id[v.claim_id], again.get(v.claim_id), sources, metrics, refs, by_piece.get(v.piece_id))
+            second.detail["recheck"] = {"first": v.verdict, "first_detail": v.detail}
+            verdicts[i] = second
+    counts = _count(verdicts)
+    counts["rechecked"] = len(targets)
+    return FaithResult(verdicts, counts, calls, tool_calls)
 
 
 def _safe_args(arguments: str) -> dict:
