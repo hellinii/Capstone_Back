@@ -189,8 +189,9 @@ def drop_covered_thresholds(claims: list[Claim], pieces: dict[str, Piece], rejec
     return kept
 
 
-def empty_sentences(scope: list[Piece], claims: list[Claim], limit: int = 60) -> str:
-    """아직 주장을 하나도 뽑지 않은 문장 목록(자기 점검용, 1.13 — 숫자 없는 문장을 통째로 건너뛰었다)."""
+def empty_sentences(scope: list[Piece], claims: list[Claim], limit: int = 400) -> str:
+    """아직 주장을 하나도 뽑지 않은 문장 목록(자기 점검용, 1.13 — 숫자 없는 문장을 통째로 건너뛰었다). 1.15: 60 문장에서 잘라
+    뒤쪽 문장이 목록에 들지 못했다 — 서술 전체가 들도록 넉넉히."""
     lines = []
     for p in scope:
         quotes = [_norm(c.quote) for c in claims if c.piece_id == p.id]

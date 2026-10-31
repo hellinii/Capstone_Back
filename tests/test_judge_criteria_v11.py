@@ -946,3 +946,23 @@ def test_v114_margin_without_metric_uses_all_judged_metrics(flags, polarity, wan
           for i, f in enumerate(flags)]
     quote = "판정 여유가 충분하다" if polarity == "positive" else "판정 여유가 작다"
     assert degree_verdict(polarity, "", quote, ms, []) == want
+
+
+# ── 1.15(V2 1.14 R-0054 — 추출 재현율) ───────────────────────────────
+
+
+def test_v115_extract_prompt_names_often_missed_claims():
+    text = ex.instructions({})
+    for word in ("가장 높은·낮은·많은", "핵심 지표인 Recall", "판정 여유", "관찰되지 않았다"):
+        assert word in text
+
+
+def test_v115_empty_sentence_list_is_not_cut_short():
+    long = Piece("slot:9:6.2", "9", "6.2", "ai", " ".join(f"가상 문장 {i} 이다." for i in range(120)))
+    listed = ex.empty_sentences([long], [])
+    assert "가상 문장 119 이다." in listed
+
+
+def test_v115_extraction_effort_stays_low_for_time():
+    # medium 을 검토했으나 추출이 이미 약 85초(채점 전체 약 150초) — 두 배가 되면 발급 시간 한도에 걸린다(1.15 에서 되돌림)
+    assert criteria.load_json("model.json")["extract_effort"] == "low"
