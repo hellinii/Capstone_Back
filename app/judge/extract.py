@@ -154,17 +154,50 @@ def _not_a_claim(item: dict, quote: str, sentence: str) -> str | None:
     판정 기준값 숫자 바로 뒤에 경계 말·'신뢰구간'이 오는 기준선 숫자('0.1 미만'·'95% 신뢰구간')."""
     if any(sentence.strip().startswith(p) for p in criteria.claim_markers("recommendation_prefix")):
         return "recommendation"
-    if item.get("kind") == "number":
-        text = str(item.get("number_text") or quote).strip()
-        printed = parse_printed(text)
-        if printed is not None:
-            constants = criteria.load_json("rule_constants.json")["values"].values()
-            at = sentence.find(text)
-            rest = sentence[at + len(text):].lstrip() if at >= 0 else ""
-            if (any(matches(text, c) for c in constants)
-                    and any(rest.startswith(w) for w in criteria.claim_markers("threshold_after"))):
-                return "threshold"
     return None
+
+
+def is_threshold_number(claim: Claim, sentence: str) -> bool:
+    """판정 기준값 숫자 바로 뒤에 경계 말·'신뢰구간'이 오는 기준선 숫자('0.1 미만'·'95% 신뢰구간')인가(1.12)."""
+    if claim.kind != "number":
+        return False
+    text = (claim.number_text or claim.quote).strip()
+    if parse_printed(text) is None:
+        return False
+    at = sentence.find(text)
+    rest = sentence[at + len(text):].lstrip() if at >= 0 else ""
+    constants = criteria.load_json("rule_constants.json")["values"].values()
+    return any(matches(text, c) for c in constants) and any(rest.startswith(w) for w in criteria.claim_markers("threshold_after"))
+
+
+def drop_covered_thresholds(claims: list[Claim], pieces: dict[str, Piece], rejected: list[dict]) -> list[Claim]:
+    """기준선 숫자는 같은 문장에 그 숫자를 담은 다른 종류 주장(대개 비교 '…0.1 미만')이 있을 때만 버린다 — 그 비교와 겹치는 중복이다.
+    비교 주장이 없으면 남긴다(사람 정답지는 기준선을 비교 주장으로 표시했다 — 숫자만 뽑혀도 그 짝이다. 1.13, V2 1.12 R-0052:
+    1.12 가 기준선 숫자를 무조건 버려 정답 짝 16개를 잃었다)."""
+    kept = []
+    for c in claims:
+        piece = pieces.get(c.piece_id)
+        sentence = _sentence_of(c.quote, piece) if piece else c.quote
+        if piece and is_threshold_number(c, sentence):
+            text = (c.number_text or c.quote).strip()
+            covered = any(o is not c and o.kind != "number" and o.piece_id == c.piece_id and text in o.quote
+                          and _norm(o.quote) in _norm(sentence) for o in claims)
+            if covered:
+                rejected.append({"round": c.round, "reason": "threshold", "piece_id": c.piece_id, "quote": c.quote[:200]})
+                continue
+        kept.append(c)
+    return kept
+
+
+def empty_sentences(scope: list[Piece], claims: list[Claim], limit: int = 60) -> str:
+    """아직 주장을 하나도 뽑지 않은 문장 목록(자기 점검용, 1.13 — 숫자 없는 문장을 통째로 건너뛰었다)."""
+    lines = []
+    for p in scope:
+        quotes = [_norm(c.quote) for c in claims if c.piece_id == p.id]
+        for s in _SENT.split(p.text):
+            if s.strip() and not any(q and q in _norm(s) for q in quotes):
+                lines.append(f"- [{p.id}] {s.strip()}")
+    return "\n".join(lines[:limit]) or "(없음)"
 
 
 def _found_text(claims: list[Claim]) -> str:
@@ -232,7 +265,7 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
     kw = {"clock": clock} if clock else {}
     for round_no in range(rounds_max + 1):
         text = base if round_no == 0 else base + "\n\n" + criteria.load_text("prompts/extract_self_check.md").format(
-            found=_found_text(claims))
+            found=_found_text(claims), empty=empty_sentences(scope, claims))
         out = await llm.create_response(
             client, purpose=f"extract_{round_no}", model=config.extract_model(), instructions=text,
             input=[{"role": "user", "content": user}], timeout_s=CALL_TIMEOUT_SECONDS, deadline=deadline,
@@ -249,6 +282,7 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
             break
         if round_no == rounds_max and new:
             stopped = True
+    claims = drop_covered_thresholds(claims, by_id, rejected)
     for i, c in enumerate(claims, 1):
         c.id = f"C{i}"
     failure = "no_claims" if not claims and any(re.search(r"\d", p.text) for p in scope) else None

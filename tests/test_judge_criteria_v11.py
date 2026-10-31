@@ -860,9 +860,8 @@ def test_v111_occurrences(quote, text, n):
 @pytest.mark.parametrize("item, sentence, reason", [
     ({"kind": "number", "number_text": "0.970"}, "권고: 매주 Recall 이 목표 0.970 아래로 내려가는지 점검한다.", "recommendation"),
     ({"kind": "name"}, "권고: 표본을 늘려 다시 확인한다.", "recommendation"),
-    ({"kind": "number", "number_text": "0.1"}, "두 값의 차이는 0.1 미만이다.", "threshold"),
-    ({"kind": "number", "number_text": "95%"}, "Recall 의 95% 신뢰구간은 0.91~0.99 이다.", "threshold"),
-    ({"kind": "number", "number_text": "10%p"}, "비율 차가 10%p 미만이다.", "threshold"),
+    # 기준선 숫자는 1.13 부터 _not_a_claim 이 아니라 drop_covered_thresholds 가 본다(비교 주장이 있을 때만 버림)
+    ({"kind": "number", "number_text": "0.1"}, "두 값의 차이는 0.1 미만이다.", None),
     ({"kind": "number", "number_text": "0.352"}, "차이는 0.352 이상이다.", None),  # 기준값이 아닌 숫자는 주장
     ({"kind": "number", "number_text": "0.1"}, "F1 은 0.1 로 낮다.", None),  # 경계 말이 없으면 주장
     ({"kind": "number", "number_text": "0.970"}, "Recall 은 목표 0.970 을 충족했다.", None),  # 권고 문장이 아님
@@ -872,12 +871,52 @@ def test_v112_recommendation_and_threshold_numbers_are_not_claims(item, sentence
     assert ex._not_a_claim(item, quote, sentence) == reason
 
 
-def test_v112_filters_are_wired_into_accept():
+def test_v112_recommendation_filter_is_wired_into_accept():
     piece = Piece("slot:9:6.2", "9", "6.2", "ai", "권고: 목표 0.970 아래로 내려가는지 점검한다. 차이는 0.1 미만이다. F1 은 0.61 이다.")
     raw = [{"kind": "number", "quote": q, "piece_id": piece.id, "number_text": q} for q in ("0.970", "0.1", "0.61")]
     rejected: list[dict] = []
     got = ex._accept(raw, {piece.id: piece}, {}, [], 0, rejected)
-    assert [c.quote for c in got] == ["0.61"] and [r["reason"] for r in rejected] == ["recommendation", "threshold"]
+    assert [c.quote for c in got] == ["0.1", "0.61"] and [r["reason"] for r in rejected] == ["recommendation"]
+
+
+# ── 1.13(V2 1.12 R-0052) ─────────────────────────────────────────────
+
+T_PIECE = Piece("slot:7.2", "7.2", "5.3", "ai", "불균형 비율은 3.0 이다. 두 값 모두 0.1 미만이다. 비율 차가 10%p 미만이다.")
+
+
+def _c(cid, kind, quote, number_text=""):
+    return Claim(cid, kind, quote, T_PIECE.id, "7.2", "5.3", "ai", "", "", number_text, "", 0)
+
+
+def test_v113_threshold_number_dropped_only_when_a_comparison_covers_it():
+    claims = [_c("C1", "number", "0.1", "0.1"), _c("C2", "comparison", "두 값 모두 0.1 미만이다"),
+              _c("C3", "number", "10%p", "10%p"), _c("C4", "number", "3.0", "3.0")]
+    rejected: list[dict] = []
+    kept = ex.drop_covered_thresholds(claims, {T_PIECE.id: T_PIECE}, rejected)
+    # 0.1 은 비교가 담고 있어 버림, 10%p 는 비교가 없어 남김(사람 정답지의 비교 주장과 짝), 3.0 은 기준선이 아님
+    assert [c.id for c in kept] == ["C2", "C3", "C4"] and [r["reason"] for r in rejected] == ["threshold"]
+
+
+@pytest.mark.parametrize("quote, want", [("0.1", True), ("10%p", True), ("3.0", False)])
+def test_v113_is_threshold_number(quote, want):
+    assert ex.is_threshold_number(_c("C1", "number", quote, quote), T_PIECE.text) is want
+
+
+def test_v113_empty_sentences_lists_sentences_without_claims():
+    text = ex.empty_sentences([T_PIECE], [_c("C1", "number", "3.0", "3.0")])
+    assert "불균형 비율은 3.0" not in text and "두 값 모두 0.1 미만이다." in text and "비율 차가 10%p" in text
+    assert ex.empty_sentences([T_PIECE], [_c("C1", "number", "3.0"), _c("C2", "number", "0.1"), _c("C3", "number", "10%p")]) == "(없음)"
+
+
+async def test_v113_self_check_round_shows_empty_sentences():
+    fake = F.FakeOpenAI([F.json_response({"claims": [{"kind": "number", "quote": "3.0", "piece_id": T_PIECE.id,
+                                                       "number_text": "3.0", "field": "", "field_b": "", "polarity": ""}]}),
+                         F.json_response({"claims": []})])
+    res = await ex.extract_claims(fake, [T_PIECE], {})
+    assert res.failure is None and len(fake.calls) == 2
+    second = fake.calls[1]["instructions"]
+    assert "아직 주장을 하나도 뽑지 않은 문장" in second and "두 값 모두 0.1 미만이다." in second
+    assert "불균형 비율은 3.0 이다." not in second.split("아직 주장을 하나도 뽑지 않은 문장")[1]
 
 
 def test_v112_core_metric_fits_declared_risk_via_risk_side_name():
