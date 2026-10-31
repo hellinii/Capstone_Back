@@ -25,12 +25,32 @@ def _judged(m) -> bool:
     return m.threshold is not None and m.value is not None and m.status in ("pass", "fail")
 
 
+MARGIN_WORDS = tuple(_RULES.get("margin_words", []))
+
+
+def _margin_verdict(polarity: str, metric_id: str, metrics) -> str | None:
+    """판정 여유 표현(1.7) — near_target 표시로. 표시가 없으면 None(보통 판정으로)."""
+    if metric_id:
+        targets = [m for m in metrics if m.metric_id == metric_id]
+    else:
+        targets = [m for m in metrics if m.is_core and _judged(m)]
+    flags = [getattr(m, "near_target", None) for m in targets]
+    if not flags or any(f is None for f in flags):
+        return None
+    near = any(flags)
+    return "ok" if (near if polarity == "negative" else not near) else "violation"
+
+
 def degree_verdict(polarity: str, metric_id: str, quote: str, metrics, refs: list[dict]) -> str:
     """polarity·대상 지표(metric_id, 빈 글이면 성능 전체 = 판정 대상 핵심 지표) → 허용 판정."""
     if polarity == "neutral":
         return "ok"
     if polarity not in ("positive", "negative"):
         return "target_unclear"
+    if any(w in quote for w in MARGIN_WORDS):
+        margin = _margin_verdict(polarity, metric_id, metrics)
+        if margin is not None:
+            return margin
     strong = polarity == "positive" and is_strong(quote)
     if metric_id:
         m = next((m for m in metrics if m.metric_id == metric_id), None)

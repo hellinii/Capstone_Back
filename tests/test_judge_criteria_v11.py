@@ -139,7 +139,8 @@ def test_number_claim_with_two_sides_is_judged_as_comparison(relation, verdict):
 
 @pytest.mark.parametrize("sentence, reason", [
     ("다음 평가 전에 라벨을 다시 맞춰야 한다.", "normative"),
-    ("이 값은 같은 지점 자료에 한정된 결과로 읽어야 한다.", None),  # 해석을 감싼 '읽어야'는 규범이 아니다(1.5)
+    ("이 값은 같은 지점 자료에 한정된 결과로 읽어야 한다.", "normative"),  # 읽는 법 안내는 규범(1.7)
+    ("이 0.62 는 클래스 3 을 배우지 못했다는 뜻으로 읽어야 한다.", None),  # 해석을 감싼 꼴은 규범이 아니다(1.5 검토 P2)
     ("이 표본이 운영 자료를 대표하는지는 단정할 수 없다.", "scope"),
     ("새 자료에서도 같은지 알 수 없다.", "scope"),
     ("오류가 많은 것은 라벨 품질 때문이다.", None),  # 진짜 단정형 추론은 걸러지지 않는다
@@ -677,3 +678,33 @@ async def test_v16_misaimed_twice_stays_blocked_and_real_wrong_number_is_not_rec
 def test_v16_prompts_say_check_the_listed_number():
     assert "대조할 숫자" in criteria.load_text("prompts/faithfulness.md")
     assert "대조할 숫자" in criteria.load_text("prompts/faithfulness_recheck.md")
+
+
+# ── 1.7(V2 1.6 R-0039 — '판정의 여유가 작다') ─────────────────────────
+
+
+def _m(mid, status, near):
+    return M(metric_id=mid, display_name=mid, value=0.98, threshold=0.97, status=status, is_core=True, near_target=near)
+
+
+@pytest.mark.parametrize("polarity, quote, near, want", [
+    ("negative", "Recall 은 판정의 여유가 작다", True, "ok"),
+    ("negative", "Recall 은 판정의 여유가 작다", False, "violation"),  # 여유가 넉넉한데 작다고 함
+    ("positive", "Recall 은 판정 여유가 충분하다", False, "ok"),
+    ("positive", "Recall 은 판정 여유가 충분하다", True, "violation"),
+    ("negative", "Recall 은 목표에 근접해 겨우 넘었다", True, "ok"),
+    ("negative", "Recall 성능이 미흡하다", True, "violation"),  # 여유 낱말 없음 — 보통 규칙(목표 충족인데 부정)
+])
+def test_v17_margin_degree_is_judged_by_near_target(polarity, quote, near, want):
+    from app.judge.criteria.rules_degree import degree_verdict
+
+    assert degree_verdict(polarity, "M3", quote, [_m("M3", "pass", near)], []) == want
+
+
+def test_v17_margin_without_flag_falls_back_to_usual_rule():
+    from app.judge.criteria.rules_degree import degree_verdict
+
+    m = M(metric_id="M3", display_name="Recall", value=0.98, threshold=0.97, status="pass", is_core=True)
+    assert degree_verdict("negative", "M3", "판정의 여유가 작다", [m], []) == "violation"
+    failed = M(metric_id="M3", display_name="Recall", value=0.9, threshold=0.97, status="fail", is_core=True)
+    assert degree_verdict("negative", "M3", "판정의 여유가 작다", [failed], []) == "ok"  # 미달 지표에 부정은 보통 규칙대로 허용
