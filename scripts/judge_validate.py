@@ -752,7 +752,12 @@ def read_human_reading(folder: Path) -> dict | None:
 
 def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[str, Callable] | None = None,
                answers: Path | None = None, human: Path | None = None, echo: Callable[[str], None] = print,
-               plan: dict[str, R.BatchDefault] | None = None) -> dict:
+               plan: dict[str, R.BatchDefault] | None = None, version: str | None = None) -> dict:
+    """version: 이 고정 버전의 회차로 계산한다(VERSIONS.json 의 지문, 기본 = 지금 기준). 기준을 올린 뒤 지난 버전 회차를 바뀐 셈으로
+    다시 계산할 때 쓴다(2026-10-31 — 1.11 로 올린 뒤 1.10 재현성 6회를 짝짓기 규칙③ 변경으로 다시 셈)."""
+    if version is not None and version not in criteria.recorded_versions():
+        raise RunnerError(f"고정 기록에 없는 버전: {version}")
+    fingerprint = criteria.recorded_versions()[version] if version else criteria.fingerprint()
     vroot = validation_root()
     if mode == "dev":
         if ledger is None:
@@ -766,7 +771,7 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
         ledger, out, root = Path(ledger or vroot / "장부.csv"), Path(out or vroot / RESULTS_OUT), vroot
         answers = Path(answers) if answers else vroot / ANSWERS
         human = Path(human) if human else vroot / HUMAN
-    runs = collect_runs(jl.Ledger(ledger).rows(), fingerprint=criteria.fingerprint(),
+    runs = collect_runs(jl.Ledger(ledger).rows(), fingerprint=fingerprint,
                         mode="live" if mode == "verify" else "dev", root=root)
     tags = sorted({r["key"].report for r in runs if r["key"].batch == "reproducibility"})
     claims = read_human_claims(answers, tags) if answers and Path(answers).is_dir() else {}
@@ -775,7 +780,8 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
     reading = read_human_reading(human) if human and Path(human).is_dir() else None
     result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores, human_reading=reading,
                     human_missed=judged_missed, plan=plan)
-    result.update({"mode": mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(), "tag": criteria_tag()})
+    result.update({"mode": mode, "criteria_version": version or criteria.version(), "fingerprint": fingerprint,
+                   "tag": f"{TAG_PREFIX}{version}" if version else criteria_tag()})
     out.mkdir(parents=True, exist_ok=True)
     for path in write_missed(out, result.get("missed_claims") or {}):
         echo(f"놓친 주장 표 {path}")
@@ -1094,6 +1100,7 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--human", help="사람 채점 폴더(기본 verify 는 검증/04_사람평가)")
     rep.add_argument("--reports-n", type=int, help="재현성 계획 성적서 수(기본 3 — V1 결정 1)")
     rep.add_argument("--repeats", type=int, help="재현성 계획 회차(기본 2 — V1 결정 1)")
+    rep.add_argument("--version", help="이 고정 버전의 회차로 계산(기본 지금 기준) — 예: 1.10")
     for name, helptext in (("check-defects", "결함본·sham 꼴 검사(verify 는 V1 뒤 --allow-sealed)"),
                            ("make-diff", "결함본·sham 의 diff.txt 를 도구로 쓴다")):
         c = sub.add_parser(name, help=helptext)
@@ -1160,7 +1167,8 @@ def main(argv: list[str] | None = None) -> int:
             d = R.DEFAULTS["reproducibility"]
             cmd_report(args.mode, ledger=Path(args.ledger) if args.ledger else None, out=Path(args.out) if args.out else None,
                        answers=Path(args.answers) if args.answers else None, human=Path(args.human) if args.human else None,
-                       plan={"reproducibility": R.BatchDefault(args.reports_n or d.items, args.repeats or d.repeats)})
+                       plan={"reproducibility": R.BatchDefault(args.reports_n or d.items, args.repeats or d.repeats)},
+                       version=args.version)
             return 0
         if args.mode == "verify" and (args.inputs or args.defects):
             raise RunnerError("verify 는 입력·결함을 검증 폴더에서만 읽는다(--inputs·--defects 는 dev 전용)")

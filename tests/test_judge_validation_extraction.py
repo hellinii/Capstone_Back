@@ -94,19 +94,23 @@ def test_condition_number_value_and_kind():
     assert len(X.match_claims(g, preds(pred("number", "Recall 0.984", number_text="0.984")))["pairs"]) == 1
     wrong = preds(pred("number", "Recall 0.984", number_text="0.948"))  # 범위는 겹치지만 값이 다름
     assert X.match_claims(g, wrong)["pairs"] == []
-    as_comparison = preds(pred("comparison", "Recall 0.984"))  # 숫자 주장은 숫자 주장끼리만
-    assert X.match_claims(g, as_comparison)["pairs"] == []
-    assert X.match_claims(gold((1, "comparison", "Recall 0.984")), preds(pred("number", "0.984")))["pairs"] == []
+    as_comparison = preds(pred("comparison", "Recall 0.984"))  # 종류만 다르면 짝(민서 결정 2026-10-31 — 이름표 차이)
+    assert len(X.match_claims(g, as_comparison)["pairs"]) == 1
+    assert len(X.match_claims(gold((1, "comparison", "Recall 0.984")), preds(pred("number", "0.984")))["pairs"]) == 1
 
 
-def test_condition_comparison_kind_must_match():
-    """V1 결정 10③(2026-10-29): 숫자·비교 주장은 종류가 같아야 짝. 이름·정도·추론끼리는 종류가 달라도 짝(덧점만 다름)."""
+def test_condition_kind_no_longer_blocks_a_pair():
+    """V1 결정 10③(2026-10-29)은 숫자·비교 주장은 종류가 같아야 짝이었다. 민서 결정(2026-10-31, 결과를 본 뒤 — 까닭은 검증
+    README 기록): 같은 자리를 짚었는데 종류만 다르면 이름표 차이라 짝으로 센다. 같은 종류면 덧점으로 먼저 짝지어진다."""
     g = gold((1, "comparison", "Recall이 0.015 높다"))
     assert len(X.match_claims(g, preds(pred("comparison", "Recall이 0.015 높다")))["pairs"]) == 1
-    assert X.match_claims(g, preds(pred("degree", "Recall이 0.015 높다")))["pairs"] == []
-    assert X.match_claims(gold((2, "degree", "몰려 있다")), preds(pred("comparison", "몰려 있다")))["pairs"] == []
-    assert len(X.match_claims(gold((2, "degree", "몰려 있다")), preds(pred("name", "몰려 있다")))["pairs"]) == 1
-    assert X.STRICT_KINDS == ("number", "comparison")
+    assert len(X.match_claims(g, preds(pred("degree", "Recall이 0.015 높다")))["pairs"]) == 1
+    assert len(X.match_claims(gold((2, "degree", "몰려 있다")), preds(pred("comparison", "몰려 있다")))["pairs"]) == 1
+    assert X.STRICT_KINDS == ()
+    # 같은 종류 후보가 있으면 그쪽과 짝(덧점) — 다른 종류 후보는 남는다
+    both = preds(pred("degree", "Recall이 0.015 높다"), pred("comparison", "Recall이 0.015 높다"))
+    m = X.match_claims(g, both)
+    assert m["pairs"][0][1]["kind"] == "comparison" and [p["kind"] for p in m["unmatched_pred"]] == ["degree"]
 
 
 def test_gold_has_no_target_column_so_target_condition_never_runs():

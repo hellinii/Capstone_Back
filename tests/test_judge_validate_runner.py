@@ -1031,3 +1031,9 @@ def test_extraction_verdict_uses_pooled_values_after_additions():
     assert jv.extraction_passed(ext((1.0, 1.0), (0.949, 1.0))) is False
     assert jv.extraction_passed(ext((1.0, 1.0), (1.0, 0.94))) is False
     assert jv.extraction_passed(ext((1.0, 1.0), (None, 1.0))) is None
+
+
+def test_report_can_recompute_an_earlier_frozen_version(tmp_path):
+    # 2026-10-31: 기준을 올린 뒤 지난 버전 회차를 바뀐 셈으로 다시 계산 — 없는 버전은 거부
+    with pytest.raises(jv.RunnerError, match="고정 기록에 없는 버전"):
+        jv.cmd_report("verify", ledger=None, out=tmp_path, version="9.99", echo=lambda *_: None)

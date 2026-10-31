@@ -32,7 +32,10 @@ from app.judge.validation.annotation import CLAIM_COLUMNS, SENTENCE_COLUMNS
 from app.judge.validation.stats import touches
 
 ROUNDS = (0, 1, 2)
-STRICT_KINDS = ("number", "comparison")  # ③ 이 종류는 같은 종류끼리만 짝(V1 결정 10③)
+# ③ 종류가 같아야 짝인 종류. V1 결정 10③(2026-10-29)은 ("number", "comparison") 이었다. 민서 결정(2026-10-31, 결과를 본 뒤):
+# 같은 문장의 같은 부분을 짚었는데 종류만 다르면 놓친 것이 아니라 이름표를 다르게 단 것이다 → 빈 목록. 둘 다 숫자 주장이면 값은
+# 같아야 한다(아래 compatible). 바꾸기 전 값은 검증 README 기록에 남긴다.
+STRICT_KINDS: tuple[str, ...] = ()
 MISSED_COLUMNS = ("번호", "문장번호", "칸", "종류", "인용 구절", "진짜 주장인가(예/아니오)", "메모")
 ADDED_MEMO = "시스템 추출에서 보탬(Q12②)"
 _SPACE = re.compile(r"\s+")
@@ -161,11 +164,10 @@ def compatible(g: dict, p: dict, *, same_kind: bool = False) -> bool:
     p = {**p, "sentence": g["sentence"], "span": cands[g["sentence"]]}
     if _overlap(g, p) == 0.0:  # ② 글자 범위를 알면 겹쳐야
         return False
-    if g.get("kind") in STRICT_KINDS or p.get("kind") in STRICT_KINDS:  # ③ 숫자·비교는 종류 같음
-        if g.get("kind") != p.get("kind"):
-            return False
-        if g.get("kind") == "number" and not (_values(g) & _values(p)):  # 숫자는 값도 같음
-            return False
+    if (g.get("kind") in STRICT_KINDS or p.get("kind") in STRICT_KINDS) and g.get("kind") != p.get("kind"):  # ③ 종류
+        return False
+    if g.get("kind") == "number" and p.get("kind") == "number" and not (_values(g) & _values(p)):  # 숫자끼리는 값도 같음
+        return False
     if g.get("target") and p.get("target") and g["target"] != p["target"]:  # ④ 대상 같음
         return False
     if same_kind and g.get("kind") != p.get("kind"):
