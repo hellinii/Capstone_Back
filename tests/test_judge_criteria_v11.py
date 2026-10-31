@@ -928,3 +928,21 @@ def test_v112_core_metric_fits_declared_risk_via_risk_side_name():
     ok = fa.judge_answer(claim("C1", "inference", q), ans(name_field="f1_threshold_gain.risk_side.display_name", named="Precision"),
                          src, [], [], piece)
     assert ok.verdict == "match"
+
+
+# ── 1.14(V2 1.13 R-0053 — '다른 지표는 판정 여유가 충분하여') ──────────
+
+
+@pytest.mark.parametrize("flags, polarity, want", [
+    ((True, False), "positive", "target_unclear"),  # 섞임 — 무엇을 가리키는지 모름
+    ((True, False), "negative", "target_unclear"),
+    ((False, False), "positive", "ok"), ((False, False), "negative", "violation"),
+    ((True, True), "negative", "ok"), ((True, True), "positive", "violation"),
+])
+def test_v114_margin_without_metric_uses_all_judged_metrics(flags, polarity, want):
+    from app.judge.criteria.rules_degree import degree_verdict
+
+    ms = [M(metric_id=f"M{i}", display_name=f"M{i}", value=0.98, threshold=0.97, status="pass", is_core=i == 0, near_target=f)
+          for i, f in enumerate(flags)]
+    quote = "판정 여유가 충분하다" if polarity == "positive" else "판정 여유가 작다"
+    assert degree_verdict(polarity, "", quote, ms, []) == want

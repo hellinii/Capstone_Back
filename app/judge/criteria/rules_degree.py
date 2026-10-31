@@ -33,10 +33,14 @@ def _margin_verdict(polarity: str, metric_id: str, metrics) -> str | None:
     if metric_id:
         targets = [m for m in metrics if m.metric_id == metric_id]
     else:
-        targets = [m for m in metrics if m.is_core and _judged(m)]
+        # 지표를 콕 집지 않은 여유 표현('다른 지표는 판정 여유가 충분하여')은 판정 대상 지표 전체로 본다 — 여유 작음·충분이 섞여
+        # 있으면 무엇을 가리키는지 몰라 대상 불명(1.14, V2 1.13 R-0053: 핵심 지표 Recall 하나로 보아 '다른 지표는 충분'을 위반으로 봤다)
+        targets = [m for m in metrics if _judged(m)]
     flags = [getattr(m, "near_target", None) for m in targets]
     if not flags or any(f is None for f in flags):
         return None
+    if not metric_id and len(set(flags)) > 1:
+        return "target_unclear"
     near = any(flags)
     return "ok" if (near if polarity == "negative" else not near) else "violation"
 
