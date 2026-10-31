@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from app.judge import config, criteria, llm
 from app.judge.criteria.rules_calc import CalcError, calculate
 from app.judge.criteria.rules_degree import degree_verdict
-from app.judge.criteria.rules_numbers import bound_after, bound_holds, first_quantity, fraction_value, matches, parse_printed
+from app.judge.criteria.rules_numbers import all_quantities, bound_after, bound_holds, first_quantity, fraction_value, matches, parse_printed
 from app.judge.extract import Claim
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import Sources
@@ -271,6 +271,11 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
             ok = bool(bound_holds(text, rel, value))
             v.detail["bound"] = rel
         v.verdict = "match" if ok else "violation"
+        if not ok and text in claim.quote:
+            # 과녁 잘못 잡기(1.6): 찾아온 값이 같은 문장의 다른 숫자와 맞으면 그 숫자를 대조한 것이다 — 재확인에서 다시 묻는다
+            others = [q for q in all_quantities(claim.quote) if q != text]
+            if any(matches(q, value) for q in others):
+                v.detail["misaimed"] = True
     elif claim.kind == "comparison":
         _compare(v, ans, sources)
     elif claim.kind == "name":
@@ -508,14 +513,19 @@ async def _ask_agent(client, content: str, ask: list[Claim], instructions: str, 
 
 
 def _listing(claims: list[Claim]) -> str:
+    # 숫자 주장은 대조할 숫자를 함께 준다 — 숫자가 여럿인 문장에서 다른 숫자의 칸을 찾아왔다(1.6, V2 1.5 R-0038)
     return "\n".join(f"- {c.id} [{c.kind}] (조각 {c.piece_id}) {c.quote}"
+                     + (f" — 대조할 숫자 {c.number_text}" if c.kind == "number" and c.number_text else "")
                      + (f" — 칸 후보 {c.field}" if c.field else "") + (f" / {c.field_b}" if c.field_b else "")
                      for c in claims)
 
 
 def recheck_targets(verdicts: list[ClaimVerdict]) -> list[str]:
-    """재확인할 주장 — 발급을 막는 단정형 추론 가운데 인과 문장이 아닌 것(1.5). 인과 문장은 데이터 대조로 옮기지 않는다."""
-    return [v.claim_id for v in verdicts if v.verdict == "inference_violation" and not v.detail.get("causal")]
+    """재확인할 주장 — 발급을 막는 단정형 추론 가운데 인과 문장이 아닌 것(1.5, 인과 문장은 데이터 대조로 옮기지 않는다)과,
+    같은 문장의 다른 숫자를 대조한 숫자 위반(misaimed, 1.6)."""
+    return [v.claim_id for v in verdicts
+            if (v.verdict == "inference_violation" and not v.detail.get("causal"))
+            or (v.verdict == "violation" and v.kind == "number" and v.detail.get("misaimed"))]
 
 
 async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], sources: Sources, metrics, refs, *,

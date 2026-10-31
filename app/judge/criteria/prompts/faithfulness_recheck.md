@@ -13,5 +13,8 @@
 3. 원인·해석·앞날처럼 데이터 칸으로 바로 확인되지 않는 말이면 resolution 을 resolved 로 하고 대조 칸은 비워 둔다.
    억지로 칸 하나에 맞추지 않는다 — 확인되지 않는 단정은 막히는 것이 맞다.
 
+숫자 주장(number)은 목록의 "대조할 숫자"가 나오는 식을 expr 에 쓴다 — 같은 문장의 다른 숫자(앞뒤 값, 구간 끝 등)의 칸이 아니다.
+예: "신뢰수준 95% 구간 0.91~0.99"에서 대조할 숫자가 95% 면 신뢰수준 칸이다.
+
 inference_basis 는 근거가 데이터(data)·고객 입력만(client_input)·그 밖(other) 중 무엇인지. 쓰지 않는 칸은 빈 글로 둔다.
 도구: lookup_value(field) · find_fields(query) · read_context(piece_id) · calc(expr).

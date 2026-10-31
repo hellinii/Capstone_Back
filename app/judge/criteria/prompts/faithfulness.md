@@ -10,7 +10,7 @@
 주장마다 답할 것(claim_id 는 받은 그대로):
 - resolution: resolved(대상을 찾음) | no_data(조사한 칸 어디에도 없음 — 검증 불가) | target_unclear(대상 지표를 정할 수 없음) |
   not_claim(추론 주장에만 — 아래 추론 줄).
-- 숫자(number): expr — 그 숫자가 나오는 식. 칸 이름은 중괄호로 감싼다. 예 "{confusion_counts.1.fn}",
+- 숫자(number): expr — 그 숫자가 나오는 식. 목록에 "대조할 숫자"가 있으면 문장의 다른 숫자가 아니라 그 숫자의 식을 쓴다. 칸 이름은 중괄호로 감싼다. 예 "{confusion_counts.1.fn}",
   "{confusion_counts.1.fn} / {facts.error_totals.misclassified}". 백분율이면 비율(0~1) 그대로 둔다(코드가 % 와 맞춘다).
   비율·몫(…의 몇 %, …의 몇 분의 몇)은 분모가 무엇인지 문장에서 읽고, 칸 목록의 설명을 보고 그 분모 칸을 고른다 —
   "전체 오류의 몇 %"의 분모는 전체 오류 건수이지 전체 표본 수가 아니다. 그 비율을 담은 칸(…share 등)이 있으면 그 칸을 쓴다.

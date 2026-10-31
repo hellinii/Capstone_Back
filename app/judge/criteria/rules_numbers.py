@@ -63,6 +63,19 @@ def fraction_value(text: str) -> float | None:
     return int(m.group(2)) / int(m.group(1))
 
 
+def all_quantities(text: str) -> list[str]:
+    """문장의 수량 숫자 글자 전부(분수 말 포함, 이름에 붙은 숫자 제외) — 과녁 잘못 잡기 확인용(1.6)."""
+    found = [m.group(0) for m in _FRACTION.finditer(text)]
+    for m in _NUMBER_IN_TEXT.finditer(text):
+        before = text[: m.start()].rstrip().lower()
+        counted = text[m.end():].lstrip().startswith(COUNT_UNITS)
+        if any(before.endswith(w) for w in NAME_BEFORE_NUMBER) and not counted:
+            continue
+        if parse_printed(m.group(0).strip()):
+            found.append(m.group(0).strip())
+    return found
+
+
 def first_quantity(text: str) -> str | None:
     """문장에서 대조할 첫 수량 글자 — 분수 말이 있으면 그것, 아니면 이름에 붙지 않은 첫 숫자. 없으면 None."""
     m = _FRACTION.search(text)

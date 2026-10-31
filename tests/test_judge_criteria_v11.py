@@ -631,3 +631,49 @@ def test_declared_average_remap_is_anchored_by_priority_words():
 def test_pair_field_is_anchored_by_either_class_name():
     assert fa.field_anchored("confusion.7>8", "실제 7 을 8 로 본 것이 20건이다", SOURCES)
     assert not fa.field_anchored("confusion.7>8", "이 모델은 안정적이다", SOURCES)
+
+
+# ── 1.6(V2 1.5 R-0038 — 숫자가 여럿인 문장에서 다른 숫자를 대조) ─────
+
+M_PIECE = Piece("slot:7.1", "7.1", "5.2", "ai", "가상. F1 Score 는 지금 0.61 에서 그 임계값에서는 0.8 이 된다.")
+TWO = Claim("C1", "number", "F1 Score 는 지금 0.61 에서 그 임계값에서는 0.8 이 된다", M_PIECE.id, "7.1", "5.2", "ai",
+            "metric.M2.value", "", "0.8", "", 0)
+
+
+def test_v16_listing_tells_which_number_to_check():
+    assert "대조할 숫자 0.8" in fa._listing([TWO])
+    assert "대조할 숫자" not in fa._listing([claim("C2", "inference", "가상 문장")])
+
+
+def test_v16_value_of_another_number_in_the_sentence_is_misaimed():
+    v = fa.judge_answer(TWO, ans(expr="{metric.M2.value}"), SOURCES, [], [], M_PIECE)  # 0.61 의 칸
+    assert v.verdict == "violation" and v.detail["misaimed"] is True
+    v = fa.judge_answer(TWO, ans(expr="{metric.M2.threshold}"), SOURCES, [], [], M_PIECE)  # 0.8 — 맞음
+    assert v.verdict == "match"
+    wrong = Claim("C1", "number", "F1 Score 는 0.7 이다", M_PIECE.id, "7.1", "5.2", "ai", "", "", "0.7", "", 0)
+    v = fa.judge_answer(wrong, ans(expr="{metric.M2.value}"), SOURCES, [], [], M_PIECE)  # 진짜 틀린 숫자
+    assert v.verdict == "violation" and not v.detail.get("misaimed")
+
+
+async def test_v16_misaimed_number_is_rechecked_and_code_judges_again():
+    fake = F.FakeOpenAI([F.json_response({"claims": [{"claim_id": "C1", **ans(expr="{metric.M2.value}")}]}),
+                         F.json_response({"claims": [{"claim_id": "C1", **ans(expr="{metric.M2.threshold}")}]})])
+    res = await fa.judge_faithfulness(fake, [M_PIECE], [TWO], SOURCES, [], [])
+    assert res.verdicts[0].verdict == "match" and res.counts["rechecked"] == 1
+    assert "대조할 숫자 0.8" in json.dumps(fake.calls[1]["input"], ensure_ascii=False)
+
+
+async def test_v16_misaimed_twice_stays_blocked_and_real_wrong_number_is_not_rechecked():
+    fake = F.FakeOpenAI([F.json_response({"claims": [{"claim_id": "C1", **ans(expr="{metric.M2.value}")}]}),
+                         F.json_response({"claims": [{"claim_id": "C1", **ans(expr="{metric.M2.value}")}]})])
+    res = await fa.judge_faithfulness(fake, [M_PIECE], [TWO], SOURCES, [], [])
+    assert res.verdicts[0].verdict == "violation"
+    wrong = Claim("C1", "number", "F1 Score 는 0.7 이다", M_PIECE.id, "7.1", "5.2", "ai", "", "", "0.7", "", 0)
+    fake = F.FakeOpenAI([F.json_response({"claims": [{"claim_id": "C1", **ans(expr="{metric.M2.value}")}]})])
+    res = await fa.judge_faithfulness(fake, [M_PIECE], [wrong], SOURCES, [], [])
+    assert len(fake.calls) == 1 and res.verdicts[0].verdict == "violation"
+
+
+def test_v16_prompts_say_check_the_listed_number():
+    assert "대조할 숫자" in criteria.load_text("prompts/faithfulness.md")
+    assert "대조할 숫자" in criteria.load_text("prompts/faithfulness_recheck.md")
