@@ -422,3 +422,23 @@ def test_v13_definition_is_decided_by_code_whatever_the_agent_says(sentence, age
     piece = Piece("slot:7.1", "7.1", "5.2", "ai", sentence + ".")
     v = fa.judge_answer(claim("C1", "inference", sentence), ans(resolution=agent), SOURCES, [], [], piece)
     assert v.verdict == verdict
+
+
+# ── 1.4(V2 1.3 3회차) ────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("quote, value, verdict", [
+    ("가장 약한 클래스는 매크로 F1 보다 0.1 이상 낮다", 0.51, "match"),  # 경계를 지킴
+    ("가장 약한 클래스는 매크로 F1 보다 0.1 이상 낮다", 0.1, "match"),
+    ("가장 약한 클래스는 매크로 F1 보다 0.1 이상 낮다", 0.04, "violation"),  # 경계를 어김
+    ("차이는 0.1 미만이다", 0.04, "match"),
+    ("차이는 0.1 미만이다", 0.2, "violation"),
+    ("차이는 0.1 이다", 0.51, "violation"),  # 경계 말이 없으면 같아야 한다
+    ("비율은 5% 이하이다", 0.03, "match"),
+    ("비율은 5% 이상이다", 0.08, "match"),  # 백분율 경계는 데이터를 백분율로도 본다
+])
+def test_v14_bound_numbers_are_checked_as_bounds(quote, value, verdict):
+    fs = {**FS, "facts": {**FS["facts"], "weakest_class": {"label": "7", "f1": 0.1, "gap_from_macro": value}}}
+    src = Sources(fs, [], {}, CLIENT)
+    v = fa.judge_answer(claim("C1", "number", quote), ans(expr="{facts.weakest_class.gap_from_macro}"), src, [], [], PIECE)
+    assert v.verdict == verdict

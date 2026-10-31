@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from app.judge import config, criteria, llm
 from app.judge.criteria.rules_calc import CalcError, calculate
 from app.judge.criteria.rules_degree import degree_verdict
-from app.judge.criteria.rules_numbers import first_quantity, fraction_value, matches, parse_printed
+from app.judge.criteria.rules_numbers import bound_after, bound_holds, first_quantity, fraction_value, matches, parse_printed
 from app.judge.extract import Claim
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import Sources
@@ -263,7 +263,13 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
         if text is None or value is None:
             return v
         v.detail["data"] = value
-        v.verdict = "match" if matches(text, value) else "violation"
+        ok = matches(text, value)
+        rel = bound_after(claim.quote, text)
+        if not ok and rel:
+            # 경계선 숫자('0.1 이상') — 데이터가 그 경계를 지키면 맞다(1.4)
+            ok = bool(bound_holds(text, rel, value))
+            v.detail["bound"] = rel
+        v.verdict = "match" if ok else "violation"
     elif claim.kind == "comparison":
         _compare(v, ans, sources)
     elif claim.kind == "name":

@@ -10,6 +10,8 @@
   0.333 과 어긋났다).
 - 문장에서 숫자를 찾을 때 이름에 붙은 숫자('클래스 3'·'레이블 14'·'Class 9')는 수량이 아니다(NAME_BEFORE_NUMBER, 1.1 — '클래스 3
   으로 예측된 표본이 … 많이' 의 3 을 예측 건수와 대조했다).
+- 숫자 바로 뒤에 경계 말(이상·이하·미만·초과)이 오면 그 숫자는 경계선이다 — 데이터가 그 경계를 지키면 일치('차이가 0.1 이상'
+  ↔ 0.51). 같은 값이어도 일치(1.4, V2 1.3 3회차 — 경계선 0.1 을 차이 값 0.51 과 같은지로 대조했다).
 기준 묶음에 둔다 — 대조 규칙이 바뀌면 판정이 바뀐다.
 """
 from __future__ import annotations
@@ -26,6 +28,7 @@ FRACTION_TOLERANCE = 0.0005 + 1e-9
 _NUMBER_IN_TEXT = re.compile(r"(?<![A-Za-z0-9.])[+\-−]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])\s*(?:%p|%)?")
 NAME_BEFORE_NUMBER = ("클래스", "레이블", "라벨", "class", "label")
 COUNT_UNITS = ("개", "종", "가지")
+BOUND_WORDS = {"이상": "ge", "이하": "le", "미만": "lt", "초과": "gt"}
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,26 @@ def first_quantity(text: str) -> str | None:
         if parse_printed(m.group(0).strip()):
             return m.group(0).strip()
     return None
+
+
+def bound_after(text: str, number: str) -> str | None:
+    """글에서 그 숫자 바로 뒤(띄어쓰기만 허용)에 경계 말이 오면 관계(ge·le·lt·gt), 아니면 None."""
+    at = text.find(number)
+    if at < 0:
+        return None
+    rest = text[at + len(number):].lstrip()
+    return next((rel for word, rel in BOUND_WORDS.items() if rest.startswith(word)), None)
+
+
+def bound_holds(number: str, rel: str, data: float | int) -> bool | None:
+    """데이터가 찍힌 경계(숫자·관계)를 지키나. 백분율 경계는 데이터를 백분율로도 본다."""
+    p = parse_printed(number)
+    if p is None:
+        return None
+    d = Decimal(str(data))
+    values = [d * 100, d] if p.percent else [d]
+    ok = {"ge": lambda x: x >= p.value, "le": lambda x: x <= p.value, "lt": lambda x: x < p.value, "gt": lambda x: x > p.value}[rel]
+    return any(ok(v) for v in values)
 
 
 def _close(printed: Printed, data: Decimal) -> bool:
