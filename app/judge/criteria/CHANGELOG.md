@@ -91,3 +91,15 @@
   통째로 봐주지 않고 데이터로 확인하게 했다: 프롬프트 ①에 "지표·평균의 정의에서 바로 나오는 풀이"를 넣고, 그 양(클래스 F1 의
   최고 − 최저, 평균 사이 차이)을 판정 기준값 칸(`rule.imbalance_gap_threshold` 0.1 — 생성기와 같은 기준)과 비교하게 했다. 칸
   설명 두 줄(`field_notes.json`). 실제 차이가 기준보다 작으면 위반으로 잡힌다(시험).
+
+## 1.1
+
+- 심판 라운드 세션 7(2026-10-31): **기준 고정** — 1.1-dev 의 마지막 모습(위 절 1~5, 검토 반영, 민서 결정)을 그대로 1.1 로
+  잠근다. VERSION 만 "1.1" 로 바꿨다(`scripts/judge_criteria_manifest.py freeze 1.1`). 지문은 `VERSIONS.json` 의 "1.1" 줄,
+  태그 `judge-criteria-v1.1`.
+  - 잠그는 것(MANIFEST 22개 파일): 1.0 의 20개 + `field_notes.json`(칸 설명) + `inference_rules.json`(추론 보탬 규칙).
+    claims.json 은 1.0 과 같다(사람 정답지 표시 그대로 쓴다).
+  - 기준 묶음 밖이지만 판정에 닿는 코드(faithfulness.py·consistency.py·extract.py·sources.py·aggregate.py)는 고정 커밋
+    (태그가 가리키는 커밋)에 함께 있다.
+  - 다음: V2 를 처음부터 다시 — 재현성 3건 × 2회 → 결함 3 → sham 1(10회). 결함 D01~D03·S01 은 1.0 에서 채점하지 않았으므로
+    그대로 쓴다. 비용은 돌리기 전에 묻는다(라운드 상한 $4.5 에서 남은 것 $0.97 — 10회 약 $1.4 라 상한을 올려야 한다).

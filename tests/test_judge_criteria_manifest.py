@@ -20,6 +20,7 @@ from app.judge import config, criteria
 # 사본이 시험 파일에 있으면 VERSIONS.json 의 기록 줄을 지우거나 바꾸려면 두 파일을 함께 고쳐야 하고, 그 diff 가 검토에 드러난다.
 KNOWN: dict[str, str] = {
     "1.0": "2cbc32785d6deec818f417a193711d7242a6defcab86c17123c4d348d9e18e58",
+    "1.1": "25f70440c5851b80e8950c5e2c1dd573ad35dfb47807aa43cc51737a325c8d6c",
 }
 
 
