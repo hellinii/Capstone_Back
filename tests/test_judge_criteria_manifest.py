@@ -21,6 +21,7 @@ from app.judge import config, criteria
 KNOWN: dict[str, str] = {
     "1.0": "2cbc32785d6deec818f417a193711d7242a6defcab86c17123c4d348d9e18e58",
     "1.1": "25f70440c5851b80e8950c5e2c1dd573ad35dfb47807aa43cc51737a325c8d6c",
+    "1.2": "613a6f39883ee662be0b8af0ee3e4fa0a63d56fea0996c92ea35301f99349c18",
 }
 
 
