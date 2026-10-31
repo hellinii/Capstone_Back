@@ -966,3 +966,17 @@ def test_v115_empty_sentence_list_is_not_cut_short():
 def test_v115_extraction_effort_stays_low_for_time():
     # medium 을 검토했으나 추출이 이미 약 85초(채점 전체 약 150초) — 두 배가 되면 발급 시간 한도에 걸린다(1.15 에서 되돌림)
     assert criteria.load_json("model.json")["extract_effort"] == "low"
+
+
+# ── 1.16(V2 1.15 R-0056 — '수행 안 함' ↔ '수행하지 않았다') ─────────────
+
+
+@pytest.mark.parametrize("actual, named, want", [
+    ("수행 안 함 (의뢰자 제공: 그대로 학습했다.)", "편향 감소 노력을 수행하지 않았음", True),
+    ("수행 안 함", "편향 감소 노력은 수행하지 못했다", True),
+    ("수행 안 함", "편향 감소 노력을 수행했다", False),  # 부정 없음 — 반대 말
+    ("측정 안 함", "일치도를 측정하지 않았다", True),
+    ("측정 안 함", "일치도를 측정했다", False),
+])
+def test_v116_negated_client_option(actual, named, want):
+    assert fa.client_text_matches(actual, named) is want

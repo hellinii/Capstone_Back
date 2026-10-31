@@ -260,6 +260,12 @@ def client_text_matches(actual: str, named: str) -> bool | None:
             return None if said(choice) else False
         if said(choice):
             return True
+    neg = criteria.load_json("names.json").get("client_negated_option")
+    if neg and choice.endswith(neg["suffix"]):
+        # '○○ 안 함' 선택지 — 같은 동사와 부정 표현이 함께 있으면 맞고, 동사만 있고 부정이 없으면 아니다(1.16)
+        verb = _norm_name(choice[: -len(neg["suffix"])])
+        if verb and verb in n:
+            return any(_norm_name(w) in n for w in neg["negations"])
     note = re.search(r"\(의뢰자 제공:(.*)\)\s*$", full)
     # 선택 값만·참고 글 붙은 전체·참고 글만 — 문장이 참고 글을 말할 수도 있다(J4 AI 파일럿)
     for cand in {_norm_name(_CLIENT_NOTE.sub("", full)), _norm_name(full), _norm_name(note.group(1)) if note else ""}:
