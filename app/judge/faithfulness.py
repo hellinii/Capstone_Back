@@ -25,7 +25,8 @@ from dataclasses import asdict, dataclass, field
 from app.judge import config, criteria, llm
 from app.judge.criteria.rules_calc import CalcError, calculate
 from app.judge.criteria.rules_degree import degree_verdict
-from app.judge.criteria.rules_numbers import all_quantities, bound_after, bound_holds, first_quantity, fraction_value, matches, parse_printed
+from app.judge.criteria.rules_numbers import (COUNT_UNITS, NAME_BEFORE_NUMBER, all_quantities, bound_after, bound_holds,
+                                              first_quantity, fraction_value, matches, parse_printed)
 from app.judge.extract import Claim
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import Sources
@@ -121,11 +122,47 @@ def eval_expr(expr: str, sources: Sources) -> float | None:
         return None
 
 
-def printed_number(claim: Claim) -> str | None:
-    """대조할 찍힌 숫자 — 추출이 적은 숫자 글(분수 말 포함), 없으면 문장의 첫 수량(이름에 붙은 숫자는 건너뜀, criteria/rules_numbers)."""
+def name_number_in_sentence(claim: Claim, text: str, piece: Piece | None) -> bool:
+    """찍힌 숫자가 문장 안에서 이름에 붙은 숫자인가('클래스 3으로 예측된' 의 3) — 인용 구절이 숫자만('3')이어도 문장을 보고
+    판단한다(1.9, V2 1.8 R-0043 — 추출이 '3' 만 떼어 숫자 주장으로 뽑아 예측 건수 229 와 대조했다)."""
+    if piece is None or not text:
+        return False
+    sentence = sentence_of(claim.quote, piece)
+    at = sentence.find(claim.quote)
+    if at < 0:
+        return False
+    inner = claim.quote.find(text)
+    if inner < 0:
+        return False
+    pos = at + inner
+    before = sentence[:pos].rstrip().lower()
+    after = sentence[pos + len(text):].lstrip()
+    return any(before.endswith(w) for w in NAME_BEFORE_NUMBER) and not after.startswith(COUNT_UNITS)
+
+
+def printed_number(claim: Claim, piece: Piece | None = None) -> str | None:
+    """대조할 찍힌 숫자 — 추출이 적은 숫자 글(분수 말 포함), 없으면 문장의 첫 수량(이름에 붙은 숫자는 건너뜀, criteria/rules_numbers).
+    문장에서 이름에 붙은 숫자면 수량이 아니다(None)."""
     if claim.number_text and (parse_printed(claim.number_text) or fraction_value(claim.number_text) is not None):
-        return claim.number_text
-    return first_quantity(claim.quote)
+        text = claim.number_text
+    else:
+        text = first_quantity(claim.quote)
+    return None if name_number_in_sentence(claim, text or "", piece) else text
+
+
+def _label_in_fields(text: str, ans: dict) -> bool:
+    fields = [f for e in (ans.get("expr", ""), ans.get("expr_b", "")) for f in _FIELD.findall(e or "")]
+    return any(text.strip() in re.split(r"[.>]", f) for f in fields)
+
+
+def braced(expr: str, sources: Sources) -> str:
+    """괄호 없이 적은 칸 이름을 {칸} 으로(1.9, R-0043 — 재확인 답이 'benchmark.Accuracy.model_value' 처럼 괄호 없이 와서 칸을 못
+    읽고 근거 없음으로 거부했다). 이미 괄호가 있으면 그대로. 사칙연산 기호·괄호로 나눈 조각 가운데 칸 이름인 것만 감싼다."""
+    if not expr or "{" in expr:
+        return expr
+    parts = re.split(r"(\s[+\-*/]\s|[()*/+])", expr)
+    names = set(sources.numbers) | set(sources.texts)
+    return "".join(f"{{{p.strip()}}}" if p.strip() in names else p for p in parts)
 
 
 def sentence_of(quote: str, piece: Piece | None) -> str:
@@ -237,6 +274,8 @@ def client_text_matches(actual: str, named: str) -> bool | None:
 def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs, piece: Piece | None) -> ClaimVerdict:
     """에이전트 답(없으면 None)과 자료로 주장 하나를 판정한다(코드)."""
     v = ClaimVerdict(claim.id, claim.kind, "unverifiable", claim.slot, claim.piece_id, claim.quote)
+    if ans:
+        ans = {**ans, "expr": braced(ans.get("expr") or "", sources), "expr_b": braced(ans.get("expr_b") or "", sources)}
     if claim.kind == "inference":
         return _judge_inference(v, claim, ans, sources, piece)
     if ans is None:
@@ -253,14 +292,17 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
         # 앞쪽 식 값과 맞아야 한다 — 답의 꼴만 바꿔 틀린 숫자가 통과하지 않게(1.1 검토).
         v.detail["as"] = "comparison"
         _compare(v, ans, sources)
-        text = printed_number(claim)
+        text = printed_number(claim, piece)
+        # 대조식 칸 이름에 그 숫자가 클래스 이름으로 들어 있으면('prediction_bias.3.predicted' 의 3) 수량이 아니다(1.9)
+        if text is not None and _label_in_fields(text, ans):
+            text = None
         if text is not None and v.verdict == "match":
             value = eval_expr(ans.get("expr", ""), sources)
             v.detail["data"] = value
             if value is None or not matches(text, value):
                 v.verdict = "violation" if value is not None else "unverifiable"
     elif claim.kind == "number":
-        text, value = printed_number(claim), eval_expr(ans.get("expr", ""), sources)
+        text, value = printed_number(claim, piece), eval_expr(ans.get("expr", ""), sources)
         if text is None or value is None:
             return v
         v.detail["data"] = value

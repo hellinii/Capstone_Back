@@ -767,3 +767,50 @@ def test_v18_every_enumerated_str_field_in_schema_is_named():
             inner(f.annotation)
     walk(S.FactSheet, "")
     assert missing == [], missing
+
+
+# ── 1.9(V2 1.8 R-0043) ───────────────────────────────────────────────
+
+N_PIECE = Piece("slot:9:6.2", "9", "6.2", "ai", "가상. 이번 시험에서 클래스 7로 예측된 표본이 실제 클래스 7 표본보다 많았다.")
+
+
+@pytest.mark.parametrize("a, verdict", [
+    (ans(expr="{facts.prediction_bias.7.predicted}"), "unverifiable"),  # 이름 속 숫자 '7' 은 수량이 아니다
+    (ans(expr="{facts.prediction_bias.7.predicted}", expr_b="{facts.prediction_bias.7.actual}", relation="gt"), "match"),
+    (ans(expr="{facts.prediction_bias.7.predicted}", expr_b="{facts.prediction_bias.7.actual}", relation="lt"), "violation"),
+])
+def test_v19_number_quote_that_is_only_a_class_name(a, verdict):
+    c = Claim("C1", "number", "7", N_PIECE.id, "9", "6.2", "ai", "", "", "7", "", 0)
+    assert fa.judge_answer(c, a, SOURCES, [], [], N_PIECE).verdict == verdict
+
+
+def test_v19_count_after_name_is_still_a_quantity():
+    piece = Piece("slot:7.1", "7.1", "5.2", "ai", "가상. 평가한 클래스 2개 가운데 하나가 약하다.")
+    c = Claim("C1", "number", "2", piece.id, "7.1", "5.2", "ai", "", "", "2", "", 0)
+    assert fa.printed_number(c, piece) == "2"
+
+
+@pytest.mark.parametrize("expr, want", [
+    ("metric.M2.value", "{metric.M2.value}"),
+    ("metric.M2.value - metric.M2.threshold", "{metric.M2.value} - {metric.M2.threshold}"),
+    ("{metric.M2.value}", "{metric.M2.value}"),
+    ("0.8", "0.8"),
+    ("없는.칸", "없는.칸"),
+])
+def test_v19_bare_field_names_are_braced(expr, want):
+    assert fa.braced(expr, SOURCES) == want
+
+
+def test_v19_recheck_answer_without_braces_is_still_judged():
+    c = claim("C1", "inference", "F1 Score 는 목표 수준에 이르렀다고 보기 어렵다")
+    v = judge(c, ans(expr="metric.M2.value", expr_b="metric.M2.threshold", relation="lt"))
+    assert v.verdict == "match" and v.detail["expr"] == "{metric.M2.value}"
+
+
+def test_v19_number_that_names_a_field_label_is_not_a_quantity_even_without_sentence():
+    piece = Piece("slot:9:6.2", "9", "6.2", "ai", "가상 0.7 과 7건. 클래스 7 예측이 실제보다 많았다.")  # '7' 이 여러 번
+    c = Claim("C1", "number", "7", piece.id, "9", "6.2", "ai", "", "", "7", "", 0)
+    a = ans(expr="{facts.prediction_bias.7.predicted}", expr_b="{facts.prediction_bias.7.actual}", relation="gt")
+    assert fa.judge_answer(c, a, SOURCES, [], [], piece).verdict == "match"
+    wrong = Claim("C1", "number", "150건", piece.id, "9", "6.2", "ai", "", "", "150", "", 0)  # 진짜 수량은 그대로 대조
+    assert fa.judge_answer(wrong, a, SOURCES, [], [], piece).verdict == "violation"
