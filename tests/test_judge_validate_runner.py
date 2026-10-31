@@ -1021,7 +1021,8 @@ def test_keys_are_read_only(tmp_path, vdir):
 
 
 def test_extraction_verdict_uses_pooled_values_after_additions():
-    """V1 결정 11 — 보태기 전엔 미달이어도 보탠 뒤 0.95 이상이면 통과, 기준 바로 아래면 미달, 값이 없으면 계산 불가."""
+    """V1 결정 11 — 보태기 전엔 미달이어도 보탠 뒤 기준 이상이면 통과(재현율 0.95, 정밀도 0.90 — 민서 2026-11-01), 바로 아래면 미달,
+    값이 없으면 계산 불가."""
     def ext(before, after):
         return {"pooled": {"recall": before[0], "precision": before[1]},
                 "pooled_with_additions": {"recall": after[0], "precision": after[1]}}
@@ -1029,7 +1030,9 @@ def test_extraction_verdict_uses_pooled_values_after_additions():
     assert jv.extraction_passed(ext((1.0, 0.5), (1.0, 0.95))) is True
     assert jv.extraction_passed(ext((0.5, 1.0), (0.95, 1.0))) is True  # 기준값 자체는 통과(이상)
     assert jv.extraction_passed(ext((1.0, 1.0), (0.949, 1.0))) is False
-    assert jv.extraction_passed(ext((1.0, 1.0), (1.0, 0.94))) is False
+    assert jv.extraction_passed(ext((1.0, 0.5), (0.95, 0.90))) is True  # 정밀도 기준값 자체는 통과
+    assert jv.extraction_passed(ext((1.0, 1.0), (1.0, 0.899))) is False
+    assert jv.extraction_passed(ext((1.0, 1.0), (0.94, 0.99))) is False  # 재현율은 여전히 0.95
     assert jv.extraction_passed(ext((1.0, 1.0), (None, 1.0))) is None
 
 

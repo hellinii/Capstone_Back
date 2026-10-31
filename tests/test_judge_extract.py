@@ -193,19 +193,17 @@ async def test_missing_sentences_are_asked_once_and_only_those():
 
 
 async def test_fill_is_asked_at_most_once():
-    nothing = [{"sid": "s1", "n_claims": 2, "none_reason": ""}]
-    fake, res = await run(first(item("0.912"), sentences=nothing), reply(), reply())
+    fake, res = await run(first(item("0.912"), sentences=[]), reply(), reply())
     assert len(fake.calls) == 3  # 첫 추출 + 채우기 1번 + 자기 점검 1번 — 채우기를 되풀이하지 않는다
-    assert "[s1] (slot:7.1) Recall 은 0.912 로 목표 0.9 를 넘었고 FN 이 FP 보다 많다.\n    이미 뽑은 것: number: 0.912" in \
-        fake.calls[1]["instructions"]  # 채우기는 그 문장에서 이미 뽑은 것을 보여 주고 없는 것만 묻는다
+    assert "[s2] (slot:8.2) 종합 판정은 합격이다.\n    이미 뽑은 것: (아직 없음)" in fake.calls[1]["instructions"]
     assert fake.calls[2]["instructions"].count("이미 뽑은 것") == 3 and "다시 읽을 문장" not in fake.calls[2]["instructions"]
-    assert res.sentence_checks["gaps"] == {"s1": "short", "s2": "missing", "s3": "missing"}
-    assert res.sentence_checks["left"] == {"s2": "missing", "s3": "missing"}  # 채우기 답에 판정이 없어도 s1 은 주장이 있어 본 것
+    assert res.sentence_checks["gaps"] == {"s2": "missing", "s3": "missing"}  # s1 은 판정이 없어도 주장이 있어 본 것
+    assert res.sentence_checks["left"] == {"s2": "missing", "s3": "missing"}
 
 
 @pytest.mark.parametrize("said, items, want", [
-    ({"s1": (2, "")}, [item("0.912")], {"s1": "short"}),  # 2개라 적고 1개만
-    ({"s1": (1, "")}, [item("0.913")], {"s1": "short"}),  # 인용이 틀려 버려진 것은 본 것으로 치지 않는다
+    ({"s1": (2, "")}, [item("0.912")], {}),  # 2개라 적고 1개만 — 1.18 부터 다시 묻지 않는다(R-0058 채우기 압박)
+    ({"s1": (1, "")}, [item("0.913")], {"s1": "lost"}),  # 인용이 틀려 하나도 안 들어감 — 본 것으로 치지 않는다
     ({"s1": (0, "")}, [], {"s1": "no_reason"}),  # 까닭 없는 '없음'
     ({"s1": (0, "권고 문장")}, [], {}),
     ({}, [item("0.912")], {}),  # 판정은 없어도 주장이 들어간 문장은 본 것
@@ -258,23 +256,22 @@ def test_same_text_in_two_sentences_counts_once():
     assert extract.place(sents, [("slot:7.1", "Recall 은 0.91"), ("slot:7.1", "Recall 은 0.91")]) == ["s3", "s4"]
     cl = [extract.Claim("", "number", q, "slot:7.1", "7.1", "5.2", "ai", "", "", "", "", 0) for q in ("1건", "Recall 은 0.91")]
     said = [{"sid": f"s{i}", "n_claims": 1, "none_reason": ""} for i in range(1, 5)]
-    assert extract.sentence_gaps(sents, said, cl, []) == {"s2": "short", "s4": "short"}
+    assert extract.sentence_gaps(sents, said, cl, []) == {"s2": "lost", "s4": "lost"}
     assert "전체는 171건이다.\n    이미 뽑은 것: (아직 없음)" in extract.by_sentence(sents, cl)
 
 
-async def test_fill_keeps_only_new_claims_inside_asked_sentences():
-    s1_only = [{"sid": "s1", "n_claims": 2, "none_reason": ""}, {"sid": "s2", "n_claims": 0, "none_reason": "x"},
-               {"sid": "s3", "n_claims": 0, "none_reason": "x"}]
+async def test_fill_keeps_only_claims_inside_asked_sentences():
+    rest = [{"sid": "s2", "n_claims": 0, "none_reason": "x"}, {"sid": "s3", "n_claims": 0, "none_reason": "x"}]  # s1 판정 빠짐
     fake, res = await run(
-        first(item("0.912"), sentences=s1_only),
-        reply(item("Recall 은 0.912", field="metric.M3.value"),  # 이미 있는 '0.912' 를 앞으로 늘린 것 — 겹침
-              item("종합 판정은 합격이다", piece="slot:8.2", kind="name", field="", number_text=""),  # 다시 묻지 않은 문장
-              item("FN 이 FP 보다 많다", kind="comparison", field="", number_text="")),  # 새 주장
+        first(sentences=rest),
+        reply(item("종합 판정은 합격이다", piece="slot:8.2", kind="name", field="", number_text=""),  # 다시 묻지 않은 문장
+              item("FN 이 FP 보다 많다", kind="comparison", field="", number_text="")),  # 다시 물은 s1 의 새 주장
         reply(),
     )
-    assert [c.quote for c in res.claims] == ["0.912", "FN 이 FP 보다 많다"]
-    assert [r["reason"] for r in res.rejected] == ["fill_overlap", "fill_outside"]
-    assert res.sentence_checks["filled"] == 1 and res.sentence_checks["left"] == {}
+    assert [c.quote for c in res.claims] == ["FN 이 FP 보다 많다"]
+    assert [r["reason"] for r in res.rejected] == ["fill_outside"]
+    assert res.sentence_checks["gaps"] == {"s1": "missing"} and res.sentence_checks["filled"] == 1
+    assert res.sentence_checks["left"] == {}
     assert "[s2]" not in fake.calls[1]["instructions"].split("다시 읽을 문장")[1]
 
 
@@ -293,7 +290,8 @@ def test_scope_without_sentences_has_no_sentence_field():
 
 def test_extract_prompt_widens_and_narrows_claims():
     text = extract.instructions({})
-    assert "n_claims" in text and "맨 지표 이름" in text
+    assert "n_claims" in text and "맨 지표 이름" in text and "억지로 뽑지 않는다" in text and "적은 수만큼" not in text
+    assert "어떻게 계산되는지만 풀이하는 말은 주장이 아니다" in text
     for word in ("명사를 꾸미는 말", "'~중 ~개'", "확인 대상은 계산값만이 아니다", "의뢰자가 적은 값(용도, 운영 방식, 데이터 출처", "지시어 그대로",
                  "이것이 보류의 사유이다", "같은 구절을 비교로 또 뽑지 않는다", "분야 일반론", "claims 보다 먼저"):
         assert word in text, word

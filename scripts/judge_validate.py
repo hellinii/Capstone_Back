@@ -493,7 +493,8 @@ def planted_sentence(meta: dict) -> str | None:
 
 
 UNCOMPUTABLE = "계산 불가"
-EXTRACTION_MIN = 0.95  # V1 결정 11 — 재현율·정밀도 모두, 3건 × 회차를 합친 값·놓친 주장을 보탠 뒤로 판정
+EXTRACTION_MIN = 0.95  # V1 결정 11 — 재현율, 3건 × 회차를 합친 값·놓친 주장을 보탠 뒤로 판정
+EXTRACTION_PRECISION_MIN = 0.90  # 정밀도 — 민서 2026-11-01 0.95 → 0.90(결과를 본 뒤 바꿈, 검증 README 미리 정한 기준 11)
 
 
 def extraction_passed(ext: dict) -> bool | None:
@@ -501,7 +502,7 @@ def extraction_passed(ext: dict) -> bool | None:
     judged_on = ext["pooled_with_additions"]
     if judged_on["recall"] is None or judged_on["precision"] is None:
         return None
-    return judged_on["recall"] >= EXTRACTION_MIN and judged_on["precision"] >= EXTRACTION_MIN
+    return judged_on["recall"] >= EXTRACTION_MIN and judged_on["precision"] >= EXTRACTION_PRECISION_MIN
 
 
 def verdict_word(value: bool | None) -> str:

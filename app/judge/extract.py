@@ -4,7 +4,7 @@
 - 한 번 뽑고, 같은 모델에 빠진 주장을 최대 2번 더 묻는다(자기 점검). 2번째에도 새 주장이 나오면 넣고 "멈춤"을 기록한다.
   0·1·2번 시점 목록을 따로 남긴다(설계 7.1 추출 재현율 비교용).
 - 문장마다 판정(1.17): 첫 추출은 문장 id 마다 "주장 n개" 또는 "주장 없음 + 이유"를 먼저 낸다. 판정이 없는데 주장도 없는 문장,
-  적은 수보다 덜 뽑힌 문장, 이유 없는 "주장 없음" 문장은 그 문장들만 한 번 다시 묻는다(채우기 — 첫 추출과 같은 0번 시점).
+  이유 없는 "주장 없음" 문장은 그 문장들만 한 번 다시 묻는다(채우기 — 첫 추출과 같은 0번 시점). 1.18: 덜 뽑힌 문장은 다시 묻지 않는다.
 - 자기 점검(1.17)은 문장마다 이미 뽑은 주장을 붙여 보여 주고 꾸밈말·비교·집계·판정 사유·사용자 입력값 가운데 빠진 것만 묻는다.
 - 칸은 코드가 조각 id 로 정한다(LLM 은 조각 id 만 고른다 — 문서 심판-40).
 - 코드 검사: 조각 id 가 범위 밖이거나 인용 구절이 그 조각에 없으면 버리고 기록한다. 칸 이름이 목록에 없으면 빈 글로 바꾼다.
@@ -254,8 +254,10 @@ _LOOKED = ("normative", "scope", "recommendation", "duplicate")
 
 
 def sentence_gaps(sents: list[Sentence], verdicts: list, claims: list[Claim], rejected: list[dict]) -> dict[str, str]:
-    """다시 물을 문장 {sid: 까닭}(1.17). 까닭: missing(판정도 주장도 없음) · short(적은 수보다 덜 뽑힘) · no_reason(이유 없는 '없음').
-    판정이 없어도 주장이 들어간 문장은 본 것으로 친다."""
+    """다시 물을 문장 {sid: 까닭}(1.17). 까닭: missing(판정도 주장도 없음) · lost(주장이 있다고 했는데 하나도 안 들어감 — 인용이
+    틀려 버려진 것 등) · no_reason(이유 없는 '없음').
+    판정이 없어도 주장이 들어간 문장은 본 것으로 친다. 1.18: '적은 수보다 덜 뽑힘'(short)으로는 다시 묻지 않는다 — R-0058 에서 109문장 중
+    51문장이 short 로 불려 채우기가 21초를 더했고, 수를 채우려 설명·한계 문장까지 뽑게 했다(정밀도 0.789). 적은 수는 기록에만 남는다."""
     said: dict[str, dict] = {}
     for v in verdicts or []:
         if isinstance(v, dict) and isinstance(v.get("sid"), str):
@@ -271,8 +273,8 @@ def sentence_gaps(sents: list[Sentence], verdicts: list, claims: list[Claim], re
         if v is None or n is None:
             if not got:
                 gaps[s.sid] = "missing"
-        elif n > got:
-            gaps[s.sid] = "short"
+        elif n >= 1 and not got:
+            gaps[s.sid] = "lost"
         elif n <= 0 and not got and not str(v.get("none_reason") or "").strip():
             gaps[s.sid] = "no_reason"
     return gaps
@@ -334,10 +336,9 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
     return new
 
 
-def fill_items(raw: list, sents: list[Sentence], asked: set[str], have: list[Claim], rejected: list[dict]) -> list:
-    """채우기 답 가운데 다시 물은 문장 안의 것만, 그 문장에 이미 있는 같은 종류 주장과 인용이 겹치지 않는 것만(검토 P1 — 'n개라 했으니
-    더' 압박에 경계만 다른 인용 '0.71' ↔ 'Precision 은 0.71' 을 또 내기 쉽다). 버린 것은 rejected 에 fill_outside·fill_overlap."""
-    at = place(sents, [(c.piece_id, c.quote) for c in have])
+def fill_items(raw: list, sents: list[Sentence], asked: set[str], rejected: list[dict]) -> list:
+    """채우기 답 가운데 다시 물은 문장 안의 것만(검토 P1). 버린 것은 rejected 에 fill_outside. 1.18: 다시 묻는 문장은 주장이 하나도
+    없는 문장뿐이라 이미 뽑은 주장과의 겹침 거름(1.17 fill_overlap)은 뺐다."""
     kept = []
     for item in raw:
         if not isinstance(item, dict):
@@ -347,11 +348,6 @@ def fill_items(raw: list, sents: list[Sentence], asked: set[str], have: list[Cla
         sid = next((x.sid for x in sents if x.sid in asked and _in_sentence(pid, quote, x)), None)
         if sid is None:
             rejected.append({"round": 0, "reason": "fill_outside", "piece_id": pid, "quote": quote[:200]})
-            continue
-        q = _norm(quote)
-        if any(w == sid and c.kind == item.get("kind") and (q in _norm(c.quote) or _norm(c.quote) in q)
-               for c, w in zip(have, at)):
-            rejected.append({"round": 0, "reason": "fill_overlap", "piece_id": pid, "quote": quote[:200]})
             continue
         kept.append(item)
     return kept
@@ -414,7 +410,7 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
                 if failure:
                     checks["fill_failure"] = failure  # 채우기는 덤 — 실패해도 첫 추출은 살린다(검토 P1)
                 else:
-                    filled = _accept(fill_items(data.get("claims") or [], sents, set(gaps), claims, rejected),
+                    filled = _accept(fill_items(data.get("claims") or [], sents, set(gaps), rejected),
                                      by_id, catalog, claims, 0, rejected)
                     claims.extend(filled)
                     checks["filled"] = len(filled)
