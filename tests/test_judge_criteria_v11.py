@@ -814,3 +814,22 @@ def test_v19_number_that_names_a_field_label_is_not_a_quantity_even_without_sent
     assert fa.judge_answer(c, a, SOURCES, [], [], piece).verdict == "match"
     wrong = Claim("C1", "number", "150건", piece.id, "9", "6.2", "ai", "", "", "150", "", 0)  # 진짜 수량은 그대로 대조
     assert fa.judge_answer(wrong, a, SOURCES, [], [], piece).verdict == "violation"
+
+
+# ── 1.10(V2 1.9 R-0044) ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("actual, named, want", [
+    ("not_provided", "같은 분포인지는 이 성적서에서 확인할 수 없다", None),  # 이름 표의 말이 없음 — 검증 불가
+    ("not_provided", "학습 분포가 제공되지 않아 비교하지 않았다", True),
+    ("compared", "학습 분포가 제공되지 않아 비교하지 않았다", False),  # 다른 값의 이름 — 위반
+    ("batch", "batch 방식", True),  # 코드 글자 그대로 쓰면 맞다
+])
+def test_v110_code_value_without_any_named_label_is_unverifiable(actual, named, want):
+    assert fa.name_matches(actual, named) is want
+
+
+def test_v110_unverifiable_name_does_not_block():
+    v = judge(claim("C1", "name", "같은 분포인지는 확인할 수 없다"),
+              ans(name_field="facts.distribution_shift_status", named="확인할 수 없다"))
+    assert v.verdict == "unverifiable"

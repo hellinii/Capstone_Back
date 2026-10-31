@@ -226,6 +226,10 @@ def name_matches(actual: str, named: str) -> bool | None:
             if said:
                 return said.pop() == str(actual)
             return None
+        # 코드값인데 문장에 그 묶음의 이름이 하나도 없으면 무엇을 지목했는지 모른다 — 위반이 아니라 검증 불가(1.10, V2 1.9 R-0044:
+        # "같은 분포인지는 확인할 수 없다" ↔ not_provided 를 코드 글자 'not_provided' 가 문장에 없다고 위반으로 봤다)
+        if _norm_name(actual) not in target:
+            return None
     return bool(_norm_name(actual)) and _norm_name(actual) in target
 
 
