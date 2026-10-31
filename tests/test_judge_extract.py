@@ -306,3 +306,11 @@ def test_self_check_prompt_targets_five_kinds():
     for word in ("꾸밈말", "비교·집계", "판정과 사유", "의뢰자 입력값", "정도·추론", "(아직 없음)", "{by_sentence}"):
         assert word in text, word
     assert "{found}" not in text and "{empty}" not in text
+
+
+
+def test_fill_prompt_names_every_reask_reason_and_does_not_push():
+    # 1.20: 채우기 지시문이 1.19 의 다시 묻는 까닭(lost·missed)을 모두 말하고, 억지로 뽑지 말라고 한다
+    text = extract.criteria.load_text("prompts/extract_fill.md")
+    for word in ("판정이 빠졌거나", "하나도 들어가지 않았거나", "'빠뜨림'", "까닭이 비어", "억지로 뽑지 않는다", "{by_sentence}"):
+        assert word in text, word
