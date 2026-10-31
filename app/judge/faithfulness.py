@@ -150,15 +150,42 @@ def _norm_name(text: str) -> str:
     return re.sub(r"[\s'\"‘’“”.,]", "", str(text)).lower()
 
 
-def name_matches(actual: str, named: str) -> bool:
-    """데이터의 이름(actual)이 문장이 지목한 이름(named)에 들어 있나. 코드값(판정 FAIL 등)은 기준 묶음 names.json 의 찍히는 이름으로도 본다."""
-    labels = criteria.load_json("names.json")["code_labels"]
+def _occurrences(text: str, labels: dict[str, list[str]]) -> list[tuple[int, int, str]]:
+    """글(정규화) 안의 이름 자리 (시작, 끝, 코드). 더 긴 이름 자리에 덮이는 짧은 자리는 뺀다('불합격' 안의 '합격')."""
+    spans = []
+    for code, labs in labels.items():
+        for lab in labs:
+            n = _norm_name(lab)
+            start = text.find(n)
+            while n and start >= 0:
+                spans.append((start, start + len(n), code))
+                start = text.find(n, start + 1)
+    return [s for s in spans if not any(o[0] <= s[0] and s[1] <= o[1] and (o[1] - o[0]) > (s[1] - s[0]) for o in spans)]
+
+
+def name_matches(actual: str, named: str) -> bool | None:
+    """데이터의 이름(actual)이 문장이 지목한 이름(named)에 들어 있나. 모호하면 None(검증 불가).
+    코드값(판정 FAIL·선언 fn 등)은 기준 묶음 names.json 의 찍히는 이름으로 보되, 실제 값이 든 묶음(code_groups)의 이름만 본다.
+    - 같은 묶음의 서로 다른 코드가 둘 다 지목되면 None('FN 이 FP 보다 위험' — 1.1 검토, 예전엔 코드 글자 순서로 정해졌다).
+    - 이름 바로 뒤에 부정이 오면 지목이 아니다. 실제 값을 부정하면 아니다('모든 클래스가 동등하지 않다')."""
+    names = criteria.load_json("names.json")
+    labels = names["code_labels"]
     target = _norm_name(named)
     if str(actual) in labels:
-        # 코드값이면 문장에 든 이름 가운데 가장 긴 것이 가리키는 코드로 본다('합격'은 '불합격' 안에도 들어 있다)
-        hits = [(len(_norm_name(lab)), code) for code, labs in labels.items() for lab in labs if _norm_name(lab) in target]
-        if hits:
-            return max(hits)[1] == str(actual)
+        group = next((g for g in names.get("code_groups", []) if str(actual) in g), list(labels))
+        occ = _occurrences(target, {c: labels[c] for c in group if c in labels})
+        if occ:
+            window = int(names.get("negation_window", 6))
+            neg_words = [_norm_name(w) for w in names.get("negation_after", [])]
+            negated = lambda o: any(w in target[o[1]: o[1] + window] for w in neg_words)  # noqa: E731
+            if any(negated(o) and o[2] == str(actual) for o in occ):
+                return False
+            said = {o[2] for o in occ if not negated(o)}
+            if len(said) > 1:
+                return None
+            if said:
+                return said.pop() == str(actual)
+            return None
     return bool(_norm_name(actual)) and _norm_name(actual) in target
 
 
@@ -170,7 +197,7 @@ def _bigrams(t: str) -> set[str]:
     return {t[i:i + 2] for i in range(len(t) - 1)}
 
 
-def client_text_matches(actual: str, named: str) -> bool:
+def client_text_matches(actual: str, named: str) -> bool | None:
     """고객 입력 칸은 다시 말한 글도 맞다(설계 6.1 "고객 입력을 다시 말하는 문장은 그 입력과 맞으면 통과").
     - 의뢰자 참고 글 '(의뢰자 제공: …)' 은 떼고 본다.
     - 한쪽이 다른 쪽에 들어 있거나(6자 이상 — 앞부분만 옮김, J4 2차 파일럿),
@@ -182,7 +209,12 @@ def client_text_matches(actual: str, named: str) -> bool:
     choice = _CLIENT_NOTE.sub("", full).strip()
     if choice in options:
         said = lambda opt: any(_norm_name(lab) in n for lab in options[opt])  # noqa: E731
-        if said(choice) and not any(said(other) for other in options if other != choice):
+        other_said = any(said(other) for other in options if other != choice)
+        if other_said:
+            # 반대 값의 말이 있으면 뒤의 글 겹침 대조로 넘기지 않는다(1.1 검토 — '다른 곳이 아닌 같은 출처'): 두 값이 다 있으면 모호,
+            # 반대 값만 있으면 아니다
+            return None if said(choice) else False
+        if said(choice):
             return True
     note = re.search(r"\(의뢰자 제공:(.*)\)\s*$", full)
     # 선택 값만·참고 글 붙은 전체·참고 글만 — 문장이 참고 글을 말할 수도 있다(J4 AI 파일럿)
@@ -214,9 +246,16 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
         return v
     if claim.kind == "number" and _is_comparison(ans):
         # 숫자로 뽑혔지만 두 값의 관계를 말하는 문장('예측된 표본이 실제 표본보다 많이') — 에이전트가 두 식과 관계를 주면 비교로
-        # 대조한다(1.1, V2 1차 — 숫자 하나로 대조해 이름 속 숫자 '클래스 3' 을 예측 건수와 맞댔다)
+        # 대조한다(1.1, V2 1차 — 숫자 하나로 대조해 이름 속 숫자 '클래스 3' 을 예측 건수와 맞댔다). 문장에 수량이 있으면 그 숫자도
+        # 앞쪽 식 값과 맞아야 한다 — 답의 꼴만 바꿔 틀린 숫자가 통과하지 않게(1.1 검토).
         v.detail["as"] = "comparison"
         _compare(v, ans, sources)
+        text = printed_number(claim)
+        if text is not None and v.verdict == "match":
+            value = eval_expr(ans.get("expr", ""), sources)
+            v.detail["data"] = value
+            if value is None or not matches(text, value):
+                v.verdict = "violation" if value is not None else "unverifiable"
     elif claim.kind == "number":
         text, value = printed_number(claim), eval_expr(ans.get("expr", ""), sources)
         if text is None or value is None:
@@ -252,12 +291,21 @@ def _name(v: ClaimVerdict, ans: dict, sources: Sources) -> None:
     v.detail["data"] = actual
     if ans.get("name_field", "").strip().startswith("client."):
         ok = client_text_matches(actual, ans["named"])
+        if ok is None:
+            return
     else:
         ok = name_matches(actual, ans["named"])
+        if ok is None:
+            return
         positive = sources.texts.get("facts.positive_class")
         if not ok and positive is not None and str(actual) == positive:  # 양성 클래스를 '양성'으로 부름
             ok = any(lab in ans["named"] for lab in criteria.load_json("names.json")["positive_class_labels"])
     v.verdict = "match" if ok else "violation"
+
+
+def is_definition(sentence: str) -> bool:
+    """용어 뜻풀이 문장인가 — 뜻풀이 어미(inference_rules.json definition_markers)가 있고 숫자가 없다."""
+    return any(m in sentence for m in criteria.claim_markers("definition_markers")) and not re.search(r"\d", sentence)
 
 
 def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: Sources, piece: Piece | None) -> ClaimVerdict:
@@ -265,15 +313,24 @@ def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: S
     1.1(V2 1차 — 사실·판정·고객 입력을 옮긴 문장과 용어 뜻풀이가 단정형 추론으로 걸렸다):
     - 에이전트가 그 문장을 데이터 대조로 옮기면(두 식과 관계, 또는 이름 칸과 이름) 코드가 비교·이름 주장처럼 대조한다 — 맞으면
       match, 틀리면 violation. 대조할 수 없으면(칸 없음) 어미 판정으로 돌아간다. 맞다·틀리다는 여전히 코드가 정한다.
-    - 에이전트가 not_claim(용어 뜻풀이·일반 원리 설명)으로 답하면 주장이 아니다(not_claim — 분모·게이트 밖, 기록에 남는다)."""
+      문장에 인과 낱말(causal_markers — 때문·원인 등)이 있으면 옮기지 않는다 — 인과 부분은 대조가 보지 못한다(1.1 검토).
+    - 에이전트가 not_claim(용어 뜻풀이)으로 답하면, 코드가 뜻풀이 어미가 있고 숫자·인과 낱말이 없음을 확인할 때만 주장이 아니다
+      (not_claim — 분모·게이트 밖, 기록에 남는다). 아니면 어미 판정."""
     ans = ans or {}
-    marked = inference_marked(sentence_of(claim.quote, piece))
+    sentence = sentence_of(claim.quote, piece)
+    marked = inference_marked(sentence)
+    causal = any(m in sentence for m in criteria.claim_markers("causal_markers"))
     v.detail = {"marked": marked, "basis": ans.get("inference_basis", "")}
     resolution = ans.get("resolution")
     if resolution == "not_claim":
-        v.verdict = "not_claim"
-        return v
-    if resolution == "resolved" and (_is_comparison(ans) or (ans.get("name_field", "").strip() and ans.get("named"))):
+        # 코드가 확인한다(1.1 검토): 뜻풀이 어미가 있고 숫자·인과 낱말이 없을 때만. 아니면 어미 판정으로.
+        if is_definition(sentence) and not causal:
+            v.verdict = "not_claim"
+            return v
+        v.detail["not_claim_refused"] = True
+    elif causal and resolution == "resolved" and (_is_comparison(ans) or ans.get("name_field", "").strip()):
+        v.detail["remap_refused"] = "causal"
+    elif resolution == "resolved" and (_is_comparison(ans) or (ans.get("name_field", "").strip() and ans.get("named"))):
         v.detail.update({k: ans.get(k) for k in ("expr", "expr_b", "relation", "name_field", "named")})
         if _is_comparison(ans):
             v.detail["as"] = "comparison"
@@ -313,6 +370,7 @@ def _count(verdicts: list[ClaimVerdict]) -> dict:
         "claims": len(verdicts), "checked": by("match") + by("violation"), "matched": by("match"), "violations": by("violation"),
         "unverifiable": by("unverifiable"), "target_unclear": by("target_unclear"),
         "inference_ok": by("inference_ok"), "inference_violation": by("inference_violation"), "not_claim": by("not_claim"),
+        "from_inference": sum(1 for v in verdicts if v.kind == "inference" and v.verdict in ("match", "violation")),
         "client_input_assertive": sum(1 for v in verdicts if v.verdict == "inference_violation"
                                       and v.detail.get("basis") == "client_input"),
     }

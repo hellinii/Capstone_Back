@@ -105,6 +105,24 @@ def _sentence_of(quote: str, piece: Piece) -> str:
     return quote
 
 
+# 절 나누기(1.1 검토): 쉼표, 그리고 '…며·…고·…지만·…으나·…는데' 뒤의 띄어쓰기.
+_CLAUSE_BREAK = re.compile(r"[,，]\s*|(?<=며)\s+|(?<=고)\s+|(?<=지만)\s+|(?<=으나)\s+|(?<=는데)\s+")
+
+
+def _clause_of(quote: str, sentence: str) -> str:
+    """문장 가운데 인용 구절이 걸친 절(들). 구절을 못 찾으면 문장 전체. 규범·범위 낱말은 이 범위에서만 본다 — 앞 절의 단정이 뒤
+    절의 '…단정할 수 없다' 때문에 함께 버려지지 않게(1.1 검토)."""
+    start = sentence.find(quote)
+    if start < 0:
+        return sentence
+    end = start + len(quote)
+    cuts = [0, *(m.end() for m in _CLAUSE_BREAK.finditer(sentence)), len(sentence)]
+    lo = max(c for c in cuts if c <= start)
+    hi = min((c for c in cuts if c >= end), default=len(sentence))
+    # 끝 경계가 다음 절 시작이면 그 절은 넣지 않는다 — hi 는 구절 끝을 덮는 첫 경계
+    return sentence[lo:hi]
+
+
 def _not_inference(sentence: str) -> str | None:
     """추론으로 뽑혔지만 규범 문장이거나 시험 범위 문장이면 그 사유(claims.json + inference_rules.json 의 normative_markers·scope_markers)."""
     if any(m in sentence for m in criteria.claim_markers("normative_markers")):
@@ -135,7 +153,7 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
             rejected.append({"round": round_no, "reason": "quote", "piece_id": piece.id, "quote": quote[:200]})
             continue
         if item["kind"] == "inference":
-            reason = _not_inference(_sentence_of(quote, piece))
+            reason = _not_inference(_clause_of(quote, _sentence_of(quote, piece)))
             if reason:
                 rejected.append({"round": round_no, "reason": reason, "piece_id": piece.id, "quote": quote[:200]})
                 continue

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+from types import SimpleNamespace as M
+
 from app.judge import consistency as co
 from app.judge import criteria
 from app.judge import extract as ex
@@ -64,15 +66,16 @@ def test_declaration_codes_match_their_korean_names_and_only_those(field, named,
     assert v.verdict == ("match" if ok else "violation")
 
 
-@pytest.mark.parametrize("named, ok", [
-    ("학습 때와 다른 조건의 데이터", True),
-    ("학습 데이터와 다른 출처", True),
-    ("학습 때와 같은 조건의 데이터", False),  # 의뢰자 답은 '다른 출처'
-    ("다른 곳에서 모았지만 같은 조건", False),  # 두 값의 말이 같이 있으면 맞지 않다
+@pytest.mark.parametrize("named, verdict", [
+    ("학습 때와 다른 조건의 데이터", "match"),
+    ("학습 데이터와 다른 출처", "match"),
+    ("학습 때와 같은 조건의 데이터", "violation"),  # 의뢰자 답은 '다른 출처'
+    ("다른 곳에서 모았지만 같은 조건", "unverifiable"),  # 두 값의 말이 같이 있으면 모호
+    ("다른 출처지만 같은 곳", "unverifiable"),  # 글 겹침 대조로 넘어가 맞다가 되지 않는다(1.1 검토)
 ])
-def test_client_option_paraphrase_matches_only_its_own_option(named, ok):
+def test_client_option_paraphrase_matches_only_its_own_option(named, verdict):
     v = judge(claim("C1", "name", named), ans(name_field="client.test_data.학습 데이터와의 관계", named=named))
-    assert v.verdict == ("match" if ok else "violation")
+    assert v.verdict == verdict
 
 
 # ── 2. 비율의 분모·분수 ───────────────────────────────────────────────
@@ -110,20 +113,20 @@ def test_fraction_claim_is_judged_on_its_ratio_not_on_the_first_digit():
 # ── 3. 비교를 숫자 하나로 ─────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("text, want", [("클래스 7로 예측된 표본이 130건", "130"), ("레이블 14 의 표본", None),
+@pytest.mark.parametrize("text, want", [("클래스 7 쪽 예측은 130건", "130"), ("레이블 14 의 표본", None),
                                         ("Class 9 는 약하다", None), ("F1 0.61", "0.61"), ("오류 40건", "40")])
 def test_numbers_inside_names_are_not_quantities(text, want):
     assert first_quantity(text) == want
 
 
 def test_number_claim_without_quantity_is_unverifiable_not_violation():
-    q = "클래스 7로 예측된 표본이 실제 클래스 7 표본보다 많다"
+    q = "클래스 7 예측 건수는 실제 건수를 웃돈다"
     assert judge(claim("C1", "number", q), ans(expr="{facts.prediction_bias.7.predicted}")).verdict == "unverifiable"
 
 
 @pytest.mark.parametrize("relation, verdict", [("gt", "match"), ("lt", "violation")])
 def test_number_claim_with_two_sides_is_judged_as_comparison(relation, verdict):
-    q = "클래스 7로 예측된 표본이 실제 클래스 7 표본보다 많다"
+    q = "클래스 7 예측 건수는 실제 건수를 웃돈다"
     v = judge(claim("C1", "number", q), ans(expr="{facts.prediction_bias.7.predicted}",
                                             expr_b="{facts.prediction_bias.7.actual}", relation=relation))
     assert v.verdict == verdict and v.detail["as"] == "comparison"
@@ -189,7 +192,7 @@ def test_inference_restating_client_input_is_judged_as_name():
     ans(resolution="no_data", expr="{metric.M2.value}", expr_b="0.8", relation="lt"),  # resolved 가 아니면 옮기지 않음
 ])
 def test_unhedged_inference_without_usable_mapping_still_violates(a):
-    v = judge(claim("C1", "inference", "오류가 많은 것은 라벨 품질 때문이다"), a)
+    v = judge(claim("C1", "inference", "이 모델은 새 지점 자료에서도 잘 맞을 것이다"), a)  # 인과 낱말 없는 단정
     assert v.verdict == "inference_violation"
 
 
@@ -229,3 +232,110 @@ def test_large_number_on_count_field_is_not_skipped_by_ratio_rule():
                                       {"facts.error_totals.misclassified": 40})
     assert [c.type for c in found] == ["value_mismatch"]
 
+
+
+# ── 1.1 검토 반영(P1·P2) ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("quote, verdict", [("클래스 7 예측은 130건으로 실제 건수를 웃돈다", "match"),
+                                            ("클래스 7 예측은 150건으로 실제 건수를 웃돈다", "violation")])
+def test_number_answered_as_comparison_still_checks_its_quantity(quote, verdict):
+    v = judge(claim("C1", "number", quote), ans(expr="{facts.prediction_bias.7.predicted}",
+                                                expr_b="{facts.prediction_bias.7.actual}", relation="gt"))
+    assert v.verdict == verdict
+
+
+def test_causal_inference_is_not_remapped_to_a_true_comparison():
+    c = claim("C1", "inference", "클래스 7 의 성능이 낮은 것은 표본이 적기 때문이다")
+    v = judge(c, ans(expr="{distribution.class_distribution.7}", expr_b="{distribution.class_distribution.8}", relation="lt"))
+    assert v.verdict == "inference_violation" and v.detail["remap_refused"] == "causal"
+
+
+@pytest.mark.parametrize("quote, verdict", [
+    ("경계 오류는 두 확률이 비슷한 경우를 뜻한다", "not_claim"),
+    ("클래스 7 의 성능이 낮은 것은 표본이 적기 때문이다", "inference_violation"),  # 뜻풀이 어미 없음
+    ("이 결과는 표본이 적기 때문임을 뜻한다", "inference_violation"),  # 인과 낱말
+    ("오류 40건은 두 확률이 비슷한 경우를 뜻한다", "inference_violation"),  # 숫자가 있는 문장은 이 데이터에 대한 말
+])
+def test_not_claim_is_accepted_only_for_definitions(quote, verdict):
+    piece = Piece("slot:7.1", "7.1", "5.2", "ai", quote + ".")
+    v = fa.judge_answer(claim("C1", "inference", quote), ans(resolution="not_claim"), SOURCES, [], [], piece)
+    assert v.verdict == verdict
+
+
+@pytest.mark.parametrize("actual, named, want", [
+    ("fp", "거짓 음성이 거짓 양성보다 더 위험하다", None),  # 같은 칸 두 코드 — 예전엔 코드 글자 순서로 맞다
+    ("fp", "FN 이 FP 보다 위험하다", None),
+    ("all_equal", "모든 클래스가 동등하지 않다", False),  # 실제 값을 부정
+    ("realtime", "실시간이 아닌 배치로 쓴다", False),
+    ("batch", "실시간이 아닌 배치로 쓴다", True),
+    ("fp", "실시간 서비스에서 FP 가 더 위험하다", True),  # 다른 칸 낱말은 보지 않는다
+    ("all_equal", "두 오류의 비용은 동등하다고 보고 다수 클래스를 우선", False),
+    ("FAIL", "종합 판정은 '최종 불합격'", True),
+    ("PASS", "종합 판정은 '최종 불합격'", False),
+])
+def test_name_matching_uses_its_own_code_group_ties_and_negation(actual, named, want):
+    assert fa.name_matches(actual, named) is want
+
+
+def test_ambiguous_name_is_unverifiable_not_match():
+    v = judge(claim("C1", "name", "FN 이 FP 보다 위험하다"),
+              ans(name_field="facts.declarations.risk_direction", named="FN 이 FP 보다 위험하다"))
+    assert v.verdict == "unverifiable"
+
+
+def test_inference_remapped_to_name_records_it():
+    c = claim("C1", "inference", "평가 데이터는 학습 데이터와 다른 출처이다")
+    v = judge(c, ans(name_field="client.test_data.학습 데이터와의 관계", named="다른 출처"))
+    assert v.detail["as"] == "name" and fa._count([v])["from_inference"] == 1
+
+
+@pytest.mark.parametrize("own, table, text, counted", [
+    (0, "0", "3", True), (1, "1", "4", True),  # 건수 칸 0·1 은 비율이 아니다
+    (0.95, "95%", "0.5", True),  # 1 이하는 비율의 표기일 수 있는 크기 — 넘기지 않고 센다
+    (0.95, "95%", "2", False),
+])
+def test_ratio_rule_only_for_real_ratio_fields(own, table, text, counted):
+    found, _, _ = co.value_mismatches({"f": [(table, TABLE), (text, AI)]}, {"f": own})
+    assert bool(found) is counted
+
+
+@pytest.mark.parametrize("sentence, quote, reason", [
+    ("라벨 오류 때문에 성능이 낮으며, 그 밖의 영향은 단정할 수 없다.", "라벨 오류 때문에 성능이 낮으며", None),
+    ("바로 배포해야 하며 성능 문제는 없다.", "성능 문제는 없다", None),
+    ("그래서 운영 자료를 대표하는지는 단정할 수 없다.", "운영 자료를 대표하는지는 단정할 수 없다", "scope"),
+])
+def test_normative_and_scope_words_count_only_in_the_quoted_clause(sentence, quote, reason):
+    assert ex._not_inference(ex._clause_of(quote, sentence)) == reason
+
+
+@pytest.mark.parametrize("text, want", [("레이블 14개 가운데 3개", "14"), ("클래스 3개 모두", "3"), ("클래스 3 은 약하다", None)])
+def test_count_units_make_a_number_after_a_name_word_a_quantity(text, want):
+    assert first_quantity(text) == want
+
+
+def test_extract_instructions_carry_added_markers():
+    assert "기 쉽" in ex.claim_rules_text()["inference_markers"]
+
+
+def test_scorecard_reports_not_claim_and_remapped_counts():
+    from app.judge import aggregate
+
+    d = judge(claim("C1", "inference", "경계 오류는 두 확률이 비슷한 경우를 뜻한다"), ans(resolution="not_claim"))
+    r = judge(claim("C2", "inference", "가중 평균으로 보아도 목표에 못 미친다"), ans(expr="{metric.M2.value}", expr_b="0.8", relation="lt"))
+    faith = fa.FaithResult([d, r], fa._count([d, r]))
+    cons = M(counts={"checked": 0, "contradictions": 0, "by_type": {}}, contradictions=[])
+    cov = M(counts={"applicable": 0, "described": 0, "not_applicable": 0}, items=[])
+    rea = M(counts={"rules": 0, "violations": 0})
+    card = aggregate.scorecard(faith, cons, cov, rea)["faithfulness"]
+    assert (card["not_claim"], card["from_inference"], card["checked"]) == (1, 1, 1)
+
+
+def test_extraction_filter_is_wired_to_the_quoted_clause():
+    # 배선: 추출 결과 받기(_accept)가 절 범위로 거른다 — 앞 절의 '…해야 하며' 때문에 뒤 절의 단정이 버려지지 않는다
+    piece = Piece("slot:8.2", "8.2", "5.1", "ai", "바로 배포해야 하며 성능 문제는 없다. 대표하는지는 단정할 수 없다.")
+    raw = [{"kind": "inference", "quote": "성능 문제는 없다", "piece_id": piece.id},
+           {"kind": "inference", "quote": "대표하는지는 단정할 수 없다", "piece_id": piece.id}]
+    rejected: list[dict] = []
+    got = ex._accept(raw, {piece.id: piece}, {}, [], 0, rejected)
+    assert [c.quote for c in got] == ["성능 문제는 없다"] and [r["reason"] for r in rejected] == ["scope"]

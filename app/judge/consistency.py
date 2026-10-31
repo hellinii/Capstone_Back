@@ -82,7 +82,9 @@ def _not_a_ratio_print(text: str, own) -> bool:
     """칸 값이 비율(0~1)인데 서술 숫자가 백분율도 아닌 1보다 큰 수 — 그 칸 값을 어떻게 찍어도 나올 수 없는 숫자라 칸을 잘못
     붙인 것이다(1.1, V2 1차 — '2,000회' 를 신뢰수준 0.95 칸에 붙여 '95%' 와 모순으로 셌다)."""
     p = parse_printed(text)
-    return p is not None and not p.percent and 0 <= own <= 1 and abs(p.value) > 1
+    # 비율 칸 = 정수가 아닌 값(0.95). 건수 칸의 0·1 은 비율이 아니다(1.1 검토 — 오분류 0건 ↔ 서술 3건 모순을 숨겼다)
+    ratio = isinstance(own, float) and not float(own).is_integer() and 0 < own < 1
+    return p is not None and not p.percent and ratio and abs(p.value) > 1
 
 
 def value_mismatches(groups: dict[str, list[tuple[str, Piece]]], data: dict | None = None) -> tuple[list[Contradiction], int, list[dict]]:

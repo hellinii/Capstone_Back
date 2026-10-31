@@ -37,7 +37,9 @@ def scorecard(faith, consistency, coverage, readability) -> dict:
         "faithfulness": {"checked": f["checked"], "matched": f["matched"], "violations": f["violations"],
                          "inference_ok": f["inference_ok"], "inference_violations": f["inference_violation"],
                          "unverifiable": f["unverifiable"], "target_unclear": f["target_unclear"],
-                         "client_input_assertive": f["client_input_assertive"]},
+                         "client_input_assertive": f["client_input_assertive"],
+                         # 1.1: 추론으로 뽑혔지만 뜻풀이라 뺀 수, 추론에서 데이터 대조로 옮겨 checked 에 든 수(1.0 점수와 바로 비교하지 않게)
+                         "not_claim": f.get("not_claim", 0), "from_inference": f.get("from_inference", 0)},
         "consistency": {"checked": c["checked"], "contradictions": c["contradictions"], "by_type": c["by_type"]},
         "coverage": {"applicable": coverage.counts["applicable"], "described": coverage.counts["described"],
                      "not_applicable": coverage.counts["not_applicable"],

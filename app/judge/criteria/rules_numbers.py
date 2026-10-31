@@ -25,6 +25,7 @@ FRACTION_TOLERANCE = 0.0005 + 1e-9
 # 문장에서 수량 숫자를 찾는 꼴(낱말에 붙은 숫자 'F1'·'M4'·'Class9' 는 숫자가 아니다 — J4 AI 파일럿)
 _NUMBER_IN_TEXT = re.compile(r"(?<![A-Za-z0-9.])[+\-−]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])\s*(?:%p|%)?")
 NAME_BEFORE_NUMBER = ("클래스", "레이블", "라벨", "class", "label")
+COUNT_UNITS = ("개", "종", "가지")
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,9 @@ def first_quantity(text: str) -> str | None:
         return m.group(0)
     for m in _NUMBER_IN_TEXT.finditer(text):
         before = text[: m.start()].rstrip().lower()
-        if any(before.endswith(w) for w in NAME_BEFORE_NUMBER):
+        after = text[m.end():].lstrip()
+        counted = after.startswith(COUNT_UNITS)  # '레이블 14개' 는 수량이다(1.1 검토)
+        if any(before.endswith(w) for w in NAME_BEFORE_NUMBER) and not counted:
             continue
         if parse_printed(m.group(0).strip()):
             return m.group(0).strip()
