@@ -8,7 +8,7 @@ judge_validate.py — 심판 검증 실행기(계획 17-3, 설계 7절). pytest 
            어떤 철자로 적어도(scripts/judge_paths) 거부한다(오염 방지 규칙 2) — 입력·결함·장부·출력·정답지·사람 채점·결과 원본 경로.
 - verify : 진짜 검증(V2). 아래 다섯이 모두 맞아야 시작한다 — 사유는 하나씩 따로 찍는다.
            ① 작업 트리가 깨끗하다(git status 빈칸)  ② 기준 버전이 고정 버전이고 기록된 지문과 같다(1.0-dev 면 거부)
-           ③ 지금 MANIFEST == 태그 judge-criteria-v1.0 의 MANIFEST(파일 ↔ MANIFEST 도)  ④ --live  ⑤ 장부에 쓸 수 있다
+           ③ 지금 MANIFEST == 태그 judge-criteria-v<지금 VERSION> 의 MANIFEST(파일 ↔ MANIFEST 도)  ④ --live  ⑤ 장부에 쓸 수 있다
            입력은 검증 폴더의 봉인 서술(00_봉인/<태그>.json — SHA256SUMS 와 맞아야), 결함·sham 은 02_결함/, 결과 원본은
            03_실행/<run_id>.json, 장부는 검증/장부.csv. 서술 글은 화면에 찍지 않는다(개수·해시·게이트만).
 
@@ -80,7 +80,14 @@ from app.judge.validation import variants as V  # noqa: E402
 
 RunnerError = jl.RunnerError
 MODES = ("dev", "verify")
-TAG = "judge-criteria-v1.0"
+TAG_PREFIX = "judge-criteria-v"
+
+
+def criteria_tag() -> str:
+    """지금 기준 버전의 고정 태그(1.1 부터 — 1.0 이름을 박아 두어 1.1 검증이 시작되지 않았다)."""
+    return f"{TAG_PREFIX}{criteria.version()}"
+
+
 MANIFEST_IN_REPO = "app/judge/criteria/MANIFEST.sha256"
 DEV_INPUTS = ROOT / "tests" / "data" / "judge_dev"
 SEALED = "00_봉인"
@@ -149,11 +156,12 @@ def verify_problems(*, live: bool, ledger_path: Path, git: Callable[..., tuple[i
     ver = criteria.version()
     if ver.endswith("-dev") or criteria.version_problem() is not None:
         problems.append(f"기준 버전이 고정되지 않았다(지금 {ver}) — V1 에서 scripts/judge_criteria_manifest.py freeze 1.0 으로 고정한다")
-    code, tagged = git("show", f"{TAG}:{MANIFEST_IN_REPO}")
+    tag = criteria_tag()
+    code, tagged = git("show", f"{tag}:{MANIFEST_IN_REPO}")
     if code != 0:
-        problems.append(f"태그 {TAG} 가 없다 — 기준 고정 뒤 태그를 붙인다(정8)")
+        problems.append(f"태그 {tag} 가 없다 — 기준 고정 뒤 태그를 붙인다(정8)")
     elif tagged != criteria.recorded_manifest() or criteria.recorded_manifest() != criteria.manifest_text():
-        problems.append(f"지금 기준 묶음 MANIFEST 가 태그 {TAG} 의 MANIFEST 와 다르다 — 고정한 기준으로만 검증한다(7.4)")
+        problems.append(f"지금 기준 묶음 MANIFEST 가 태그 {tag} 의 MANIFEST 와 다르다 — 고정한 기준으로만 검증한다(7.4)")
     if not live:
         problems.append("--live 가 없다 — verify 는 실호출이다")
     if not ledger_writable(ledger_path):
@@ -767,7 +775,7 @@ def cmd_report(mode: str, *, ledger: Path | None, out: Path | None, api: dict[st
     reading = read_human_reading(human) if human and Path(human).is_dir() else None
     result = report(runs, api or load_stats_api(), human_claims=claims, human_scores=scores, human_reading=reading,
                     human_missed=judged_missed, plan=plan)
-    result.update({"mode": mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(), "tag": TAG})
+    result.update({"mode": mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(), "tag": criteria_tag()})
     out.mkdir(parents=True, exist_ok=True)
     for path in write_missed(out, result.get("missed_claims") or {}):
         echo(f"놓친 주장 표 {path}")

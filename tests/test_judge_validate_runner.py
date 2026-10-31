@@ -107,6 +107,22 @@ def test_verify_each_condition_gives_its_own_reason(tmp_path, monkeypatch, froze
     assert len(problems) == 1 and expected in problems[0], problems
 
 
+def test_verify_reads_the_tag_of_the_current_version(tmp_path, monkeypatch):
+    # 태그 이름은 지금 VERSION 에서 — 1.0 이름을 박아 두어 1.1 검증이 '태그와 다르다'로 시작되지 않았다(세션 7)
+    monkeypatch.setattr(criteria, "version", lambda: "1.1")
+    monkeypatch.setattr(criteria, "version_problem", lambda *a, **k: None)
+    shown = []
+    manifest = criteria.recorded_manifest()
+
+    def git(*args):
+        if args[0] == "show":
+            shown.append(args[1])
+        return _git_ok(manifest)(*args)
+
+    assert jv.verify_problems(live=True, ledger_path=tmp_path / "장부.csv", git=git) == []
+    assert shown == ["judge-criteria-v1.1:app/judge/criteria/MANIFEST.sha256"]
+
+
 def test_verify_manifest_must_also_match_files(tmp_path, monkeypatch, frozen):
     # 태그와 기록된 MANIFEST 는 같아도 파일이 MANIFEST 와 다르면 거부(몰래 바꾼 파일).
     monkeypatch.setattr(criteria, "manifest_text", lambda: "다름\n")
