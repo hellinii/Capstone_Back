@@ -105,8 +105,8 @@ def _sentence_of(quote: str, piece: Piece) -> str:
     return quote
 
 
-# 절 나누기(1.1 검토): 쉼표, 그리고 '…며·…고·…지만·…으나·…는데' 뒤의 띄어쓰기.
-_CLAUSE_BREAK = re.compile(r"[,，]\s*|(?<=며)\s+|(?<=고)\s+|(?<=지만)\s+|(?<=으나)\s+|(?<=는데)\s+")
+# 절 나누기(1.1 검토): 쉼표, 그리고 '…며·…고·…지만·…으나·…는데·…아니라·…것으로'(1.5) 뒤의 띄어쓰기.
+_CLAUSE_BREAK = re.compile(r"[,，]\s*|(?<=며)\s+|(?<=고)\s+|(?<=지만)\s+|(?<=으나)\s+|(?<=는데)\s+|(?<=아니라)\s+|(?<=것으로)\s+")
 
 
 def _clause_of(quote: str, sentence: str) -> str:
@@ -125,8 +125,9 @@ def _clause_of(quote: str, sentence: str) -> str:
 
 def _not_inference(sentence: str) -> str | None:
     """추론으로 뽑혔지만 규범 문장이거나 시험 범위 문장이면 그 사유(claims.json + inference_rules.json 의 normative_markers·scope_markers)."""
-    if any(m in sentence for m in criteria.claim_markers("normative_markers")):
-        return "normative"
+    if (any(m in sentence for m in criteria.claim_markers("normative_markers"))
+            and not any(w in sentence for w in criteria.claim_markers("normative_not_when"))):
+        return "normative"  # '…로 읽어야 한다'처럼 해석을 감싼 꼴은 규범이 아니다(normative_not_when, 1.5)
     if any(m in sentence for m in criteria.claim_markers("scope_markers")):
         return "scope"
     return None

@@ -48,7 +48,8 @@ def ans(**kw):
 
 
 def judge(c, a):
-    return fa.judge_answer(c, a, SOURCES, [], [], PIECE)
+    # 근거 범위(문장)는 그 주장 문장이다 — 1.5 부터 옮긴 대조는 문장 근거가 있어야 받는다
+    return fa.judge_answer(c, a, SOURCES, [], [], Piece(PIECE.id, PIECE.slot, PIECE.place, PIECE.source, c.quote + "."))
 
 
 # ── 1. 한글 선언 ↔ 코드값 ───────────────────────────────────────────
@@ -137,7 +138,8 @@ def test_number_claim_with_two_sides_is_judged_as_comparison(relation, verdict):
 
 
 @pytest.mark.parametrize("sentence, reason", [
-    ("이 값은 같은 지점 자료에 한정된 결과로 읽어야 한다.", "normative"),
+    ("다음 평가 전에 라벨을 다시 맞춰야 한다.", "normative"),
+    ("이 값은 같은 지점 자료에 한정된 결과로 읽어야 한다.", None),  # 해석을 감싼 '읽어야'는 규범이 아니다(1.5)
     ("이 표본이 운영 자료를 대표하는지는 단정할 수 없다.", "scope"),
     ("새 자료에서도 같은지 알 수 없다.", "scope"),
     ("오류가 많은 것은 라벨 품질 때문이다.", None),  # 진짜 단정형 추론은 걸러지지 않는다
@@ -175,7 +177,7 @@ def test_not_claim_is_honoured_only_for_inference():
 
 @pytest.mark.parametrize("relation, verdict", [("lt", "match"), ("gt", "violation")])
 def test_inference_restating_data_is_judged_by_code(relation, verdict):
-    c = claim("C1", "inference", "가중 평균으로 보아도 목표에 못 미친다")
+    c = claim("C1", "inference", "F1 Score 는 목표 0.8 에 못 미친다")
     v = judge(c, ans(expr="{metric.M2.value}", expr_b="0.8", relation=relation, inference_basis="data"))
     assert v.verdict == verdict and v.detail["as"] == "comparison"
 
@@ -184,7 +186,8 @@ def test_inference_restating_client_input_is_judged_as_name():
     c = claim("C1", "inference", "평가 데이터는 학습 데이터와 다른 출처이다")
     ok = judge(c, ans(name_field="client.test_data.학습 데이터와의 관계", named="다른 출처", inference_basis="client_input"))
     bad = judge(c, ans(name_field="client.test_data.학습 데이터와의 관계", named="같은 출처", inference_basis="client_input"))
-    assert (ok.verdict, bad.verdict) == ("match", "violation")
+    assert (ok.verdict, bad.verdict) == ("match", "inference_violation")  # 문장에 없는 이름은 받지 않는다(1.5)
+    assert bad.detail["remap_refused"] == "unanchored"
 
 
 @pytest.mark.parametrize("a", [
@@ -323,7 +326,7 @@ def test_scorecard_reports_not_claim_and_remapped_counts():
     from app.judge import aggregate
 
     d = judge(claim("C1", "inference", "경계 오류는 두 확률이 비슷한 경우를 뜻한다"), ans(resolution="not_claim"))
-    r = judge(claim("C2", "inference", "가중 평균으로 보아도 목표에 못 미친다"), ans(expr="{metric.M2.value}", expr_b="0.8", relation="lt"))
+    r = judge(claim("C2", "inference", "F1 Score 는 목표 0.8 에 못 미친다"), ans(expr="{metric.M2.value}", expr_b="0.8", relation="lt"))
     faith = fa.FaithResult([d, r], fa._count([d, r]))
     cons = M(counts={"checked": 0, "contradictions": 0, "by_type": {}}, contradictions=[])
     cov = M(counts={"applicable": 0, "described": 0, "not_applicable": 0}, items=[])
@@ -345,13 +348,14 @@ def test_extraction_filter_is_wired_to_the_quoted_clause():
 @pytest.mark.parametrize("gap_high, verdict", [(0.75, "match"), (0.65, "violation")])
 def test_interpretation_of_average_gap_is_checked_against_rule_threshold(gap_high, verdict):
     # 평균 차이를 풀이한 문장(1.1 사용자 결정): '크다'를 판정 기준값(0.1)과 비교 — 실제 차이가 작으면 위반으로 잡힌다
-    fs = {**FS, "per_class": [{"label": "7", "f1": gap_high, "precision": 0.5, "recall": 0.5, "support": 100},
-                              {"label": "8", "f1": 0.6, "precision": 0.5, "recall": 0.5, "support": 300}]}
+    fs = {**FS, "facts": {**FS["facts"], "average_gap": {"kind": "macro_vs_micro", "macro_f1": 0.5, "other_f1": 0.5,
+                                                         "difference": round(gap_high - 0.6, 3)}}}
     src = Sources(fs, [], {}, CLIENT)
     assert "크다" in src.lookup("rule.imbalance_gap_threshold")["note"]
-    c = claim("C1", "inference", "두 평균이 벌어진 것은 클래스마다 성능이 고르지 않다는 뜻이다")
-    v = fa.judge_answer(c, ans(expr="{per_class.7.f1} - {per_class.8.f1}", expr_b="{rule.imbalance_gap_threshold}", relation="ge"),
-                        src, [], [], PIECE)
+    q = "두 평균의 차이는 클래스 사이 성능 편차가 크다는 것을 보여 준다"
+    v = fa.judge_answer(claim("C1", "inference", q),
+                        ans(expr="{facts.average_gap.difference}", expr_b="{rule.imbalance_gap_threshold}", relation="ge"),
+                        src, [], [], Piece("slot:7.1", "7.1", "5.2", "ai", q + "."))
     assert v.verdict == verdict
 
 
@@ -447,7 +451,7 @@ def test_v14_bound_numbers_are_checked_as_bounds(quote, value, verdict):
 
 # ── 1.5 재확인(민서 결정 2026-10-31) ──────────────────────────────────
 
-R_PIECES = [Piece("slot:8.2", "8.2", "5.1", "ai", "가상 결론. 이 결과로는 목표 수준에 이르렀다고 보기 어렵다."),
+R_PIECES = [Piece("slot:8.2", "8.2", "5.1", "ai", "가상 결론. F1 Score 가 낮다. 이 결과로는 목표 수준에 이르렀다고 보기 어렵다."),
             Piece("slot:7.1", "7.1", "5.2", "ai", "가상 분석. 성능이 낮은 것은 라벨 품질 때문이다."),
             Piece("slot:9:6.1", "9", "6.1", "ai", "가상 권고 칸. 재확인과 상관없는 글이다.")]
 GOAL = Claim("C1", "inference", "목표 수준에 이르렀다고 보기 어렵다", "slot:8.2", "8.2", "5.1", "ai", "", "", "", "", 0)
@@ -474,6 +478,8 @@ async def test_recheck_turns_blocking_inference_into_code_checked_comparison(rel
     v = res.verdicts[0]
     assert v.verdict == verdict and v.detail["recheck"]["first"] == "inference_violation" and res.counts["rechecked"] == 1
     assert len(fake.calls) == 2 and "faithfulness_recheck" in json.dumps(fake.calls[1]["text"], ensure_ascii=False)
+    # 재확인 호출도 기록에 든다 — 장부 비용(core.JudgeRun.cost_usd)이 이 기록을 더한다
+    assert [c["purpose"] for c in res.calls] == ["faithfulness", "faithfulness_recheck"]
 
 
 async def test_recheck_sends_only_pieces_of_rechecked_claims():
@@ -507,7 +513,121 @@ async def test_no_recheck_when_nothing_blocks():
 
 @pytest.mark.parametrize("sentence, reason", [
     ("이 점검은 낮은 성능의 원인을 확정하려는 것이 아니라 후보를 좁힌다.", "scope"),
-    ("이 표는 오류 사례를 다시 보기 위한 것이다.", "normative"),
+    ("임계값을 0.3 으로 둔 것은 거짓 음성을 줄이기 위한 것이다.", None),  # 의도 단정 — '위한 것이다'로 버리지 않는다(1.5 검토)
 ])
 def test_v15_purpose_and_not_intended_endings(sentence, reason):
     assert ex._not_inference(sentence) == reason
+
+
+# ── 1.5 검토 반영 — 문장과 상관없는 대조로 통과시키지 않는다 ─────────
+
+
+@pytest.mark.parametrize("quote, a", [
+    ("이 모델은 현장에 그대로 배포해도 안정적으로 동작한다",
+     ans(expr="{n_samples}", expr_b="{facts.error_totals.misclassified}", relation="gt")),  # 상관없는 참인 비교
+    ("이 모델은 다른 지점에서도 잘 통한다",
+     ans(name_field="client.test_data.학습 데이터와의 관계", named="다른 출처")),  # 칸 값을 베낀 이름
+    ("F1 Score 가 높아 그대로 써도 된다", ans(expr="{metric.M2.value}", expr_b="0.1", relation="gt")),  # 문장에 없는 숫자
+    ("F1 Score 가 높아 그대로 써도 된다", ans(expr="{metric.M2.value}", expr_b="{metric.M2.threshold}", relation="lt")),  # 기준 낱말 없음
+])
+def test_unanchored_remap_is_refused_and_blocks(quote, a):
+    v = judge(claim("C1", "inference", quote), a)
+    assert v.verdict == "inference_violation" and v.detail["remap_refused"] == "unanchored"
+
+
+def test_anchor_context_reaches_two_sentences_back_but_not_three():
+    text = "F1 Score 는 0.61 이다. 가상 문장. 다른 문장. 따라서 판정은 그대로다."
+    piece = Piece("slot:8.2", "8.2", "5.1", "ai", text)
+    c = Claim("C1", "inference", "따라서 판정은 그대로다", piece.id, "8.2", "5.1", "ai", "", "", "", "", 0)
+    assert "F1" not in fa.context_of(c.quote, piece)
+    piece2 = Piece("slot:8.2", "8.2", "5.1", "ai", "F1 Score 는 0.61 이다. 다른 문장. 따라서 판정은 그대로다.")
+    assert "F1 Score" in fa.context_of(c.quote, piece2)
+
+
+def test_anchor_context_includes_the_previous_sentence():
+    piece = Piece("slot:8.2", "8.2", "5.1", "ai", "F1 Score 는 0.61 이다. 따라서 판정은 그대로다.")
+    c = Claim("C1", "inference", "따라서 판정은 그대로다", piece.id, "8.2", "5.1", "ai", "", "", "", "", 0)
+    v = fa.judge_answer(c, ans(expr="{metric.M2.value}", expr_b="0.61", relation="eq"), SOURCES, [], [], piece)
+    assert v.verdict == "match"
+
+
+def test_short_label_anchor_needs_word_boundary():
+    assert fa.field_anchored("per_class.7.f1", "클래스 7 의 F1", SOURCES)
+    assert not fa.field_anchored("per_class.7.f1", "표본 170건", SOURCES)
+
+
+@pytest.mark.parametrize("sentence", ["재현율이 낮은 것은 라벨 오류에서 비롯된다", "성능 저하는 표본 부족에 기인한다",
+                                      "조명 변화가 정확도를 떨어뜨렸다", "오류는 장비 차이에 의한 것이다"])
+def test_more_causal_words_block_remap(sentence):
+    v = judge(claim("C1", "inference", sentence), ans(expr="{metric.M2.value}", expr_b="{metric.M2.threshold}", relation="lt"))
+    assert v.detail["causal"] is True and v.verdict == "inference_violation"
+
+
+@pytest.mark.parametrize("sentence, quote", [
+    ("원인을 확정하려는 것이 아니라 클래스 7 의 낮은 재현율은 라벨 오류에서 비롯된다.", "클래스 7 의 낮은 재현율은 라벨 오류에서 비롯된다"),
+    ("다수 클래스만 맞히는 것은 정확도를 높이려는 것으로 이 모델은 현장에 쓸 수 없다.", "이 모델은 현장에 쓸 수 없다"),
+])
+def test_assertion_after_not_intended_clause_is_kept(sentence, quote):
+    assert ex._not_inference(ex._clause_of(quote, sentence)) is None
+
+
+async def test_recheck_failure_costs_zero_and_is_counted():
+    from app.judge import aggregate
+
+    fake = F.FakeOpenAI([first_pass("C1"), TimeoutError("느림")])
+    res = await fa.judge_faithfulness(fake, R_PIECES, [GOAL], SOURCES, [], [])
+    assert res.verdicts[0].verdict == "inference_violation" and res.counts["recheck_failed"] == 1
+    failed = [c for c in res.calls if c["purpose"] == "faithfulness_recheck"]
+    assert failed and all(c["cost_usd"] == 0.0 and c["cost_unknown"] for c in failed)
+    card = aggregate.scorecard(res, M(counts={"checked": 0, "contradictions": 0, "by_type": {}}, contradictions=[]),
+                               M(counts={"applicable": 0, "described": 0, "not_applicable": 0}, items=[]),
+                               M(counts={"rules": 0, "violations": 0}))["faithfulness"]
+    assert (card["rechecked"], card["recheck_failed"], card["recheck_changed"]) == (1, 1, 0)
+
+
+async def test_recheck_keeps_first_detail_sums_tools_and_uses_short_deadline():
+    t = [100.0]
+    fake = F.FakeOpenAI([first_pass("C1"),
+                         F.response([F.function_call_item("lookup_value", {"field": "metric.M2.threshold"})]),
+                         second("C1", expr="{metric.M2.value}", expr_b="{metric.M2.threshold}", relation="lt")])
+    res = await fa.judge_faithfulness(fake, R_PIECES, [GOAL], SOURCES, [], [], deadline=1000.0, clock=lambda: t[0])
+    v = res.verdicts[0]
+    assert v.verdict == "match" and v.detail["recheck"]["first_detail"]["resolution"] == "resolved"
+    assert res.tool_calls == 1 and res.counts["recheck_changed"] == 1
+    # 재확인 호출의 시간 한도는 지금 + 60초(전체 마감 1000 이 아니라)
+    assert fake.options[-1]["timeout"] <= fa.RECHECK_SECONDS + 1e-6
+
+
+def test_every_field_family_has_an_anchor():
+    # 칸이 근거 표에 없으면 그 칸으로 옮긴 대조는 늘 거부된다 — 맞는 서술이 막힌다(1.5: facts.declared_average 가 빠져 있었다).
+    # 조회 자료의 모든 칸이 근거 낱말을 하나 이상 갖는지 본다(시험용 사실 시트로).
+    from fnmatch import fnmatch
+
+    t = criteria.load_json("remap_anchors.json")
+    fs = {**FS, "class_averages": [{"label": "가중 평균", "precision": 0.5, "recall": 0.5, "f1": 0.6, "support": 400}],
+          "confusion": {"labels": ["7", "8"], "matrix": [[90, 10], [20, 280]]},
+          "facts": {**FS["facts"], "declared_average": {"class_priority": "larger_first", "average": "weighted", "f1": 0.5},
+                    "precision_recall_gap": {"precision": 0.5, "recall": 0.4}, "n_classes": 2, "positive_class": "8"}}
+    src = Sources(fs, [], {"confusion": {"total": 400}}, CLIENT)
+
+    def has_anchor(n):
+        return (any(fnmatch(n, p) for p in t["threshold_fields"]) or n.startswith("rule.") or n.startswith(("metric.", "benchmark."))
+                or any(n.startswith(p) for p in t["label_fields"] + t["pair_fields"]) or n.startswith("class_averages.")
+                or any(fnmatch(n, p) for p, w in t["patterns"].items() if w))
+    missing = sorted(n for n in [*src.numbers, *src.texts] if not has_anchor(n))
+    assert missing == [], missing
+
+
+def test_declared_average_remap_is_anchored_by_priority_words():
+    q = "다수 클래스를 우선하는 관점에서도 판정 결과는 달라지지 않는다"
+    piece = Piece("slot:8.2", "8.2", "5.1", "ai", "그에 맞춘 평균 F1 은 0.5 이다. F1 Score 의 목표에 못 미친다. 따라서 " + q + ".")
+    fs = {**FS, "facts": {**FS["facts"], "declared_average": {"class_priority": "larger_first", "average": "weighted", "f1": 0.5}}}
+    v = fa.judge_answer(Claim("C1", "inference", q, piece.id, "8.2", "5.1", "ai", "", "", "", "", 0),
+                        ans(expr="{facts.declared_average.f1}", expr_b="{metric.M2.threshold}", relation="lt"),
+                        Sources(fs, [], {}, CLIENT), [], [], piece)
+    assert v.verdict == "match"
+
+
+def test_pair_field_is_anchored_by_either_class_name():
+    assert fa.field_anchored("confusion.7>8", "실제 7 을 8 로 본 것이 20건이다", SOURCES)
+    assert not fa.field_anchored("confusion.7>8", "이 모델은 안정적이다", SOURCES)

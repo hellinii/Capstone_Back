@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import asdict, dataclass, field
 
 from app.judge import config, criteria, llm
@@ -311,6 +312,75 @@ def _name(v: ClaimVerdict, ans: dict, sources: Sources) -> None:
     v.verdict = "match" if ok else "violation"
 
 
+CONTEXT_BEFORE = 2
+
+
+def context_of(quote: str, piece: Piece | None) -> str:
+    """주장이 든 문장과 앞 두 문장 — 옮긴 대조의 근거를 찾는 범위('…가중 평균 F1 은 0.514 이다. 이 값도 목표에 못 미친다.
+    따라서 …' — 근거가 두 문장 앞에 있었다, 1.5)."""
+    if piece is None:
+        return quote
+    norm = " ".join(quote.split())
+    sents = [s for s in _SENTENCE.split(piece.text) if s.strip()]
+    for i, s in enumerate(sents):
+        if norm in " ".join(s.split()):
+            return " ".join(sents[max(0, i - CONTEXT_BEFORE): i + 1])
+    return quote
+
+
+def _has_word(context: str, word: str) -> bool:
+    if not word:
+        return False
+    if re.fullmatch(r"[0-9A-Za-z]+", word):  # 짧은 영숫자 이름('3'·'F1')은 낱말 경계로
+        return re.search(rf"(?<![0-9A-Za-z]){re.escape(word)}(?![0-9A-Za-z])", context) is not None
+    return _norm_name(word) in _norm_name(context)
+
+
+def field_anchored(field_name: str, context: str, sources: Sources) -> bool:
+    """옮긴 대조의 칸 하나가 문장 근거를 가졌나(criteria/remap_anchors.json, 1.5 검토 P0)."""
+    from fnmatch import fnmatch
+
+    table = criteria.load_json("remap_anchors.json")
+    if any(fnmatch(field_name, pat) for pat in table["threshold_fields"]):
+        return any(_has_word(context, w) for w in table["threshold_words"])
+    if field_name.startswith("rule."):
+        return any(_has_word(context, w) for w in table["rule_words"])
+    words: list[str] = []
+    m = re.match(r"(?:metric|benchmark)\.([^.]+)\.", field_name)
+    if m:
+        display = sources.texts.get(f"metric.{m.group(1)}.display_name") or m.group(1)
+        words += [display, m.group(1), *[t for t in re.split(r"[\s()]+", display) if len(t) >= 2]]
+    for prefix in table["label_fields"]:
+        if field_name.startswith(prefix):
+            words.append(field_name[len(prefix):].split(".")[0])
+    for prefix in table.get("pair_fields", []):
+        if field_name.startswith(prefix) and ">" in field_name:
+            words += field_name[len(prefix):].split(".")[0].split(">")
+    m = re.match(r"class_averages\.([^.]+)\.", field_name)
+    if m:
+        words += [m.group(1), *[t for t in m.group(1).split() if t != "평균"]]
+    words += [w for pat, ws in table["patterns"].items() if fnmatch(field_name, pat) for w in ws]
+    return any(_has_word(context, w) for w in words)
+
+
+def mapping_anchored(ans: dict, context: str, sources: Sources) -> bool:
+    """옮긴 대조 전체가 문장에 묶였나 — 식의 칸마다 근거, 식에 쓴 숫자는 문장에, 이름은 named 가 문장에."""
+    if _is_comparison(ans):
+        exprs = [ans.get("expr", ""), ans.get("expr_b", "")]
+        fields = [f.strip() for e in exprs for f in _FIELD.findall(e)]
+        literals = [n for e in exprs for n in re.findall(r"\d+(?:\.\d+)?", _FIELD.sub(" ", e))]
+        return (bool(fields) and all(field_anchored(f, context, sources) for f in fields)
+                and all(lit in context for lit in literals))
+    named = _norm_name(ans.get("named", ""))
+    ctx = _norm_name(context)
+    if not named:
+        return False
+    if named in ctx:
+        return True
+    bn = _bigrams(named)
+    return bool(bn) and len(bn & _bigrams(ctx)) / len(bn) >= CLIENT_OVERLAP
+
+
 def is_definition(sentence: str) -> bool:
     """용어 뜻풀이 문장인가 — 뜻풀이 어미(inference_rules.json definition_markers)가 있고, 숫자가 없고, 앞 문장·데이터를 가리키는
     말(definition_not_after — 이는·이 결과는·그래서 등)로 시작하지 않는다('이는 모델이 취약함을 뜻한다'는 해석이다, 1.3)."""
@@ -343,6 +413,11 @@ def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: S
         v.detail["not_claim_refused"] = True
     elif causal and resolution == "resolved" and (_is_comparison(ans) or ans.get("name_field", "").strip()):
         v.detail["remap_refused"] = "causal"
+    elif (resolution == "resolved" and (_is_comparison(ans) or (ans.get("name_field", "").strip() and ans.get("named")))
+          and not mapping_anchored(ans, context_of(claim.quote, piece), sources)):
+        # 문장과 상관없는 대조는 받지 않는다(1.5 검토 P0 — 표본 400 > 오류 40 으로 '배포해도 안정적'을 통과시켰다)
+        v.detail["remap_refused"] = "unanchored"
+        v.detail.update({k: ans.get(k) for k in ("expr", "expr_b", "relation", "name_field", "named")})
     elif resolution == "resolved" and (_is_comparison(ans) or (ans.get("name_field", "").strip() and ans.get("named"))):
         v.detail.update({k: ans.get(k) for k in ("expr", "expr_b", "relation", "name_field", "named")})
         if _is_comparison(ans):
@@ -395,10 +470,15 @@ def _count(verdicts: list[ClaimVerdict]) -> dict:
     }
 
 
+RECHECK_SECONDS = 60.0
+RECHECK_MAX_TURNS = 4
+
+
 async def _ask_agent(client, content: str, ask: list[Claim], instructions: str, purpose: str, sources: Sources,
-                     scope: list[Piece], *, deadline: float | None, kw: dict) -> tuple[dict[str, dict], list[dict], int, str | None]:
+                     scope: list[Piece], *, deadline: float | None, kw: dict,
+                     max_turns: int | None = None) -> tuple[dict[str, dict], list[dict], int, str | None]:
     """에이전트(도구 4개)에게 주장 목록의 대상을 묻는다. (답, 호출 기록, 도구 호출 수, 실패 사유)."""
-    max_turns = int(criteria.load_json("model.json")["faithfulness_max_turns"])
+    max_turns = max_turns or int(criteria.load_json("model.json")["faithfulness_max_turns"])
     convo: list = [{"role": "user", "content": content}]
     schema = llm.json_schema_format(purpose, answer_schema([c.id for c in ask]))
     calls: list[dict] = []
@@ -471,10 +551,17 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
     if targets:
         ask = [c for c in claims if c.id in targets]
         near = [p for p in scope if p.id in {c.piece_id for c in ask}]
+        # 재확인은 짧게(60초·최대 4턴, 1.5 검토 P2) — 뒤 단계 시간을 먹지 않게
+        now = (clock or time.monotonic)()
+        short = now + RECHECK_SECONDS if deadline is None else min(deadline, now + RECHECK_SECONDS)
         again, more_calls, more_tools, failure = await _ask_agent(
             client, f"## 조각\n{render(near)}\n\n## 다시 볼 주장\n{_listing(ask)}", ask,
             criteria.load_text("prompts/faithfulness_recheck.md"), "faithfulness_recheck", sources, scope,
-            deadline=deadline, kw=kw)
+            deadline=short, kw=kw, max_turns=RECHECK_MAX_TURNS)
+        for rec in more_calls:
+            # 응답 없이 실패한 재확인 호출은 비용을 0 으로 두고 표시한다 — 채점 전체 비용이 '모름'이 되지 않게(1.5 검토 P1)
+            if rec.get("cost_usd") is None and rec.get("failure"):
+                rec["cost_usd"], rec["cost_unknown"] = 0.0, True
         calls += more_calls
         tool_calls += more_tools
         by_id = {c.id: c for c in ask}
@@ -489,6 +576,9 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
             verdicts[i] = second
     counts = _count(verdicts)
     counts["rechecked"] = len(targets)
+    counts["recheck_failed"] = len(targets) if targets and failure else 0
+    counts["recheck_changed"] = sum(1 for v in verdicts if v.detail.get("recheck", {}).get("first") and
+                                    v.verdict != v.detail["recheck"]["first"])
     return FaithResult(verdicts, counts, calls, tool_calls)
 
 

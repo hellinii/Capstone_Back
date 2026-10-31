@@ -1,0 +1,197 @@
+{
+  "name": "추론을 데이터 대조로 옮길 때 칸마다 필요한 문장 근거(1.5)",
+  "source": "1.5 독립 검토 P0 — 에이전트가 문장과 상관없는 참인 비교('배포해도 안정적이다' ↔ 표본 400 > 오류 40)나 칸 값을 베낀 이름을 내면 그대로 통과했다. 옮긴 대조의 칸마다 그 문장(과 바로 앞 문장)에 근거 낱말이 있어야 받는다. 없으면 옮기지 않고 어미 판정(막음).",
+  "rule": "식의 칸 {…} 마다 근거가 있어야 한다. 기준선 칸(threshold_fields)은 기준 낱말(threshold_words)이, 판정 기준값 칸(rule.*)은 rule_words 가 있어야 한다. 그 밖의 칸은 patterns 의 낱말, 지표 칸은 그 지표 표시 이름, 클래스 칸(label_fields)은 그 클래스 이름이 있어야 한다. 식에 직접 쓴 숫자는 문장에 그 숫자가 있어야 한다. 이름으로 옮길 때는 named 가 문장에 있어야 한다(두 글자 묶음 60% 이상). 클래스 쌍 칸(pair_fields — 'A>B')은 두 클래스 이름 가운데 하나라도 있으면 된다. 1.5: 성적서 6건의 모든 칸 무리를 표와 대조해 빠진 것을 채웠다(시험 test_every_field_family_has_an_anchor).",
+  "threshold_fields": [
+    "metric.*.threshold",
+    "metric.*.target",
+    "benchmark.*.target",
+    "benchmark.*.ref_low",
+    "benchmark.*.ref_high"
+  ],
+  "threshold_words": [
+    "목표",
+    "기준",
+    "충족",
+    "미달",
+    "미치",
+    "도달",
+    "이르",
+    "넘",
+    "통과"
+  ],
+  "rule_words": [
+    "기준",
+    "크",
+    "작",
+    "차이",
+    "편차",
+    "이상",
+    "미만",
+    "불균형",
+    "표본",
+    "비율"
+  ],
+  "label_fields": [
+    "per_class.",
+    "confusion_counts.",
+    "distribution.class_distribution.",
+    "distribution.class_share.",
+    "facts.prediction_bias.",
+    "facts.low_support_classes."
+  ],
+  "patterns": {
+    "metric.*": [],
+    "class_averages.*": [
+      "평균"
+    ],
+    "facts.average_gap.*": [
+      "평균",
+      "차이"
+    ],
+    "facts.weakest_class.*": [
+      "가장 낮",
+      "가장 약",
+      "가장 작",
+      "최저"
+    ],
+    "facts.error_totals.*": [
+      "오류",
+      "오분류",
+      "틀린"
+    ],
+    "facts.declared_risk_errors.*": [
+      "위험",
+      "오류"
+    ],
+    "facts.verdict_detail.*": [
+      "판정",
+      "합격",
+      "불합격",
+      "충족"
+    ],
+    "distribution.imbalance_ratio": [
+      "불균형"
+    ],
+    "n_samples": [
+      "표본",
+      "샘플"
+    ],
+    "error_ratios.*": [
+      "오류",
+      "경계",
+      "확신"
+    ],
+    "facts.declarations.*": [
+      "의뢰자",
+      "선언",
+      "밝혔",
+      "밝힌"
+    ],
+    "client.*": [
+      "의뢰자",
+      "밝혔",
+      "밝힌",
+      "제공"
+    ],
+    "f1_threshold_gain.*": [
+      "임계값",
+      "F1"
+    ],
+    "confusion.*": [
+      "혼동",
+      "예측",
+      "오분류",
+      "잘못"
+    ],
+    "facts.top_confusion_pairs.*": [
+      "혼동",
+      "잘못",
+      "오분류",
+      "쌍"
+    ],
+    "derived.*": [
+      "합계",
+      "전체",
+      "총"
+    ],
+    "derived_prediction.*": [
+      "임계값",
+      "예측"
+    ],
+    "facts.declared_average.*": [
+      "가중",
+      "마이크로",
+      "우선",
+      "중요도",
+      "의뢰자"
+    ],
+    "facts.distribution_shift*": [
+      "학습",
+      "분포"
+    ],
+    "facts.low_support_classes.*": [
+      "표본",
+      "작은",
+      "적은"
+    ],
+    "facts.n_classes": [
+      "클래스",
+      "레이블"
+    ],
+    "facts.positive_class": [
+      "양성"
+    ],
+    "facts.precision_recall_gap.*": [
+      "Precision",
+      "Recall",
+      "정밀",
+      "재현",
+      "차이"
+    ],
+    "imbalance_effect.*": [
+      "불균형",
+      "다수",
+      "소수",
+      "왜곡"
+    ],
+    "verdict": [
+      "판정",
+      "합격",
+      "불합격"
+    ],
+    "verdict.*": [
+      "판정",
+      "충족",
+      "지표"
+    ],
+    "facts.core_metrics_source": [
+      "핵심",
+      "기본값",
+      "지정"
+    ],
+    "facts.class_share_basis": [
+      "비율",
+      "기준"
+    ],
+    "facts.report_purpose_label": [
+      "목적"
+    ],
+    "latency.*": [
+      "지연",
+      "응답"
+    ],
+    "ci_method_note": [
+      "신뢰구간",
+      "부트스트랩"
+    ],
+    "dropped_rows": [
+      "제외",
+      "행"
+    ]
+  },
+  "pair_fields": [
+    "confusion.",
+    "facts.top_confusion_pairs."
+  ]
+}
