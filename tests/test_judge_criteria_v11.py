@@ -852,3 +852,40 @@ def test_v111_repeated_quote_is_kept_as_many_times_as_it_appears():
 @pytest.mark.parametrize("quote, text, n", [("1건", "1건과 1건, 171건", 2), ("0.984", "0.984 와 0.9841", 1), ("없음", "글", 1)])
 def test_v111_occurrences(quote, text, n):
     assert ex.occurrences(quote, text) == n
+
+
+# ── 1.12(1.11 R-0051 분석 — 권고 문장·기준선 숫자, 위험 방향 지표 칸) ──
+
+
+@pytest.mark.parametrize("item, sentence, reason", [
+    ({"kind": "number", "number_text": "0.970"}, "권고: 매주 Recall 이 목표 0.970 아래로 내려가는지 점검한다.", "recommendation"),
+    ({"kind": "name"}, "권고: 표본을 늘려 다시 확인한다.", "recommendation"),
+    ({"kind": "number", "number_text": "0.1"}, "두 값의 차이는 0.1 미만이다.", "threshold"),
+    ({"kind": "number", "number_text": "95%"}, "Recall 의 95% 신뢰구간은 0.91~0.99 이다.", "threshold"),
+    ({"kind": "number", "number_text": "10%p"}, "비율 차가 10%p 미만이다.", "threshold"),
+    ({"kind": "number", "number_text": "0.352"}, "차이는 0.352 이상이다.", None),  # 기준값이 아닌 숫자는 주장
+    ({"kind": "number", "number_text": "0.1"}, "F1 은 0.1 로 낮다.", None),  # 경계 말이 없으면 주장
+    ({"kind": "number", "number_text": "0.970"}, "Recall 은 목표 0.970 을 충족했다.", None),  # 권고 문장이 아님
+])
+def test_v112_recommendation_and_threshold_numbers_are_not_claims(item, sentence, reason):
+    quote = item.get("number_text") or "표본"
+    assert ex._not_a_claim(item, quote, sentence) == reason
+
+
+def test_v112_filters_are_wired_into_accept():
+    piece = Piece("slot:9:6.2", "9", "6.2", "ai", "권고: 목표 0.970 아래로 내려가는지 점검한다. 차이는 0.1 미만이다. F1 은 0.61 이다.")
+    raw = [{"kind": "number", "quote": q, "piece_id": piece.id, "number_text": q} for q in ("0.970", "0.1", "0.61")]
+    rejected: list[dict] = []
+    got = ex._accept(raw, {piece.id: piece}, {}, [], 0, rejected)
+    assert [c.quote for c in got] == ["0.61"] and [r["reason"] for r in rejected] == ["recommendation", "threshold"]
+
+
+def test_v112_core_metric_fits_declared_risk_via_risk_side_name():
+    fs = {**FS, "f1_threshold_gain": {"risk_side": {"side": "fp", "metric_id": "M2", "display_name": "Precision"}}}
+    src = Sources(fs, [], {}, CLIENT)
+    assert "위험" in src.lookup("f1_threshold_gain.risk_side.display_name")["note"]
+    q = "Precision 이 핵심 지표로 지정된 것은 이 용도와 부합한다"
+    piece = Piece("slot:8.2", "8.2", "5.1", "ai", q + ".")
+    ok = fa.judge_answer(claim("C1", "inference", q), ans(name_field="f1_threshold_gain.risk_side.display_name", named="Precision"),
+                         src, [], [], piece)
+    assert ok.verdict == "match"

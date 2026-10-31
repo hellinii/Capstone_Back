@@ -188,6 +188,14 @@
     "dropped_rows": [
       "제외",
       "행"
+    ],
+    "f1_threshold_gain.risk_side.*": [
+      "위험",
+      "핵심 지표",
+      "놓침",
+      "잘못 잡",
+      "용도",
+      "부합"
     ]
   },
   "pair_fields": [

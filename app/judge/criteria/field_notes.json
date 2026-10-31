@@ -14,6 +14,7 @@
     "rule.imbalance_gap_threshold": "클래스(레이블) 사이 F1 차이가 '크다'고 보는 판정 기준값(0.1 이상이면 큼) — 생성기 규칙 문장과 같은 기준",
     "facts.average_gap.difference": "매크로 평균 F1 과 다른 평균(가중·마이크로) F1 의 차이 — 클래스(레이블)마다 성능이 고르지 않을수록 커진다",
     "facts.declared_average.*": "의뢰자 클래스 중요도 선언에 맞춰 참고로 따로 계산한 평균(average = 그 평균 이름) — 성적서 지표(Precision·Recall·F1)가 쓰는 평균이 아니다",
-    "class_averages.*": "평균 방식별 값(매크로·가중·마이크로·샘플 평균 줄). 성적서 지표가 어떤 평균인지는 지표 값이 어느 줄 값과 같은지로 확인한다"
+    "class_averages.*": "평균 방식별 값(매크로·가중·마이크로·샘플 평균 줄). 성적서 지표가 어떤 평균인지는 지표 값이 어느 줄 값과 같은지로 확인한다",
+    "f1_threshold_gain.risk_side.*": "의뢰자가 더 위험하다고 밝힌 오류 방향(side — fn 놓침·fp 잘못 잡음)과 그 방향을 재는 지표(display_name — fn 이면 Recall, fp 면 Precision). 핵심 지표가 용도·위험 방향과 맞는지 확인할 때 쓴다"
   }
 }

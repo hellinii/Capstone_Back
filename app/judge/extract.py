@@ -19,6 +19,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 
 from app.judge import config, criteria, llm
+from app.judge.criteria.rules_numbers import matches, parse_printed
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import FieldEntry, catalog_text
 
@@ -148,6 +149,24 @@ def occurrences(quote: str, text: str) -> int:
     return max(count, 1)
 
 
+def _not_a_claim(item: dict, quote: str, sentence: str) -> str | None:
+    """종류와 상관없이 주장이 아닌 것(1.12, 검증 추출 분석 — 사람 정답지·민서 판정과 맞춤): 권고 문장('권고: …') 안의 말,
+    판정 기준값 숫자 바로 뒤에 경계 말·'신뢰구간'이 오는 기준선 숫자('0.1 미만'·'95% 신뢰구간')."""
+    if any(sentence.strip().startswith(p) for p in criteria.claim_markers("recommendation_prefix")):
+        return "recommendation"
+    if item.get("kind") == "number":
+        text = str(item.get("number_text") or quote).strip()
+        printed = parse_printed(text)
+        if printed is not None:
+            constants = criteria.load_json("rule_constants.json")["values"].values()
+            at = sentence.find(text)
+            rest = sentence[at + len(text):].lstrip() if at >= 0 else ""
+            if (any(matches(text, c) for c in constants)
+                    and any(rest.startswith(w) for w in criteria.claim_markers("threshold_after"))):
+                return "threshold"
+    return None
+
+
 def _found_text(claims: list[Claim]) -> str:
     return "\n".join(f"- [{c.piece_id}] {c.kind}: {c.quote}" for c in claims) or "(없음)"
 
@@ -168,8 +187,13 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
         if not quote.strip() or _norm(quote) not in _norm(piece.text):
             rejected.append({"round": round_no, "reason": "quote", "piece_id": piece.id, "quote": quote[:200]})
             continue
+        sentence = _sentence_of(quote, piece)
+        reason = _not_a_claim(item, quote, sentence)
+        if reason:
+            rejected.append({"round": round_no, "reason": reason, "piece_id": piece.id, "quote": quote[:200]})
+            continue
         if item["kind"] == "inference":
-            reason = _not_inference(_clause_of(quote, _sentence_of(quote, piece)))
+            reason = _not_inference(_clause_of(quote, sentence))
             if reason:
                 rejected.append({"round": round_no, "reason": reason, "piece_id": piece.id, "quote": quote[:200]})
                 continue
