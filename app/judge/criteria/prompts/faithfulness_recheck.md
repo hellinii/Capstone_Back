@@ -10,7 +10,8 @@
    위험 방향 지표 칸 f1_threshold_gain.risk_side.display_name 의 이름)
    그렇다면 resolution 을 resolved 로 하고 그 대조를 비교(expr·expr_b·relation)나 이름(name_field·named)으로 채운다.
    '크다·작다'는 판정 기준값 칸(rule.*)과 비교한다. 문장이 말하는 방향 그대로 쓴다 — 데이터에 맞춰 방향을 바꾸지 않는다.
-2. 용어 뜻풀이면 resolution 을 not_claim 으로.
+2. 용어 뜻풀이, 또는 평균·지표의 계산 방식에서 늘 성립하는 성질의 풀이('…을 합쳐 계산하므로 …의 영향이 크다')면 resolution 을
+   not_claim 으로(1.21).
 3. 원인·해석·앞날처럼 데이터 칸으로 바로 확인되지 않는 말이면 resolution 을 resolved 로 하고 대조 칸은 비워 둔다.
    억지로 칸 하나에 맞추지 않는다 — 확인되지 않는 단정은 막히는 것이 맞다.
 

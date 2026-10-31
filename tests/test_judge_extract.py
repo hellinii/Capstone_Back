@@ -172,7 +172,7 @@ async def test_first_call_lists_sentences_and_asks_verdict_before_claims():
 
 async def test_fully_judged_first_answer_needs_no_fill():
     fake, res = await run(first(item("0.912")), reply())
-    assert len(fake.calls) == 2 and res.sentence_checks == {"sentences": 3, "gaps": {}, "left": {}}
+    assert len(fake.calls) == 2 and res.sentence_checks == {"sentences": 3, "gaps": {}, "left": {}, "repaired": []}
 
 
 async def test_missing_sentences_are_asked_once_and_only_those():
@@ -294,7 +294,9 @@ def test_scope_without_sentences_has_no_sentence_field():
 def test_extract_prompt_widens_and_narrows_claims():
     text = extract.instructions({})
     assert "n_claims" in text and "맨 지표 이름" in text and "억지로 뽑지 않는다" in text and "적은 수만큼" not in text
-    assert "어떻게 계산되는지만 풀이하는 말은 주장이 아니다" in text
+    assert "평균 방식의 일반 성질만 말하는 말은 주장이 아니다" in text
+    assert "어떤 평균·방식으로 낸 값인지 말하는 것은 이름 주장이다" in text  # 1.21 — 1.18 이 '…는 매크로 평균이다'까지 빼게 했다
+    assert "끝말도 바꾸지 않는다" in text and "운영 주기·횟수" in text
     for word in ("명사를 꾸미는 말", "'~중 ~개'", "확인 대상은 계산값만이 아니다", "의뢰자가 적은 값(용도, 운영 방식, 데이터 출처", "지시어 그대로",
                  "이것이 보류의 사유이다", "같은 구절을 비교로 또 뽑지 않는다", "분야 일반론", "먼저 claims 에 주장을 모두 적는다",
                  "none_reason 에 '빠뜨림'"):
@@ -314,3 +316,27 @@ def test_fill_prompt_names_every_reask_reason_and_does_not_push():
     text = extract.criteria.load_text("prompts/extract_fill.md")
     for word in ("판정이 빠졌거나", "하나도 들어가지 않았거나", "'빠뜨림'", "까닭이 비어", "억지로 뽑지 않는다", "{by_sentence}"):
         assert word in text, word
+
+
+
+# ── 1.21 끝말만 바꾼 인용 되살리기 ──────────────────────────────────────
+
+
+@pytest.mark.parametrize("quote, text, want", [
+    ("세 매장 모두 하한선을 밑돌지 않는다", "세 매장 모두 하한선을 밑돌지 않으므로 괜찮다.", "세 매장 모두 하한선을 밑돌지 않"),
+    ("0.913", "Recall 은 0.912 이다.", None),  # 짧은 숫자는 되살리지 않는다(6자 미만)
+    ("전혀 다른 문장이다", "Recall 은 0.912 이다.", None),
+    ("Recall 은 0.912", "Recall 은 0.912 이다.", "Recall 은 0.912"),  # 그대로 있으면 그대로
+    ("Recall 은 0.9123456", "Recall 은 0.912 이다.", None),  # 앞부분이 75% 에 못 미침
+])
+def test_repair_quote(quote, text, want):
+    assert extract.repair_quote(quote, text) == want
+
+
+async def test_repaired_quote_is_kept_and_recorded():
+    pieces = [Piece("slot:7.1", "7.1", "5.2", "ai", "세 매장 모두 하한선을 밑돌지 않으므로 괜찮다.")]
+    bad = item("세 매장 모두 하한선을 밑돌지 않는다", kind="comparison", field="", number_text="")
+    fake = F.FakeOpenAI([first(bad, pieces=pieces, sentences=[{"sid": "s1", "n_claims": 1, "none_reason": ""}]), reply()])
+    res = await extract.extract_claims(fake, pieces, CATALOG)
+    assert [c.quote for c in res.claims] == ["세 매장 모두 하한선을 밑돌지 않"] and res.rejected == []
+    assert res.sentence_checks["repaired"][0]["from"] == "세 매장 모두 하한선을 밑돌지 않는다"

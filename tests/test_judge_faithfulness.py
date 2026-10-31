@@ -85,7 +85,7 @@ async def test_agent_tool_loop_then_code_judges_its_answer():
     ]})
     fake, res = await run(claims, F.response([F.reasoning_item(), F.function_call_item("lookup_value", {"field": "confusion_counts.1.fn"}, "call_1")]),
                           final)
-    assert len(fake.calls) == 2 and res.tool_calls == 1
+    assert len(fake.calls) == 2 and res.tool_calls == 1 and res.counts["rechecked"] == 0  # 정도 위반은 재확인하지 않는다(1.21)
     # 도구 결과(값·출처)가 다음 턴에 되돌아갔다
     out = json.loads(fake.calls[1]["input"][-1]["output"])
     assert out == {"field": "confusion_counts.1.fn", "value": 43, "source": "성적서 데이터"}

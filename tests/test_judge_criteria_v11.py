@@ -496,9 +496,19 @@ async def test_recheck_without_mapping_keeps_the_block():
 
 
 async def test_recheck_failure_keeps_first_verdict_without_failing_the_module():
-    _, res = await run_recheck([GOAL], first_pass("C1"), F.response([F.message_item("x", refusal=True)]))
-    assert res.failure is None and res.verdicts[0].verdict == "inference_violation"
+    # 1.21: 실패하면 한 번 더 묻고, 그래도 실패하면 첫 판정(막음) 그대로
+    refuse = F.response([F.message_item("x", refusal=True)])
+    fake, res = await run_recheck([GOAL], first_pass("C1"), refuse, F.response([F.message_item("x", refusal=True)]))
+    assert res.failure is None and res.verdicts[0].verdict == "inference_violation" and len(fake.calls) == 3
     assert res.verdicts[0].detail["recheck"] == {"failure": "refusal"}
+
+
+async def test_recheck_is_retried_once_after_a_failure():
+    # 1.21(V2 1.20 R-0060 — 재확인이 4턴 안에 답을 못 내 맞는 문장이 막혔다): 실패 뒤 한 번 더 물어 대조를 받으면 코드가 판정
+    retry = F.json_response({"claims": [{"claim_id": "C1", **ans(expr="{metric.M2.value}", expr_b="{metric.M2.threshold}",
+                                                                 relation="lt")}]})
+    fake, res = await run_recheck([GOAL], first_pass("C1"), F.response([F.message_item("x", refusal=True)]), retry)
+    assert len(fake.calls) == 3 and res.verdicts[0].verdict == "match" and res.counts["recheck_retried"] == 1
 
 
 async def test_causal_sentence_is_not_rechecked():
@@ -1048,3 +1058,141 @@ def test_v119_field_label_reaches_client_match_through_judge():
     v = fa.judge_answer(claim("C1", "name", q), ans(name_field="client.training_data.편향 감소 노력", named=q), src, [], [],
                         Piece(PIECE.id, PIECE.slot, PIECE.place, PIECE.source, q + "에서 학습했다."))
     assert v.verdict == "match"
+
+
+# ── 1.21(V2 1.20 R-0060 — 가능성 절·계산 방식 풀이·클래스 문장의 정도 표현·재확인 넓힘, 마지막 기회) ─────────
+
+
+def _judge_in(c, a, text, src=SOURCES, metrics=()):
+    return fa.judge_answer(c, a, src, list(metrics), [], Piece(PIECE.id, PIECE.slot, PIECE.place, PIECE.source, text))
+
+
+@pytest.mark.parametrize("text, quote, want", [
+    ("한 주문에 상품이 여럿일 수 있어 비율을 모두 더하면 전체를 넘을 수 있다.", "비율을 모두 더하면 전체를 넘을 수 있다", "unverifiable"),
+    ("비율을 모두 더하면 전체를 넘는다.", "비율을 모두 더하면 전체를 넘는다", "violation"),  # 단정이면 그대로 위반
+])
+def test_v121_possibility_clause_is_not_refuted_by_one_value(text, quote, want):
+    a = ans(expr="{n_samples}", expr_b="{n_samples}", relation="gt")  # 400 > 400 아님
+    assert _judge_in(claim("C1", "comparison", quote), a, text).verdict == want
+
+
+def test_v121_denied_possibility_is_still_an_assertion():
+    # '가능성은 낮다'는 단정 — 틀리면 막혀야 한다(판정 여유 문장)
+    a = ans(expr="{n_samples}", expr_b="{n_samples}", relation="gt")
+    text = "표본 수가 기준을 넘을 가능성은 낮다."
+    assert _judge_in(claim("C1", "comparison", "표본 수가 기준을 넘을 가능성은 낮다"), a, text).verdict == "violation"
+
+
+def test_v121_possibility_does_not_hide_a_true_match():
+    a = ans(expr="{n_samples}", expr_b="1", relation="gt")
+    text = "표본 수는 1 보다 클 수 있다."
+    assert _judge_in(claim("C1", "comparison", "표본 수는 1 보다 클 수 있다"), a, text).verdict == "match"
+
+
+@pytest.mark.parametrize("sentence, want", [
+    ("가중 평균은 모든 매장의 주문을 합쳐 계산하므로 주문이 많은 매장의 영향이 크다.", True),
+    ("단순 평균은 매장마다 같은 무게로 평균하므로 작은 매장의 몫도 같다.", True),
+    ("이 결과는 매장별 값을 합쳐 계산하므로 0.71 이 나왔다.", False),  # 숫자가 있으면 이 데이터에 대한 말
+    ("이는 모든 매장을 합쳐 계산하므로 큰 매장의 영향이 크다는 뜻이다.", False),  # 앞 말을 가리키며 시작 — 해석
+])
+def test_v121_method_explanation_counts_as_definition(sentence, want):
+    assert fa.is_definition(sentence) is want
+    assert fa.is_definition(sentence, "주문이 많은 매장의 영향이 크다") is want
+
+
+def test_v121_method_explanation_inference_is_not_blocked():
+    text = "가중 평균은 모든 매장의 주문을 합쳐 계산하므로 주문이 많은 매장의 영향이 크다."
+    v = _judge_in(claim("C1", "inference", "주문이 많은 매장의 영향이 크다"), ans(inference_basis="data"), text)
+    assert v.verdict == "not_claim"
+
+
+@pytest.mark.parametrize("text, want", [
+    ("가장 약한 클래스는 F1 0.05 인 클래스 7 이며, 평균보다 0.1 이상 낮아 운영 위험으로 다룬다.", "target_unclear"),
+    ("전체 성능은 운영 위험이 크다.", "violation"),  # 클래스를 말하지 않으면 판정 지표로 — 핵심 지표가 목표를 넘었는데 '위험'
+    ("전체 성능은 운영 위험이 크며 클래스 7 만 예외이다.", "violation"),  # 클래스가 뒤에 곁들여 나와도 첫 절이 전체를 말하면 그대로
+])
+def test_v121_degree_in_a_class_sentence_is_not_judged_against_core_metrics(text, want):
+    m = M(metric_id="M2", display_name="F1 Score", value=0.9, threshold=0.8, status="pass", is_core=True, near_target=False)
+    c = Claim("C1", "degree", "운영 위험", PIECE.id, PIECE.slot, PIECE.place, PIECE.source, "", "", "", "negative", 0)
+    assert _judge_in(c, ans(metric_id=""), text, metrics=[m]).verdict == want
+
+
+def test_v121_planted_degree_flip_still_blocks():
+    # 결함 D01 꼴(목표 미달인데 '양호') — 가능성 낱말도 클래스 이름도 없으니 1.21 규칙에 걸리지 않고 위반
+    m = M(metric_id="M1", display_name="Accuracy", value=0.5, threshold=0.9, status="fail", is_core=True, near_target=False)
+    c = Claim("C1", "degree", "양호한 수준", PIECE.id, PIECE.slot, PIECE.place, PIECE.source, "", "", "", "positive", 0)
+    assert _judge_in(c, ans(metric_id="M1"), "Accuracy 는 0.5 로 양호한 수준이다.", metrics=[m]).verdict == "violation"
+
+
+@pytest.mark.parametrize("label, text, want", [
+    ("7", "클래스 7 의 F1 은 0.05 이다", True), ("7", "F1 은 0.07 이다", False), ("7", "클래스 77 이다", False),
+    ("Class1", "Class14 는 13건이다", False), ("Class1", "Class1 은 13건이다", True),
+])
+def test_v121_class_mention_boundaries(label, text, want):
+    assert fa._mentions_label(label, text) is want
+
+
+# 재확인은 넓히지 않는다(1.21-dev 에서 넓혔다가 독립 검토 P0 로 되돌림) — 이름·비교·정도 위반은 그대로 막는다
+NAME_PIECE = [Piece("slot:7.1", "7.1", "5.2", "ai", "가상 분석. 의뢰자가 밝힌 사용 방식은 배치 방식이다.")]
+NAME_CLAIM = Claim("C1", "name", "사용 방식은 배치 방식", "slot:7.1", "7.1", "5.2", "ai", "", "", "", "", 0)
+MISREAD = dict(name_field="facts.declarations.usage_mode", named="배치 방식")  # 실제 realtime — 진짜 틀림
+
+
+async def _run_name(*replies, pieces=NAME_PIECE, c=NAME_CLAIM):
+    fake = F.FakeOpenAI(list(replies))
+    return fake, await fa.judge_faithfulness(fake, pieces, [c], SOURCES, [], [])
+
+
+async def test_v121_fact_violations_are_not_rechecked():
+    fake, res = await _run_name(second("C1", **MISREAD))
+    assert len(fake.calls) == 1 and res.verdicts[0].verdict == "violation" and res.counts["rechecked"] == 0
+
+
+@pytest.mark.parametrize("text, quote, polarity, want", [
+    # 독립 검토 P1 — 흔한 단정 어미 '할 수 있다·쓸 수 있는'은 가능성이 아니다(결함 '양호'가 빠져나가지 않게)
+    ("F1 Score 는 0.61 로 양호한 수준이라 할 수 있다.", "양호한 수준", "positive", "violation"),
+    ("운영에 쓸 수 있는 양호한 수준이다.", "양호한 수준", "positive", "violation"),
+])
+def test_v121_assertive_su_itda_is_not_possibility(text, quote, polarity, want):
+    m = M(metric_id="M2", display_name="F1 Score", value=0.61, threshold=0.8, status="fail", is_core=True, near_target=False)
+    c = Claim("C1", "degree", quote, PIECE.id, PIECE.slot, PIECE.place, PIECE.source, "", "", "", polarity, 0)
+    assert _judge_in(c, ans(metric_id="M2"), text, metrics=[m]).verdict == want
+
+
+def test_v121_class_first_clause_does_not_exempt_a_whole_performance_judgement():
+    # 독립 검토 P1 — '가장 약한 클래스는 … 클래스 7 이며, 전체 성능은 … 미흡하다'의 '미흡'은 전체 판단 — 판정 지표로 대조
+    m = M(metric_id="M2", display_name="F1 Score", value=0.9, threshold=0.8, status="pass", is_core=True, near_target=False)
+    c = Claim("C1", "degree", "미흡하다", PIECE.id, PIECE.slot, PIECE.place, PIECE.source, "", "", "", "negative", 0)
+    text = "가장 약한 클래스는 F1 0.05 인 클래스 7 이며, 전체 성능은 운영에 쓰기에 미흡하다."
+    assert _judge_in(c, ans(metric_id=""), text, metrics=[m]).verdict == "violation"
+
+
+def test_v121_method_marker_does_not_hide_a_model_claim():
+    # 독립 검토 — '…합쳐 계산하므로 이 모델은 운영에서도 안정적으로 동작한다'는 계산 방식 풀이가 아니라 단정형 추론
+    text = "가중 평균은 모든 매장의 주문을 합쳐 계산하므로 이 모델은 운영에서도 안정적으로 동작한다."
+    v = _judge_in(claim("C1", "inference", "이 모델은 운영에서도 안정적으로 동작한다"), ans(inference_basis="data"), text)
+    assert v.verdict == "inference_violation"
+
+
+async def test_v121_recheck_has_room_for_more_tool_turns():
+    # R-0060 C119: 재확인이 도구를 여러 번 부르다 4턴에서 끊겼다 — 5턴 도구 뒤 답해도 받는다
+    tool = lambda i: F.response([F.reasoning_item(), F.function_call_item("lookup_value", {"field": "n_samples"}, f"call_{i}")])  # noqa: E731
+    final = second("C1", expr="{metric.M2.value}", expr_b="{metric.M2.threshold}", relation="lt")
+    fake, res = await run_recheck([GOAL], first_pass("C1"), *[tool(i) for i in range(5)], final)
+    assert len(fake.calls) == 7 and res.verdicts[0].verdict == "match" and res.counts["recheck_retried"] == 0
+
+
+
+@pytest.mark.parametrize("text, quote, polarity, metric_id, want", [
+    # 클래스 문장에서 첫 답이 핵심 지표를 집어도, 절이 그 지표 이름을 말하지 않으면 대조하지 않는다(R-0060 C138 꼴)
+    ("가장 약한 클래스는 F1 0.05 인 클래스 7 이며, 평균보다 0.1 이상 낮아 운영 위험으로 다룬다.", "운영 위험", "negative", "M2", "target_unclear"),
+    # 절이 지표 이름을 말하면 그대로 대조 — 결함 꼴('클래스 7 이며, F1 Score 는 … 양호하다')이 빠져나가지 않게
+    ("가장 약한 클래스는 클래스 7 이며, F1 Score 는 0.61 로 양호하다.", "양호하다", "positive", "M2", "violation"),
+    ("가장 약한 클래스는 클래스 7 이며, 핵심 지표도 양호하다.", "양호하다", "positive", "M2", "violation"),  # '지표'는 전체 낱말
+])
+def test_v121_class_sentence_with_a_chosen_metric(text, quote, polarity, metric_id, want):
+    m = M(metric_id="M2", display_name="F1 Score", value=0.61, threshold=0.8, status="fail", is_core=True, near_target=False)
+    if polarity == "negative":
+        m = M(metric_id="M2", display_name="F1 Score", value=0.9, threshold=0.8, status="pass", is_core=True, near_target=False)
+    c = Claim("C1", "degree", quote, PIECE.id, PIECE.slot, PIECE.place, PIECE.source, "", "", "", polarity, 0)
+    assert _judge_in(c, ans(metric_id=metric_id), text, metrics=[m]).verdict == want

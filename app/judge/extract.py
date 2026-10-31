@@ -296,8 +296,30 @@ def by_sentence(sents: list[Sentence], claims: list[Claim], only: set[str] | Non
     return "\n".join(lines) or "(없음)"
 
 
+REPAIR_MIN_SHARE = 0.75
+REPAIR_MIN_CHARS = 6
+
+
+def repair_quote(quote: str, text: str) -> str | None:
+    """인용이 조각 글에 글자 그대로 없을 때, 끝말만 바꿔 옮긴 것이면('…않으므로' → '…않는다') 글에 있는 앞부분으로 되살린다(1.21,
+    V2 1.20 R-0060: 끝말을 바꾼 인용 4개를 버렸다). 앞부분이 인용의 75% 이상·6자 이상이어야 한다. 못 살리면 None."""
+    q, t = _norm(quote), _norm(text)
+    if not q:
+        return None
+    if q in t:
+        return quote
+    floor = max(REPAIR_MIN_CHARS, -(-len(q) * 3 // 4))
+    for k in range(len(q) - 1, floor - 1, -1):
+        head = q[:k].rstrip()
+        if re.search(r"\d", q[len(head):]):
+            break  # 잘려 나갈 끝에 숫자가 있으면 되살리지 않는다 — 숫자를 바꾸는 셈이다('0.9123' → '0.912')
+        if len(head) >= floor and head in t:
+            return head
+    return None
+
+
 def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry], have: list[Claim], round_no: int,
-            rejected: list[dict]) -> list[Claim]:
+            rejected: list[dict], repaired: list[dict] | None = None) -> list[Claim]:
     seen = Counter((c.piece_id, _norm(c.quote), c.kind) for c in have)
     new: list[Claim] = []
     for item in raw:
@@ -309,9 +331,14 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
         if piece is None:
             rejected.append({"round": round_no, "reason": "piece", "piece_id": item.get("piece_id"), "quote": quote[:200]})
             continue
-        if not quote.strip() or _norm(quote) not in _norm(piece.text):
+        fixed = repair_quote(quote, piece.text)
+        if fixed is None:
             rejected.append({"round": round_no, "reason": "quote", "piece_id": piece.id, "quote": quote[:200]})
             continue
+        if fixed != quote:
+            if repaired is not None:
+                repaired.append({"round": round_no, "piece_id": piece.id, "from": quote[:200], "to": fixed})
+            quote = fixed
         sentence = _sentence_of(quote, piece)
         reason = _not_a_claim(item, quote, sentence)
         if reason:
@@ -371,7 +398,7 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
     rejected: list[dict] = []
     calls: list[dict] = []
     rounds: list[int] = []
-    checks: dict = {"sentences": len(sents), "gaps": {}, "left": {}}
+    checks: dict = {"sentences": len(sents), "gaps": {}, "left": {}, "repaired": []}
     stopped = False
     kw = {"clock": clock} if clock else {}
 
@@ -397,7 +424,7 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
                 "prompts/extract_self_check.md").format(by_sentence=by_sentence(sents, claims)), None)
         if failure:
             return result(failure)
-        new = _accept(data.get("claims") or [], by_id, catalog, claims, round_no, rejected)
+        new = _accept(data.get("claims") or [], by_id, catalog, claims, round_no, rejected, checks["repaired"])
         claims.extend(new)
         if round_no == 0:
             # 문장마다 판정 — 빠진 문장만, 한 번만 다시 묻는다(1.17). 채운 주장도 0번 시점이다.
@@ -415,7 +442,7 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
                     checks["fill_failure"] = failure  # 채우기는 덤 — 실패해도 첫 추출은 살린다(검토 P1)
                 else:
                     filled = _accept(fill_items(data.get("claims") or [], sents, set(gaps), rejected),
-                                     by_id, catalog, claims, 0, rejected)
+                                     by_id, catalog, claims, 0, rejected, checks["repaired"])
                     claims.extend(filled)
                     checks["filled"] = len(filled)
                     checks["left"] = sentence_gaps(asked, data.get("sentences") or [], claims, rejected)

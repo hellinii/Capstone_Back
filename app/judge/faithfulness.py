@@ -27,7 +27,7 @@ from app.judge.criteria.rules_calc import CalcError, calculate
 from app.judge.criteria.rules_degree import degree_verdict
 from app.judge.criteria.rules_numbers import (COUNT_UNITS, NAME_BEFORE_NUMBER, all_quantities, bound_after, bound_holds,
                                               first_quantity, fraction_value, matches, parse_printed)
-from app.judge.extract import Claim
+from app.judge.extract import _CLAUSE_BREAK, Claim, _clause_of
 from app.judge.reading import Piece, for_module, render
 from app.judge.sources import Sources
 
@@ -337,9 +337,61 @@ def judge_answer(claim: Claim, ans: dict | None, sources: Sources, metrics, refs
     elif claim.kind == "name":
         _name(v, ans, sources)
     elif claim.kind == "degree":
-        result = degree_verdict(claim.polarity, ans.get("metric_id", "").strip(), claim.quote, metrics, refs)
+        metric_id = ans.get("metric_id", "").strip()
+        sentence, clause = sentence_of(claim.quote, piece), _clause(claim.quote, piece)
+        whole = any(w in clause for w in criteria.claim_markers("scope_whole_words"))
+        class_scope = not whole and (names_a_class(clause, sources) or names_a_class(_first_clause(sentence), sources))
+        # 지표를 골랐어도 그 절이 그 지표 이름을 말하지 않으면 클래스 이야기다(검토 — 첫 답이 핵심 지표를 집으면 재확인 없이 막혔다).
+        # 절이 지표 이름을 말하면('F1 Score 는 … 양호하다') 그대로 대조한다 — 결함이 빠져나가지 않게.
+        if class_scope and (not metric_id or not _metric_named(metric_id, clause, metrics)):
+            # 지표를 집지 않은 정도 표현이 특정 클래스를 말하는 절에 있거나, 문장의 첫 절(주어 쪽)이 클래스를 말한다('가장 약한 레이블은
+            # … Class9 이며, … 운영 위험으로 다룬다') — 판정 지표 전체로
+            # 보지 않는다(1.21, V2 1.20 R-0060). 클래스 하나의 좋고 나쁨은 판정 지표와 대볼 수 없다.
+            v.verdict = "target_unclear"
+            v.detail["class_scope"] = True
+            return v
+        result = degree_verdict(claim.polarity, metric_id, claim.quote, metrics, refs)
         v.verdict = {"ok": "match", "violation": "violation", "target_unclear": "target_unclear"}[result]
+    if v.verdict == "violation" and claim.kind in ("comparison", "degree", "name") and is_possibility(_clause(claim.quote, piece)):
+        # 가능성을 말하는 절('…넘을 수 있다')은 값 하나로 반박할 수 없다 — 검증 불가(1.21, V2 1.20 R-0060)
+        v.verdict = "unverifiable"
+        v.detail["possibility"] = True
     return v
+
+
+def _clause(quote: str, piece: Piece | None) -> str:
+    """주장이 걸친 절(extract._clause_of — 쉼표·연결 어미로 나눈 범위). 조각이 없으면 인용 그대로."""
+    return _clause_of(quote, sentence_of(quote, piece)) if piece else quote
+
+
+def _metric_named(metric_id: str, text: str, metrics) -> bool:
+    m = next((m for m in metrics if m.metric_id == metric_id), None)
+    name = "".join(str(getattr(m, "display_name", "") or "").split()) if m else ""
+    return bool(name) and name in "".join(text.split())
+
+
+def _first_clause(sentence: str) -> str:
+    """문장의 첫 절(extract._CLAUSE_BREAK 첫 경계까지). '전체 성능은 우수하며 클래스 7 만 낮다'의 첫 절은 '전체 성능은 우수하며'."""
+    m = _CLAUSE_BREAK.search(sentence)
+    return sentence[: m.start()] if m else sentence
+
+
+def is_possibility(clause: str) -> bool:
+    return any(m in clause for m in criteria.claim_markers("possibility_markers"))
+
+
+def _mentions_label(label: str, text: str) -> bool:
+    """클래스 이름이 글에 지목돼 있나. 숫자 이름('3')은 '클래스 3'·'레이블 3' 꼴로만(다른 숫자 안의 3 을 세지 않게), 그 밖은 앞뒤가
+    글자·숫자가 아닌 자리에서만('Class1' 이 'Class14' 안에서 잡히지 않게)."""
+    if not label:
+        return False
+    if label.isdigit():
+        return re.search(rf"(클래스|레이블)\s*{re.escape(label)}(?!\d)", text) is not None
+    return re.search(rf"(?<![0-9A-Za-z가-힣]){re.escape(label)}(?![0-9A-Za-z])", text) is not None
+
+
+def names_a_class(text: str, sources: Sources) -> bool:
+    return any(_mentions_label(lab, text) for lab in class_labels(sources))
 
 
 def _is_comparison(ans: dict) -> bool:
@@ -457,13 +509,20 @@ def mapping_anchored(ans: dict, context: str, sources: Sources) -> bool:
     return bool(bn) and len(bn & _bigrams(ctx)) / len(bn) >= CLIENT_OVERLAP
 
 
-def is_definition(sentence: str) -> bool:
+def is_definition(sentence: str, clause: str | None = None) -> bool:
     """용어 뜻풀이 문장인가 — 뜻풀이 어미(inference_rules.json definition_markers)가 있고, 숫자가 없고, 앞 문장·데이터를 가리키는
     말(definition_not_after — 이는·이 결과는·그래서 등)로 시작하지 않는다('이는 모델이 취약함을 뜻한다'는 해석이다, 1.3)."""
     head = sentence.strip()
     if any(head.startswith(w) for w in criteria.claim_markers("definition_not_after")):
         return False
-    return any(m in sentence for m in criteria.claim_markers("definition_markers")) and not re.search(r"\d", sentence)
+    if re.search(r"\d", sentence):
+        return False
+    if any(m in sentence for m in criteria.claim_markers("definition_markers")):
+        return True
+    # 계산 방식 풀이(1.21) — 주장이 든 절이 모델·운영·성능 전체를 말하면 풀이가 아니라 해석이다(독립 검토)
+    method = any(m in sentence for m in criteria.claim_markers("method_markers"))
+    part = clause if clause is not None else sentence
+    return method and not any(w in part for w in [*criteria.claim_markers("scope_whole_words"), "운영"])
 
 
 def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: Sources, piece: Piece | None) -> ClaimVerdict:
@@ -483,7 +542,7 @@ def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: S
     v.detail = {"marked": marked, "basis": ans.get("inference_basis", ""), "resolution": resolution or "", "causal": causal}
     if resolution == "not_claim":
         # 코드가 확인한다(1.1 검토): 뜻풀이 어미가 있고 숫자·인과 낱말이 없을 때만. 아니면 어미 판정으로.
-        if is_definition(sentence) and not causal:
+        if is_definition(sentence, _clause_of(claim.quote, sentence)) and not causal:
             v.verdict = "not_claim"
             return v
         v.detail["not_claim_refused"] = True
@@ -504,7 +563,7 @@ def _judge_inference(v: ClaimVerdict, claim: Claim, ans: dict | None, sources: S
             _name(v, ans, sources)
         if v.verdict in ("match", "violation"):
             return v
-    if not marked and not causal and is_definition(sentence) and not v.detail.get("not_claim_refused"):
+    if not marked and not causal and is_definition(sentence, _clause_of(claim.quote, sentence)) and not v.detail.get("not_claim_refused"):
         # 뜻풀이 문장은 에이전트 답과 상관없이 코드가 주장이 아님으로 정한다 — 같은 문장에 회차마다 답이 갈렸다(1.3, V2 1.2 2회차:
         # 1회차는 not_claim, 2회차는 ③). 에이전트가 데이터 대조로 옮겨 판정이 났으면 위에서 이미 돌아갔다.
         v.verdict = "not_claim"
@@ -547,7 +606,9 @@ def _count(verdicts: list[ClaimVerdict]) -> dict:
 
 
 RECHECK_SECONDS = 60.0
-RECHECK_MAX_TURNS = 4
+# 1.21: 4 → 8(V2 1.20 R-0060 — 재확인이 도구를 6번 부르고 4턴 안에 답을 못 내 막혔다). 60초 한도는 그대로.
+RECHECK_MAX_TURNS = 8
+RECHECK_RETRY_MIN_SECONDS = 20.0  # 재확인이 실패하면 남은 시간이 이만큼 있을 때 한 번 더 묻는다(1.21)
 
 
 async def _ask_agent(client, content: str, ask: list[Claim], instructions: str, purpose: str, sources: Sources,
@@ -592,8 +653,10 @@ def _listing(claims: list[Claim]) -> str:
 
 
 def recheck_targets(verdicts: list[ClaimVerdict]) -> list[str]:
-    """재확인할 주장 — 발급을 막는 단정형 추론 가운데 인과 문장이 아닌 것(1.5, 인과 문장은 데이터 대조로 옮기지 않는다)과,
-    같은 문장의 다른 숫자를 대조한 숫자 위반(misaimed, 1.6)."""
+    """재확인할 주장 — 발급을 막는 단정형 추론 가운데 인과 문장이 아닌 것(1.5, 인과 문장은 데이터 대조로 옮기지 않는다),
+    같은 문장의 다른 숫자를 대조한 숫자 위반(misaimed, 1.6). 이름·비교·정도 위반은 재확인하지 않는다 — 1.21-dev 에서 넓혔다가
+    독립 검토 P0 로 되돌림: 재확인 답이 지표를 비우면('성능 전체') 결함 'F1 은 0.399 로 양호'가 풀렸고, 비교·이름은 문장 근거 확인 없이
+    다른 칸으로 맞춰졌다."""
     return [v.claim_id for v in verdicts
             if (v.verdict == "inference_violation" and not v.detail.get("causal"))
             or (v.verdict == "violation" and v.kind == "number" and v.detail.get("misaimed"))]
@@ -629,16 +692,30 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
     # 추론만 그 조각과 함께 다시 묻는다. 같은 문장에 회차마다 답이 갈렸다(V2 1.1~1.4). 다시 물어 데이터 대조를 받으면 코드가
     # 맞다·틀리다를 정하고, 대조를 못 받으면 그대로 막는다. 재확인 호출이 실패하면 첫 판정(막음)을 그대로 둔다.
     targets = recheck_targets(verdicts)
+    retried = 0
     if targets:
         ask = [c for c in claims if c.id in targets]
         near = [p for p in scope if p.id in {c.piece_id for c in ask}]
         # 재확인은 짧게(60초·최대 4턴, 1.5 검토 P2) — 뒤 단계 시간을 먹지 않게
-        now = (clock or time.monotonic)()
+        clock_fn = clock or time.monotonic
+        now = clock_fn()
         short = now + RECHECK_SECONDS if deadline is None else min(deadline, now + RECHECK_SECONDS)
         again, more_calls, more_tools, failure = await _ask_agent(
             client, f"## 조각\n{render(near)}\n\n## 다시 볼 주장\n{_listing(ask)}", ask,
             criteria.load_text("prompts/faithfulness_recheck.md"), "faithfulness_recheck", sources, scope,
             deadline=short, kw=kw, max_turns=RECHECK_MAX_TURNS)
+        left = None if deadline is None else deadline - clock_fn()
+        if failure and (left is None or left >= RECHECK_RETRY_MIN_SECONDS):
+            # 한 번 더(1.21) — 일시 실패·턴 다 씀으로 맞는 문장이 막히지 않게. 그래도 실패하면 첫 판정(막음)을 그대로 둔다.
+            now = clock_fn()
+            short = now + RECHECK_SECONDS if deadline is None else min(deadline, now + RECHECK_SECONDS)
+            again, retry_calls, retry_tools, failure = await _ask_agent(
+                client, f"## 조각\n{render(near)}\n\n## 다시 볼 주장\n{_listing(ask)}", ask,
+                criteria.load_text("prompts/faithfulness_recheck.md"), "faithfulness_recheck", sources, scope,
+                deadline=short, kw=kw, max_turns=RECHECK_MAX_TURNS)
+            more_calls += retry_calls
+            more_tools += retry_tools
+            retried = 1
         for rec in more_calls:
             # 응답 없이 실패한 재확인 호출은 비용을 0 으로 두고 표시한다 — 채점 전체 비용이 '모름'이 되지 않게(1.5 검토 P1)
             if rec.get("cost_usd") is None and rec.get("failure"):
@@ -657,6 +734,7 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
             verdicts[i] = second
     counts = _count(verdicts)
     counts["rechecked"] = len(targets)
+    counts["recheck_retried"] = retried  # 재확인이 한 번 실패해 다시 물었나(1.21)
     counts["recheck_failed"] = len(targets) if targets and failure else 0
     counts["recheck_changed"] = sum(1 for v in verdicts if v.detail.get("recheck", {}).get("first") and
                                     v.verdict != v.detail["recheck"]["first"])
