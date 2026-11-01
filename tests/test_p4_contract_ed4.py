@@ -60,13 +60,14 @@ EXAMPLES = {
 # S6 뒤 사용자 결정 4·5(2026-10-24)로 대조 표를 고침: count 규칙과 줄(정수 건수 천 단위 쉼표), class_name·name_count 규칙과
 # class_name_cases·name_count_cases(이름(설명)·이름[설명]·숫자로 끝나는 이름 '{이름}: {n}건'), josa_cases 에 '이름[설명]' 일곱 줄.
 # 같은 결정 4 로 멀티 예시만 프론트에서 다시 떠 옮김 — 고정 문구 17(facts.fixed_sentences)의 '틀린 레이블 칸 2,687개'. 이진·다중 그대로.
+# 심판 라운드 J2(2026-10-29)로 예시 셋을 다시 떠 옮김 — 판 4 요청 맨 끝에 심판 읽기 재료(judge_material). 그 앞 바이트 그대로.
 SHA256 = {
     "fact_sheet_contract_ed4.json": "f8516766cef76c0d504e21e78eb6cafe4edd6f1e6e7bedf373527d4477a80776",
     "number_wording_ed4.json": "e138b9152a8305b59276baecdd438c4fbb5f3bb612c937d3cd7b628414d2b5fb",
     "narrative_slots_ed4.json": "3c43ffa35357c8c7f4c8a30d182482a85dec51caefa872dc9e556ae51d5b7d35",
-    EXAMPLE: "0f7da6dfc88870aec7cb18c3a02204319df8487b4a9e058c344ade8dc0d63f69",
-    "fact_sheet_multiclass_ed4.json": "68277d563888fdc1fdb1f4c50a0cd373d264394026c0ede9e1c421bc91ef96a5",
-    "fact_sheet_multilabel_ed4.json": "9c3a3d73ed30839d403ba4971a25b0052754baa84bc5e888aa49dc022caf53d5",
+    EXAMPLE: "cf9e0bf6d2822197ed4327ae49e618bd7d471728a77f7e6a5c99af32156248df",
+    "fact_sheet_multiclass_ed4.json": "b02df6a786b55f4d3ced5ebdb1ed4689afffdb47a6c9638c628755ab9535f010",
+    "fact_sheet_multilabel_ed4.json": "44d0d30f674ec140f5136a16b322eaafee3b4208ccc0423a6080278f451855c0",
 }
 
 
@@ -194,8 +195,10 @@ def test_example_differs_from_edition3_bc_strong_only_at_declared_places():
     diff = _diff_paths(ed3, EX)
     assert diff
     # 목록 길이가 달라진 자리(problems·fixed_sentences)는 그 아래 칸이 선언돼 있으면 선언된 것으로 본다.
-    stray = sorted(p for p in diff if p not in declared and not any(d.startswith(f"{p}[]") or d == p for d in declared))
+    stray = sorted(p for p in diff if p not in declared and not any(d.startswith(f"{p}[]") or d == p for d in declared)
+                   and not _judge_material(p))
     assert stray == []
+    assert "judge_material" in diff  # 심판 읽기 재료(심판 라운드 J2)는 판 4 요청에만
     # 판 4 키는 모두 판 3 에 없던 자리라 diff 에 나온다.
     assert set(ED4_ONLY) <= diff
     # 판 3 와 같은 값으로 남아야 하는 칸 몇 개 — 판 4 가 건드리면 안 된다.
@@ -205,6 +208,11 @@ def test_example_differs_from_edition3_bc_strong_only_at_declared_places():
 
 def _issued_edition3(tag: str) -> dict:
     return json.loads((TESTS / "data" / "edition3_issued" / "requests" / f"{tag}.request.json").read_text(encoding="utf-8"))
+
+
+def _judge_material(path: str) -> bool:
+    """심판 읽기 재료(심판 라운드 J2) — 판 4 요청에만 있는 한 묶음. 안 모양은 judge_material_ed4.json 계약·app.judge.material 이 본다."""
+    return path == "judge_material" or path.startswith("judge_material.") or path.startswith("judge_material[")
 
 
 @pytest.mark.parametrize("name", list(EXAMPLES))
@@ -218,8 +226,9 @@ def test_every_example_differs_from_its_edition3_request_only_at_declared_places
     def declared_here(p: str) -> bool:
         return any(p == d or p.startswith(f"{d}.") or p.startswith(f"{d}[]") or d.startswith(f"{p}[]") for d in declared)
 
-    stray = sorted(p for p in diff if not declared_here(p))
+    stray = sorted(p for p in diff if not declared_here(p) and not _judge_material(p))
     assert stray == []
+    assert "judge_material" in diff
     for path in ("fact_sheet.metrics[].value_text", "fact_sheet.metrics[].ci_low", "fact_sheet.score", "client_inputs"):
         assert not any(d == path or d.startswith(f"{path}.") for d in diff), path
 

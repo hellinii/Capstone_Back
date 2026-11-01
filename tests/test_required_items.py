@@ -29,10 +29,11 @@ def _ids(req: NarrativeRequest) -> list[str]:
 
 # ── 표 ─────────────────────────────────────────────────────────────────────────
 
-def test_table_has_the_41_rows_of_section_5():
-    assert len(REQUIRED_ITEMS) == 41
+def test_table_has_the_42_rows_of_section_5():
+    # 서술 설계 v0.14 — 8.2 평가 데이터의 대표성과 한계를 더해 41 → 42.
+    assert len(REQUIRED_ITEMS) == 42
     assert Counter(i.section for i in REQUIRED_ITEMS) == {
-        "7.1": 12, "7.2": 4, "7.3": 1, "8.1": 3, "8.2": 13, "8.3": 5, "9": 3,
+        "7.1": 12, "7.2": 4, "7.3": 1, "8.1": 3, "8.2": 14, "8.3": 5, "9": 3,
     }
     assert [i.section for i in REQUIRED_ITEMS] == sorted((i.section for i in REQUIRED_ITEMS), key=SECTION_IDS.index)
     assert {i.author for i in REQUIRED_ITEMS} == {"ai", "ai_fact", "fixed_interpret", "fixed", "form"}
@@ -44,6 +45,10 @@ def test_plan_decisions_on_authors():
     assert (by_id["7.1-11"].author, by_id["8.3-02"].author) == ("fixed_interpret", "fixed_interpret")
     assert (by_id["8.2-10"].author, by_id["8.2-12"].author) == ("form", "form")
     assert (by_id["8.2-13"].author, by_id["8.3-01"].author) == ("ai_fact", "ai_fact")
+    # 평가 데이터의 대표성과 한계 = AI 해석(템플릿은 사실 문장만), 모델 용도 바로 뒤(5절 표 순서)
+    assert by_id["8.2-14"].author == "ai_fact" and by_id["8.2-14"].task_types == {"binary", "multiclass", "multilabel"}
+    ids = [i.id for i in REQUIRED_ITEMS]
+    assert ids.index("8.2-14") == ids.index("8.2-13") + 1
     # D24 확인은 세 항목뿐
     assert {i.id for i in REQUIRED_ITEMS if i.d24 is not None} == {"7.1-03", "8.2-11", "8.3-05"}
 
@@ -63,7 +68,8 @@ EXPECTED = {
         "7.1-01", "7.1-04", "7.1-06", "7.1-08", "7.1-10", "7.1-11",
         "7.2-01", "7.2-02", "7.2-03", "7.3-01",
         "8.1-01", "8.1-02",
-        "8.2-01", "8.2-02", "8.2-03", "8.2-04", "8.2-10", "8.2-11",
+        # 8.2-07(평균 방식 차이)은 M22 를 고르지 않은 이 예시에도 나온다(D17, v0.14 — 클래스별 표는 늘 계산한다).
+        "8.2-01", "8.2-02", "8.2-03", "8.2-04", "8.2-07", "8.2-10", "8.2-11",
         "8.3-01",
         "9-01", "9-02",
     ],
@@ -71,7 +77,7 @@ EXPECTED = {
         "7.1-01", "7.1-05", "7.1-09", "7.1-10", "7.1-11",
         "7.2-01", "7.2-02", "7.3-01",
         "8.1-01", "8.1-02", "8.1-03",
-        "8.2-01", "8.2-02", "8.2-03", "8.2-04", "8.2-09", "8.2-11",
+        "8.2-01", "8.2-02", "8.2-03", "8.2-04", "8.2-08", "8.2-09", "8.2-11",
         "8.3-01",
         "9-01", "9-02",
     ],
@@ -151,7 +157,8 @@ def test_d24_items_switch_off_for_similar_equal_batch_or_unknown():
     assert "8.3-05" not in _select(no_latency)
 
 
-def test_average_gap_needs_m22_but_weakest_class_does_not():
+def test_average_gap_and_weakest_class_do_not_need_m22():
+    # 서술 설계 D17·D39(v0.14) — 평균 방식 차이도 최약 클래스처럼 지표 선택(M22)과 무관하다(클래스별 표는 늘 계산한다).
     gap = {
         "kind": "macro_vs_weighted", "macro_f1": 0.5, "other_f1": 0.6, "difference": 0.1, "difference_text": "0.1",
         "reference_class": {"label": "a", "support": 50, "f1": 0.7},
@@ -162,9 +169,11 @@ def test_average_gap_needs_m22_but_weakest_class_does_not():
     }
     without = _fs(facts=NarrativeFactsFact(selected_metrics=["M1"], average_gap=gap, weakest_class=weak))
     picked = _select(without, "multiclass")
-    assert "8.2-07" not in picked and "7.1-10" in picked and "8.3-01" in picked
+    assert "8.2-07" in picked and "7.1-10" in picked and "8.3-01" in picked
     with_m22 = _fs(facts=NarrativeFactsFact(selected_metrics=["M1", "M22"], average_gap=gap, weakest_class=weak))
-    assert "8.2-07" in _select(with_m22, "multiclass")
+    assert _select(with_m22, "multiclass")["8.2-07"] == picked["8.2-07"]
+    # 반대 갈래 — 값이 없으면(정답 클래스 둘 미만 등 프론트가 싣지 않음) M22 를 골라도 쓰지 않는다.
+    assert "8.2-07" not in _select(_fs(facts=NarrativeFactsFact(selected_metrics=["M22"], weakest_class=weak)), "multiclass")
 
 
 def test_precision_recall_needs_m2_and_m3():

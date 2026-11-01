@@ -1,0 +1,42 @@
+"""app/judge/bundle.py — 고객용 심판 묶음(계획 14-2, 계약 tests/contract/judge_bundle_ed4.json).
+
+판 4 서술 작업 결과의 `judge` 칸을 만든다. 실을 축은 여기 한 곳(PUBLISHED_AXES)이 정한다 — 검증(7.7)에서 축을 빼면 이 값만
+바꾼다. 근거 인용·사유·주장 내용·재생성 횟수·토큰·비용·시간·기준 지문은 싣지 않는다(계약 never_in_bundle).
+
+상호작용
+- 의존(import): app.judge.config·criteria
+- 사용처: app.narrative.jobs(판 4 갈래), tests
+"""
+from __future__ import annotations
+
+from app.judge import config, criteria
+
+# 필수 내용(coverage)은 뺐다 — V2 결함 검사에서 D03(권고 하나의 근거 문장 삭제)을 못 잡았다: 항목 '권고-1(각 권고의 근거)'을 항목
+# 하나로 보아 다른 권고의 근거로 '서술됨'이라 했다. 검증 README 미리 정한 기준 9("필수 내용·표기 축만 미달이면 그 축만 빼고 켠다"),
+# 민서 2026-11-01. 필수 내용 점검은 내부 기록으로만 계속 돌고(검증·분석용) 발급을 막지 않는다(core·safety 도 이 목록을 본다).
+PUBLISHED_AXES = ("faithfulness", "consistency", "readability")
+
+
+def _head(gate: str, held_kind: str | None, retry_allowed: bool) -> dict:
+    return {"gate": gate, "held_kind": held_kind, "retry_allowed": retry_allowed,
+            "criteria_version": criteria.version(), "model": config.judge_model(), "axes": list(PUBLISHED_AXES)}
+
+
+def held(kind: str, *, retry_allowed: bool) -> dict:
+    return {**_head("held", kind, retry_allowed), "counts": None}
+
+
+def _axis_counts(axis: str, s: dict) -> dict:
+    if axis == "faithfulness":
+        return {"checked": s["checked"], "matched": s["matched"]}
+    if axis == "consistency":
+        return {"checked": s["checked"], "contradictions": s["contradictions"]}
+    if axis == "coverage":
+        return {"applicable": s["applicable"], "described": s["described"], "not_applicable": s["not_applicable"],
+                "items": [{"id": i["id"], "described": i["described"], "place": i["place"]} for i in s["items"]]}
+    return {"rules": s["rules"], "violations": s["violations"]}
+
+
+def passed(scorecard: dict) -> dict:
+    """싣는 축만 읽는다 — 뺀 축은 점수표에 없어도(내부 점검 실패) 묶음이 만들어진다."""
+    return {**_head("passed", None, False), "counts": {a: _axis_counts(a, scorecard[a]) for a in PUBLISHED_AXES}}

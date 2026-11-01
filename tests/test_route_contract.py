@@ -151,5 +151,6 @@ def test_narrative_job_response_fields():
     }
     assert _fields("NarrativeJobResult") == {
         "interpretation", "conclusion", "recommendation_narrative", "recommendations", "section_sources",
-        "section_models",
+        "section_models", "judge",  # judge — 판 4 작업만(심판 라운드 J5b). 판 3 결과에는 키가 없다
     }
+    assert _fields("JudgeBundle") == {"gate", "held_kind", "retry_allowed", "criteria_version", "model", "axes", "counts"}

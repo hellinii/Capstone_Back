@@ -248,7 +248,9 @@ def spies(monkeypatch):
 
 async def _run(raw: dict, factory, client) -> tuple[dict, list]:
     tasks = BackgroundTasks()
-    created = await jobs.create_job(raw, client=client, session_factory=factory, background_tasks=tasks)
+    # 판 4 심판 자리 — judge_passes 가 judge_once 를 통과로 바꿔 끼워 이 자리 표시는 부르지 않는다(키 없음 보류 방지, J5b).
+    created = await jobs.create_job(raw, client=client, session_factory=factory, background_tasks=tasks,
+                                    judge_client=object())
     for task in tasks.tasks:
         await task.func(*task.args, **task.kwargs)
     return created.model_dump(mode="json"), client.beta.messages.create.call_args_list if client is not None else []
@@ -363,3 +365,7 @@ def test_legacy_route_answers_edition4_request_as_edition3():
     assert ed4.status_code == ed3.status_code == 200
     a, b = ed4.json(), ed3.json()
     assert a["benchmark_refs"] and a == b
+
+
+# 판 4 작업은 심판 키가 없으면 서술 AI 를 부르지 않는다(심판 라운드 J5b, 정3) — 생성 경로를 보려고 심판 자리를 통과로 채운다.
+pytestmark = pytest.mark.usefixtures("judge_passes")

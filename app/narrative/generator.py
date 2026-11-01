@@ -23,7 +23,8 @@
 상호작용
 - 의존(import): app.narrative.llm·prompt·checks·fallback·required_items·sections·grounding·derived·baselines,
   app.core.concurrency(narrative_slot·run_cpu_bound)
-- 사용처: app.narrative.jobs(run_job·작업 행 상한), tests
+- 사용처: app.narrative.jobs(run_job·작업 행 상한), app.judge.ladder(심판 재생성·규칙 문장 — GenerationSession 의
+  judge_regenerate·to_template, 칸 id 만 넘긴다), tests
 """
 from __future__ import annotations
 
@@ -63,6 +64,9 @@ MIN_CALL_SECONDS = 30.0
 RETRYABLE = frozenset({"api_error", "timeout", "invalid_json", "rate_limited"})
 
 GENERATOR_VERSION = "sections-1"
+
+# '다시' 지시문을 쓰는 호출 목적 — 칸 다시 만들기와 심판 재생성(심판 라운드 J5a). 기록 목적 이름만 다르다.
+REGENERATE_PURPOSES = frozenset({"regenerate", "judge_regenerate"})
 
 
 def job_effort() -> str:
@@ -185,107 +189,130 @@ def _rec_dicts(parts: dict) -> dict:
     return {**parts, "recommendations": [r.model_dump() if isinstance(r, RecommendationOut) else r for r in recs]}
 
 
-async def generate_sections(
-    client,
-    req: NarrativeRequest,
-    *,
-    forced_reason: str | None = None,
-    deadline_seconds: float | None = None,
-    slot_wait: float | None = None,
-    call_timeout: float | None = None,
-    effort: str | None = None,
-    on_stage=_no_stage,
-    trace_into: dict | None = None,
-) -> GenerationResult:
-    """칸별 사다리로 서술을 만든다. 호출 실패는 칸 템플릿으로 끝내고, 예기치 않은 오류는 호출부가 받는다.
+class GenerationSession:
+    """서술 생성 한 번의 상태(칸 상태·사실 재료·내부 기록)와 단계.
 
-    trace_into 를 주면 내부 기록을 그 dict 에 바로 쓴다 — 바깥 제한(작업 전체 10분)이 도중에 끊어도 그때까지의 호출
-    기록이 남는다(요청은 이미 나가 과금됐을 수 있다)."""
-    started = time.perf_counter()
-    deadline_at = started + deadline_seconds if deadline_seconds is not None else None
-    fs = req.fact_sheet
-    edition = req.report_edition
-    derived, refs, whitelist, conclusions, ctx, exempt, masks = await run_cpu_bound(_prepare, req)
-    effort = effort or job_effort()
-    problem_ids = [p.id for p in fs.problems]
-    labels = checks.numeric_labels(fs)  # 9칸 기대 효과에서 '클래스 2' 를 예측 수치로 보지 않게
-    # 8.1 이 성적서 고정 문구 16 뿐이면 AI 에 맡기지 않는다 — 쓸 것이 16 의 되풀이뿐이라 빈 글이 맞다.
-    benchmark_fixed = benchmark_printed_only(fs, refs, conclusions)
-    states = {sid: SectionState(sid) for sid in SECTION_IDS}
-    trace: dict = trace_into if trace_into is not None else {}
-    trace.update({
-        "generator": GENERATOR_VERSION,
-        "effort": effort,
-        "calls": [],
-        "sections": {},
-        "rate_limited": 0,
-        "prompt_trimmed": ctx.trimmed,
-        "client_keys_dropped": ctx.dropped_client_keys,
-    })
-    if ctx.dropped_client_keys:
-        logger.warning("서술 고객 입력의 모르는 묶음을 AI 에 보내지 않음(D34): %s", ctx.dropped_client_keys)
+    `run()` 이 지금까지의 생성 사다리(첫 생성 → 다시 부르기·다시 만들기 → 최종본 재검사)를 돈다. 상태를 객체에 두는 것은
+    심판(판 4)이 생성이 끝난 뒤 같은 재료로 걸린 칸만 다시 만들거나 규칙 문장으로 바꿀 수 있게 하려는 것이다(심판 라운드
+    J1 ③, 계획 13-1). 판 3·판 4 출력은 이 손질 전과 바이트까지 같다(얼린 정답·판 4 정답 시험).
 
-    def template(sid: str, reason: str) -> None:
-        st = states[sid]
+    시간 기준(`started`)은 객체를 만든 때가 아니라 `run()` 을 시작한 때다 — 손질 전 함수와 같게.
+    """
+
+    def __init__(
+        self,
+        client,
+        req: NarrativeRequest,
+        *,
+        deadline_seconds: float | None = None,
+        slot_wait: float | None = None,
+        call_timeout: float | None = None,
+        effort: str | None = None,
+        on_stage=_no_stage,
+        trace_into: dict | None = None,
+    ):
+        self.client = client
+        self.req = req
+        self.fs = req.fact_sheet
+        self.edition = req.report_edition
+        self.deadline_seconds = deadline_seconds
+        self.slot_wait = slot_wait
+        self.call_timeout = call_timeout
+        self.effort_arg = effort
+        self.on_stage = on_stage
+        self.trace: dict = trace_into if trace_into is not None else {}
+        self.states: dict[str, SectionState] = {}
+        self.started = 0.0
+        self.deadline_at: float | None = None
+        self.result: GenerationResult | None = None
+
+    # ── 준비 ─────────────────────────────────────────────────────────────
+
+    async def _setup(self) -> None:
+        self.started = time.perf_counter()
+        self.deadline_at = self.started + self.deadline_seconds if self.deadline_seconds is not None else None
+        fs = self.fs
+        (self.derived, self.refs, self.whitelist, self.conclusions, self.ctx, self.exempt,
+         self.masks) = await run_cpu_bound(_prepare, self.req)
+        self.effort = self.effort_arg or job_effort()
+        self.problem_ids = [p.id for p in fs.problems]
+        self.labels = checks.numeric_labels(fs)  # 9칸 기대 효과에서 '클래스 2' 를 예측 수치로 보지 않게
+        # 8.1 이 성적서 고정 문구 16 뿐이면 AI 에 맡기지 않는다 — 쓸 것이 16 의 되풀이뿐이라 빈 글이 맞다.
+        self.benchmark_fixed = benchmark_printed_only(fs, self.refs, self.conclusions)
+        self.states = {sid: SectionState(sid) for sid in SECTION_IDS}
+        trace = self.trace
+        trace.update({
+            "generator": GENERATOR_VERSION,
+            "effort": self.effort,
+            "calls": [],
+            "sections": {},
+            "rate_limited": 0,
+            "prompt_trimmed": self.ctx.trimmed,
+            "client_keys_dropped": self.ctx.dropped_client_keys,
+        })
+        if self.ctx.dropped_client_keys:
+            logger.warning("서술 고객 입력의 모르는 묶음을 AI 에 보내지 않음(D34): %s", self.ctx.dropped_client_keys)
+
+        # 문제가 0개면 9칸은 코드가 정한 문장 — 9장을 부르지 않는다(화-1).
+        if not fs.problems:
+            self.template("9", "no_problems")
+            self.states["9"].outcome = "fixed"
+            trace["chapter_9_skipped"] = True
+        # 8.1 이 고정 문구 16 뿐이면 8장 호출에서 8.1 을 뺀다(8.2·8.3 은 늘 있다 — 8장 호출은 남는다).
+        if self.benchmark_fixed:
+            self.template("8.1", "no_benchmark")
+            self.states["8.1"].outcome = "fixed"
+            trace["section_8_1_fixed"] = True
+
+    # ── 칸 상태 바꾸기 ────────────────────────────────────────────────────
+
+    def template(self, sid: str, reason: str) -> None:
+        fs = self.fs
+        st = self.states[sid]
         st.parts = fallback.section_template(
-            sid, fs, refs, derived, task_type=req.task_type.value, client_inputs=req.client_inputs, conclusions=conclusions,
-            edition=edition,
+            sid, fs, self.refs, self.derived, task_type=self.req.task_type.value, client_inputs=self.req.client_inputs,
+            conclusions=self.conclusions, edition=self.edition,
         )
-        if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems) or (sid == "8.1" and benchmark_fixed):
+        if SECTIONS_BY_ID[sid].fixed_without_ai or (sid == "9" and not fs.problems) or (sid == "8.1" and self.benchmark_fixed):
             st.source, st.outcome = "fixed", "fixed"  # 7.3 을 검문으로 뺐으면 호출부가 dropped 로 덮는다
         else:
             st.source, st.outcome = "fallback", "template"
         st.reason = reason
 
-    # 문제가 0개면 9칸은 코드가 정한 문장 — 9장을 부르지 않는다(화-1).
-    if not fs.problems:
-        template("9", "no_problems")
-        states["9"].outcome = "fixed"
-        trace["chapter_9_skipped"] = True
-    # 8.1 이 고정 문구 16 뿐이면 8장 호출에서 8.1 을 뺀다(8.2·8.3 은 늘 있다 — 8장 호출은 남는다).
-    if benchmark_fixed:
-        template("8.1", "no_benchmark")
-        states["8.1"].outcome = "fixed"
-        trace["section_8_1_fixed"] = True
-
-    def finish(reason: str | None) -> GenerationResult:
-        for sid, st in states.items():
+    def finish(self, reason: str | None) -> GenerationResult:
+        for sid, st in self.states.items():
             if st.parts is None:
-                template(sid, reason or "not_generated")
-        return _result(fs, states, trace, reason, started, derived=derived, refs=refs)
+                self.template(sid, reason or "not_generated")
+        self.result = _result(self.fs, self.states, self.trace, reason, self.started, derived=self.derived, refs=self.refs)
+        return self.result
 
-    if forced_reason is not None:
-        return finish(forced_reason)
-    if client is None:
-        return finish("no_key")
-    if not prompt.fits(ctx):
-        logger.warning("서술 지시문이 상한(%d자)을 넘음 — 덜어 내도 넘어 규칙 문장(input_too_large)", prompt.MAX_PROMPT_CHARS)
-        return finish("input_too_large")
-
-    async def stage(name: str) -> None:
+    async def stage(self, name: str) -> None:
         # 단계가 같아도 매번 알린다 — 작업 행의 마지막 갱신 시각이 유실 판정(jobs.is_lost)의 기준이라, 슬롯 대기·차례
         # 호출이 길어질 때마다 갱신해야 멈춘 작업으로 오인되지 않는다.
-        await on_stage(name)
+        await self.on_stage(name)
 
-    async def call(section_ids: tuple[str, ...], purpose: str):
+    def _left(self) -> float | None:
+        return None if self.deadline_at is None else self.deadline_at - time.perf_counter()
+
+    async def call(self, section_ids: tuple[str, ...], purpose: str):
         """한 번 부른다. (LLMResult 또는 None, 실패 사유) — 슬롯 대기·남은 시간·호출 제한을 여기서 본다."""
+        trace, states = self.trace, self.states
         entry: dict = {"purpose": purpose, "sections": list(section_ids), "http": False}
         trace["calls"].append(entry)
-        def left() -> float | None:
-            return None if deadline_at is None else deadline_at - time.perf_counter()
 
-        remaining = left()
+        remaining = self._left()
         if remaining is not None and remaining < MIN_CALL_SECONDS:
             entry["failure"] = "deadline"
             return None, "deadline"
         # 슬롯 대기도 남은 시간 안에서 — 호출할 시간(MIN_CALL_SECONDS)을 남긴다(S5 검토 ladder-1).
-        wait_cap = slot_wait
+        wait_cap = self.slot_wait
         if remaining is not None:
             room = remaining - MIN_CALL_SECONDS
-            wait_cap = room if slot_wait is None else min(slot_wait, room)
-        user = prompt.build_user_message(ctx, section_ids, regenerate=purpose == "regenerate")
-        schema = prompt.response_schema(section_ids, problem_ids)
-        system = prompt.system_prompt(edition)
+            wait_cap = room if self.slot_wait is None else min(self.slot_wait, room)
+        # 심판 재생성(judge_regenerate)도 생성 단계 다시 만들기와 같은 지시문이다 — 심판 사유를 넣을 자리가 없다(계획 13-3).
+        user = prompt.build_user_message(self.ctx, section_ids, regenerate=purpose in REGENERATE_PURPOSES)
+        schema = prompt.response_schema(section_ids, self.problem_ids)
+        system = prompt.system_prompt(self.edition)
         entry["prompt_chars"] = len(system) + len(user)
         waited_from = time.perf_counter()
         slot = {"held": False}
@@ -297,22 +324,23 @@ async def generate_sections(
                 entry["slot_wait_seconds"] = round(time.perf_counter() - waited_from, 3)
                 # 슬롯을 기다린 만큼 남은 시간이 줄었다 — 호출 제한을 지금 남은 시간으로 정한다. 모자라면 부르지 않는다
                 # (요청이 나가지 않아 과금 없음). 그러지 않으면 작업 전체 제한을 넘겨 다 만든 칸까지 잃는다.
-                remaining = left()
+                remaining = self._left()
                 if remaining is not None and remaining < MIN_CALL_SECONDS:
                     entry["failure"] = "deadline"
                     return None, "deadline"
+                call_timeout = self.call_timeout
                 limit = call_timeout if remaining is None else (
                     remaining if call_timeout is None else min(call_timeout, remaining)
                 )
                 # 첫 장 호출은 '생성 중', 장 재시도·칸 다시 만들기는 '다시 만드는 중'(S5 검토 jobs-3).
-                await stage("generating" if purpose == "chapter" else "regenerating")
+                await self.stage("generating" if purpose == "chapter" else "regenerating")
                 for sid in section_ids:
                     states[sid].http_calls += 1
                 entry["http"] = True  # 요청이 나간다 — 끊겨도 과금됐을 수 있다(비용 모름)
-                entry["started_at_seconds"] = round(time.perf_counter() - started, 3)
+                entry["started_at_seconds"] = round(time.perf_counter() - self.started, 3)
                 async with asyncio.timeout(limit):
                     result = await call_narrative_llm(
-                        client, system=system, user=user, schema=schema, effort=effort,
+                        self.client, system=system, user=user, schema=schema, effort=self.effort,
                     )
         except TimeoutError:
             failure = "timeout" if slot["held"] else "busy"
@@ -325,15 +353,16 @@ async def generate_sections(
                 trace["rate_limited"] += 1
         return result, result.failure
 
-    def accept(sid: str, parts: dict, *, last_chance: bool, model: str | None) -> bool:
+    def accept(self, sid: str, parts: dict, *, last_chance: bool, model: str | None) -> bool:
         """검사해서 받으면 True. 걸리면 False(호출부가 다시 만들기·템플릿을 정한다). last_chance 면 늘 끝을 낸다.
 
         model 은 이 글을 낸 호출의 응답 모델 — 글을 실으면 칸 모델로 남긴다(section_models)."""
-        st = states[sid]
+        fs, edition, trace = self.fs, self.edition, self.trace
+        st = self.states[sid]
         aligned = _align(parts, fs.problems, fill_missing=False, edition=edition)[0] if sid == "9" else parts
         result = checks.check_section(
-            sid, _rec_dicts(aligned), whitelist=whitelist, verdict=fs.verdict, conclusions=conclusions,
-            problem_ids=problem_ids, exempt=exempt, masks=masks, labels=labels, edition=edition,
+            sid, _rec_dicts(aligned), whitelist=self.whitelist, verdict=fs.verdict, conclusions=self.conclusions,
+            problem_ids=self.problem_ids, exempt=self.exempt, masks=self.masks, labels=self.labels, edition=edition,
         )
         st.checks.append(result.as_record())
         hard = result.hard_failures
@@ -341,12 +370,12 @@ async def generate_sections(
             raw = parts.get("interpretation.additional_observations", "")
             trace.setdefault("additional_observations_raw", []).append(raw)
             if hard:
-                template(sid, "check:" + ",".join(hard))
+                self.template(sid, "check:" + ",".join(hard))
                 st.outcome = "dropped"  # 다시 만들지 않는다 — 성적서는 고정 문구 15(D38)
             elif raw:
                 st.parts, st.source, st.outcome, st.model = parts, "llm", "first", model
             else:
-                template(sid, "no_observation")
+                self.template(sid, "no_observation")
             return True
         if not last_chance and not hard and result.d24_missing:
             st.kept = ("d24", aligned, model)
@@ -364,15 +393,15 @@ async def generate_sections(
             st.d24_missing = result.d24_missing
             return True
         if last_chance:
-            rescue(sid, "check:" + ",".join(hard or ["d24_missing"]))
+            self.rescue(sid, "check:" + ",".join(hard or ["d24_missing"]))
             return True
         return False
 
-    def rescue(sid: str, reason: str) -> None:
+    def rescue(self, sid: str, reason: str) -> None:
         """다시 만들기가 실패했거나 또 걸렸다. 첫 글을 둬 뒀으면 그것을, 아니면 그 칸의 규칙 템플릿을 싣는다."""
-        st = states[sid]
+        st = self.states[sid]
         if st.kept is None:
-            template(sid, reason)
+            self.template(sid, reason)
             return
         kind, parts, model = st.kept
         st.checks.append({"kept_first": reason})
@@ -381,81 +410,210 @@ async def generate_sections(
             st.parts, st.source, st.outcome, st.d24_missing, st.reason = parts, "llm", "kept_first", True, None
             st.model = model
         else:
-            filled_parts, filled = _align(parts, fs.problems, fill_missing=True, edition=edition)
+            filled_parts, filled = _align(parts, self.fs.problems, fill_missing=True, edition=self.edition)
             st.parts, st.source, st.outcome, st.reason = filled_parts, "fallback", "filled", "missing_recommendation"
-            trace["recommendations_from_template"] = filled
+            self.trace["recommendations_from_template"] = filled
 
-    async def run_batch(jobs: list[tuple[tuple[str, ...], str]]):
+    async def run_batch(self, jobs: list[tuple[tuple[str, ...], str]]):
         """호출 묶음 — 동시에 부르고, 429 로 끝난 것은 차례로 한 번 더(나머지 재시도는 동시에)."""
-        results = await asyncio.gather(*(call(ids, purpose) for ids, purpose in jobs))
+        results = await asyncio.gather(*(self.call(ids, purpose) for ids, purpose in jobs))
         return list(zip(jobs, results))
 
-    # 1. 첫 생성 — 장별 동시.
-    chapter_8 = tuple(sid for sid in CHAPTERS["8"] if not (sid == "8.1" and benchmark_fixed))
-    chapters = [CHAPTERS["7"], chapter_8] + ([CHAPTERS["9"]] if fs.problems else [])
-    first = await run_batch([(ids, "chapter") for ids in chapters])
-    await stage("checking")
+    # ── 생성 사다리 ──────────────────────────────────────────────────────
 
-    retries: list[tuple[str, ...]] = []
-    sequential: list[tuple[str, ...]] = []
-    regenerate: list[str] = []
-    for (ids, _), (result, failure) in first:
-        if failure is None:
+    async def run(self, *, forced_reason: str | None = None) -> GenerationResult:
+        """칸별 사다리로 서술을 만든다. 호출 실패는 칸 템플릿으로 끝내고, 예기치 않은 오류는 호출부가 받는다."""
+        await self._setup()
+        fs, states, trace = self.fs, self.states, self.trace
+
+        if forced_reason is not None:
+            return self.finish(forced_reason)
+        if self.client is None:
+            return self.finish("no_key")
+        if not prompt.fits(self.ctx):
+            logger.warning("서술 지시문이 상한(%d자)을 넘음 — 덜어 내도 넘어 규칙 문장(input_too_large)", prompt.MAX_PROMPT_CHARS)
+            return self.finish("input_too_large")
+
+        # 1. 첫 생성 — 장별 동시.
+        chapter_8 = tuple(sid for sid in CHAPTERS["8"] if not (sid == "8.1" and self.benchmark_fixed))
+        chapters = [CHAPTERS["7"], chapter_8] + ([CHAPTERS["9"]] if fs.problems else [])
+        first = await self.run_batch([(ids, "chapter") for ids in chapters])
+        await self.stage("checking")
+
+        retries: list[tuple[str, ...]] = []
+        sequential: list[tuple[str, ...]] = []
+        regenerate: list[str] = []
+        for (ids, _), (result, failure) in first:
+            if failure is None:
+                for sid in ids:
+                    parts = _extract(sid, result.data)
+                    if parts is None:
+                        states[sid].checks.append({"format": ["missing_field"]})
+                        if sid == "7.3":
+                            self.template(sid, "missing_field")
+                        else:
+                            regenerate.append(sid)
+                    elif not self.accept(sid, parts, last_chance=False, model=result.record.response_model):
+                        regenerate.append(sid)
+            elif failure == "rate_limited":
+                sequential.append(ids)
+            elif failure in RETRYABLE:
+                retries.append(ids)
+            else:  # refusal · max_tokens · model_unavailable · busy · deadline
+                for sid in ids:
+                    self.template(sid, failure)
+
+        # 2. 다시 부르기(장 재시도)와 다시 만들기(칸) — 한 칸의 HTTP 는 최대 2회.
+        if retries or sequential or regenerate:
+            await self.stage("regenerating")
+        second: list = []
+        batch = [(ids, "retry") for ids in retries] + [((sid,), "regenerate") for sid in regenerate]
+        if batch:
+            second.extend(await self.run_batch(batch))
+        for ids in sequential:  # 429 는 차례로
+            await self.stage("regenerating")
+            second.extend(await self.run_batch([(ids, "retry")]))
+        for (ids, purpose), (result, failure) in second:
+            if failure is not None:
+                for sid in ids:
+                    self.rescue(sid, failure)
+                continue
             for sid in ids:
                 parts = _extract(sid, result.data)
                 if parts is None:
-                    states[sid].checks.append({"format": ["missing_field"]})
-                    if sid == "7.3":
-                        template(sid, "missing_field")
-                    else:
-                        regenerate.append(sid)
-                elif not accept(sid, parts, last_chance=False, model=result.record.response_model):
-                    regenerate.append(sid)
-        elif failure == "rate_limited":
-            sequential.append(ids)
-        elif failure in RETRYABLE:
-            retries.append(ids)
-        else:  # refusal · max_tokens · model_unavailable · busy · deadline
-            for sid in ids:
-                template(sid, failure)
+                    self.rescue(sid, "missing_field")
+                else:
+                    self.accept(sid, parts, last_chance=True, model=result.record.response_model)
+        if second:
+            await self.stage("checking")
 
-    # 2. 다시 부르기(장 재시도)와 다시 만들기(칸) — 한 칸의 HTTP 는 최대 2회.
-    if retries or sequential or regenerate:
-        await stage("regenerating")
-    second: list = []
-    batch = [(ids, "retry") for ids in retries] + [((sid,), "regenerate") for sid in regenerate]
-    if batch:
-        second.extend(await run_batch(batch))
-    for ids in sequential:  # 429 는 차례로
-        await stage("regenerating")
-        second.extend(await run_batch([(ids, "retry")]))
-    for (ids, purpose), (result, failure) in second:
-        if failure is not None:
-            for sid in ids:
-                rescue(sid, failure)
-            continue
-        for sid in ids:
-            parts = _extract(sid, result.data)
-            if parts is None:
-                rescue(sid, "missing_field")
+        # 3. 최종본 판정 모순 재검사 — 인쇄될 칸 글(AI 글, 권고를 템플릿으로 채운 9칸 포함)을 한 번 더 본다. 칸 검사와 같은 함수라
+        #    보통은 아무것도 잡지 않는다 — 조립·채우기 단계의 결함에 대한 마지막 방어다(칸 검사를 끈 테스트로 따로 시험한다).
+        #    걸린 칸은 템플릿으로(다시 부르지 않는다).
+        final_flags = []
+        for sid, st in states.items():
+            if st.parts is None or not (st.source == "llm" or st.outcome == "filled"):
+                continue
+            if find_verdict_contradictions(checks.mask_names(checks.section_texts(sid, _rec_dicts(st.parts)), self.masks), fs.verdict):
+                final_flags.append(sid)
+                self.template(sid, "final_verdict_contradiction")
+        trace["final_recheck"] = final_flags
+        return self._rebuild()
+
+    def _rebuild(self) -> GenerationResult:
+        reasons = [st.reason for st in self.states.values() if st.source == "fallback" and st.reason]
+        self.result = _result(self.fs, self.states, self.trace, reasons[0] if reasons else None, self.started,
+                              derived=self.derived, refs=self.refs)
+        return self.result
+
+    # ── 심판 사다리가 부르는 길(심판 라운드 J5a, 계획 13-1·정6) ──────────────────────
+    # 칸 id 만 받는다 — 심판 사유·인용을 받을 인자가 없다(사유 격리, 계획 13-3). 이 모듈은 app.judge 를 import 하지 않는다.
+
+    def has_ai_text(self, sid: str) -> bool:
+        """인쇄될 글에 AI 글이 들어 있나 — AI 칸, 또는 AI 권고에 빠진 권고만 템플릿으로 채운 9칸."""
+        st = self.states[sid]
+        return st.parts is not None and (st.source == "llm" or st.outcome == "filled")
+
+    def to_template(self, sids, reason: str) -> list[str]:
+        """AI 글이 든 칸을 규칙 문장으로 바꾼다(이미 규칙 문장·고정 문구인 칸은 그대로 — 정6 ②). 7.3 은 빼고 '해당 없음'
+        (정6 ③, D38). 바꾼 칸을 돌려준다."""
+        changed = []
+        for sid in sids:
+            if not self.has_ai_text(sid):
+                continue
+            self.template(sid, reason)
+            if sid == "7.3":
+                self.states[sid].outcome = "dropped"
+            self.states[sid].kept = None
+            changed.append(sid)
+        if changed:
+            self._rebuild()
+        return changed
+
+    async def judge_regenerate(self, sids, *, seconds: float | None) -> dict[str, str]:
+        """심판이 건 칸을 한 번 다시 만든다(정6 ①②③⑦, D36). 칸마다 결과(regenerated·template·dropped·skipped)를 돌려준다.
+
+        - 이미 규칙 문장·고정 문구인 칸은 건너뛴다. 7.3 은 다시 만들지 않고 뺀다.
+        - 지시문은 생성 단계 다시 만들기와 바이트까지 같다(기록 목적 이름만 judge_regenerate).
+        - 다시 만든 글이 생성 검문(권고 빠짐 포함)이나 최종본 판정 모순 재검사에 걸리거나 호출이 실패하면 그 칸 전체를 규칙
+          문장으로 — 둬 둔 첫 글(D24 빠짐·권고 하나 빠짐)을 되살리지 않는다(그 글이 바로 심판이 건 글일 수 있다).
+        - seconds 는 이번 단계에 쓸 시간(사다리가 다음 채점 시간을 빼고 준다). 모자라면 부르지 않고 규칙 문장.
+        """
+        if seconds is not None:
+            self.deadline_at = time.perf_counter() + seconds
+        out: dict[str, str] = {}
+        targets = []
+        for sid in sids:
+            if not self.has_ai_text(sid):
+                out[sid] = "skipped"
+            elif sid == "7.3":
+                self.to_template([sid], "judge")
+                out[sid] = "dropped"
             else:
-                accept(sid, parts, last_chance=True, model=result.record.response_model)
-    if second:
-        await stage("checking")
+                self.states[sid].kept = None
+                targets.append(sid)
+        if targets and self.client is None:
+            for sid in targets:
+                self.template(sid, "judge_regenerate:no_key")
+                out[sid] = "template"
+            targets = []
+        results = await self.run_batch([((sid,), "judge_regenerate") for sid in targets]) if targets else []
+        if results:
+            await self.stage("checking")
+        for (ids, _), (result, failure) in results:
+            sid = ids[0]
+            parts = None if failure is not None else _extract(sid, result.data)
+            if parts is None:
+                self.template(sid, f"judge_regenerate:{failure or 'missing_field'}")
+            else:
+                self._judge_accept(sid, parts, model=result.record.response_model)
+            st = self.states[sid]
+            if st.source == "llm" and find_verdict_contradictions(
+                checks.mask_names(checks.section_texts(sid, _rec_dicts(st.parts)), self.masks), self.fs.verdict,
+            ):
+                self.template(sid, "judge_regenerate:final_verdict_contradiction")
+            out[sid] = "regenerated" if self.states[sid].source == "llm" else "template"
+        self._rebuild()
+        return out
 
-    # 3. 최종본 판정 모순 재검사 — 인쇄될 칸 글(AI 글, 권고를 템플릿으로 채운 9칸 포함)을 한 번 더 본다. 칸 검사와 같은 함수라
-    #    보통은 아무것도 잡지 않는다 — 조립·채우기 단계의 결함에 대한 마지막 방어다(칸 검사를 끈 테스트로 따로 시험한다).
-    #    걸린 칸은 템플릿으로(다시 부르지 않는다).
-    final_flags = []
-    for sid, st in states.items():
-        if st.parts is None or not (st.source == "llm" or st.outcome == "filled"):
-            continue
-        if find_verdict_contradictions(checks.mask_names(checks.section_texts(sid, _rec_dicts(st.parts)), masks), fs.verdict):
-            final_flags.append(sid)
-            template(sid, "final_verdict_contradiction")
-    trace["final_recheck"] = final_flags
-    reasons = [st.reason for st in states.values() if st.source == "fallback" and st.reason]
-    return _result(fs, states, trace, reasons[0] if reasons else None, started, derived=derived, refs=refs)
+    def _judge_accept(self, sid: str, parts: dict, *, model: str | None) -> None:
+        fs = self.fs
+        st = self.states[sid]
+        aligned = _align(parts, fs.problems, fill_missing=False, edition=self.edition)[0] if sid == "9" else parts
+        result = checks.check_section(
+            sid, _rec_dicts(aligned), whitelist=self.whitelist, verdict=fs.verdict, conclusions=self.conclusions,
+            problem_ids=self.problem_ids, exempt=self.exempt, masks=self.masks, labels=self.labels, edition=self.edition,
+        )
+        st.checks.append({**result.as_record(), "judge_regenerate": True})
+        if result.hard_failures:
+            self.template(sid, "judge_regenerate:check:" + ",".join(result.hard_failures))
+            return
+        # D24 빠짐만은 생성 단계 마지막 기회처럼 싣고 기록한다(템플릿 사유가 아니다 — D36).
+        st.parts, st.source, st.model, st.outcome = aligned, "llm", model, "judge_regenerated"
+        st.d24_missing = result.d24_missing
+
+
+async def generate_sections(
+    client,
+    req: NarrativeRequest,
+    *,
+    forced_reason: str | None = None,
+    deadline_seconds: float | None = None,
+    slot_wait: float | None = None,
+    call_timeout: float | None = None,
+    effort: str | None = None,
+    on_stage=_no_stage,
+    trace_into: dict | None = None,
+) -> GenerationResult:
+    """칸별 사다리로 서술을 만든다. 호출 실패는 칸 템플릿으로 끝내고, 예기치 않은 오류는 호출부가 받는다.
+
+    trace_into 를 주면 내부 기록을 그 dict 에 바로 쓴다 — 바깥 제한(작업 전체 10분)이 도중에 끊어도 그때까지의 호출
+    기록이 남는다(요청은 이미 나가 과금됐을 수 있다). 상태가 필요한 호출부(심판)는 `GenerationSession` 을 직접 쓴다."""
+    session = GenerationSession(
+        client, req, deadline_seconds=deadline_seconds, slot_wait=slot_wait, call_timeout=call_timeout,
+        effort=effort, on_stage=on_stage, trace_into=trace_into,
+    )
+    return await session.run(forced_reason=forced_reason)
 
 
 def _result(fs, states: dict, trace: dict, reason: str | None, started: float, *, derived, refs) -> GenerationResult:

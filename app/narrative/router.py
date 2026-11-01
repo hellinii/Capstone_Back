@@ -68,9 +68,12 @@ async def create_narrative_job(
     session_factory=Depends(jobs.get_session_factory),
 ) -> NarrativeJobCreated:
     client = getattr(request.app.state, "anthropic_client", None)
+    # 판 4 작업의 심판(OpenAI) 클라이언트 — 컬럼 매핑과 같은 앱 클라이언트. 없으면 판 4 는 규칙 문장 + 발급 보류(no_key).
+    judge_client = getattr(request.app.state, "openai_client", None)
     try:
         return await jobs.create_job(
             payload, client=client, session_factory=session_factory, background_tasks=background_tasks,
+            judge_client=judge_client,
         )
     except ValidationError as exc:
         raise RequestValidationError(
@@ -83,7 +86,7 @@ async def create_narrative_job(
     response_model=NarrativeJobOut,
     summary="서술 작업 조회",
     description=(
-        "단계(queued·generating·checking·regenerating·done·failed)와, 끝났으면 서술 본문·칸별 출처를 돌려준다. "
+        "단계(queued·generating·checking·regenerating·judging(판 4)·done·failed)와, 끝났으면 서술 본문·칸별 출처를 돌려준다. "
         "멈춘 작업은 조회할 때 실패(lost)로 판정한다. 없는 번호는 404."
     ),
 )

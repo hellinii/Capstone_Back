@@ -48,7 +48,7 @@ Start Command 에 있고 저장소에서 확인할 수 없다(`render.yaml` 이 
 
 상호작용
 - 의존(import): time, threading
-- 사용처: app.analysis.analysis_service(mapping), app.narrative.legacy(narrative — 옛 경로), app.narrative.jobs(narrative·narrative_jobs)
+- 사용처: app.analysis.analysis_service(mapping), app.narrative.legacy(narrative — 옛 경로), app.narrative.jobs(narrative·narrative_jobs·judge)
 """
 import os
 import threading
@@ -126,6 +126,10 @@ MAX_NARRATIVE_JOBS_PER_HOUR = _env_limit("NARRATIVE_JOBS_PER_HOUR", 200)
 mapping = Wallet("mapping", MAX_LLM_CALLS_PER_HOUR)
 narrative = Wallet("narrative", MAX_NARRATIVE_REPORTS_PER_HOUR)
 narrative_jobs = Wallet("narrative_jobs", MAX_NARRATIVE_JOBS_PER_HOUR)
+# 심판(판 4 서술 작업의 채점 — OpenAI): 시간당 허용 보고서 수. 서술 지갑과 같은 값으로 시작한다(심판 라운드 J5b, 계획 사-5).
+# 판 4 작업을 만들 때 서술 지갑과 함께 1건을 예약한다. 소진이면 AI 를 부르지 않고 규칙 문장 + 발급 보류(budget).
+MAX_JUDGE_REPORTS_PER_HOUR = _env_limit("JUDGE_REPORTS_PER_HOUR", MAX_NARRATIVE_REPORTS_PER_HOUR)
+judge = Wallet("judge", MAX_JUDGE_REPORTS_PER_HOUR)
 
 
 def try_consume(now: float | None = None) -> bool:
@@ -143,3 +147,4 @@ def reset() -> None:
     mapping.reset()
     narrative.reset()
     narrative_jobs.reset()
+    judge.reset()
