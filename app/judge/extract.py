@@ -176,6 +176,39 @@ def hits(quote: str, text: str) -> int:
     return count
 
 
+def catalog_labels(catalog: dict[str, FieldEntry]) -> set[str]:
+    """칸 목록에서 데이터의 클래스·레이블 이름(per_class.<이름>.*·distribution.class_distribution.<이름>)."""
+    out = set()
+    for k in catalog:
+        for pre in ("per_class.", "distribution.class_distribution."):
+            if k.startswith(pre):
+                out.add(k[len(pre):].split(".")[0])
+    return out
+
+
+def _names_label(text: str, labels: set[str]) -> bool:
+    """숫자 없는 클래스 이름('benign')이 글에 지목돼 있나. 숫자가 든 이름('Class9'·'7')은 볼 필요가 없다 — 그런 문장은 숫자가 있어
+    not_a_claim_sentence 가 먼저 거르지 않는다."""
+    return any(re.search(rf"(?<![0-9A-Za-z가-힣]){re.escape(lab)}(?![0-9A-Za-z])", text) for lab in labels if lab)
+
+
+def not_a_claim_sentence(kind: str, sentence: str, labels: set[str]) -> str | None:
+    """문장 꼴로 정하는 '주장 아님'(1.23 — 정밀도, V2 18회차에 사람 정답 0개 잃음을 확인한 꼴만). 숫자 주장은 건드리지 않는다.
+    - section_label: 절 번호와 권고 꼬리표를 가리키는 문장('6.2절의 권고는 … (P1) 을 다룬다')
+    - metric_definition: 숫자·비교 낱말 없이 지표를 정의하는 문장('… 는 … 비율이고 …')
+    - method_sentence: 숫자·클래스 이름 없이 계산 방식을 풀이하는 문장('… 합쳐 계산하므로 …')"""
+    rules = criteria.load_json("inference_rules.json")
+    if any(re.search(p, sentence) for p in rules["section_label_patterns"]):
+        return "section_label"
+    if kind == "number" or re.search(r"\d", sentence):
+        return None
+    if re.search(rules["metric_definition_pattern"], sentence) and not any(w in sentence for w in rules["metric_definition_not_when"]):
+        return "metric_definition"
+    if any(m in sentence for m in rules["method_markers"]) and not _names_label(sentence, labels):
+        return "method_sentence"
+    return None
+
+
 def _not_a_claim(item: dict, quote: str, sentence: str) -> str | None:
     """종류와 상관없이 주장이 아닌 것(1.12, 검증 추출 분석 — 사람 정답지·민서 판정과 맞춤): 권고 문장('권고: …') 안의 말,
     판정 기준값 숫자 바로 뒤에 경계 말·'신뢰구간'이 오는 기준선 숫자('0.1 미만'·'95% 신뢰구간')."""
@@ -272,7 +305,7 @@ def place(sents: list[Sentence], items: list[tuple[str, str]]) -> list[str | Non
 
 MISSED_WORD = "빠뜨림"  # 점검표의 none_reason 에 이 낱말이 있으면 그 문장을 다시 묻는다(prompts/extract.md 문장마다 판정, 1.19)
 # 모델이 냈지만 코드가 주장 규칙으로 버린 것 — 그 문장을 본 것으로 친다(다시 물어도 같은 답이 온다). 인용·조각이 틀린 것은 치지 않는다.
-_LOOKED = ("normative", "scope", "recommendation", "duplicate")
+_LOOKED = ("normative", "scope", "recommendation", "duplicate", "section_label", "metric_definition", "method_sentence")
 
 
 def sentence_gaps(sents: list[Sentence], verdicts: list, claims: list[Claim], rejected: list[dict]) -> dict[str, str]:
@@ -360,7 +393,7 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
                 repaired.append({"round": round_no, "piece_id": piece.id, "from": quote[:200], "to": fixed})
             quote = fixed
         sentence = _sentence_of(quote, piece)
-        reason = _not_a_claim(item, quote, sentence)
+        reason = _not_a_claim(item, quote, sentence) or not_a_claim_sentence(item["kind"], sentence, catalog_labels(catalog))
         if reason:
             rejected.append({"round": round_no, "reason": reason, "piece_id": piece.id, "quote": quote[:200]})
             continue

@@ -1213,3 +1213,42 @@ def test_v122_ci_level_number_is_dropped(quote, number_text, want):
     rejected = []
     kept = ex.drop_covered_thresholds([c], {piece.id: piece}, rejected)
     assert (kept == []) is want and ([r["reason"] for r in rejected] == ["ci_level"]) is want
+
+
+# ── 1.23 문장 꼴로 정하는 '주장 아님'(정밀도 — V2 18회차 사람 정답 0개 잃음) ─────────
+
+
+LABS = {"7", "8", "Class9", "benign"}
+
+
+@pytest.mark.parametrize("kind, sentence, want", [
+    ("name", "3.2절의 권고는 표본 보강(P2)과 재평가(P3)를 다룬다.", "section_label"),
+    ("number", "3.2절의 권고는 표본 0.5 기준(P1)을 다룬다.", "section_label"),
+    ("name", "정확 일치율은 주문의 모든 품목을 맞힌 비율이고 오차율은 틀린 칸의 비율이다.", "metric_definition"),
+    ("name", "가중 평균은 모든 매장의 주문을 합쳐 계산하므로 주문이 많은 매장의 영향이 크다.", "method_sentence"),
+    # 남겨야 하는 꼴(사람 정답과 같은 꼴)
+    ("name", "가중 평균은 매장마다 같은 무게로 계산되므로, Class9 처럼 낮은 매장의 부진은 이 평균에 반영된다.", None),  # 숫자 든 이름
+    ("name", "가중 평균은 매장마다 같은 무게로 계산되므로, benign 처럼 낮은 클래스의 부진은 이 평균에 반영된다.", None),  # 숫자 없는 이름
+    ("name", "가중 평균은 매장마다 같은 무게로 계산되므로, benignity 가 큰 매장의 몫이 크다.", "method_sentence"),  # 이름 경계
+    ("comparison", "이 값은 목표보다 낮은 값이다.", None),  # 비교 낱말
+    ("name", "정확 일치율은 0.41 로 모든 품목을 맞힌 비율이다.", None),  # 숫자
+    ("number", "정확 일치율은 모든 품목을 맞힌 비율이다.", None),  # 숫자 주장은 건드리지 않음(절 꼬리표만 예외)
+    ("degree", "클래스 7 은 같은 무게로 평균하므로 부진이 그대로 보인다.", None),  # 숫자 이름 클래스
+])
+def test_v123_sentence_shapes_that_are_not_claims(kind, sentence, want):
+    assert ex.not_a_claim_sentence(kind, sentence, LABS) == want
+
+
+def test_v123_catalog_labels():
+    cat = {n: None for n in ("per_class.Class9.f1", "per_class.7.recall", "distribution.class_distribution.8", "metric.M2.value")}
+    assert ex.catalog_labels(cat) == {"Class9", "7", "8"}
+
+
+async def test_v123_filtered_claims_are_recorded_and_not_refilled():
+    piece = Piece("slot:7.1", "7.1", "5.2", "ai", "3.2절의 권고는 표본 보강(P2)을 다룬다. 재평가가 필요하다.")
+    item = {"kind": "name", "quote": "표본 보강(P2)", "piece_id": piece.id, "field": "", "field_b": "", "number_text": "", "polarity": ""}
+    sents = [{"sid": "s1", "n_claims": 1, "none_reason": ""}, {"sid": "s2", "n_claims": 0, "none_reason": "규범"}]
+    fake = F.FakeOpenAI([F.json_response({"claims": [item], "sentences": sents}), F.json_response({"claims": []})])
+    res = await ex.extract_claims(fake, [piece], {})
+    assert res.claims == [] and [r["reason"] for r in res.rejected] == ["section_label"]
+    assert res.sentence_checks["gaps"] == {} and res.sentence_checks["lost"] == 0 and len(fake.calls) == 2  # 본 것으로 친다
