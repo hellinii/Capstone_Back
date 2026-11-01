@@ -62,11 +62,15 @@ def test_no_record_means_unvalidated(lock_on, tmp_path):
     assert criteria_lock.problem(tmp_path / "없음.json") == criteria_lock.UNVALIDATED
 
 
-def test_repo_has_no_record_before_v2(lock_on):
-    """V2 전에는 기록이 없다(J11 이 쓴다) — 그래서 운영 기본값(켜짐)이면 판 4 는 모두 보류다."""
-    assert not criteria_lock.RECORD_PATH.exists()
+def test_repo_record_matches_the_current_criteria(lock_on):
+    """J11(2026-11-01, 민서 결정 — V2 부분 검증 수용): 기록은 지금 기준(버전·지문)과 같아야 한다. 기준을 바꾸고 기록을 고치지 않으면
+    이 시험이 깨진다 — '배포되는 기준 = 검증한 기준'(정9)을 지키는 문."""
+    assert criteria_lock.RECORD_PATH.exists()
     assert criteria_lock.RECORD_PATH.parent == criteria.HERE.parent  # 기준 묶음 폴더 밖(쓰면 지문이 바뀌지 않게)
-    assert criteria_lock.problem() == criteria_lock.UNVALIDATED
+    rec = json.loads(criteria_lock.RECORD_PATH.read_text(encoding="utf-8"))
+    assert (rec["version"], rec["fingerprint"]) == (criteria.version(), criteria.fingerprint())
+    assert rec["tag"] == f"judge-criteria-v{criteria.version()}" and "부분 검증" in rec["note"]
+    assert criteria_lock.problem() is None
 
 
 @pytest.mark.parametrize("text", ["{", "[]", '"1.0"', '{"version": "1.0"}', '{"fingerprint": "x"}',
@@ -114,7 +118,8 @@ def _internal(factory, job_id) -> dict:
         return json.loads(db.get(NarrativeJob, job_id).internal_json)
 
 
-def test_locked_job_is_held_without_calling_the_judge(shared, judge_passes, lock_on):
+def test_locked_job_is_held_without_calling_the_judge(shared, judge_passes, lock_on, tmp_path, monkeypatch):
+    monkeypatch.setattr(criteria_lock, "RECORD_PATH", tmp_path / "no_record.json")  # 기록이 없는 서버(검증 전)
     client, factory = shared
     job_id = _job(client, _ed4())
     judge = client.get(f"/api/narrative/jobs/{job_id}").json()["result"]["judge"]
