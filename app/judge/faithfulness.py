@@ -220,18 +220,35 @@ def name_matches(actual: str, named: str) -> bool | None:
             negated = lambda o: (not any(w in target[o[0]: o[1]] for w in neg_words)  # noqa: E731
                                  and any(w in target[o[1]: o[1] + window] for w in neg_words))
             if any(negated(o) and o[2] == str(actual) for o in occ):
-                return False
+                return False  # 실제 값을 부정했다 — 보기 고르기에서도 빼고 그대로 위반(negates_actual, 1.24 검토 P1)
             said = {o[2] for o in occ if not negated(o)}
             if len(said) > 1:
                 return None
             if said:
-                return said.pop() == str(actual)
+                code = said.pop()
+                # 넓은 말 ⊃ 좁은 실제 값(1.24 — '임계값 적용' ⊃ 레이블마다 임계값). 반대 방향은 아니다.
+                return code == str(actual) or code in names.get("code_broader", {}).get(str(actual), [])
             return None
         # 코드값인데 문장에 그 묶음의 이름이 하나도 없으면 무엇을 지목했는지 모른다 — 위반이 아니라 검증 불가(1.10, V2 1.9 R-0044:
         # "같은 분포인지는 확인할 수 없다" ↔ not_provided 를 코드 글자 'not_provided' 가 문장에 없다고 위반으로 봤다)
         if _norm_name(actual) not in target:
             return None
     return bool(_norm_name(actual)) and _norm_name(actual) in target
+
+
+def negates_actual(actual: str, named: str) -> bool:
+    """코드값 이름 대조에서 실제 값의 이름 바로 뒤에 부정이 왔나('합격하지 않았다' ↔ PASS). 이런 위반은 보기 고르기로 보내지 않는다."""
+    names = criteria.load_json("names.json")
+    labels = names["code_labels"]
+    if str(actual) not in labels:
+        return False
+    target = _norm_name(named)
+    window = int(names.get("negation_window", 6))
+    neg_words = [_norm_name(w) for w in names.get("negation_after", [])]
+    for o in _occurrences(target, {str(actual): labels[str(actual)]}):
+        if not any(w in target[o[0]: o[1]] for w in neg_words) and any(w in target[o[1]: o[1] + window] for w in neg_words):
+            return True
+    return False
 
 
 _CLIENT_NOTE = re.compile(r"\s*\(의뢰자 제공:.*\)\s*$")
@@ -492,14 +509,30 @@ def field_anchored(field_name: str, context: str, sources: Sources) -> bool:
     return any(_has_word(context, w) for w in words)
 
 
+def generic_label_anchored(loose: list[str], expr_text: str, context: str) -> bool:
+    """클래스 이름 없이 '레이블마다 다르다'처럼 레이블 전반을 말한 문장에 클래스 칸 차이 대조를 묶어도 되나(1.24 — 검토 P1 로 좁힘):
+    근거 없는 칸이 모두 클래스 칸이고 같은 지표, 문장에 레이블 전반 낱말과 차이 낱말, 식에 빼기('-')가 있을 때만."""
+    table = criteria.load_json("remap_anchors.json")
+    pre = [next((p for p in table["label_fields"] if f.startswith(p)), None) for f in loose]
+    if not all(pre):
+        return False
+    metrics_ = {f[len(p):].split(".", 1)[1] if "." in f[len(p):] else "" for f, p in zip(loose, pre)}
+    return (len(metrics_) == 1 and "-" in expr_text
+            and any(_has_word(context, w) for w in table.get("label_generic_words", []))
+            and any(_has_word(context, w) for w in table.get("label_generic_diff_words", [])))
+
+
 def mapping_anchored(ans: dict, context: str, sources: Sources) -> bool:
     """옮긴 대조 전체가 문장에 묶였나 — 식의 칸마다 근거, 식에 쓴 숫자는 문장에, 이름은 named 가 문장에."""
     if _is_comparison(ans):
         exprs = [ans.get("expr", ""), ans.get("expr_b", "")]
         fields = [f.strip() for e in exprs for f in _FIELD.findall(e)]
         literals = [n for e in exprs for n in re.findall(r"\d+(?:\.\d+)?", _FIELD.sub(" ", e))]
-        return (bool(fields) and all(field_anchored(f, context, sources) for f in fields)
-                and all(lit in context for lit in literals))
+        loose = [f for f in fields if not field_anchored(f, context, sources)]
+        if loose and not generic_label_anchored(loose, " ".join(exprs), context):
+            return False
+        # '레이블마다 다르다'를 차이 ≠ 0 으로 옮긴 꼴의 0 은 문장에 없어도 된다(1.24) — 그 밖의 숫자는 문장에 있어야 한다
+        return bool(fields) and all(lit in context for lit in literals if not (loose and lit == "0"))
     named = _norm_name(ans.get("named", ""))
     ctx = _norm_name(context)
     if not named:
@@ -711,6 +744,137 @@ async def _ask_in_chunks(client, scope: list[Piece], pending: list[Claim], sourc
     return answers, calls, tool_calls, None, info
 
 
+# ── 이름 주장 보기 고르기(1.24, 민서 결정 2026-11-01 "방식 자체를 바꾸자 — 어긋남일 때만 막기") ─────────────
+# 글자·이름 표 대조가 '다르다'고 한 이름 주장만 한 번 더 본다. 코드값·클래스·지표 이름 칸은 실제 값을 보여 주지 않고 보기(그 칸의 가능한
+# 값 전부 + 0 '특정하지 않음·여럿')에서 고르게 하고 코드가 실제 값과 비교한다. 의뢰자 자유 글 칸은 맞음·어긋남·관계없음으로 묻고
+# 어긋남일 때만 막는다. V2 1.17~1.22 매 회차 처음 보는 말꼴 2~4개가 글자 대조에서 막혔다(서술은 모두 맞았다).
+NAME_CHOICE_SECONDS = 60.0
+CLIENT_ANSWERS = ("맞음", "어긋남", "관계없음")
+# 보기 표시는 글자(A, B, …) — 숫자 클래스 이름('0'~'9')과 보기 번호가 겹쳐 '클래스 2'를 2번 보기로 읽는 일이 없게(1.24 검토 P1).
+OPTION_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVW"
+NOT_SPECIFIC = "X"  # 특정하지 않음·여럿에 들어맞음 → 검증 불가
+OPPOSITE = "Y"  # 보기 값을 부정·보기에 없는 것 → 위반 그대로
+
+
+def name_options(v: ClaimVerdict, sources: Sources, metrics) -> tuple[str, list[str]] | None:
+    """보기 고르기 꼴과 보기(실제 값은 그 안의 하나). ('code'|'label'|'metric', [값…]) 또는 ('client', []) 또는 None(보지 않음)."""
+    field_name = str(v.detail.get("name_field") or "").strip()
+    actual = v.detail.get("data")
+    if actual is None:
+        return None
+    if field_name.startswith("client."):
+        return "client", []
+    names = criteria.load_json("names.json")
+    if negates_actual(str(actual), str(v.detail.get("named") or "")):
+        return None  # 실제 값을 부정한 문장 — 그대로 위반(1.24 검토 P1)
+    if str(actual) in names["code_labels"]:
+        group = next((g for g in names.get("code_groups", []) if str(actual) in g), None)
+        return ("code", [c for c in group if c in names["code_labels"]]) if group else None
+    labels = class_labels(sources)
+    if str(actual) in labels:
+        opts = sorted(labels, key=lambda x: (len(x), x))
+        return ("label", opts) if len(opts) <= len(OPTION_LETTERS) else None
+    shown = sorted({str(getattr(m, "display_name", "")) for m in metrics if getattr(m, "display_name", None)})
+    if str(actual) in shown and len(shown) <= len(OPTION_LETTERS):
+        return "metric", shown
+    return None
+
+
+def _option_text(kind: str, value: str) -> str:
+    if kind == "code":
+        return " / ".join(criteria.load_json("names.json")["code_labels"][value])
+    return value
+
+
+def _choice_listing(items: list[tuple[ClaimVerdict, Claim, str, list[str]]], scope: list[Piece], sources: Sources) -> str:
+    by_piece = {p.id: p for p in scope}
+    out = []
+    for v, c, kind, opts in items:
+        head = f"- {c.id} | 문장: {sentence_of(c.quote, by_piece.get(c.piece_id))} | 구절: {c.quote}"
+        if kind == "client":
+            out.append(f"{head} | 의뢰자 글: {v.detail.get('data')} | 답: 맞음 / 어긋남 / 관계없음")
+        else:
+            out.append(head + " | 보기: " + " ".join(f"{OPTION_LETTERS[i]}) {_option_text(kind, o)}" for i, o in enumerate(opts))
+                       + f" {NOT_SPECIFIC}) 특정하지 않음·여럿에 들어맞음 {OPPOSITE}) 보기 값을 부정함·보기에 없음")
+    return "\n".join(out)
+
+
+def apply_name_choice(v: ClaimVerdict, kind: str, opts: list[str], choice: str | None) -> None:
+    """고른 답으로 코드가 정한다. 보기 꼴: 실제 값(또는 넓은 말) → match, X → unverifiable, 다른 값·Y·잘못된 답 → 위반 그대로.
+    의뢰자 꼴: 맞음 → match, 관계없음 → unverifiable, 어긋남·잘못된 답 → 위반 그대로.
+    이름으로 옮긴 추론은 검증 불가가 될 자리에서 추론 어미 판정으로 돌아간다 — 어미 없으면 막음(1.24 검토 P1)."""
+    choice = str(choice or "").strip()
+    v.detail["name_choice"] = {"kind": kind, "choice": choice}
+    unsure = "inference_ok" if v.kind == "inference" and v.detail.get("marked") else (
+        "inference_violation" if v.kind == "inference" else "unverifiable")
+    if kind == "client":
+        if choice == "맞음":
+            v.verdict = "match"
+        elif choice == "관계없음":
+            v.verdict = unsure
+        return
+    if choice == NOT_SPECIFIC:
+        v.verdict = unsure
+        return
+    if len(choice) != 1 or choice not in OPTION_LETTERS[:len(opts)]:
+        return
+    picked, actual = opts[OPTION_LETTERS.index(choice)], str(v.detail.get("data"))
+    broader = criteria.load_json("names.json").get("code_broader", {}).get(actual, []) if kind == "code" else []
+    if picked == actual or picked in broader:
+        v.verdict = "match"
+
+
+async def _choose_names(client, verdicts: list[ClaimVerdict], claims: list[Claim], scope: list[Piece], sources: Sources,
+                        metrics, *, deadline: float | None, clock, kw: dict) -> tuple[list[dict], int]:
+    """글자 대조가 '다르다'고 한 이름 주장(이름·이름으로 옮긴 추론)을 묶어 한 번 묻는다. 실패하면 한 번 더, 그래도 실패하면 위반 그대로.
+    (호출 기록, 본 주장 수)."""
+    by_id = {c.id: c for c in claims}
+    items = []
+    for v in verdicts:
+        if v.verdict != "violation" or not (v.kind == "name" or v.detail.get("as") == "name") or v.claim_id not in by_id:
+            continue
+        found = name_options(v, sources, metrics)
+        if found:
+            items.append((v, by_id[v.claim_id], found[0], found[1]))
+    if not items:
+        return [], 0
+    ids = [c.id for _, c, _, _ in items]
+    schema = llm.json_schema_format("name_choice", {
+        "type": "object", "additionalProperties": False, "required": ["items"],
+        "properties": {"items": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["claim_id", "choice"],
+            "properties": {"claim_id": {"type": "string", "enum": ids},
+                           "choice": {"type": "string", "enum": [*OPTION_LETTERS, NOT_SPECIFIC, OPPOSITE, *CLIENT_ANSWERS]}}}}}})
+    clock_fn = clock or time.monotonic
+    calls: list[dict] = []
+    data = None
+    for _attempt in range(2):
+        left = None if deadline is None else deadline - clock_fn()
+        if left is not None and left < RECHECK_RETRY_MIN_SECONDS:
+            break
+        short = clock_fn() + NAME_CHOICE_SECONDS if deadline is None else min(deadline, clock_fn() + NAME_CHOICE_SECONDS)
+        out = await llm.create_response(
+            client, purpose="faithfulness_names", model=config.judge_model(),
+            instructions=criteria.load_text("prompts/faithfulness_names.md"),
+            input=[{"role": "user", "content": "## 주장\n" + _choice_listing(items, scope, sources)}],
+            timeout_s=CALL_TIMEOUT_SECONDS, deadline=short, text_format=schema, **kw)
+        rec = out.record.as_dict()
+        if rec.get("cost_usd") is None and rec.get("failure"):
+            rec["cost_usd"], rec["cost_unknown"] = 0.0, True
+        calls.append(rec)
+        data, failure = (None, out.failure) if out.failure else llm.parse_json(out)
+        if not failure:
+            break
+        data = None
+    answers = {a.get("claim_id"): a.get("choice") for a in (data or {}).get("items") or [] if isinstance(a, dict)}
+    for v, c, kind, opts in items:
+        if data is None:
+            v.detail["name_choice"] = {"kind": kind, "failure": True}
+            continue
+        apply_name_choice(v, kind, opts, answers.get(c.id))
+    return calls, len(items)
+
+
 def _listing(claims: list[Claim]) -> str:
     # 숫자 주장은 대조할 숫자를 함께 준다 — 숫자가 여럿인 문장에서 다른 숫자의 칸을 찾아왔다(1.6, V2 1.5 R-0038)
     return "\n".join(f"- {c.id} [{c.kind}] (조각 {c.piece_id}) {c.quote}"
@@ -799,7 +963,11 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
             second = judge_answer(by_id[v.claim_id], again.get(v.claim_id), sources, metrics, refs, by_piece.get(v.piece_id))
             second.detail["recheck"] = {"first": v.verdict, "first_detail": v.detail}
             verdicts[i] = second
+    name_calls, name_checked = await _choose_names(client, verdicts, claims, scope, sources, metrics, deadline=deadline,
+                                                   clock=clock, kw=kw)
+    calls += name_calls
     counts = _count(verdicts)
+    counts["name_checked"] = name_checked  # 보기 고르기로 다시 본 이름 주장 수(1.24)
     counts["rechecked"] = len(targets)
     counts["recheck_retried"] = retried  # 재확인이 한 번 실패해 다시 물었나(1.21)
     counts.update(chunk_info)  # 본 조사 묶음 수·쪼개 다시 물은 묶음 수(1.22)

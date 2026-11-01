@@ -44,6 +44,7 @@ TABLE: tuple[tuple[str, tuple[str, ...]], ...] = (
     (C + "rule_constants.json", ("faithfulness",)), (C + "rules_calc.py", ("faithfulness",)),
     (C + "rules_degree.py", ("faithfulness",)), (C + "prompts/faithfulness.md", ("faithfulness",)),
     (C + "prompts/faithfulness_recheck.md", ("faithfulness",)), (C + "remap_anchors.json", ("faithfulness",)),
+    (C + "prompts/faithfulness_names.md", ("faithfulness",)),  # 이름 주장 보기 고르기(1.24)
     ("app/judge/faithfulness.py", ("faithfulness",)),
     # 숫자 대조 규칙은 사실 일치·일관성이 같이 쓴다
     (C + "rules_numbers.py", ("faithfulness", "consistency")),

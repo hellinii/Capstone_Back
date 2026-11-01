@@ -201,5 +201,21 @@
   "pair_fields": [
     "confusion.",
     "facts.top_confusion_pairs."
+  ],
+  "label_generic_words": [
+    "레이블마다",
+    "클래스마다",
+    "레이블별",
+    "클래스별",
+    "레이블 사이",
+    "클래스 사이"
+  ],
+  "label_generic_note": "1.24(V2 1.22 R-0062 — '일부 기능 범주를 놓치는 정도가 레이블마다 다르므로'를 레이블별 Recall 차이로 옮겼는데 클래스 이름이 문장에 없어 근거 없음으로 거부 → 단정형 추론으로 막힘): 클래스 칸은 클래스 이름 대신 레이블 전반 낱말(label_generic_words)로도 근거가 되지만, 문장에 차이 낱말(label_generic_diff_words)이 있고, 그렇게 묶인 클래스 칸이 모두 같은 지표이며 식이 그 차이('-')를 셀 때만 (독립 검토 P1 — '클래스별 성능이 고르게 높아 안정적이다'를 'Class8 F1 > Class7 F1'로 옮겨 통과시키는 길을 막음).",
+  "label_generic_diff_words": [
+    "다르",
+    "차이",
+    "편차",
+    "제각각",
+    "고르지"
   ]
 }

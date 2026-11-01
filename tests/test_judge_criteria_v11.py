@@ -1144,8 +1144,11 @@ async def _run_name(*replies, pieces=NAME_PIECE, c=NAME_CLAIM):
 
 
 async def test_v121_fact_violations_are_not_rechecked():
-    fake, res = await _run_name(second("C1", **MISREAD))
-    assert len(fake.calls) == 1 and res.verdicts[0].verdict == "violation" and res.counts["rechecked"] == 0
+    # 재확인은 넓히지 않는다 — 1.24 보기 고르기가 '배치'(1번)를 고르면 실제 realtime 과 달라 그대로 위반
+    pick = F.json_response({"items": [{"claim_id": "C1", "choice": "A"}]})
+    fake, res = await _run_name(second("C1", **MISREAD), pick)
+    assert len(fake.calls) == 2 and res.verdicts[0].verdict == "violation" and res.counts["rechecked"] == 0
+    assert res.counts["name_checked"] == 1 and fake.calls[1]["instructions"].startswith("너는 시험성적서 서술의 구절이")
 
 
 @pytest.mark.parametrize("text, quote, polarity, want", [
@@ -1252,3 +1255,140 @@ async def test_v123_filtered_claims_are_recorded_and_not_refilled():
     res = await ex.extract_claims(fake, [piece], {})
     assert res.claims == [] and [r["reason"] for r in res.rejected] == ["section_label"]
     assert res.sentence_checks["gaps"] == {} and res.sentence_checks["lost"] == 0 and len(fake.calls) == 2  # 본 것으로 친다
+
+
+
+# ── 1.24 이름 주장 보기 고르기·넓은 말·레이블 전반 근거 ─────────────────────────────
+
+
+def test_v124_broader_code_name_matches_narrower_actual():
+    assert fa.name_matches("threshold_per_label", "확률에 결정 임계값을 적용해 만든 것") is True  # 넓은 말 ⊃ 좁은 실제 값
+    assert fa.name_matches("threshold", "레이블마다 임계값을 적용했다") is False  # 반대 방향은 틀림
+    assert fa.name_matches("argmax", "확률에 결정 임계값을 적용해 만든 것") is False
+
+
+async def test_v124_name_choice_fixes_a_paraphrase_the_table_missed():
+    # 첫 답이 이름을 '배치 방식'으로 옮겨 위반 → 보기 고르기가 구절 뜻대로 2) 실시간을 고르면 실제 realtime 과 같아 맞음
+    piece = [Piece("slot:7.1", "7.1", "5.2", "ai", "가상 분석. 의뢰자는 응답을 그때그때 바로 돌려주는 방식으로 쓴다고 밝혔다.")]
+    c = Claim("C1", "name", "응답을 그때그때 바로 돌려주는 방식", "slot:7.1", "7.1", "5.2", "ai", "", "", "", "", 0)
+    pick = F.json_response({"items": [{"claim_id": "C1", "choice": "B"}]})
+    fake, res = await _run_name(second("C1", **MISREAD), pick, pieces=piece, c=c)
+    assert res.verdicts[0].verdict == "match" and res.verdicts[0].detail["name_choice"] == {"kind": "code", "choice": "B"}
+    listing = fake.calls[1]["input"][0]["content"]
+    assert "A) 배치 / 일괄 처리 / 일괄로 처리" in listing and "B) 실시간 / 대화형" in listing and "X) 특정하지 않음" in listing
+    assert "Y) 보기 값을 부정함" in listing
+    assert "realtime" not in listing and "의뢰자 글" not in listing  # 실제 값은 보여 주지 않는다
+
+
+@pytest.mark.parametrize("kind, opts, choice, want", [
+    ("code", ["batch", "realtime"], "B", "match"),  # 실제 realtime
+    ("code", ["batch", "realtime"], "A", "violation"),  # 다른 값 — 진짜 틀림
+    ("code", ["batch", "realtime"], "X", "unverifiable"),  # 특정 안 함·여럿
+    ("code", ["batch", "realtime"], "Y", "violation"),  # 보기 값을 부정·보기에 없음
+    ("code", ["batch", "realtime"], "C", "violation"),  # 보기 밖 글자 — 위반 그대로
+    ("code", ["batch", "realtime"], "2", "violation"),  # 숫자로 답하면 받지 않는다
+    ("code", ["batch", "realtime"], None, "violation"),
+    ("client", [], "맞음", "match"), ("client", [], "관계없음", "unverifiable"),
+    ("client", [], "어긋남", "violation"), ("client", [], "모름", "violation"),
+])
+def test_v124_apply_name_choice(kind, opts, choice, want):
+    v = fa.ClaimVerdict("C1", "name", "violation", "7.1", "slot:7.1", "q", {"data": "realtime"})
+    fa.apply_name_choice(v, kind, opts, choice)
+    assert v.verdict == want
+
+
+def test_v124_broader_choice_counts_as_match():
+    v = fa.ClaimVerdict("C1", "name", "violation", "7.1", "slot:7.1", "q", {"data": "threshold_per_label"})
+    fa.apply_name_choice(v, "code", ["threshold", "argmax", "threshold_per_label"], "A")  # '임계값 적용'(넓은 말)
+    assert v.verdict == "match"
+    v = fa.ClaimVerdict("C1", "name", "violation", "7.1", "slot:7.1", "q", {"data": "threshold"})
+    fa.apply_name_choice(v, "code", ["threshold", "argmax", "threshold_per_label"], "C")  # 실제는 하나인데 '레이블마다'
+    assert v.verdict == "violation"
+
+
+def test_v124_name_options_by_field_kind():
+    src = Sources({**FS, "per_class": {"7": {"f1": 0.3}, "8": {"f1": 0.9}}}, [], {}, CLIENT)
+    mk = lambda field, data: fa.ClaimVerdict("C1", "name", "violation", "", "", "q", {"name_field": field, "data": data})  # noqa: E731
+    assert fa.name_options(mk("facts.declarations.usage_mode", "realtime"), src, []) == ("code", ["batch", "realtime"])
+    assert fa.name_options(mk("facts.weakest_class.label", "7"), src, [])[0] == "label"
+    m = M(metric_id="M2", display_name="F1 Score")
+    assert fa.name_options(mk("facts.x.display_name", "F1 Score"), src, [m]) == ("metric", ["F1 Score"])
+    assert fa.name_options(mk("client.test_data.학습 데이터와의 관계", "다른 출처"), src, []) == ("client", [])
+    assert fa.name_options(mk("facts.something_free_text", "아무 글"), src, []) is None  # 보지 않음 — 위반 그대로
+
+
+async def test_v124_client_contradiction_still_blocks_and_consistent_passes():
+    src_client = {"training_data": {"수집 주기": "매주 새 목록을 받는다 (의뢰자 제공: 주 1회 새 목록을 한꺼번에 돌린다.)"}}
+    src = Sources(FS, [], {}, src_client)
+    piece = [Piece("slot:7.1", "7.1", "5.2", "ai", "가상 분석. 새 목록은 하루 한 번 들어온다.")]
+    c = Claim("C1", "name", "새 목록은 하루 한 번 들어온다", "slot:7.1", "7.1", "5.2", "ai", "", "", "", "", 0)
+    first = second("C1", name_field="client.training_data.수집 주기", named="하루 한 번 들어온다")
+    for answer, want in (("어긋남", "violation"), ("맞음", "match")):
+        fake = F.FakeOpenAI([first, F.json_response({"items": [{"claim_id": "C1", "choice": answer}]})])
+        res = await fa.judge_faithfulness(fake, piece, [c], src, [], [])
+        assert res.verdicts[0].verdict == want
+        assert "의뢰자 글: 매주 새 목록을 받는다" in fake.calls[1]["input"][0]["content"]
+
+
+async def test_v124_name_choice_failure_keeps_violation():
+    refuse = lambda: F.response([F.message_item("x", refusal=True)])  # noqa: E731
+    fake, res = await _run_name(second("C1", **MISREAD), refuse(), refuse())
+    assert len(fake.calls) == 3 and res.verdicts[0].verdict == "violation"
+    assert res.verdicts[0].detail["name_choice"]["failure"] is True
+
+
+def test_v124_generic_label_words_anchor_class_fields():
+    # 1.24 검토 P1 로 좁힘 — 클래스 칸 차이('-')·같은 지표·레이블 전반 낱말·차이 낱말이 다 있을 때만
+    diff = {"expr": "{per_class.7.f1} - {per_class.8.f1}", "expr_b": "0", "relation": "ne"}
+    assert fa.mapping_anchored(diff, "일부 범주를 놓치는 정도가 레이블마다 다르므로", SOURCES)
+    assert not fa.mapping_anchored(diff, "일부 범주를 놓치는 정도가 다르므로", SOURCES)  # 레이블 전반 낱말 없음
+    assert not fa.mapping_anchored(diff, "클래스별 성능이 고르게 높다", SOURCES)  # 빼기 식이어도 차이 낱말이 없으면 아님
+    gt = {"expr": "{per_class.8.f1}", "expr_b": "{per_class.7.f1}", "relation": "gt"}
+    assert not fa.mapping_anchored(gt, "클래스별 성능이 고르게 높아 배포해도 안정적이다", SOURCES)  # 차이 낱말·빼기 없음
+    assert not fa.mapping_anchored(gt, "클래스별 성능 차이가 작아 안정적이다", SOURCES)  # 빼기 없는 비교
+    mixed = {"expr": "{per_class.7.f1} - {per_class.8.recall}", "expr_b": "0", "relation": "ne"}
+    assert not fa.mapping_anchored(mixed, "클래스마다 성능이 다르다", SOURCES)  # 다른 지표끼리
+
+
+async def test_v124_number_violation_is_never_name_checked():
+    # 숫자 값이 클래스 이름과 같아도('3' 클래스와 값 3) 숫자 위반은 보기 고르기에 들지 않는다 — 고르는 것만으로 풀리지 않게
+    src = Sources({**FS, "per_class": {"3": {"support": 7}, "7": {"support": 9}}}, [], {}, CLIENT)
+    piece = [Piece("slot:7.1", "7.1", "5.2", "ai", "가상 분석. 클래스 3 의 표본은 3건이다.")]
+    c = Claim("C1", "number", "3건", "slot:7.1", "7.1", "5.2", "ai", "", "", "3", "", 0)
+    fake = F.FakeOpenAI([second("C1", expr="{per_class.3.support}")])  # 실제 7 — 클래스 이름 '7' 과 같은 값
+    res = await fa.judge_faithfulness(fake, piece, [c], src, [], [])
+    assert res.verdicts[0].verdict == "violation" and len(fake.calls) == 1 and res.counts["name_checked"] == 0
+
+
+
+def test_v124_numeric_class_names_use_letter_options():
+    # 검토 P1: 클래스 '0'~'9' 와 보기 번호가 겹쳤다 — 이제 글자 보기, 숫자 답은 받지 않는다
+    src = Sources({**FS, "per_class": {str(i): {"f1": 0.5} for i in range(10)}}, [], {}, CLIENT)
+    mk = fa.ClaimVerdict("C1", "name", "violation", "", "", "q", {"name_field": "facts.weakest_class.label", "data": "1"})
+    kind, opts = fa.name_options(mk, src, [])
+    assert kind == "label" and opts[:3] == ["0", "1", "2"]
+    for choice, want in (("C", "violation"), ("2", "violation"), ("B", "match")):  # C = '2' (틀림), '2' 숫자 답, B = '1'
+        v = fa.ClaimVerdict("C1", "name", "violation", "", "", "q", {"data": "1"})
+        fa.apply_name_choice(v, kind, opts, choice)
+        assert v.verdict == want, choice
+
+
+@pytest.mark.parametrize("marked, choice, want", [
+    (False, "X", "inference_violation"), (True, "X", "inference_ok"),  # 검토 P1: 옮긴 추론은 어미 판정으로
+    (False, "B", "match"),
+])
+def test_v124_inference_mapped_as_name_falls_back_to_marker(marked, choice, want):
+    v = fa.ClaimVerdict("C1", "inference", "violation", "", "", "q", {"data": "realtime", "marked": marked, "as": "name"})
+    fa.apply_name_choice(v, "code", ["batch", "realtime"], choice)
+    assert v.verdict == want
+    v = fa.ClaimVerdict("C1", "inference", "violation", "", "", "q", {"data": "x", "marked": False, "as": "name"})
+    fa.apply_name_choice(v, "client", [], "관계없음")
+    assert v.verdict == "inference_violation"
+
+
+def test_v124_negated_actual_is_not_sent_to_choice():
+    # 검토 P1: 실제 합격인데 '합격하지 않았다' — 보기 고르기에서 빼고 그대로 위반
+    assert fa.negates_actual("PASS", "최종 합격하지 않았다") and not fa.negates_actual("PASS", "최종 합격이다")
+    v = fa.ClaimVerdict("C1", "name", "violation", "", "", "q",
+                        {"name_field": "facts.verdict_detail.verdict", "data": "PASS", "named": "최종 합격하지 않았다"})
+    assert fa.name_options(v, SOURCES, []) is None
