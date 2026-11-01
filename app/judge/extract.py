@@ -209,6 +209,13 @@ def not_a_claim_sentence(kind: str, sentence: str, labels: set[str]) -> str | No
     return None
 
 
+def is_question(kind: str, quote: str) -> str | None:
+    """묻는 말로 끝나는 인용('…아래로 내려가는지')은 주장이 아니다(1.25). 숫자 주장은 건드리지 않는다."""
+    if kind != "number" and re.search(criteria.load_json("inference_rules.json")["question_ending_pattern"], quote.strip()):
+        return "question"
+    return None
+
+
 def _not_a_claim(item: dict, quote: str, sentence: str) -> str | None:
     """종류와 상관없이 주장이 아닌 것(1.12, 검증 추출 분석 — 사람 정답지·민서 판정과 맞춤): 권고 문장('권고: …') 안의 말,
     판정 기준값 숫자 바로 뒤에 경계 말·'신뢰구간'이 오는 기준선 숫자('0.1 미만'·'95% 신뢰구간')."""
@@ -305,7 +312,8 @@ def place(sents: list[Sentence], items: list[tuple[str, str]]) -> list[str | Non
 
 MISSED_WORD = "빠뜨림"  # 점검표의 none_reason 에 이 낱말이 있으면 그 문장을 다시 묻는다(prompts/extract.md 문장마다 판정, 1.19)
 # 모델이 냈지만 코드가 주장 규칙으로 버린 것 — 그 문장을 본 것으로 친다(다시 물어도 같은 답이 온다). 인용·조각이 틀린 것은 치지 않는다.
-_LOOKED = ("normative", "scope", "recommendation", "duplicate", "section_label", "metric_definition", "method_sentence")
+_LOOKED = ("normative", "scope", "recommendation", "duplicate", "section_label", "metric_definition", "method_sentence",
+           "question")
 
 
 def sentence_gaps(sents: list[Sentence], verdicts: list, claims: list[Claim], rejected: list[dict]) -> dict[str, str]:
@@ -393,7 +401,8 @@ def _accept(raw: list, pieces: dict[str, Piece], catalog: dict[str, FieldEntry],
                 repaired.append({"round": round_no, "piece_id": piece.id, "from": quote[:200], "to": fixed})
             quote = fixed
         sentence = _sentence_of(quote, piece)
-        reason = _not_a_claim(item, quote, sentence) or not_a_claim_sentence(item["kind"], sentence, catalog_labels(catalog))
+        reason = (_not_a_claim(item, quote, sentence) or not_a_claim_sentence(item["kind"], sentence, catalog_labels(catalog))
+                  or is_question(item["kind"], quote))
         if reason:
             rejected.append({"round": round_no, "reason": reason, "piece_id": piece.id, "quote": quote[:200]})
             continue

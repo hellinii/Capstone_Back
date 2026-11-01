@@ -1392,3 +1392,30 @@ def test_v124_negated_actual_is_not_sent_to_choice():
     v = fa.ClaimVerdict("C1", "name", "violation", "", "", "q",
                         {"name_field": "facts.verdict_detail.verdict", "data": "PASS", "named": "최종 합격하지 않았다"})
     assert fa.name_options(v, SOURCES, []) is None
+
+
+
+# ── 1.25 묻는 말로 끝나는 구절(V2 1.24 R-0065) ───────────────────────────
+
+
+@pytest.mark.parametrize("kind, quote, want", [
+    ("comparison", "목표 0.80 아래로 떨어지는지", "question"),
+    ("name", "같은 분포인지", "question"),
+    ("degree", "표본이 충분한지", "question"),
+    ("comparison", "목표를 넘을지", "question"),
+    ("name", "다른 지점에서도 유지되는지는 이번 시험으로 확인되지 않았다", None),  # 끝이 단정 — 그대로
+    ("comparison", "목표 0.80 보다 낮다", None),
+    ("number", "0.80 인지", None),  # 숫자 주장은 건드리지 않음
+])
+def test_v125_question_ending_is_not_a_claim(kind, quote, want):
+    assert ex.is_question(kind, quote) == want
+
+
+async def test_v125_question_claim_is_dropped_and_counted_as_looked():
+    piece = Piece("slot:9:6.2", "9", "6.2", "ai", "매주 Recall 을 산출하고 목표 0.80 아래로 떨어지는지 점검하기를 권한다.")
+    item = {"kind": "comparison", "quote": "목표 0.80 아래로 떨어지는지", "piece_id": piece.id, "field": "", "field_b": "",
+            "number_text": "", "polarity": ""}
+    fake = F.FakeOpenAI([F.json_response({"claims": [item], "sentences": [{"sid": "s1", "n_claims": 1, "none_reason": ""}]}),
+                         F.json_response({"claims": []})])
+    res = await ex.extract_claims(fake, [piece], {})
+    assert res.claims == [] and [r["reason"] for r in res.rejected] == ["question"] and res.sentence_checks["lost"] == 0
