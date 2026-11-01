@@ -368,7 +368,9 @@ def test_contract_examples_validate_and_bundle_matches_the_passed_example_shape(
     built = bundle.passed(CARD)
     example = contract["examples"]["passed"]
     assert list(built) == list(example)
-    assert {a: set(v) for a, v in built["counts"].items()} == {a: set(v) for a, v in example["counts"].items()}
+    # 싣는 축(bundle.PUBLISHED_AXES)만 — 예시는 네 축을 다 싣던 때의 모양이고, 축을 빼면 그 축만 빠진다(계약 axes)
+    assert list(built["counts"]) == list(bundle.PUBLISHED_AXES) and "coverage" not in built["counts"]
+    assert {a: set(v) for a, v in built["counts"].items()} == {a: set(example["counts"][a]) for a in built["counts"]}
     assert built["counts"]["readability"]["rules"] == example["counts"]["readability"]["rules"] == 2
     assert list(bundle.held("budget", retry_allowed=True)) == list(contract["examples"]["held"])
 

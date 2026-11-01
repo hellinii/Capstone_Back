@@ -15,7 +15,8 @@ def _norm(t: str) -> str:
     return " ".join(t.split())
 
 
-def problems(pieces: list[Piece], faith, consistency, coverage) -> list[str]:
+def problems(pieces: list[Piece], faith, consistency, coverage, *, coverage_gates: bool = True) -> list[str]:
+    """coverage_gates=False 면 필수 내용 인용 확인은 하지 않는다 — 그 축을 고객 묶음에서 뺐을 때(bundle.PUBLISHED_AXES, 2026-11-01)."""
     by_id = {p.id: p for p in pieces}
     out: list[str] = []
 
@@ -29,7 +30,7 @@ def problems(pieces: list[Piece], faith, consistency, coverage) -> list[str]:
     for c in consistency.contradictions:
         if not all(has(pid, q) for pid, q in zip(c.pieces, c.quotes)):
             out.append(f"consistency:{c.type}")
-    for i in coverage.items:
+    for i in (coverage.items if coverage_gates else []):
         if i.described and (not has(i.piece_id, i.quote) or by_id[i.piece_id].source == "table"):
             out.append(f"coverage:{i.id}")
     return out

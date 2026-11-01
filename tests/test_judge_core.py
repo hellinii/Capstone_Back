@@ -7,7 +7,7 @@ from types import SimpleNamespace as M
 
 import pytest
 
-from app.judge import aggregate, core, criteria, safety
+from app.judge import aggregate, bundle, core, criteria, safety
 from app.judge.consistency import ConsistencyResult, Contradiction
 from app.judge.coverage import CoverageResult, ItemResult
 from app.judge.faithfulness import ClaimVerdict, FaithResult
@@ -68,6 +68,8 @@ def test_safety_rejects_quotes_not_in_text_and_table_evidence():
     assert safety.problems(pieces, ok_f, cons(), CoverageResult([], [], {})) == []
     assert safety.problems(pieces, bad_f, cons(), CoverageResult([], [], {})) == ["faithfulness:C"]
     assert safety.problems(pieces, ok_f, cons(), cov_bad) == ["coverage:분석-2"]
+    # 필수 내용 축을 고객 묶음에서 뺐으면(bundle.PUBLISHED_AXES) 그 인용 문제로 보류하지 않는다(2026-11-01)
+    assert safety.problems(pieces, ok_f, cons(), cov_bad, coverage_gates=False) == []
     c = ct(["7.1", "7.1"], ["ai", "table"], pieces=("slot:7.1", "t"), quotes=("43건", "99"))
     assert safety.problems(pieces, ok_f, cons(c), CoverageResult([], [], {})) == ["consistency:value_mismatch"]
 
@@ -174,7 +176,7 @@ async def test_module_failure_means_no_gate():
     quote = next(tok for tok in gen.response.conclusion.narrative.split() if any(ch.isdigit() for ch in tok))
     answers["claims"] = {"claims": [{"kind": "number", "quote": quote, "piece_id": "slot:8.2", "field": "", "field_b": "",
                                      "number_text": "", "polarity": ""}]}
-    answers["coverage"] = lambda kw: {"items": []}  # 항목 답 없음 → bad_output
+    answers["readability"] = lambda kw: {"slots": []}  # 칸 답 없음 → bad_output(필수 내용은 뺀 축이라 1.25~ 막지 않음)
     fake = F.FakeOpenAI([router(answers)] * 20)
     run = await core.judge_once(fake, req, gen.response, gen.section_sources, refs)
     assert (run.gate, run.failure, run.scorecard) == (None, "bad_output", None)
@@ -194,3 +196,41 @@ async def test_core_runs_safety_gate_on_module_output(monkeypatch):
     monkeypatch.setattr(core, "judge_faithfulness", bad_faith)
     run = await core.judge_once(F.FakeOpenAI([router(answers)] * 20), req, gen.response, gen.section_sources, refs)
     assert (run.gate, run.failure, run.record["safety"]) == (None, "safety", ["faithfulness:C1"])
+
+
+
+async def test_coverage_failure_is_recorded_but_does_not_hold_when_the_axis_is_not_published():
+    # 필수 내용 축을 뺐다(bundle.PUBLISHED_AXES, 2026-11-01 — V2 결함 D03 미달). 그 점검이 실패해도 판정은 나고, 기록에만 남는다.
+    assert "coverage" not in bundle.PUBLISHED_AXES
+    req, gen, refs = await _setup()
+    answers = _empty_answers(None)
+    quote = next(tok for tok in gen.response.conclusion.narrative.split() if any(ch.isdigit() for ch in tok))
+    answers["claims"] = {"claims": [{"kind": "number", "quote": quote, "piece_id": "slot:8.2", "field": "", "field_b": "",
+                                     "number_text": "", "polarity": ""}]}
+    answers["coverage"] = lambda kw: {"items": []}  # 항목 답 없음 → bad_output
+    fake = F.FakeOpenAI([router(answers)] * 20)
+    run = await core.judge_once(fake, req, gen.response, gen.section_sources, refs)
+    assert run.failure is None and run.gate in ("pass", "blocked")
+    assert run.record["coverage"]["failure"] == "bad_output"
+    assert run.scorecard["coverage"]["applicable"] == 0 and run.scorecard["coverage"]["items"] == []
+    assert "coverage" not in bundle.passed(run.scorecard)["counts"]
+
+
+async def test_coverage_quote_problem_does_not_hold_when_the_axis_is_not_published():
+    # 끝에서 끝: 필수 내용 답의 인용이 글에 없어도 보류(safety)로 가지 않는다. 필수 내용 모듈이 먼저 그 답을 '없음'으로 바꿔
+    # 안전장치의 필수 내용 확인은 운영 경로에서 늘 두 번째 방어다 — 스위치(coverage_gates) 자체는 test_safety_rejects_… 가 잡는다
+    req, gen, refs = await _setup()
+    answers = _empty_answers(None)
+    quote = next(tok for tok in gen.response.conclusion.narrative.split() if any(ch.isdigit() for ch in tok))
+    answers["claims"] = {"claims": [{"kind": "number", "quote": quote, "piece_id": "slot:8.2", "field": "", "field_b": "",
+                                     "number_text": "", "polarity": ""}]}
+
+    def bogus(kw):
+        ids = kw["text"]["format"]["schema"]["properties"]["items"]["items"]["properties"]["id"]["enum"]
+        return {"items": [{"id": i, "present": n == 0, "quote": "글에 없는 지어낸 구절이다" if n == 0 else "",
+                           "piece_id": "slot:8.2" if n == 0 else ""} for n, i in enumerate(ids)]}
+
+    answers["coverage"] = bogus
+    fake = F.FakeOpenAI([router(answers)] * 20)
+    run = await core.judge_once(fake, req, gen.response, gen.section_sources, refs)
+    assert run.failure is None and not any(i.startswith("coverage:") for i in run.record["safety"])

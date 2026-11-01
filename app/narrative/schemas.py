@@ -736,8 +736,16 @@ class JudgeCounts(BaseModel):
     """축별 검사 건수·결과 건수(통과한 성적서만). 근거 인용·사유·주장 내용은 싣지 않는다."""
     faithfulness: dict[Literal["checked", "matched"], int]
     consistency:  dict[Literal["checked", "contradictions"], int]
-    coverage:     JudgeCoverageCounts
+    coverage:     JudgeCoverageCounts | None = None  # 필수 내용 축을 뺀 기준(1.25~)에서는 없다 — axes 에 든 축만 싣는다
     readability:  dict[Literal["rules", "violations"], int]
+
+    @model_serializer(mode="wrap")
+    def _drop_absent_axis(self, handler):
+        # 뺀 축은 키째 싣지 않는다 — 'coverage: null' 이 나가면 계약("counts 에는 axes 에 든 축만") 밖이다(2026-11-01)
+        data = handler(self)
+        if data.get("coverage") is None:
+            data.pop("coverage", None)
+        return data
 
 
 class JudgeBundle(BaseModel):

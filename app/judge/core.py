@@ -19,8 +19,9 @@ import time
 from dataclasses import dataclass, field
 
 from app.judge import aggregate, config, criteria, safety
+from app.judge.bundle import PUBLISHED_AXES
 from app.judge.consistency import judge_consistency
-from app.judge.coverage import judge_coverage
+from app.judge.coverage import CoverageResult, judge_coverage
 from app.judge.extract import extract_claims
 from app.judge.faithfulness import judge_faithfulness
 from app.judge.material import parse_material
@@ -49,6 +50,12 @@ class JudgeRun:
 def lookup_data_empty(fs) -> bool:
     """조회 자료(혼동행렬 건수·클래스별 표)가 비었나 — 프론트가 본문 예산으로 비운 드문 요청(Q4 f)."""
     return not fs.confusion_counts and not fs.per_class
+
+
+def _empty_coverage(cov) -> CoverageResult:
+    """필수 내용 점검이 실패했을 때 점수표 자리(뺀 축이라 보류하지 않는다) — 0 건과 실패 사유를 남긴다."""
+    return CoverageResult([], [], {"applicable": 0, "described": 0, "not_applicable": 0, "failure": cov.failure},
+                          cov.calls, cov.failure)
 
 
 async def judge_once(client, req, result, section_sources: dict, benchmark_refs: list[dict], *,
@@ -85,7 +92,9 @@ async def judge_once(client, req, result, section_sources: dict, benchmark_refs:
                                                source_notes=[r.get("source_note", "") for r in benchmark_refs], **kw)),
     )
     record.update({"extract": ext.as_record(), "coverage": cov.as_record(), "readability": rea.as_record()})
-    first_failure = ext.failure or cov.failure or rea.failure
+    # 필수 내용 축을 고객 묶음에서 뺐으면(bundle.PUBLISHED_AXES) 그 점검의 실패·인용 문제로 보류하지 않는다 — 기록에만 남는다
+    coverage_gates = "coverage" in PUBLISHED_AXES
+    first_failure = ext.failure or (cov.failure if coverage_gates else None) or rea.failure
     if first_failure:
         record["seconds"] = {**timings, "total": round(clock_fn() - started, 3)}
         return JudgeRun(None, first_failure, record=record)
@@ -99,13 +108,13 @@ async def judge_once(client, req, result, section_sources: dict, benchmark_refs:
         record["seconds"] = {**timings, "total": round(clock_fn() - started, 3)}
         return JudgeRun(None, faith.failure or cons.failure, record=record)
     t = clock_fn()
-    issues = safety.problems(pieces, faith, cons, cov)
+    issues = safety.problems(pieces, faith, cons, cov, coverage_gates=coverage_gates)
     record["safety"] = issues
     if issues:
         record["seconds"] = {**timings, "total": round(clock_fn() - started, 3)}
         return JudgeRun(None, "safety", record=record)
     slots, unfixable = aggregate.flagged_slots(faith, cons)
-    card = aggregate.scorecard(faith, cons, cov, rea)
+    card = aggregate.scorecard(faith, cons, cov if not cov.failure else _empty_coverage(cov), rea)
     timings["aggregate"] = round(clock_fn() - t, 3)
     record["seconds"] = {**timings, "total": round(clock_fn() - started, 3)}
     return JudgeRun(aggregate.gate(faith, cons), None, slots, unfixable, card, record)
