@@ -1,0 +1,910 @@
+{
+  "task_type": "binary",
+  "report_purpose": "external",
+  "report_edition": 4,
+  "fact_sheet": {
+    "n_samples": 200,
+    "dropped_rows": 0,
+    "metrics": [
+      {
+        "metric_id": "M1",
+        "display_name": "Accuracy",
+        "value": 0.505,
+        "threshold": 0.9,
+        "status": "fail",
+        "is_core": false,
+        "ci_low": 0.4363,
+        "ci_high": 0.5735,
+        "margin": -0.395,
+        "near_target": false,
+        "value_text": "0.505",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.395",
+        "ci_contains_target": false,
+        "ci_low_text": "0.436",
+        "ci_high_text": "0.574"
+      },
+      {
+        "metric_id": "M2",
+        "display_name": "Precision",
+        "value": 0.48148148148148145,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "value": 0.5473684210526316,
+        "threshold": 0.9,
+        "status": "fail",
+        "is_core": true,
+        "ci_low": 0.4474,
+        "ci_high": 0.6437,
+        "margin": -0.352631579,
+        "near_target": false,
+        "value_text": "0.547",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.353",
+        "ci_contains_target": false,
+        "ci_low_text": "0.447",
+        "ci_high_text": "0.644"
+      },
+      {
+        "metric_id": "M4",
+        "display_name": "F1 Score",
+        "value": 0.5123152709359606,
+        "threshold": 0.85,
+        "status": "fail",
+        "is_core": false,
+        "ci_low": 0.4271,
+        "ci_high": 0.5909,
+        "margin": -0.337684729,
+        "near_target": false,
+        "value_text": "0.512",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.338",
+        "ci_contains_target": false,
+        "ci_low_text": "0.427",
+        "ci_high_text": "0.591"
+      },
+      {
+        "metric_id": "M9",
+        "display_name": "AUROC",
+        "value": 0.5111779448621554,
+        "threshold": 0.9,
+        "status": "fail",
+        "is_core": false,
+        "ci_low": 0.4329,
+        "ci_high": 0.5923,
+        "margin": -0.388822055,
+        "near_target": false,
+        "value_text": "0.511",
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": "-0.389",
+        "ci_contains_target": false,
+        "ci_low_text": "0.433",
+        "ci_high_text": "0.592"
+      },
+      {
+        "metric_id": "M10",
+        "display_name": "AUPRC",
+        "value": 0.49404782320259494,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": true,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M19",
+        "display_name": "Log Loss",
+        "value": 1.1966162767452984,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": false,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      },
+      {
+        "metric_id": "M23",
+        "display_name": "Imbalance Ratio",
+        "value": 1.105263157894737,
+        "threshold": null,
+        "status": "info",
+        "is_core": false,
+        "ci_low": null,
+        "ci_high": null,
+        "margin": null,
+        "near_target": false,
+        "value_text": null,
+        "higher_is_better": false,
+        "beta": null,
+        "margin_text": null,
+        "ci_contains_target": null,
+        "ci_low_text": null,
+        "ci_high_text": null
+      }
+    ],
+    "per_class": [
+      {
+        "label": "0",
+        "precision": 0.532608695652174,
+        "recall": 0.4666666666666667,
+        "f1": 0.49746192893401014,
+        "support": 105
+      },
+      {
+        "label": "1",
+        "precision": 0.48148148148148145,
+        "recall": 0.5473684210526316,
+        "f1": 0.5123152709359606,
+        "support": 95
+      }
+    ],
+    "class_averages": [
+      {
+        "label": "매크로 평균",
+        "precision": 0.5070450885668277,
+        "recall": 0.5070175438596491,
+        "f1": 0.5048885999349854,
+        "support": 200
+      },
+      {
+        "label": "가중 평균",
+        "precision": 0.508323268921095,
+        "recall": 0.505,
+        "f1": 0.5045172663849367,
+        "support": 200
+      }
+    ],
+    "confusion": {
+      "labels": [
+        "0",
+        "1"
+      ],
+      "matrix": [
+        [
+          49,
+          56
+        ],
+        [
+          43,
+          52
+        ]
+      ],
+      "positive_class": "1"
+    },
+    "confusion_counts": [
+      {
+        "label": "1",
+        "tp": 52,
+        "fp": 56,
+        "fn": 43,
+        "tn": 49
+      }
+    ],
+    "derived_prediction": null,
+    "error_ratios": {
+      "unit": "sample",
+      "misclassified": 99,
+      "boundary": null,
+      "boundary_note": "threshold_unknown",
+      "confident": {
+        "count": 31,
+        "ratio": 0.3131
+      },
+      "boundary_margin": 0.1,
+      "confident_level": 0.9,
+      "threshold": null
+    },
+    "ci_method_note": "판정 대상 지표의 95% 신뢰구간은 Wilson 점수 구간(M1, M3), 다항 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M4), 행 재표집 부트스트랩(2,000회, 시드 4213, 백분위 구간; M9)으로 산출하였습니다.",
+    "f1_threshold_gain": {
+      "max_f1": 0.6483,
+      "current_f1": 0.5123,
+      "gain": 0.136,
+      "best_threshold": 0.03,
+      "notable": true,
+      "gain_text": "0.136",
+      "best_threshold_text": "0.030",
+      "max_f1_text": "0.648",
+      "current_f1_text": "0.512",
+      "best_recall_text": "0.989",
+      "best_precision_text": "0.482",
+      "current_recall_text": "0.547",
+      "current_precision_text": "0.481",
+      "risk_side": {
+        "side": "fn",
+        "metric_id": "M3",
+        "display_name": "Recall",
+        "meets_target_now": false,
+        "meets_target_at_best": true
+      }
+    },
+    "imbalance_effect": {
+      "level": "mild",
+      "imbalance_ratio": 1.1053,
+      "accuracy_minus_macro_f1": 0.0001,
+      "majority_minus_minority_f1": -0.0149,
+      "majority_class": "0",
+      "minority_class": "1",
+      "accuracy": 0.505,
+      "macro_f1": 0.5049,
+      "majority_f1": 0.4975,
+      "minority_f1": 0.5123,
+      "display": {
+        "imbalance_ratio": "1.105",
+        "accuracy_minus_macro_f1": "0.000",
+        "majority_minus_minority_f1": "-0.015",
+        "accuracy": "0.505",
+        "macro_f1": "0.505",
+        "majority_f1": "0.497",
+        "minority_f1": "0.512"
+      }
+    },
+    "problems": [
+      {
+        "id": "P1",
+        "kind": "core_fail",
+        "priority": "HIGH",
+        "title": "핵심 지표 미달 (Recall)",
+        "source_section": "8.2",
+        "recommend_section": "9.2",
+        "evidence": {
+          "Recall": {
+            "value": "0.547",
+            "target": "0.900"
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P2",
+        "kind": "noncore_fail",
+        "priority": "MEDIUM",
+        "title": "비핵심 지표 미달 (Accuracy, F1 Score, AUROC)",
+        "source_section": "8.2",
+        "recommend_section": "9.2",
+        "evidence": {
+          "Accuracy": {
+            "value": "0.505",
+            "target": "0.900"
+          },
+          "F1 Score": {
+            "value": "0.512",
+            "target": "0.850"
+          },
+          "AUROC": {
+            "value": "0.511",
+            "target": "0.900"
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P3",
+        "kind": "threshold_tuning",
+        "priority": "MEDIUM",
+        "title": "임계값 부적합",
+        "source_section": "8.3",
+        "recommend_section": "9.2",
+        "evidence": {
+          "max_f1": "0.648",
+          "current_f1": "0.512",
+          "gain": "0.136",
+          "best_threshold": "0.030",
+          "notable": true
+        },
+        "note": null
+      },
+      {
+        "id": "P4",
+        "kind": "distribution_shift",
+        "priority": "LOW",
+        "title": "학습↔평가 분포 차이 (0, 1)",
+        "source_section": "7.2",
+        "recommend_section": "9.1",
+        "evidence": {
+          "0": {
+            "training_ratio": "0.800",
+            "evaluation_ratio": "0.525",
+            "difference": "0.275"
+          },
+          "1": {
+            "training_ratio": "0.200",
+            "evaluation_ratio": "0.475",
+            "difference": "-0.275"
+          }
+        },
+        "note": null
+      },
+      {
+        "id": "P5",
+        "kind": "label_caution",
+        "priority": "LOW",
+        "title": "정답 라벨 주의 (구축 방법 운영 로그, 신뢰성 검토 없음)",
+        "source_section": "7.2",
+        "recommend_section": "9.1",
+        "evidence": {
+          "정답 라벨 구축 방법": "운영 로그",
+          "정답 라벨 신뢰성": "검토 없음"
+        },
+        "note": null
+      }
+    ],
+    "distribution": {
+      "class_distribution": {
+        "0": 105,
+        "1": 95
+      },
+      "imbalance_ratio": 1.105263157894737
+    },
+    "verdict": "FAIL",
+    "score": 0,
+    "latency": {
+      "available": false,
+      "mean": null,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "unit": "ms"
+    },
+    "facts": {
+      "contract": "facts-1",
+      "positive_class": "1",
+      "n_classes": 2,
+      "class_share_basis": "samples",
+      "report_purpose_label": "외부 제출",
+      "core_metrics_source": "client",
+      "selected_metrics": [
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M9",
+        "M10",
+        "M19",
+        "M23"
+      ],
+      "declarations": {
+        "risk_direction": "fn",
+        "class_priority": null,
+        "usage_mode": "batch"
+      },
+      "verdict_detail": {
+        "verdict": "FAIL",
+        "judged_count": 4,
+        "passed_count": 0,
+        "failed_core": [
+          {
+            "metric_id": "M3",
+            "display_name": "Recall"
+          }
+        ],
+        "failed_noncore": [
+          {
+            "metric_id": "M1",
+            "display_name": "Accuracy"
+          },
+          {
+            "metric_id": "M4",
+            "display_name": "F1 Score"
+          },
+          {
+            "metric_id": "M9",
+            "display_name": "AUROC"
+          }
+        ],
+        "unavailable_core": [],
+        "inconclusive_cause": null,
+        "inconclusive_metrics": []
+      },
+      "error_totals": {
+        "unit": "sample",
+        "total": 200,
+        "misclassified": 99
+      },
+      "weakest_class": {
+        "label": "0",
+        "f1": 0.49746192893401014,
+        "f1_text": "0.497",
+        "support": 105,
+        "share": 0.525,
+        "share_text": "0.525",
+        "macro_f1": 0.5048885999349854,
+        "gap_from_macro": 0.007426671,
+        "gap_text": "0.007",
+        "low_support": false,
+        "far_below_macro": false
+      },
+      "low_support_classes": [],
+      "top_confusion_pairs": [],
+      "prediction_bias": {
+        "unit": "positive_class",
+        "rows": [
+          {
+            "label": "1",
+            "predicted": 108,
+            "actual": 95,
+            "difference": 13
+          }
+        ]
+      },
+      "declared_risk_errors": {
+        "side": "fn",
+        "count": 43,
+        "total_errors": 99,
+        "share": 0.434343434,
+        "share_text": "0.434"
+      },
+      "precision_recall_gap": {
+        "precision": 0.48148148148148145,
+        "recall": 0.5473684210526316,
+        "difference": -0.06588694,
+        "difference_text": "-0.066",
+        "flagged": false
+      },
+      "average_gap": null,
+      "declared_average": null,
+      "distribution_shift_status": "compared",
+      "distribution_shift": [
+        {
+          "label": "0",
+          "training_ratio": 0.8,
+          "evaluation_ratio": 0.525,
+          "difference": 0.275,
+          "difference_text": "0.275",
+          "flagged": true,
+          "evaluation_minus_training_text": "-0.275"
+        },
+        {
+          "label": "1",
+          "training_ratio": 0.2,
+          "evaluation_ratio": 0.475,
+          "difference": -0.275,
+          "difference_text": "-0.275",
+          "flagged": true,
+          "evaluation_minus_training_text": "0.275"
+        }
+      ],
+      "ci_available": true,
+      "ci_skipped": [],
+      "fixed_sentences": [
+        {
+          "id": "17",
+          "section": "7.1",
+          "text": "확률이 있는 오분류 99건 중 확신 오류(틀린 쪽 확률 0.9 이상)는 31건(31.3%)이다. 경계 오류는 예측값을 직접 제출해 결정 임계값을 알 수 없어 계산하지 않았다."
+        },
+        {
+          "id": "12",
+          "section": "7.2",
+          "text": "정답 라벨의 구축 방법과 신뢰성이 각각 운영 로그, 검토 없음으로, 정답 자체의 오류가 성능 수치에 반영되었을 수 있다. 수치 해석 시 이를 고려해야 한다."
+        },
+        {
+          "id": "16",
+          "section": "8.1",
+          "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: Log Loss, Imbalance Ratio."
+        },
+        {
+          "id": "11b",
+          "section": "8.2",
+          "text": "평가 데이터는 학습 데이터와 다른 출처에서 수집되었다."
+        }
+      ],
+      "omitted": {}
+    }
+  },
+  "client_inputs": {
+    "model": {
+      "모델명": "ChurnAlert-RB",
+      "버전": "v0.9",
+      "모델 용도": "통신 가입자의 이용 기록으로 다음 달 해지 가능성이 높은 가입자를 골라 상담 대상으로 넘긴다.",
+      "모델 분류": "고객 이탈 예측"
+    },
+    "report_purpose_note": "협력사 납품 전 성능 확인 자료",
+    "declarations": {
+      "위험 방향": "FN이 더 위험 (의뢰자 제공: 해지할 가입자를 놓치면 붙잡을 기회가 사라진다.)",
+      "사용 방식": "배치 (의뢰자 제공: 매월 1일 한 번에 돌린다.)"
+    },
+    "core_metrics": [
+      "Recall"
+    ],
+    "training_data": {
+      "학습 데이터셋명": "2025년 가입자 이용 기록",
+      "학습 데이터 출처": "자사 과금 시스템",
+      "학습 샘플 수": "12,000개",
+      "검증 샘플 수": "3,000개",
+      "학습 클래스 분포": "1 2,400 / 0 9,600",
+      "채널 효과": "알려진 것 없음",
+      "편향 감소 노력": "수행 안 함",
+      "학습·평가 전처리 일치": "같음"
+    },
+    "test_data": {
+      "평가 데이터 출처": "2026년 1분기 해지 신청 기록에서 뽑은 200명",
+      "학습 데이터와의 관계": "다른 출처 (의뢰자 제공: 학습은 2025년, 평가는 2026년 기록이다.)"
+    },
+    "ground_truth": {
+      "정답 라벨 구축 방법": "운영 로그 (의뢰자 제공: 실제 해지 여부)",
+      "정답 라벨 신뢰성": "검토 없음"
+    },
+    "environment": {
+      "운영체제": "제공되지 않음",
+      "CPU": "제공되지 않음",
+      "GPU": "제공되지 않음",
+      "메모리": "제공되지 않음",
+      "소프트웨어": "제공되지 않음",
+      "학습 가속": "제공되지 않음",
+      "추론 가속": "제공되지 않음",
+      "알고리즘": "제공되지 않음",
+      "하이퍼파라미터": "제공되지 않음"
+    },
+    "class_label_descriptions": {
+      "0": "유지",
+      "1": "해지"
+    }
+  },
+  "judge_material": {
+    "version": "judge-material-1",
+    "material_check_version": "2.0",
+    "segments": [
+      {
+        "id": "4.2-table",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "종합 판정",
+          "판정 대상 지표 중 충족"
+        ],
+        "rows": [
+          [
+            "최종 불합격",
+            "4개 중 0개"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "4",
+            "field": "verdict.judged_count"
+          },
+          {
+            "text": "0",
+            "field": "verdict.passed_count"
+          }
+        ]
+      },
+      {
+        "id": "4.2-basis",
+        "slot": "8",
+        "place": "4.2",
+        "kind": "fixed",
+        "text": "핵심 지표 Recall(M3)이 목표에 미달하여, 3.4의 판정 규칙에 따라 불합격으로 판정하였다.",
+        "numbers": []
+      },
+      {
+        "id": "4.3-margin",
+        "slot": "8.3",
+        "place": "4.3",
+        "kind": "table",
+        "text": "",
+        "header": [
+          "시험항목",
+          "판정 여유"
+        ],
+        "rows": [
+          [
+            "Accuracy",
+            "충분"
+          ],
+          [
+            "Recall (핵심)",
+            "충분"
+          ],
+          [
+            "F1 Score",
+            "충분"
+          ],
+          [
+            "AUROC",
+            "충분"
+          ]
+        ],
+        "numbers": []
+      },
+      {
+        "id": "4.4-counts",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "혼동 행렬 건수",
+        "header": [
+          "양성 클래스",
+          "TP",
+          "TN",
+          "FP",
+          "FN"
+        ],
+        "rows": [
+          [
+            "1",
+            "52",
+            "49",
+            "56",
+            "43"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "52",
+            "field": "confusion_counts.1.tp"
+          },
+          {
+            "text": "49",
+            "field": "confusion_counts.1.tn"
+          },
+          {
+            "text": "56",
+            "field": "confusion_counts.1.fp"
+          },
+          {
+            "text": "43",
+            "field": "confusion_counts.1.fn"
+          }
+        ]
+      },
+      {
+        "id": "4.4-fixed17",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "fixed",
+        "text": "확률이 있는 오분류 99건 중 확신 오류(틀린 쪽 확률 0.9 이상)는 31건(31.3%)이다. 경계 오류는 예측값을 직접 제출해 결정 임계값을 알 수 없어 계산하지 않았다.",
+        "numbers": []
+      },
+      {
+        "id": "4.4-weakest",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "최약 클래스(F1 최저)\n매크로 F1과의 차이 = 매크로 F1 − 이 클래스의 F1. 작은 표본은 표본 수 30건 미만 또는 전체의 5% 미만입니다.",
+        "header": [
+          "클래스",
+          "F1",
+          "표본 수",
+          "비율",
+          "매크로 F1과의 차이",
+          "작은 표본"
+        ],
+        "rows": [
+          [
+            "0(유지)",
+            "0.497",
+            "105",
+            "52.5%",
+            "0.007",
+            "아니오"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "0.497",
+            "field": "facts.weakest_class.f1"
+          },
+          {
+            "text": "105",
+            "field": "facts.weakest_class.support"
+          },
+          {
+            "text": "52.5%",
+            "field": "facts.weakest_class.share"
+          },
+          {
+            "text": "0.007",
+            "field": "facts.weakest_class.gap"
+          }
+        ]
+      },
+      {
+        "id": "4.4-bias",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "예측 편향(예측 수 대 실제 수)",
+        "header": [
+          "양성 클래스",
+          "예측 수",
+          "실제 수",
+          "차이(예측 − 실제)"
+        ],
+        "rows": [
+          [
+            "1(해지)",
+            "108",
+            "95",
+            "+13"
+          ]
+        ],
+        "numbers": [
+          {
+            "text": "108",
+            "field": "facts.prediction_bias.1.predicted"
+          },
+          {
+            "text": "95",
+            "field": "facts.prediction_bias.1.actual"
+          },
+          {
+            "text": "+13",
+            "field": "facts.prediction_bias.1.difference"
+          }
+        ]
+      },
+      {
+        "id": "4.4-threshold",
+        "slot": "7.1",
+        "place": "4.4",
+        "kind": "table",
+        "text": "임계값 조정 여지\nF1의 최대 상승폭은 0.136이다.",
+        "header": [
+          "지표",
+          "현재 예측(제출된 예측값)",
+          "F1이 가장 높은 결정 임계값 0.030"
+        ],
+        "rows": [
+          [
+            "F1 Score",
+            "0.512",
+            "0.648"
+          ],
+          [
+            "Recall",
+            "0.547",
+            "0.989"
+          ],
+          [
+            "Precision",
+            "0.481",
+            "0.482"
+          ]
+        ],
+        "numbers": []
+      },
+      {
+        "id": "5.1-fixed11",
+        "slot": "8.2",
+        "place": "5.1",
+        "kind": "fixed",
+        "text": "평가 데이터는 학습 데이터와 다른 출처에서 수집되었다.",
+        "numbers": []
+      },
+      {
+        "id": "5.3-fixed12",
+        "slot": "7.2",
+        "place": "5.3",
+        "kind": "fixed",
+        "text": "정답 라벨의 구축 방법과 신뢰성이 각각 운영 로그, 검토 없음으로, 정답 자체의 오류가 성능 수치에 반영되었을 수 있다. 수치 해석 시 이를 고려해야 한다.",
+        "numbers": []
+      },
+      {
+        "id": "4.6-fixed16",
+        "slot": "8.1",
+        "place": "4.6",
+        "kind": "fixed",
+        "text": "다음 지표는 내부 참조 기준치가 없어 벤치마크 비교를 하지 않았다: Log Loss, Imbalance Ratio.",
+        "numbers": []
+      },
+      {
+        "id": "5.4-b18",
+        "slot": "8.1",
+        "place": "5.4",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "5.6-fixed15",
+        "slot": "7.3",
+        "place": "5.6",
+        "kind": "fixed",
+        "text": "해당 없음",
+        "numbers": [],
+        "when": "slot_empty"
+      },
+      {
+        "id": "6.1-recommend",
+        "slot": "9",
+        "place": "6.1",
+        "kind": "recommend_rows",
+        "text": "",
+        "header": [
+          "우선순위",
+          "대응 문제 번호",
+          "권고",
+          "기대 효과"
+        ],
+        "rows": [
+          [
+            "낮음",
+            "P4 · 학습↔평가 분포 차이 (0, 1)"
+          ],
+          [
+            "낮음",
+            "P5 · 정답 라벨 주의 (구축 방법 운영 로그, 신뢰성 검토 없음)"
+          ]
+        ],
+        "row_keys": [
+          "P4",
+          "P5"
+        ],
+        "numbers": []
+      },
+      {
+        "id": "6.2-recommend",
+        "slot": "9",
+        "place": "6.2",
+        "kind": "recommend_rows",
+        "text": "",
+        "header": [
+          "우선순위",
+          "대응 문제 번호",
+          "권고",
+          "기대 효과"
+        ],
+        "rows": [
+          [
+            "높음",
+            "P1 · 핵심 지표 미달 (Recall)"
+          ],
+          [
+            "중간",
+            "P2 · 비핵심 지표 미달 (Accuracy, F1 Score, AUROC)"
+          ],
+          [
+            "중간",
+            "P3 · 임계값 부적합"
+          ]
+        ],
+        "row_keys": [
+          "P1",
+          "P2",
+          "P3"
+        ],
+        "numbers": []
+      }
+    ]
+  }
+}

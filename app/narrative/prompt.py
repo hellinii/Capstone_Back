@@ -400,6 +400,13 @@ def _section_notes_ed4(section_id: str, fs: FactSheet, derived: dict, task_type:
         note = _risk_side_note(fs)
         if note:
             notes.append(note)
+    if section_id == "9":
+        # 서술 설계 D20 의 7.2 말투(인과 단정 없음)를 판 4 권고 칸에도(심판 라운드 1세션 민서 결정 2026-10-28).
+        # 판 3 지시문은 얼린 정답이 있어 그대로 둔다.
+        notes.append(
+            "권고의 근거를 쓸 때 데이터로 확인되지 않은 원인을 단정하지 않는다. 예를 들어 '불균형이 성능을 떨어뜨렸다'처럼 "
+            "쓰지 말고 '소수 클래스의 성능이 낮게 관찰되었다'처럼 관찰한 사실로 쓴다."
+        )
     return notes
 
 

@@ -21,6 +21,7 @@ from app.issuance.schemas import (
     ReissueRequest,
     ReportContentOut,
 )
+from app.issuance import judge_gate
 from app.issuance import service as issuance_service
 from app.issuance.service import IssuanceError
 from app.issuance.serializers import organization_out, issuance_out, report_content_out
@@ -40,8 +41,9 @@ def get_organization(db: Session = Depends(get_db)):
 
 @router.post("/reports/issue", response_model=IssuanceOut)
 def issue(payload: IssueRequest, db: Session = Depends(get_db)):
-    """발급(채번). 같은 run_id 재호출 시 기존 발급본 반환(멱등)."""
+    """발급(채번). 같은 run_id 재호출 시 기존 발급본 반환(멱등). 판 4 성적서는 심판 통과 작업 번호가 있어야 한다."""
     try:
+        judge_gate.check(db, payload.content, payload.narrative_job_id)
         report = issuance_service.issue_report(
             db,
             run_id=payload.run_id,
@@ -58,8 +60,9 @@ def issue(payload: IssueRequest, db: Session = Depends(get_db)):
 
 @router.post("/reports/{report_no}/reissue", response_model=IssuanceOut)
 def reissue(report_no: str, payload: ReissueRequest, db: Session = Depends(get_db)):
-    """재발급(정정). 같은 번호 유지 + 버전 차수 증가."""
+    """재발급(정정). 같은 번호 유지 + 버전 차수 증가. 판 4 성적서는 첫 발급과 같은 심판 검사."""
     try:
+        judge_gate.check(db, payload.content, payload.narrative_job_id)
         report = issuance_service.reissue_report(
             db,
             report_no=report_no,

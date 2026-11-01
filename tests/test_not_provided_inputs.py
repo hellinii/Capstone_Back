@@ -29,9 +29,13 @@ def test_is_not_provided_true(value):
     assert is_not_provided(value)
 
 
-@pytest.mark.parametrize("value", ["레이블 오류를 고르게 본다", "기타 (의뢰자 제공: 제공되지 않음)"])
+@pytest.mark.parametrize(
+    "value", ["레이블 오류를 고르게 본다", "기타 (의뢰자 제공: 제공되지 않음)", "모름", " 모름 ", "모름, 사내 로그 일부"],
+)
 def test_is_not_provided_false(value):
     # 값이 있고 글이 붙은 꼴("값 (의뢰자 제공: …)")은 제공이다 — 시작만 본다.
+    # 글 칸에 의뢰자가 직접 적은 '모름'도 제공이다 — 프론트 재료 점검(materialCheck)이 제공으로 세는 것과 같게(심판 라운드 1단계
+    # 검토 지적 3·4). '모름' 선택(체크)은 프론트가 "제공되지 않음"으로 보내 위 True 쪽에 걸린다.
     assert not is_not_provided(value)
 
 

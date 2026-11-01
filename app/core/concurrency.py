@@ -55,6 +55,8 @@ def _env_slots(name: str, default: int) -> int:
 # 업로드 직후의 매핑이 서술이 끝날 때까지 기다린다(반대로 매핑이 몰리면 서술이 밀린다).
 MAX_CONCURRENT_MAPPING_CALLS = _env_slots("MAPPING_LLM_SLOTS", 2)
 MAX_CONCURRENT_NARRATIVE_CALLS = _env_slots("NARRATIVE_LLM_SLOTS", 4)
+# 심판 채점(판 4) — 채점 한 번(모듈 다섯이 함께 도는 묶음)이 칸 하나를 쓴다. 서술 칸과 따로다(심판 라운드 J5b).
+MAX_CONCURRENT_JUDGE_RUNS = _env_slots("JUDGE_SLOTS", 2)
 
 # asyncio.Semaphore 는 처음 대기가 발생할 때 실행 중인 이벤트 루프에 묶인다. 테스트는
 # TestClient 마다 새 루프를 만들 수 있으므로 모듈 전역에 하나를 두면 'bound to a
@@ -108,4 +110,14 @@ async def narrative_slot():
     상한(app.narrative.jobs)으로 기다리고, 넘으면 규칙 문장(사유 busy)이 된다.
     """
     async with _get_semaphore(_narrative_semaphores, MAX_CONCURRENT_NARRATIVE_CALLS):
+        yield
+
+
+_judge_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+@asynccontextmanager
+async def judge_slot():
+    """심판 채점 한 번을 점유한다. 대기 상한은 호출하는 쪽(app.narrative.jobs 의 판 4 갈래)이 남은 시간 안에서 둔다."""
+    async with _get_semaphore(_judge_semaphores, MAX_CONCURRENT_JUDGE_RUNS):
         yield

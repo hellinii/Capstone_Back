@@ -3,7 +3,7 @@
 import json
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_serializer, model_validator
 from app.core.schemas import ReportPurpose, TaskType
 
 
@@ -536,8 +536,8 @@ class FactSheet(BaseModel):
         default=[],
         max_length=4,
         description=(
-            "클래스별 표(M22)의 평균 줄 — 매크로·가중·마이크로(멀티레이블은 샘플 평균도). "
-            "평균 방식 차이를 8.2 에 쓰는 재료(서술 설계 D17·D39). M22 미선택이면 빈 배열."
+            "클래스별 표의 평균 줄 — 매크로·가중·마이크로(멀티레이블은 샘플 평균도). 표는 엔진이 지표 선택(M22)과 "
+            "무관하게 늘 계산한다(class_report). 평균 방식 차이를 8.2 에 쓰는 재료(서술 설계 D17·D39). 표가 없으면 빈 배열."
         ),
     )
     confusion:    ConfusionFact | None     = None
@@ -606,6 +606,12 @@ class NarrativeRequest(BaseModel):
             "회사·과제 정보는 담지 않는다(D34). 계산값이 아니라 의뢰자 제공 정보다."
         ),
     )
+
+    # 심판 읽기 재료(심판 라운드 J2, 계획 10-1) — 판 4 프론트만 싣는다. 형식을 여기서 보지 않는다(Any): 틀리거나 너무 커도
+    # 422·규칙 문장(input_too_large)으로 가지 않고 심판만 보류(재료 없음)가 된다. 읽기·검사는 app.judge.material 한 곳.
+    # facts 안에 두지 않는다 — facts 는 칸 하나가 틀리면 통째로 버려지고 상한(고정 문구 16개·3만 자)이 있다.
+    # 서술 생성은 이 칸을 읽지 않는다(지시문에 들어가지 않음 — tests/test_judge_material.py).
+    judge_material: Any = Field(default=None, description="심판 읽기 재료(판 4). 형식 오류·상한 초과는 이 칸만 버린다")
 
     @field_validator("client_inputs")
     @classmethod
@@ -698,13 +704,59 @@ class NarrativeResponse(BaseModel):
 # 에만 둔다. 그래서 옛 응답의 meta(source·model·reason·grounding)가 여기엔 없다.
 
 JobStatus = Literal["running", "done", "failed"]
-JobStage = Literal["queued", "generating", "checking", "regenerating", "done", "failed"]
+# judging(검증 중)은 판 4 작업에만 있다(심판 라운드 J5b) — 판 3 작업은 이 단계를 거치지 않는다.
+JobStage = Literal["queued", "generating", "checking", "regenerating", "judging", "done", "failed"]
 # 실패 종류 — 프론트가 안내 문구를 고르는 데 쓰는 상태 이름이다(내부 강등 사유가 아니다).
 # timeout: 전체 10분 제한을 넘김 · lost: 서버가 재시작되는 등으로 작업이 멈춤 · error: 작업 중 예기치 않은 오류 ·
 # expired: 끝난 작업의 결과 글을 보관 시간이 지나 지움. 모두 "서술 다시 만들기"로 푼다.
 JobFailure = Literal["timeout", "lost", "error", "expired"]
 # 칸 출처 — llm(AI 생성) · fallback(규칙 문장으로 대체) · fixed(고정 문구). 칸 ID 는 소절 번호(7.1 …).
 SectionSource = Literal["llm", "fallback", "fixed"]
+
+
+JudgeGate = Literal["passed", "held"]
+HeldKind = Literal["gate_failed", "timeout", "judge_error", "no_key", "budget", "job_limit", "no_material"]
+JudgeAxis = Literal["faithfulness", "consistency", "coverage", "readability"]
+
+
+class JudgeCoverageItem(BaseModel):
+    id:        str
+    described: bool
+    place:     str | None = None
+
+
+class JudgeCoverageCounts(BaseModel):
+    applicable:     int
+    described:      int
+    not_applicable: int
+    items:          list[JudgeCoverageItem] = []
+
+
+class JudgeCounts(BaseModel):
+    """축별 검사 건수·결과 건수(통과한 성적서만). 근거 인용·사유·주장 내용은 싣지 않는다."""
+    faithfulness: dict[Literal["checked", "matched"], int]
+    consistency:  dict[Literal["checked", "contradictions"], int]
+    coverage:     JudgeCoverageCounts | None = None  # 필수 내용 축을 뺀 기준(1.25~)에서는 없다 — axes 에 든 축만 싣는다
+    readability:  dict[Literal["rules", "violations"], int]
+
+    @model_serializer(mode="wrap")
+    def _drop_absent_axis(self, handler):
+        # 뺀 축은 키째 싣지 않는다 — 'coverage: null' 이 나가면 계약("counts 에는 axes 에 든 축만") 밖이다(2026-11-01)
+        data = handler(self)
+        if data.get("coverage") is None:
+            data.pop("coverage", None)
+        return data
+
+
+class JudgeBundle(BaseModel):
+    """고객용 심판 묶음(판 4 작업에만, 계약 tests/contract/judge_bundle_ed4.json — 심판 라운드 J5b, 계획 14-2)."""
+    gate:             JudgeGate
+    held_kind:        HeldKind | None = None
+    retry_allowed:    bool = False
+    criteria_version: str
+    model:            str
+    axes:             list[JudgeAxis]
+    counts:           JudgeCounts | None = None
 
 
 class NarrativeJobResult(BaseModel):
@@ -723,6 +775,18 @@ class NarrativeJobResult(BaseModel):
             "키는 section_sources 와 같은 일곱 칸(성적서 화면의 '작성 기록' — 사용자 결정 2026-10-22)"
         ),
     )
+    judge:                    JudgeBundle | None = Field(
+        default=None,
+        description="판 4 작업의 고객용 심판 묶음(gate passed 만 인쇄·발급을 연다). 판 3 작업 결과에는 이 키가 없다",
+    )
+
+    @model_serializer(mode="wrap")
+    def _drop_absent_judge(self, handler):
+        # 판 3 작업의 응답·저장 결과는 심판 라운드 전과 같은 키여야 한다 — judge 가 없으면 키째 뺀다(null 로 싣지 않음).
+        data = handler(self)
+        if isinstance(data, dict) and data.get("judge") is None:
+            data.pop("judge", None)
+        return data
 
 
 class NarrativeJobCreated(BaseModel):

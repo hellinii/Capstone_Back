@@ -13,8 +13,12 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import json
+
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from anthropic import AsyncAnthropic
@@ -150,6 +154,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class _SurrogateSafeJSONResponse(JSONResponse):
+    """보통은 JSONResponse 와 같은 바이트. 글이 UTF-8 로 못 바뀌면(짝 없는 대리 글자, 예: JSON 의 "\\ud800") 그 응답만
+    ensure_ascii 로 싣는다 — 한글 등 모든 비 ASCII 글자가 \\uXXXX 이스케이프가 될 뿐 같은 JSON 값이라 받는 쪽 해석은 그대로다.
+    """
+
+    def render(self, content) -> bytes:
+        try:
+            return super().render(content)
+        except UnicodeEncodeError:
+            return json.dumps(
+                content, ensure_ascii=True, allow_nan=False, indent=None, separators=(",", ":"),
+            ).encode("ascii")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(request: Request, exc: RequestValidationError):
+    """FastAPI 기본 422 처리기와 같은 본문({"detail": 오류 목록}). 다른 점 하나: 오류 목록이 되돌려 싣는 입력에 짝 없는 대리
+    글자가 있으면 기본 처리기는 응답을 UTF-8 로 만들다 500 을 낸다(앱 전역, 심판 라운드 J10 인계) — 여기서는 422 그대로 돌려준다."""
+    return _SurrogateSafeJSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
+
 
 @app.get("/health", tags=["System"])
 async def health_check(request: Request):

@@ -1,0 +1,13 @@
+{
+  "name": "판정 규칙 기준값(규칙 문장·고정 문구가 찍는 기준 숫자)",
+  "source": "서술 쪽 grounding.py 의 기준값 목록 사본(0.1·1.5·30·5%·10%p·95%·3%) — 심판은 서술 판정 규칙을 import 하지 않는다(J4 파일럿)",
+  "values": {
+    "rule.imbalance_ratio_threshold": 1.5,
+    "rule.imbalance_gap_threshold": 0.1,
+    "rule.small_sample_count": 30,
+    "rule.small_sample_share": 0.05,
+    "rule.distribution_diff_threshold": 0.1,
+    "rule.ci_level": 0.95,
+    "rule.near_target_share": 0.03
+  }
+}

@@ -20,7 +20,7 @@
 
 - **task_type 3종**: `binary` / `multiclass` / `multilabel`.
 - **지표 식별자**: **M1~M23** (SPEC·프론트·API 공통). 백엔드 내부 변수명도 `METRIC_REQUIREMENTS` 로 통일돼 옛 `TC` 표기는 남아 있지 않다(2026-09-07 확인).
-- **LLM**: 두 곳에 쓴다 — ①컬럼 자동 매핑은 OpenAI(`OPENAI_API_KEY`, `MAPPING_MODEL` 기본 `gpt-6-luna`), ②성적서 서술은 Anthropic Claude Sonnet 5.5(`ANTHROPIC_API_KEY`, `NARRATIVE_MODEL` 기본 `claude-sonnet-5-5`, 작업 경로 effort `NARRATIVE_JOB_EFFORT` 기본 high). 옛 매핑·서술 모델 `gpt-4.1-nano` 는 2026-10-23 에 종료됐다. **키가 없거나 실패해도 규칙 기반**으로 서비스가 계속 동작한다.
+- **LLM**: 세 곳에 쓴다 — ①컬럼 자동 매핑은 OpenAI(`OPENAI_API_KEY`, `MAPPING_MODEL` 기본 `gpt-6-luna`), ②성적서 서술은 Anthropic Claude Sonnet 5.5(`ANTHROPIC_API_KEY`, `NARRATIVE_MODEL` 기본 `claude-sonnet-5-5`, 작업 경로 effort `NARRATIVE_JOB_EFFORT` 기본 high), ③판 4 서술 심판은 OpenAI(같은 `OPENAI_API_KEY`, `JUDGE_MODEL` 기본 `gpt-6.1-sol` — 판 4 성적서에만). 옛 매핑·서술 모델 `gpt-4.1-nano` 는 2026-10-23 에 종료됐다. **키가 없거나 실패해도 규칙 기반**으로 서비스가 계속 동작한다.
 - ⭐ **단일 진실 문서(SSoT)**: `Capstone_Front/SPEC.md` — 지표별 필수/선택 컬럼·컬럼 역할·task_type별 허용 지표·검증 규칙. **프론트/백 양쪽이 이 문서 기준으로 구현**한다.
 
 ---
@@ -63,7 +63,8 @@ Capstone_Back
     ├── analysis/                # 컬럼 매핑 + 데이터 검증 (llm_mapper / fallback_mapper / validator / metadata)
     ├── evaluation/              # ISO4213 지표 계산 (engine · metrics/{common,binary,multiclass,multilabel})
     ├── narrative/               # LLM 서술(7·8·9절) — jobs(작업 번호) · generator(장별 생성 + 칸별 검문) · required_items(결론 목록) · fallback(규칙 템플릿) · legacy(옛 경로)
-    └── issuance/                # 성적서 발급/채번 DB 도메인 (models · service · serializers)
+    ├── judge/                   # 판 4 서술 심판 — core(채점 한 번) · ladder(발급 보류 사다리) · 4축 모듈 · criteria/(기준 묶음·지문) · validation/(검증 도구 함수)
+    └── issuance/                # 성적서 발급/채번 DB 도메인 (models · service · serializers · judge_gate(판 4 발급 검사))
 ```
 
 ---
@@ -94,14 +95,18 @@ Capstone_Back
         ※ verdict/score 는 프론트 computeVerdict 가 권위, 백엔드는 fact_sheet 값으로 강제
         ※ 서술 작업 경로: 프론트는 작업 번호를 run 에 저장하고 조회만 한다 — done 이어야 완성본(isEvaluated), 그 전에는
           인쇄·PDF·발급 잠금, 실패면 "서술 다시 만들기"(프론트 docs/ARCHITECTURE.md §6.1, 백엔드 §10)
+        ※ 판 4: 서술 뒤 심판(검증 중) → 결과의 judge 묶음이 passed 여야 인쇄·발급, held 면 서술은 보이되 발급 보류
+          (프론트 §6.7, 백엔드 §14)
 
 [성적서 발급/조회]
    └ POST /api/reports/issue (run_id 멱등) · reissue(번호 유지·버전업) · GET 조회
         ※ isEvaluated 인 run 에만 발급 허용
+        ※ 판 4 성적서는 요청의 narrative_job_id 가 "판 4 · 완료 · 심판 통과" 작업이고 서술 글이 같아야 발급(아니면 409, 백엔드 §14.6)
 ```
 
 - **성적서 판(contentSchema)**: 성적서 데이터에 판 번호가 찍힌다(기본 판 3). 성적서는 찍힌 판의 모양으로 그리므로, 발급한 옛 판(1·2)은 번호로 열어도 발급 당시 모양 그대로다. 판 3 은 소절 번호·7.3 추가 관찰·7절 ※ 한 줄이 있고, 본문에 AI·LLM 표현이 없다(1.4 LLM 면책 항목 없음). 프론트 `docs/ARCHITECTURE.md` §6.3.
 - **판 4**: 목차를 1 시험 개요 ~ 6 개선 권고로 다시 묶은 판. 프론트가 run 을 만들 때 한 곳(`reportEdition.newRunContentSchema()`, 빌드 환경변수 `VITE_REPORT_EDITION=4`)에서 정하고, 그 뒤 모든 단계는 찍힌 판만 따른다. 백엔드는 서술 요청 최상위 `report_edition`(기본 3)으로만 판 4 규칙을 쓴다. 운영에서는 아직 켜지 않았다 — 켤 때는 **백엔드 먼저 배포**. 프론트 `docs/ARCHITECTURE.md` §6.6, 백엔드 §13.
+- **판 4 심판**: 판 4 서술은 다 만든 뒤 OpenAI 심판이 사실 일치·필수 내용·일관성·표기 네 축으로 검사한다. 사실 위반이나 모순이 있으면 걸린 칸을 다시 만들거나 규칙 문장으로 바꿔 다시 검사하고, 끝내 남으면 **발급 보류**다. 서버도 발급 때 다시 확인한다. 판 3 에는 심판이 없다. 백엔드 §14, 프론트 §6.7.
 - **작성 기록**: 칸마다 AI 작성(모델 이름)·규칙 기반 문장·고정 문구인지를 발급 보관본에 저장하고(작업 결과 `section_sources`·`section_models`), 서비스 화면의 "작성 기록" 상자에만 보인다 — 인쇄물에는 없다.
 - **기관 이름**: 시드·프론트 자리표시자의 기관 이름은 "리트머스"(옛 "한국 AI 인증원"). 운영 DB 의 기존 행은 SQL 로 한 번 바꿨다(2026-10-23, 방법은 `docs/ARCHITECTURE.md` §12 배포·운영).
 
@@ -119,11 +124,12 @@ Capstone_Back
 | POST `/api/evaluate` | `hooks/useReportData.ts` | `evaluation/router.py` → `run_evaluation_pipeline` | 리포트 S1 |
 | POST `/api/narrative/jobs`, GET `/api/narrative/jobs/{id}` | `lib/report/narrativeJobApi.ts` (payload=`narrativeRequest.ts` `buildNarrativeRequest` — 사실 시트는 `buildFactSheet.ts`) | `narrative/router.py` → `jobs.create_job`·`read_job` → `generator.generate_sections` | 리포트 S2 |
 | POST `/api/generate-narrative` (옛 경로) | 없음 — 운영 프론트는 2026-10-23 배포부터 부르지 않는다(옛 클라이언트용으로 얼려 둠) | `narrative/router.py` → `legacy.generate_narrative` | 리포트 S2(옛) |
-| GET `/api/organization`, POST `/api/reports/issue`·`{no}/reissue`, GET `/api/reports/{no}`·`/api/reports/{no}/content` | `lib/report/issuanceApi.ts` · `hooks/useIssuance.ts` | `issuance/router.py` → `service` | 발급 |
+| GET `/api/organization`, POST `/api/reports/issue`·`{no}/reissue`, GET `/api/reports/{no}`·`/api/reports/{no}/content` | `lib/report/issuanceApi.ts` · `hooks/useIssuance.ts` | `issuance/router.py` → (판 4 면 `judge_gate`) → `service` | 발급 |
 
 - **`/api/validate-data` 와 `/api/evaluate` 는 동일 요청 구조** `EvaluateRequest`(`task_type, column_mappings[], selected_metric_ids[], metadata, beta`), multipart(`file` + `data`=JSON).
 - **role 어휘 변환(drift 방지 단일 출처 2함수)**: 요청 조립 `src/lib/mapping/translateRoleToBackend.ts`(task_type 의존), 응답 역변환 `translateRoleToFrontend.ts`. 백엔드 대응물은 `app/core/schemas.py` 의 `ColumnRole` / `VALID_ROLES_BY_TASK` / `METRIC_REQUIREMENTS`(= SPEC.md의 코드 구현).
   - 예: `y_true`→(binary/multiclass) `y_true` · (multilabel) `true_labels`; `score`→`score_positive`(binary); `prob_class_*`→`prob_per_class`(multiclass); `prob_label_*`→`score_per_label`(multilabel); 공통 `id`→`sample_id`, `latency`→`latency`, `ignore`→`ignore`.
+- **판 4 계약 사본**(두 저장소 같은 바이트): 고객용 심판 묶음 `judge_bundle_ed4.json`, 심판 읽기 재료 `judge_material_ed4.json`(프론트 `src/test/contract/`, 백엔드 `tests/contract/`).
 - **graceful 처리**: 조회(GET) 실패 시 `null`, 발급(POST) 실패 시 백엔드 `detail` throw. 서술은 무키·호출 실패면 칸마다 규칙 문장으로 **완료**, 작업이 실패(시간 초과·유실)하면 프론트가 "서술 다시 만들기"를 주고 끝나지 않은 서술은 인쇄·발급을 잠근다. snake_case→camelCase 및 KST 표기는 프론트에서 변환.
 
 ---
@@ -134,8 +140,8 @@ Capstone_Back
 |---|---|
 | `Capstone_Front/SPEC.md` ⭐ | **지표 요구사항·컬럼 역할·검증 규칙·task_type별 허용 지표를 다루는 모든 작업의 최우선 기준.** 변경 전 프론트/백 양쪽을 이 문서에 맞춘다. |
 | `Capstone_Back/docs/ARCHITECTURE.md` | 백엔드 온보딩·구조 기준 — `app/` 도메인 구조, router→service→순수로직 패턴, 새 지표/API/테이블 추가 위치. (`Capstone_Back/README.md`는 스택·주요 API·로컬 실행 요약) |
-| `Capstone_Back/docs/ARCHITECTURE.md` 의 §10 · §11 · §12 · §13 | **서술(7·8·9절)** 작업 번호·칸별 검문·규칙 템플릿·결정 번호 색인과 왜 그렇게 만들었는지(§10), **발급** 번호 규칙·정정 발급·보관본(§11), **배포·운영** 실제 주소·배포 경로·환경변수·운영 메모(§12), **성적서 판 4** 서술 요청의 `report_edition`·평가 엔진 버전 올림 규칙·정답 폴더(§13). |
-| `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. 성적서 서술 흐름·사실 시트·판(contentSchema)·고정 문구 번호 표는 §6, 판 4 켜는 법·켜기 전 확인 목록·판 4 시험 자료는 §6.6. |
+| `Capstone_Back/docs/ARCHITECTURE.md` 의 §10 · §11 · §12 · §13 · §14 | **서술(7·8·9절)** 작업 번호·칸별 검문·규칙 템플릿·결정 번호 색인과 왜 그렇게 만들었는지(§10), **발급** 번호 규칙·정정 발급·보관본(§11), **배포·운영** 실제 주소·배포 경로·환경변수·운영 메모(§12), **성적서 판 4** 서술 요청의 `report_edition`·평가 엔진 버전 올림 규칙·정답 폴더(§13), **판 4 심판** 4축·사다리·보류 종류·서버 발급 검사·기준 묶음과 버전·검증 기록 잠금·검증 도구·가짜 LLM 개발 서버(§14). |
+| `Capstone_Front/docs/ARCHITECTURE.md` | 프론트 처음 진입 — 페이지=조립자, `src/` 계층, Zustand. 성적서 서술 흐름·사실 시트·판(contentSchema)·고정 문구 번호 표는 §6, 판 4 켜는 법·켜기 전 확인 목록·판 4 시험 자료는 §6.6, 판 4 심판 화면(검증 중·발급 보류·잠금·부록 1)은 §6.7. |
 | `Capstone_Front/docs/FRONTEND_DEVELOPMENT_GUIDELINE.md` | 프론트에 새 페이지/컴포넌트/유틸 추가 시 지킬 규칙. |
 | `Capstone_Front/docs/MATERIAL_PICKER.md` | 평가 흐름 만들기 화면(작업 유형 → 블록 고르기 → 입력)의 흐름 규칙·용어. |
 | `Capstone_Front/docs/COMPOSER_COMPONENTS.md` | 평가 흐름에 넣는 블록(카드)과 항목(필드) 목록 — 코드 정본 `src/data/reportComposer.ts` 를 읽기 쉽게 옮긴 것. |

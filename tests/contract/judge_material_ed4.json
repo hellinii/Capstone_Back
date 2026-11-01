@@ -1,0 +1,30 @@
+{
+  "name": "판 4 서술 요청의 심판 읽기 재료(judge_material)",
+  "status": "심판 라운드 J2 ② 계약(2026-10-29, 계획 10-1). 같은 바이트 사본이 두 저장소 계약 폴더에 있다. 만드는 곳은 프론트 src/lib/report/edition4/judgeMaterialEd4.ts, 읽는 곳은 백엔드 app/judge/material.py 한 곳. 실제 예시는 판 4 계약 예시 fact_sheet_{binary,multiclass,multilabel}_ed4.json 의 judge_material 이다. 바꾸면 두 사본과 두 시험의 sha256 을 함께 고치고, 봉인 전이면 검증용 요청을 다시 뜬다(봉인 뒤면 봉인을 다시 한다).",
+  "where": "판 4 서술 요청 본문의 맨 끝 키 judge_material. 판 3 요청에는 키가 없다.",
+  "what": "설계 4절 읽는 범위 안에서 프론트가 찍는 것(고정 문구와 표)을 찍힌 글자 그대로. AI 칸·규칙 문장은 백엔드가 생성 결과로 가지므로 싣지 않는다. 4.6 참조 범위 표는 백엔드가 만든다. 5절 머리의 ※ 줄·범례는 싣지 않는다.",
+  "soft": "형식이 틀리거나 크면(공백 없는 JSON 300,000자 초과) 백엔드는 이 칸만 버린다 — 서술은 그대로, 심판은 보류(no_material). 프론트는 300,000자를 넘거나 붙이면 본문 예산(1,800,000바이트)을 넘을 때 싣지 않는다.",
+  "fields": {
+    "version": "\"judge-material-1\"",
+    "material_check_version": "재료 선택 점검 표 버전(materialCheck.version), 없으면 null",
+    "segments[].id": "조각 이름(겹치지 않음). 예 4.2-table, 4.4-fixed17, 6.1-recommend",
+    "segments[].slot": "판 3 칸 이름 7.1·7.2·7.3·8.1·8.2·8.3·9, 또는 8(8절 머리 = 판 4 의 4.2). 옮겨 간 것은 판 3 에서 놓였던 칸",
+    "segments[].place": "판 4 에서 찍힌 자리(예 4.4, 5.1, 6.2)",
+    "segments[].kind": "fixed | table | recommend_rows",
+    "segments[].when": "없거나 slot_empty — slot_empty 는 그 칸 서술이 빈 글일 때만 찍히는 고정 문구(5.4 B18, 5.6 고정 15)",
+    "segments[].text": "고정 문구 글, 표면 소제목과 표 아래 줄(줄바꿈으로 이음)",
+    "segments[].header": "표 머리 줄(recommend_rows 는 네 칸 머리 그대로)",
+    "segments[].rows": "표 줄. recommend_rows 는 앞 두 칸(우선순위·대응 문제)만 — 권고·기대 효과는 백엔드가 서술 결과의 권고로 채운다",
+    "segments[].row_keys": "recommend_rows 의 줄마다 문제 번호",
+    "segments[].numbers": "글·칸에 찍힌 숫자마다 {text, field}. 구조화된 값에서 칸을 만드는 표만 싣고, 글로 저장된 문장의 숫자는 싣지 않는다"
+  },
+  "number_fields": {
+    "verdict.judged_count": "4.2 판정 대상 지표 수",
+    "verdict.passed_count": "4.2 그중 충족 수",
+    "derived_prediction.threshold": "3.3 결정 임계값",
+    "confusion_counts.<클래스>.<tp|tn|fp|fn>": "4.4 건수 표",
+    "facts.weakest_class.<f1|support|share|gap>": "4.4 최약 클래스 표",
+    "facts.prediction_bias.<클래스|*>.<predicted|actual|difference>": "4.4 예측 편향 표(* = 멀티레이블 전체 레이블)",
+    "facts.top_confusion_pairs.<실제>><예측>.<count|share_of_errors>": "4.4 최다 오분류 쌍 표"
+  }
+}

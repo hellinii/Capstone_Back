@@ -74,6 +74,21 @@ jobs:
           [ "$done_ok" = "1" ] || { kill $UV_PID; cat /tmp/job_view.json; echo "::error::서술 작업이 완료되지 않음"; exit 1; }
           python -c "import json,sys;v=json.load(open('/tmp/job_view.json'));s=set(v['result']['section_sources'].values());sys.exit(0 if 'fallback' in s and s<={'fallback','fixed'} else 1)" \
             || { kill $UV_PID; cat /tmp/job_view.json; echo "::error::키 없는 서술 작업이 규칙 문장이 아님"; exit 1; }
+          # 판 4 작업 한 바퀴(심판 라운드 J5b, 계획 14-4) — 심판 키(OpenAI)가 없으면 AI 를 부르지 않고 규칙 문장으로 완료하되
+          # 발급 보류(judge.gate held, held_kind no_key)여야 한다. '심판 없이 통과'로 새면 여기서 빨개진다.
+          curl -fsS -X POST http://localhost:8000/api/narrative/jobs \
+            -H 'Content-Type: application/json' \
+            -d '{"task_type":"binary","report_edition":4,"fact_sheet":{"n_samples":10,"verdict":"PASS","score":100,"metrics":[{"metric_id":"M1","display_name":"Accuracy","value":0.9,"threshold":0.8,"status":"pass","is_core":true}]}}' > /tmp/job4.json
+          JOB4=$(python -c "import json;print(json.load(open('/tmp/job4.json'))['job_id'])")
+          done4=0
+          for i in $(seq 1 20); do
+            curl -fsS "http://localhost:8000/api/narrative/jobs/${JOB4}" > /tmp/job4_view.json
+            if python -c "import json,sys;v=json.load(open('/tmp/job4_view.json'));sys.exit(0 if v['status']=='done' else 1)"; then done4=1; break; fi
+            sleep 1
+          done
+          [ "$done4" = "1" ] || { kill $UV_PID; cat /tmp/job4_view.json; echo "::error::판 4 서술 작업이 완료되지 않음"; exit 1; }
+          python -c "import json,sys;j=json.load(open('/tmp/job4_view.json'))['result'].get('judge') or {};sys.exit(0 if (j.get('gate'),j.get('held_kind'))==('held','no_key') else 1)" \
+            || { kill $UV_PID; cat /tmp/job4_view.json; echo "::error::키 없는 판 4 작업이 발급 보류(no_key)가 아님"; exit 1; }
           kill $UV_PID
 
   # 팀 main 푸시가 CI를 통과했을 때만: 포크(hellinii) main 미러 → Render Deploy Hook.

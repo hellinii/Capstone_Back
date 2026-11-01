@@ -42,6 +42,7 @@
 - 사용처: app.narrative.router, tests
 """
 import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -56,7 +57,10 @@ from pydantic import ValidationError
 from sqlalchemy import delete, update
 
 from app.core import database, llm_budget
-from app.core.concurrency import run_cpu_bound
+from app.core.concurrency import judge_slot, run_cpu_bound
+from app.judge import alert, bundle, criteria_lock, ladder
+from app.judge.core import JudgeRun, judge_once
+from app.narrative import digest
 from app.narrative import sections
 from app.narrative.baselines import build_benchmark_refs
 from app.narrative.models import NarrativeJob, _utcnow
@@ -69,7 +73,7 @@ from app.narrative.schemas import (
     NarrativeRequest,
     NarrativeResponse,
 )
-from app.narrative.generator import GenerationResult, generate_sections
+from app.narrative.generator import GenerationResult, GenerationSession, generate_sections
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +92,15 @@ JOB_GENERATION_SECONDS = JOB_DEADLINE_SECONDS - 20.0
 LOST_IDLE_SECONDS = JOB_CALL_TIMEOUT_SECONDS + 60.0
 # 만든 뒤 전체 제한 + 이만큼이 지나도 진행 중이면 유실(run_job 의 제한이 먼저 끝내므로 여유를 둔다).
 LOST_GRACE_SECONDS = 30.0
+
+# ── 판 4 심판 갈래의 시간(심판 라운드 J5b 끝 확정 — 계획 14 "10분 안의 숫자", JUDGE_ROUND/실측 J5b 표) ─────────
+# 판 4 생성 상한 — 생성만으로 심판 시간이 사라지지 않게(판 3 생성기에 넘기는 시간은 JOB_GENERATION_SECONDS 그대로).
+# 봉인 6건 생성 실측 27~57초, 칸 다시 만들기까지 더해도 대개 2분 안. 생성이 이 시간을 다 써도 첫 채점 시간(아래 불변식)이 남는다.
+ED4_GENERATION_SECONDS = 240.0
+# 심판 슬롯 대기 상한(남은 시간 안에서 다시 줄인다). 넘으면 보류(busy — 일시적 사유, 다시 만들기 줌).
+JUDGE_SLOT_WAIT_SECONDS = 120.0
+# 채점 중 단계 갱신 간격 — 채점 한 번(약 2.5분)이 유실 판정 기준(LOST_IDLE_SECONDS)보다 길어져도 멈춘 작업으로 오인되지 않게.
+JUDGE_HEARTBEAT_SECONDS = 60.0
 
 # ── 보관 ──────────────────────────────────────────────────────────────────────
 
@@ -154,8 +167,9 @@ def is_expired(*, finished_at: datetime | None, now: datetime) -> bool:
     return finished_at is not None and now - finished_at > result_ttl()
 
 
-def customer_result(gen: GenerationResult) -> dict:
-    """생성 결과에서 고객용만 남긴다 — 서술 본문, 칸별 출처(생성기가 칸마다 정한 llm·fallback·fixed), 칸별 모델(llm 칸만)."""
+def customer_result(gen: GenerationResult, judge: dict | None = None) -> dict:
+    """생성 결과에서 고객용만 남긴다 — 서술 본문, 칸별 출처(생성기가 칸마다 정한 llm·fallback·fixed), 칸별 모델(llm 칸만),
+    판 4 면 고객용 심판 묶음(judge). judge 가 None 이면 키가 없다(판 3 결과는 심판 라운드 전과 같은 키)."""
     resp = gen.response
     result = NarrativeJobResult(
         interpretation=resp.interpretation,
@@ -164,6 +178,7 @@ def customer_result(gen: GenerationResult) -> dict:
         recommendations=resp.recommendations,
         section_sources=gen.section_sources,
         section_models=gen.section_models,
+        judge=judge,
     )
     return result.model_dump(mode="json")
 
@@ -431,6 +446,7 @@ def _db_read(factory, job_id: str, now: datetime) -> dict | None:
         job = db.get(NarrativeJob, job_id)
         if job is None:
             return None
+        just_lost = None  # 이번 조회가 유실로 판정했으면 그때의 마지막 단계
         if job.status == "running" and is_lost(created_at=job.created_at, updated_at=job.updated_at, now=now):
             internal = json.loads(job.internal_json or "{}")
             internal["failure"] = "lost"
@@ -443,7 +459,8 @@ def _db_read(factory, job_id: str, now: datetime) -> dict | None:
                         internal_json=json.dumps(internal, ensure_ascii=False))
             )
             db.commit()
-            if res.rowcount == 1:
+            just_lost = internal["last_stage"] if res.rowcount == 1 else None
+            if just_lost:
                 logger.warning("서술 작업 %s 유실 판정(마지막 단계 %s)", job_id, internal["last_stage"])
             db.refresh(job)
         elif job.result_json is not None and is_expired(finished_at=job.finished_at, now=now):
@@ -451,6 +468,7 @@ def _db_read(factory, job_id: str, now: datetime) -> dict | None:
             db.commit()
             db.refresh(job)
         return {
+            "just_lost": just_lost,
             "id": job.id, "status": job.status, "stage": job.stage,
             "result": json.loads(job.result_json) if job.result_json else None,
             "failure": json.loads(job.internal_json or "{}").get("failure"),
@@ -461,13 +479,14 @@ def _db_read(factory, job_id: str, now: datetime) -> dict | None:
 # ── 경로가 부르는 함수 ─────────────────────────────────────────────────────────
 
 
-async def create_job(raw, *, client, session_factory, background_tasks) -> NarrativeJobCreated:
+async def create_job(raw, *, client, session_factory, background_tasks, judge_client=None) -> NarrativeJobCreated:
     """작업을 만들고 즉시 돌려준다. ValidationError(422)는 라우터가 응답으로 바꾼다.
 
     작업 행 시간당 상한을 넘으면 행을 만들지 않고 규칙 문장 결과를 이 응답에 바로 담는다(job_id 없음, status done).
     429 로 막으면 한 사람이 상한을 다 썼을 때 다른 모든 사용자가 1시간 동안 서술도 8.1 표도 받지 못한다(S3a 검토).
     """
     request, trimmed = await run_cpu_bound(parse_request, raw)
+    edition4 = request.report_edition == 4
     # 8.1(판 4 는 4.6) 표 — 생성기(generator._prepare)와 같은 판으로 만든다. 출처 글이 지시문과 응답에서 갈리지 않게.
     benchmark_refs = [
         BenchmarkRefOut(**ref).model_dump(mode="json")
@@ -481,10 +500,31 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
             llm_budget.narrative_jobs.limit,
         )
         gen = await generate_sections(None, request, forced_reason="job_limit")
+        judge = None
+        if edition4:  # 판 4 는 심판 없이 나가지 않는다 — 행이 없어 서버 발급 검사도 받지 않는다
+            judge = bundle.held("job_limit", retry_allowed=ladder.retry_allowed("job_limit", failure=None, ever_blocked=False))
+            await alert.JobAlert(None).send("held", "job_limit")
         return NarrativeJobCreated(
             job_id=None, status="done", stage="done", benchmark_refs=benchmark_refs,
-            result=NarrativeJobResult(**customer_result(gen)),
+            result=NarrativeJobResult(**customer_result(gen, judge)),
         )
+
+    # 판 4 는 심판을 먼저 본다(정3) — 심판 키가 없거나·검증 기록 잠금에 걸렸거나·심판 지갑이 비었으면 서술 AI 도 부르지 않는다
+    # (생성 비용·심판 지갑을 버리지 않게). 규칙 문장 서술 + 발급 보류(no_key·judge_error·budget). 판 3 은 심판이 없다(Q1 가).
+    # 잠금은 여기서 한 번(J10 검토 — 잠긴 배포에서 서술 AI·심판 지갑을 쓰지 않게), 심판 갈래(_judge_branch)에서 한 번 더 본다.
+    judge_state = None
+    lock_problem = None
+    if edition4:
+        if judge_client is None:
+            judge_state = "no_key"
+        elif (lock_problem := _lock_problem()) is not None:
+            judge_state = "locked"
+            logger.error("검증 기록 잠금(%s) → 만들 때 규칙 문장 + 발급 보류(judge_error) — 서술 AI·심판 지갑을 쓰지 않는다", lock_problem)
+        elif llm_budget.judge.try_consume():
+            judge_state = "reserved"
+        else:
+            judge_state = "budget"
+            logger.warning("심판 시간당 예산 소진(보고서 %d건) → 판 4 규칙 문장 + 발급 보류(budget)", llm_budget.judge.limit)
 
     # AI 를 부를 작업만 서술 지갑에서 보고서 1건을 예약한다. 사유가 이미 정해진 작업은 AI 를 부르지 않는다.
     forced_reason = None
@@ -493,6 +533,8 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
     if [t for t in trimmed if t not in SOFT_REPAIRS]:
         forced_reason, budget = "input_too_large", "not_needed"
         logger.warning("서술 작업 입력이 상한을 넘어 줄임 → 규칙 문장으로 완료(input_too_large): %s", trimmed)
+    elif judge_state in ("no_key", "budget", "locked"):
+        forced_reason, budget = f"judge_{judge_state}", "not_needed"
     elif client is None:
         budget = "no_key"
     elif llm_budget.narrative.try_consume():
@@ -510,6 +552,9 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
         "trimmed": trimmed,
         "stages": [{"stage": "queued", "at": iso_utc(now)}],
     }
+    if edition4:  # 판 3 내부 기록은 심판 라운드 전과 같은 키
+        internal["report_edition"] = 4
+        internal["judge_budget"] = judge_state
     try:
         await run_in_threadpool(_db_insert, session_factory, job_id, benchmark_refs, internal, now)
     except Exception:
@@ -517,7 +562,17 @@ async def create_job(raw, *, client, session_factory, background_tasks) -> Narra
         llm_budget.narrative_jobs.refund()
         if budget == "reserved":
             llm_budget.narrative.refund()
+        if judge_state == "reserved":
+            llm_budget.judge.refund()
         raise
+    if edition4:
+        background_tasks.add_task(
+            run_job_ed4, job_id,
+            session_factory=session_factory, client=client, request=request,
+            forced_reason=forced_reason, judge_client=judge_client if judge_state == "reserved" else None,
+            judge_state=judge_state, lock_problem=lock_problem,
+        )
+        return NarrativeJobCreated(job_id=job_id, status="running", stage="queued", benchmark_refs=benchmark_refs)
     background_tasks.add_task(
         run_job, job_id,
         session_factory=session_factory, client=client, request=request,
@@ -599,10 +654,223 @@ async def run_job(
         )
     except Exception:
         logger.exception("서술 작업 %s 끝 상태(%s) 기록 실패 — 조회 때 유실로 판정된다", job_id, status)
+        written = None
+    if failure is not None:  # 생성 실패도 운영자에게 알린다(정7) — 끝 상태 쓰기를 시도한 뒤
+        await alert.JobAlert(job_id).send("failed", failure)
+    if written is None:
         return
     if not written:
         logger.warning("서술 작업 %s 은 이미 끝나 있었다(유실 판정 뒤 늦게 끝남) — 결과를 버린다", job_id)
     logger.info("서술 작업 %s 기록 %s", job_id, json.dumps({"status": status, **internal}, ensure_ascii=False))
+
+
+async def run_job_ed4(
+    job_id: str,
+    *,
+    session_factory,
+    client,
+    request: NarrativeRequest,
+    forced_reason: str | None = None,
+    judge_client=None,
+    judge_state: str | None = None,
+    lock_problem: str | None = None,
+    clock=time.monotonic,
+) -> None:
+    """판 4 작업(심판 라운드 J5b, 계획 14-1·정3). 생성 → 심판 사다리 → 고객용 심판 묶음 → 끝 상태 → 운영자 알림.
+
+    - 작업 마감은 하나(JOB_DEADLINE_SECONDS). 생성은 ED4_GENERATION_SECONDS 안, 채점은 JOB_GENERATION_SECONDS 까지.
+    - 서술이 생긴 뒤 바깥 제한을 넘으면 done + 보류(timeout), 서술이 없으면 failed(timeout) — 판 3 과 같은 실패.
+    - 심판 갈래의 모든 예외 → 보류(judge_error). 심판 기록은 끝 상태를 쓰기 전에 직렬화해 보고, 안 되면 최소 기록 + judge_error.
+    - 심판 키 없음·검증 기록 잠금(locked — lock_problem 이 사유)·심판 지갑 소진(judge_state)은 만들 때 정해져 AI 를 부르지 않고
+      (forced_reason) 규칙 문장 + 보류.
+    - 예외를 밖으로 던지지 않는다. 테스트는 이 함수를 직접 await 한다(clock 은 가짜 시계 자리).
+    """
+    started = time.perf_counter()
+    deadline_at = clock() + JOB_GENERATION_SECONDS  # 채점 마감(끝 상태를 쓸 여유를 남김)
+    stages: list[dict] = []
+    gen_trace: dict = {}
+    judge_rec: dict = {}
+    stage_lock = asyncio.Lock()
+    alerter = alert.JobAlert(job_id)
+
+    async def on_stage(stage: str) -> None:
+        moment = _utcnow()
+        stages.append({"stage": stage, "at": iso_utc(moment)})
+        try:
+            async with stage_lock:
+                await run_in_threadpool(_db_set_stage, session_factory, job_id, stage, moment)
+        except Exception:
+            logger.exception("서술 작업 %s 단계(%s) 기록 실패", job_id, stage)
+
+    refs = build_benchmark_refs(request.task_type.value, request.fact_sheet.metrics, edition=4)
+
+    async def judge(result, deadline):
+        """채점 한 번 — 심판 슬롯(남은 시간 안에서 대기) → 단계 judging(채점 중 주기 갱신) → core.judge_once."""
+        room = None if deadline is None else deadline - clock() - ladder.JUDGE_MIN_SECONDS
+        try:
+            async with contextlib.AsyncExitStack() as stack:
+                async with asyncio.timeout(JUDGE_SLOT_WAIT_SECONDS if room is None else max(0.0, min(room, JUDGE_SLOT_WAIT_SECONDS))):
+                    await stack.enter_async_context(judge_slot())
+                if deadline is not None and deadline - clock() < ladder.JUDGE_MIN_SECONDS:
+                    return JudgeRun(None, "deadline")  # 슬롯을 기다린 만큼 줄었다 — 부르지 않는다(과금 없음)
+                await on_stage("judging")
+                beat = asyncio.create_task(_heartbeat(on_stage))
+                try:
+                    return await judge_once(judge_client, request, result.response, result.section_sources, refs,
+                                            deadline=deadline, clock=clock)
+                finally:
+                    beat.cancel()
+        except TimeoutError:
+            return JudgeRun(None, "busy")
+
+    session = None
+    narrative = None
+    failure = None
+    verdict: dict | None = None
+    try:
+        async with asyncio.timeout(JOB_DEADLINE_SECONDS):
+            job_client = (
+                client.with_options(timeout=JOB_CALL_TIMEOUT_SECONDS, max_retries=0) if client is not None else None
+            )
+            session = GenerationSession(
+                job_client, request, deadline_seconds=ED4_GENERATION_SECONDS, slot_wait=JOB_SLOT_WAIT_SECONDS,
+                call_timeout=JOB_CALL_TIMEOUT_SECONDS, on_stage=on_stage, trace_into=gen_trace,
+            )
+            await session.run(forced_reason=forced_reason)
+            verdict = await _judge_branch(session, judge, judge_state, deadline_at, clock, judge_rec, lock_problem=lock_problem)
+            narrative = customer_result(session.result, verdict)
+    except TimeoutError:
+        if session is not None and session.result is not None:
+            kind = "timeout"
+            verdict = bundle.held(kind, retry_allowed=ladder.retry_allowed(
+                kind, failure=None, ever_blocked=bool(judge_rec.get("ever_blocked"))))
+            judge_rec.update({"gate": "held", "held_kind": kind, "failure": "job_timeout",
+                              "retry_allowed": verdict["retry_allowed"]})
+            narrative = customer_result(session.result, verdict)
+            logger.warning("서술 작업 %s(판 4) 전체 제한 초과 — 서술은 있음 → 발급 보류(timeout)", job_id)
+        else:
+            failure = "timeout"
+            logger.warning("서술 작업 %s 전체 제한(%.0f초) 초과 → 실패(timeout)", job_id, JOB_DEADLINE_SECONDS)
+    except Exception:
+        failure = "error"
+        logger.exception("서술 작업 %s 예기치 않은 오류 → 실패(error)", job_id)
+
+    moment = _utcnow()
+    status = "done" if failure is None else "failed"
+    stages.append({"stage": status, "at": iso_utc(moment)})
+    calls = gen_trace.get("calls", [])
+    sent = http_calls(calls)
+    if failure is None:
+        judge_rec.setdefault("judge_budget", judge_state)
+        judge_rec["summary"] = ladder.summary(judge_rec)
+        if verdict is not None and verdict["gate"] == "passed" and narrative is not None:
+            # 서술 글 지문(14-9b) — 발급·정정 때 content 의 서술과 맞댄다(app.issuance.judge_gate). 통과한 글만 남긴다.
+            judge_rec["narrative_sha256"] = digest.of_result(narrative)
+    judge_record = _serializable_judge(judge_rec, job_id)
+    if judge_record.get("serialize_error") and narrative is not None:
+        verdict = bundle.held("judge_error", retry_allowed=False)
+        narrative = {**narrative, "judge": verdict}
+    internal = {
+        "failure": failure,
+        **{k: v for k, v in gen_trace.items() if k != "calls"},
+        "calls": calls,
+        "http_attempts": len(sent),
+        "cost_usd": total_cost(sent),
+        "seconds_total": round(time.perf_counter() - started, 3),
+        "stages": stages,
+        "judge": judge_record,
+    }
+    try:
+        written = await run_in_threadpool(
+            _db_finish, session_factory, job_id, status=status, narrative=narrative, internal=internal, now=moment,
+        )
+    except Exception:
+        written = None
+        logger.exception("서술 작업 %s 끝 상태(%s) 기록 실패 — 조회 때 유실로 판정된다", job_id, status)
+    # 알림은 끝 상태 쓰기를 시도한 뒤 — 쓰기가 실패해도 보낸다(정7).
+    if failure is not None:
+        await alerter.send("failed", failure, edition=4)
+    elif verdict is not None and verdict["gate"] == "held":
+        await alerter.send("held", verdict["held_kind"], retry_allowed=verdict["retry_allowed"])
+    if written is False:
+        logger.warning("서술 작업 %s 은 이미 끝나 있었다(유실 판정 뒤 늦게 끝남) — 결과를 버린다", job_id)
+    logger.info("서술 작업 %s 심판 %s", job_id, json.dumps(judge_record.get("summary") or {}, ensure_ascii=False))
+
+
+async def _heartbeat(on_stage) -> None:
+    while True:
+        await asyncio.sleep(JUDGE_HEARTBEAT_SECONDS)
+        await on_stage("judging")
+
+
+def _lock_problem() -> str | None:
+    """검증 기록 잠금 사유(없으면 None). 판정 자체가 터져도(기준 파일을 못 읽음 등) 통과로 새지 않게 사유로 바꾼다."""
+    try:
+        return criteria_lock.problem()
+    except Exception as exc:  # noqa: BLE001
+        return f"error:{type(exc).__name__}"
+
+
+def _note_model_drift(judge_rec: dict) -> None:
+    """실제로 쓰일 심판 모델·추론 강도가 기준 묶음(model.json)과 다르면 무엇이 달랐는지 기록에 남긴다(잠금이 꺼져 있어도)."""
+    try:
+        drift = criteria_lock.model_drift()
+    except Exception as exc:  # noqa: BLE001 — 기록만 하는 자리
+        drift = {"error": type(exc).__name__}
+    if drift:
+        judge_rec["model_drift"] = drift
+
+
+def _lock_held(judge_rec: dict, locked: str) -> dict:
+    _note_model_drift(judge_rec)
+    allowed = ladder.retry_allowed("judge_error", failure="criteria_lock", ever_blocked=False)
+    logger.error("검증 기록 잠금(%s) → 심판을 부르지 않고 발급 보류(judge_error)", locked)
+    judge_rec.update({"criteria_lock": locked, "gate": "held", "held_kind": "judge_error", "failure": "criteria_lock",
+                      "retry_allowed": allowed, "rounds": []})
+    return bundle.held("judge_error", retry_allowed=allowed)
+
+
+async def _judge_branch(session, judge, judge_state, deadline_at, clock, judge_rec: dict, *,
+                        lock_problem: str | None = None) -> dict:
+    """심판 갈래 — 고객용 심판 묶음을 돌려준다. 예외는 여기서 보류(judge_error)로 바꾼다(바깥 시간 초과는 그대로 나간다)."""
+    if judge_state == "locked":  # 만들 때 잠금에 걸림 — 서술 AI 도 부르지 않았다
+        return _lock_held(judge_rec, lock_problem or "unknown")
+    if judge_state != "reserved":
+        kind = judge_state or "no_key"
+        allowed = ladder.retry_allowed(kind, failure=None, ever_blocked=False)
+        judge_rec.update({"gate": "held", "held_kind": kind, "failure": None, "retry_allowed": allowed, "rounds": []})
+        return bundle.held(kind, retry_allowed=allowed)
+    # 검증 기록 잠금(계획 14-10·정9) — 지금 기준이 검증한 기준이 아니면 심판을 부르지 않고 보류(judge_error, 다시 만들기 없음).
+    # 만들 때(create_job) 한 번 보고 여기서 한 번 더 본다(두 겹 — 그 사이 기록·기준이 바뀌어도, 만들 때 검사를 건너뛴 길에서도).
+    # 꺼져 있으면(개발·시험) 기록에 off 를 남긴다 — 발급 검사가 이 값을 본다(app.issuance.judge_gate).
+    locked = _lock_problem()
+    if locked:
+        return _lock_held(judge_rec, locked)
+    judge_rec["criteria_lock"] = "ok" if criteria_lock.enabled() else "off"
+    _note_model_drift(judge_rec)
+    if judge_rec["criteria_lock"] == "off":
+        logger.warning("검증 기록 잠금이 꺼져 있다(%s=off) — 개발·시험 전용, 운영에 두면 안 된다", criteria_lock.ENV)
+    try:
+        outcome = await ladder.run_ladder(session, judge, deadline=deadline_at, clock=clock, record=judge_rec)
+    except Exception as exc:  # noqa: BLE001 — 심판 갈래의 어떤 예외도 통과로 새지 않는다
+        logger.exception("심판 갈래 예기치 않은 오류 → 발급 보류(judge_error)")
+        judge_rec.update({"gate": "held", "held_kind": "judge_error", "failure": "exception",
+                          "exception": type(exc).__name__, "retry_allowed": False})
+        return bundle.held("judge_error", retry_allowed=False)
+    if outcome.gate == "passed":
+        return bundle.passed(outcome.final.scorecard)
+    return bundle.held(outcome.held_kind, retry_allowed=outcome.retry_allowed)
+
+
+def _serializable_judge(rec: dict, job_id: str) -> dict:
+    """심판 기록을 끝 상태 쓰기 전에 직렬화해 본다. 안 되면 최소 기록(보류 — 끝 상태 쓰기 실패가 유실 → 다시 만들기가 되지 않게)."""
+    try:
+        json.dumps(rec, ensure_ascii=False)
+        return rec
+    except (TypeError, ValueError) as exc:
+        logger.error("서술 작업 %s 심판 기록 직렬화 실패(%s) → 최소 기록 + 발급 보류(judge_error)", job_id, type(exc).__name__)
+        return {"gate": "held", "held_kind": "judge_error", "failure": "serialize", "retry_allowed": False,
+                "serialize_error": type(exc).__name__}
 
 
 async def read_job(job_id: str, *, session_factory) -> NarrativeJobOut | None:
@@ -610,6 +878,8 @@ async def read_job(job_id: str, *, session_factory) -> NarrativeJobOut | None:
     row = await run_in_threadpool(_db_read, session_factory, job_id, _utcnow())
     if row is None:
         return None
+    if row["just_lost"]:  # 이번 조회가 유실로 판정했다 — 한 번만(정7)
+        await alert.JobAlert(job_id).send("lost", row["just_lost"])
     result = row["result"]
     status, stage, failure = row["status"], row["stage"], row["failure"]
     narrative = None

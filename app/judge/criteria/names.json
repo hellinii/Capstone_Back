@@ -1,0 +1,304 @@
+{
+  "name": "이름 대조 표(사실 일치 이름 주장)",
+  "source": "심판 라운드 J4 파일럿(2026-10-29) — 데이터 코드값과 성적서에 찍히는 이름. 1.1(2026-10-31): 의뢰자 선언 코드값 전부와 고객 선택지",
+  "code_labels": {
+    "PASS": [
+      "합격",
+      "최종 합격"
+    ],
+    "CONDITIONAL_PASS": [
+      "조건부 합격"
+    ],
+    "FAIL": [
+      "불합격",
+      "최종 불합격"
+    ],
+    "INCONCLUSIVE": [
+      "판정 불가"
+    ],
+    "fn": [
+      "FN",
+      "미탐",
+      "놓침",
+      "거짓 음성",
+      "위음성",
+      "False Negative"
+    ],
+    "fp": [
+      "FP",
+      "오탐",
+      "잘못 잡음",
+      "거짓 양성",
+      "위양성",
+      "False Positive"
+    ],
+    "similar": [
+      "위험이 비슷",
+      "비슷하게 위험",
+      "비슷한 위험"
+    ],
+    "all_equal": [
+      "모든 클래스가 동등",
+      "모든 레이블이 동등",
+      "모든 클래스를 동등",
+      "모든 레이블을 동등",
+      "동등하게 중요"
+    ],
+    "larger_first": [
+      "다수 클래스를 우선",
+      "다수 클래스 우선",
+      "다수 레이블을 우선",
+      "다수 레이블 우선"
+    ],
+    "samples_first": [
+      "샘플 단위로 중요",
+      "샘플 단위",
+      "표본 단위로 중요",
+      "표본 단위"
+    ],
+    "batch": [
+      "배치",
+      "일괄 처리",
+      "일괄로 처리"
+    ],
+    "realtime": [
+      "실시간",
+      "대화형"
+    ],
+    "default": [
+      "분류 유형의 기본값",
+      "유형의 기본값",
+      "기본 핵심 지표"
+    ],
+    "client": [
+      "의뢰자가 지정",
+      "의뢰자 지정"
+    ],
+    "affected": [
+      "왜곡이 관찰",
+      "왜곡이 나타"
+    ],
+    "no_distortion": [
+      "왜곡은 관찰되지 않",
+      "왜곡이 관찰되지 않",
+      "왜곡은 없"
+    ],
+    "mild": [
+      "불균형이 경미",
+      "경미한 불균형"
+    ],
+    "macro_vs_weighted": [
+      "매크로 평균과 가중 평균",
+      "가중 평균과 매크로 평균"
+    ],
+    "macro_vs_micro": [
+      "매크로 평균과 마이크로 평균",
+      "마이크로 평균과 매크로 평균"
+    ],
+    "weighted": [
+      "가중 평균"
+    ],
+    "micro": [
+      "마이크로 평균"
+    ],
+    "compared": [
+      "분포를 비교",
+      "비교하였",
+      "비교했"
+    ],
+    "not_provided": [
+      "학습 분포를 받지 않",
+      "학습 분포가 제공되지 않",
+      "학습 클래스 분포가 제공되지 않"
+    ],
+    "uncovered": [
+      "모두 덮지 않"
+    ],
+    "training_samples_not_provided": [
+      "학습 표본 수를 받지 않",
+      "학습 표본 수가 제공되지 않"
+    ],
+    "core_not_computed": [
+      "산출 실패",
+      "산출되지 않",
+      "계산되지 않"
+    ],
+    "no_target": [
+      "목표값 없음",
+      "목표값이 없",
+      "목표값이 주어지지 않"
+    ],
+    "no_judged": [
+      "판정 대상 지표가 없",
+      "판정할 지표가 없"
+    ],
+    "samples": [
+      "표본 수 기준",
+      "표본 기준"
+    ],
+    "label_occurrences": [
+      "등장 횟수"
+    ],
+    "sample": [
+      "표본 단위",
+      "단위는 표본"
+    ],
+    "label_cell": [
+      "레이블 칸"
+    ],
+    "pass": [
+      "충족",
+      "통과",
+      "달성",
+      "목표를 넘"
+    ],
+    "fail": [
+      "미달",
+      "미충족",
+      "충족하지 못",
+      "충족하지 않",
+      "목표에 못 미",
+      "목표에 미치지"
+    ],
+    "warning": [
+      "경고"
+    ],
+    "info": [
+      "목표값 없음",
+      "목표값이 없",
+      "참고 지표"
+    ],
+    "threshold": [
+      "확률에 결정 임계값"
+    ],
+    "argmax": [
+      "가장 큰 클래스",
+      "가장 높은 클래스",
+      "argmax"
+    ],
+    "threshold_per_label": [
+      "레이블마다 점수에 결정 임계값",
+      "레이블마다 임계값",
+      "레이블별 임계값",
+      "레이블마다 결정 임계값"
+    ]
+  },
+  "positive_class_labels": [
+    "양성"
+  ],
+  "code_labels_note": "선언 코드값(facts.declarations — risk_direction·class_priority·usage_mode)은 생성기 화면 글자(app/narrative/fact_view RISK_KO·PRIORITY_DECL_KO·USAGE_KO)와 같은 낱말과 흔한 바꿔 말하기로 본다. 문장에 든 이름 가운데 가장 긴 것이 가리키는 코드로 대조한다(1.1, V2 1차 — '배치 방식'↔batch, '거짓 음성'↔fn, '모든 레이블이 동등'↔all_equal 을 위반으로 봤다). 1.3(2026-10-31, V2 1.2 2회차 — '분류 유형의 기본값'↔default): 1.1 은 선언 칸만 넣었다. 이번에는 사실 시트의 코드값 칸(Literal) 가운데 서술에 이름으로 나올 수 있는 것 전부(핵심 지표 출처·불균형 영향·평균 차이 종류·참고 평균·분포 비교 상태·판정 불가 사유·비율 기준)를 생성기 화면 글자(app/narrative/fact_view·required_items·prompt)에서 옮겼다. 단위·우선순위·문제 종류 코드는 서술에 이름으로 나오지 않아 뺐다. 1.8(V2 1.7 R-0041 — '목표를 충족했다'↔metric.M15.status pass): 1.3 은 스키마 Literal 칸만 찾아 지표 상태(str, 설명에 'pass | fail | warning | info')와 예측 파생 방식을 놓쳤다 — 설명에 값 목록이 적힌 칸도 넣었다(생성기 STATUS_KO·DERIVATION_KO). 1.18(V2 1.17 R-0058 — '단위는 표본이 아니라 레이블 칸'↔facts.error_totals.unit label_cell): 1.17 이 주장 범위를 넓혀 단위 이름도 뽑게 되어 오류 합계 단위 코드(sample·label_cell)를 넣었다(생성기 required_items '레이블 칸'). '표본' 한 낱말은 어디에나 나와 넣지 않았다.",
+  "client_option_labels": {
+    "같은 출처": [
+      "같은 출처",
+      "같은 조건",
+      "같은 곳"
+    ],
+    "다른 출처": [
+      "다른 출처",
+      "다른 조건",
+      "다른 곳"
+    ]
+  },
+  "client_option_labels_note": "고객 입력 선택지(학습 데이터와의 관계 등)의 값을 문장이 바꿔 말한 것. 선택지 값이 이 표에 있으면 그 값의 바꿔 말하기가 문장에 들어 있을 때도 맞다 — 반대쪽 값('다른 …')의 바꿔 말하기가 함께 들어 있으면 맞지 않다(1.1).",
+  "code_groups": [
+    [
+      "PASS",
+      "CONDITIONAL_PASS",
+      "FAIL",
+      "INCONCLUSIVE"
+    ],
+    [
+      "fn",
+      "fp",
+      "similar"
+    ],
+    [
+      "all_equal",
+      "larger_first",
+      "samples_first"
+    ],
+    [
+      "batch",
+      "realtime"
+    ],
+    [
+      "default",
+      "client"
+    ],
+    [
+      "affected",
+      "no_distortion",
+      "mild"
+    ],
+    [
+      "macro_vs_weighted",
+      "macro_vs_micro"
+    ],
+    [
+      "weighted",
+      "micro"
+    ],
+    [
+      "compared",
+      "not_provided",
+      "uncovered",
+      "training_samples_not_provided"
+    ],
+    [
+      "core_not_computed",
+      "no_target",
+      "no_judged"
+    ],
+    [
+      "samples",
+      "label_occurrences"
+    ],
+    [
+      "sample",
+      "label_cell"
+    ],
+    [
+      "pass",
+      "fail",
+      "warning",
+      "info"
+    ],
+    [
+      "threshold",
+      "argmax",
+      "threshold_per_label"
+    ]
+  ],
+  "code_groups_note": "한 칸의 코드값 묶음(판정·위험 방향·클래스 중요도·사용 방식). 대조는 실제 값이 든 묶음의 이름만 본다 — 다른 칸 낱말('실시간 서비스에서 FP 가…')이 섞여도 흔들리지 않게. 같은 묶음의 서로 다른 코드가 둘 다 나오면('FN 이 FP 보다') 검증 불가, 이름 바로 뒤에 부정(negation_after)이 오면 그 이름은 지목이 아니다 — 실제 값을 부정하면 위반(1.1 검토).",
+  "negation_after": [
+    "아니",
+    "아닌",
+    "않",
+    "없"
+  ],
+  "negation_window": 6,
+  "client_negated_option": {
+    "suffixes": [
+      "안 함",
+      "되지 않음",
+      "하지 않음"
+    ],
+    "negations": [
+      "하지 않",
+      "되지 않",
+      "하지 못",
+      "안 했",
+      "않았",
+      "안 함",
+      "없었",
+      "없다"
+    ]
+  },
+  "client_negated_option_note": "고객 선택지 '○○ 안 함'(수행 안 함·보정 안 함·측정 안 함)은 문장에 같은 동사(○○)와 부정 표현이 함께 있으면 맞다 — '수행하지 않았다'(1.16, V2 1.15 R-0056). 부정 없이 '○○했다'면 맞지 않다. 1.18(V2 1.17 R-0058 — 선택지 '제공되지 않음'↔'제공하지 않았다'): '○○되지 않음'·'○○하지 않음' 선택지도 같은 방식(동사 ○○ + 부정 표현).",
+  "code_broader": {
+    "threshold_per_label": [
+      "threshold"
+    ]
+  },
+  "code_broader_note": "1.24(V2 1.22 R-0062 — '확률에 결정 임계값을 적용해 만든 것'↔예측 방식 threshold_per_label 을 위반으로): 넓은 말이 가리키는 코드(threshold — 임계값 적용)는 그보다 좁은 실제 값(threshold_per_label — 레이블마다 임계값 적용)과 맞다. 반대(실제는 임계값 하나인데 '레이블마다')는 틀리다."
+}

@@ -3,7 +3,7 @@
 목록은 하나다 — AI 지시문(S5)과 규칙 템플릿(S6)이 같은 목록을 읽는다(계획 원칙 2). 심판은 이 함수를 쓰지 않는다
 (사실 시트·파생값만 공유 — 서술 설계 8절).
 
-- REQUIRED_ITEMS: 5절 41행을 코드 표로 — 항목 ID · 칸 · 작업 유형 · 재료 조건 · 필요한 값(결론을 만드는 함수) ·
+- REQUIRED_ITEMS: 5절 42행을 코드 표로 — 항목 ID · 칸 · 작업 유형 · 재료 조건 · 필요한 값(결론을 만드는 함수) ·
   작성 주체 · 생성 뒤 확인(D24 숫자) · 규칙 템플릿 문장.
 - select_items(사실 시트, 고객 입력, 작업 유형): 이 성적서에 해당하는 항목만 남기고, 숫자를 채운 결론을 돌려준다.
   숫자는 받은 사실(facts·지표·엔진 값)과 서버 파생값(혼동행렬 합계·백분율)뿐이다 — 여기서 새로 판정하지 않는다.
@@ -11,7 +11,7 @@
 작성 주체(Author)와 두 글(결론 text · 템플릿 template_text):
 - ai: AI 가 쓴다. text 는 숫자를 채운 서술체 결론 문장이고, 규칙 템플릿은 같은 문장을 찍는다(template_text = text,
   따로 정한 항목만 다름 — 판정 사유·불균형·임계값 위험처럼 규칙 문장이 더 자세한 것).
-- ai_fact: AI 가 해석을 쓴다. 템플릿은 사실 문장만 찍는다(해석하지 않는다 — 모델 용도·최약 클래스 위험).
+- ai_fact: AI 가 해석을 쓴다. 템플릿은 사실 문장만 찍는다(해석하지 않는다 — 모델 용도·평가 데이터의 대표성·최약 클래스 위험).
 - fixed_interpret: 코드가 고정 문구(17·18)로 숫자를 찍고, AI·템플릿은 그 숫자를 되풀이하지 않고 해석만. text 는 숫자 없는
   해석 재료(우세한 오류·근소 지표의 판정), 템플릿은 해석 한 문장. 성적서가 그 문장을 찍지 않는 옛 요청(옛 프론트 —
   facts 가 없다)이면 템플릿이 숫자 문장을 쓴다(code_prints).
@@ -33,6 +33,14 @@ text 가운데 fixed·form·7.3(open_ended) 항목은 AI 용 설명이라 템플
 판정과 이어진 값은 프론트 *_text, 비율은 첫째 자리 %)로 넣고, 판 4 에서 글이 다른 문장만 갈래를 둔다 — 판정 문장의 통과율(A11),
 신뢰구간 경계(*_text), 임계값 조정의 위험 쪽 지표(B20), 참조 범위 위치(B21), 판정 여유 작음(B22 — 고정 문구 18 을 보지 않는다),
 최약 클래스의 운영 위험 조건(D49 ②), 양식 설명의 절 번호(A4). 판 3 글은 그대로다(얼린 정답).
+
+심판 라운드 1단계(서술 설계 v0.14, 판 구분 없이 판 3·4 모두 — 판 3 얼린 정답은 이 두 항목만 바뀌었다):
+- 8.2 평균 방식 차이(8.2-07 다중 macro vs weighted, 8.2-08 멀티 macro vs micro — D17·D39)는 지표 선택(M22)과 무관하게
+  쓴다. 엔진이 클래스별 표(class_report)를 늘 계산하고 프론트가 그 평균 행으로 facts.average_gap 을 늘 싣는다.
+- 8.2 평가 데이터의 대표성과 한계(8.2-14): 보고 항목 2 '평가 데이터 출처'가 제공되면(출처 글과 학습 데이터와의 관계 두 줄
+  모두 wording.is_not_provided 가 아님 — 1.3 재료 점검과 같은 판정) AI 가 해석하고, 규칙 템플릿은 출처 사실 문장만 찍는다.
+  고객 입력만으로 대표성을 단정하지 않고 '~로 보인다'처럼 추론으로 쓰게 한다(심판 설계 6.2 소견-7, 고객 정보에 기댄 단정형
+  해석 금지).
 
 상호작용
 - 의존(import): app.narrative.schemas, app.narrative.derived(compute_derived), app.narrative.baselines, app.narrative.sections,
@@ -1069,6 +1077,11 @@ def verdict_sentence(fs: FactSheet, derived: dict, *, edition: int) -> str:
                 text += f" 핵심이 아닌 지표 중에도 목표에 미달한 지표가 있다{listing('목표 미달 지표', others)}."
         else:
             text = f"핵심 지표가 목표에 미달하여 종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
+    elif fs.verdict == "CONDITIONAL_PASS" and failed and edition == 4 and not has_core_info:
+        # 판 4 에서 핵심 지표가 하나도 없는 성적서(프론트 부록 B31 갈래 — 화면을 거친 입력에서는 생기지 않는 방어 갈래).
+        # 판 4 요청은 is_core 를 늘 싣으므로 '모두 거짓' = 핵심 지표 없음이다. 아래 일반 문장의 "핵심 지표는 모두 충족하였으나"는
+        # 사실이 아니어서 그 구절만 뺀다 — 4.2 근거(B31 "{미달 지표}이(가) 목표에 미달하여 …")와 같은 뜻(사용자 결정 2026-10-28).
+        text = f"목표에 미달한 지표가 있어 종합 판정은 '{vlabel}'이다{listing('목표 미달 지표', failed)}."
     elif fs.verdict == "CONDITIONAL_PASS" and failed:
         text = (
             "핵심 지표는 모두 목표를 충족하였으나 핵심이 아닌 지표가 목표에 미달하여 "
@@ -1264,14 +1277,28 @@ def _threshold_gain(ctx: Ctx) -> str | None:
     )
 
 
+def _shown_zero(number_text: str) -> bool:
+    """찍히는 수 글자가 0 인가('0'·'0.000'·'0.0000' — 부호는 떼고 받는다). 수로 읽히지 않으면 아니다."""
+    try:
+        return float(number_text) == 0
+    except ValueError:
+        return False
+
+
 def _average_gap(ctx: Ctx, kind: str) -> str | None:
+    # 지표 선택(M22)과 무관하다(서술 설계 D17·D39, v0.14) — 클래스별 표는 엔진이 늘 계산하고, 프론트가 그 평균 행으로
+    # facts.average_gap 을 늘 싣는다(narrativeFacts.averageGap). 값이 없으면(정답 클래스 둘 미만·옛 요청) 쓰지 않는다.
     g = ctx.facts.average_gap if ctx.facts else None
-    if g is None or g.kind != kind or "M22" not in ctx.selected:
+    if g is None or g.kind != kind:
         return None
     other = "가중 평균" if kind == "macro_vs_weighted" else "마이크로 평균"
     size = unsigned(g.difference_text)
     # difference = 다른 평균 − 매크로(프론트 narrativeFacts.averageGap).
-    if g.difference > 0:
+    # 갈래는 찍히는 차이(difference_text)로 고른다 — 반올림 전 값(-0.000015)으로 고르면 표기 자릿수 아래의 차이가 "보다 0 낮다"·
+    # "보다 0.000 낮다"로 찍힌다(심판 라운드 1단계 검토 지적 2, 발급본 입력 digits_strong). 찍히는 차이가 0 이면 이미 있는 '같다' 갈래.
+    if _shown_zero(size):
+        relation = "두 값이 같다"
+    elif g.difference > 0:
         relation = f"{other} F1 이 매크로 F1 보다 {size} 높다"
     elif g.difference < 0:
         relation = f"{other} F1 이 매크로 F1 보다 {size} 낮다"
@@ -1343,6 +1370,54 @@ def _purpose_fact(ctx: Ctx) -> str | None:
     """해석형 항목의 템플릿 — 사실 문장만(용도에 비춘 해석은 AI 몫)."""
     purpose = _model_purpose(ctx)
     return f"의뢰자가 밝힌 모델 용도는 '{purpose}'이다." if purpose else None
+
+
+# TS 4213 보고 항목 2 '평가 데이터 출처'를 이루는 두 줄(프론트 reportMaterials.testRows → client_inputs.test_data, 판 3·4 같은 자리).
+EVAL_SOURCE_ROW = "평가 데이터 출처"
+EVAL_RELATION_ROW = "학습 데이터와의 관계"
+
+
+def _eval_data_source(ctx: Ctx) -> str | None:
+    """보고 항목 2 '평가 데이터 출처'가 제공되었으면 의뢰자가 밝힌 출처 글, 아니면 None — 8.2-14 의 조건('평가 데이터 출처가 제공됨').
+
+    '제공'은 재료 선택 점검의 셈이다: 항목 2 는 출처 글과 학습 데이터와의 관계를 합친 항목이고, 한 항목에 줄이 여럿이면 모든 줄이
+    있어야 제공이다(재료 선택 점검 4.2·표기 규칙 — "학습 데이터와의 관계만 빠져도 '평가 데이터 출처'"). 하나라도 빠지면 성적서
+    1.3(판 3 은 1.4)이 "평가 데이터 출처: 평가 데이터가 용도를 대표하는지 판단할 수 없다."(고정 문구 2.2)를 찍으므로, 같은 성적서의
+    8.2(판 4 는 5.1)가 대표성을 해석하면 말이 엇갈린다(검토 지적 1 — 발급본 RPT-2026-0006 입력 yeast_weak). 그래서 프론트
+    materialCheck 항목 2 와 같은 판정을 쓴다: 두 줄 모두 wording.is_not_provided 가 아님. 프론트는 줄 값이 없으면(null) 그 줄을
+    "제공되지 않음…"으로 보내므로(materialRowText) 이 판정은 1.3 의 판정과 같다.
+
+    두 판정이 같은지는 두 저장소가 같은 바이트로 두는 대조 표 tests/contract/reporting_item2_cases.json 이 지킨다(이 저장소
+    tests/test_j1_item2_contract.py, 프론트 reportingItem2Contract.test.ts). 이 셈을 바꾸면 프론트 materialCheck 항목 2 와 표를
+    함께 바꾼다. 알려진 경계 하나(표의 pending): 의뢰자가 출처 글 칸에 '제공되지 않음'(으로 시작하는 글)을 직접 적으면 프론트는
+    제공, 여기는 빈 칸 대신 오는 말과 글자가 같아 제공 아님 — 글로 적은 '모름'의 셈과 함께 사용자가 정할 일이다."""
+    test = ctx.client_inputs.get("test_data") if isinstance(ctx.client_inputs, dict) else None
+    if not isinstance(test, dict):
+        return None
+    source, relation = test.get(EVAL_SOURCE_ROW), test.get(EVAL_RELATION_ROW)
+    if is_not_provided(source) or is_not_provided(relation):
+        return None
+    return source.strip()
+
+
+def _representativeness(ctx: Ctx) -> str | None:
+    """8.2 평가 데이터의 대표성과 한계(서술 설계 5절 v0.14) — AI 해석. 의뢰자 입력만으로는 대표성을 확인할 수 없으므로 단정하지
+    않고 추론으로 쓰게 한다(심판 설계 6.2 소견-7 — 고객 정보만으로 품질을 단정하는 문장은 위반)."""
+    source = _eval_data_source(ctx)
+    if source is None:
+        return None
+    # 모델 용도가 없으면 '용도를 대표하는지'를 묻지 않는다 — 없는 용도를 지어내지 않게(지시문 규칙 17·19).
+    target = "모델 용도를" if _model_purpose(ctx) else "모델이 실제로 쓰일 환경을"
+    return (
+        f"의뢰자가 밝힌 평가 데이터 출처('{source}')에 비추어 평가 데이터가 {target} 얼마나 대표하는지와 그 한계를 해석한다. "
+        "대표성은 의뢰자 입력만으로 확인할 수 없으므로 대표한다·대표하지 못한다고 단정하지 않고 '~로 보인다'처럼 추론으로 쓴다."
+    )
+
+
+def _representativeness_fact(ctx: Ctx) -> str | None:
+    """해석형 항목의 템플릿 — 사실 문장만(대표성과 한계의 해석은 AI 몫)."""
+    source = _eval_data_source(ctx)
+    return f"의뢰자가 밝힌 평가 데이터 출처는 '{source}'이다." if source else None
 
 
 # ── 8.3 리스크 ───────────────────────────────────────────────────────────────
@@ -1615,7 +1690,7 @@ def _no_template(ctx: Ctx) -> None:
     return None
 
 
-# ── 표(5절 41행) ──────────────────────────────────────────────────────────────
+# ── 표(5절 42행) ──────────────────────────────────────────────────────────────
 
 REQUIRED_ITEMS: tuple[RequiredItem, ...] = (
     RequiredItem("7.1-01", "7.1", "오분류 총건수·비율", ALL, "ai", "항상(혼동행렬·엔진 건수)", _misclassified),
@@ -1644,13 +1719,14 @@ REQUIRED_ITEMS: tuple[RequiredItem, ...] = (
     RequiredItem("8.2-04", "8.2", "일반화 해석", ALL, "fixed", "학습 데이터와의 관계", _generalization),
     RequiredItem("8.2-05", "8.2", "Precision↔Recall 치우침", BINARY, "ai", "M2·M3 선택", _pr_gap),
     RequiredItem("8.2-06", "8.2", "임계값 조정 여지", BINARY, "ai", "점수 + F1, 엔진이 부적합으로 봄", _threshold_gain),
-    RequiredItem("8.2-07", "8.2", "macro vs weighted", MULTICLASS, "ai", "M22 선택", lambda c: _average_gap(c, "macro_vs_weighted")),
-    RequiredItem("8.2-08", "8.2", "macro vs micro", MULTILABEL, "ai", "M22 선택", lambda c: _average_gap(c, "macro_vs_micro")),
+    RequiredItem("8.2-07", "8.2", "macro vs weighted", MULTICLASS, "ai", "늘 계산하는 클래스별 표(평균 행)", lambda c: _average_gap(c, "macro_vs_weighted")),
+    RequiredItem("8.2-08", "8.2", "macro vs micro", MULTILABEL, "ai", "늘 계산하는 클래스별 표(평균 행)", lambda c: _average_gap(c, "macro_vs_micro")),
     RequiredItem("8.2-09", "8.2", "Hamming Loss vs Exact Match", MULTILABEL, "ai", "M15·M16 둘 다", _hamming_exact),
     RequiredItem("8.2-10", "8.2", "평균 방식 선택 기준", MULTICLASS, "form", "클래스 중요도", _averaging_form),
     RequiredItem("8.2-11", "8.2", "선언한 평균 방식으로 본 결과", MULTI, "ai", "클래스 중요도가 동등이 아님", _declared_average, d24=_declared_average_values),
     RequiredItem("8.2-12", "8.2", "지표 선택 기준", MULTILABEL, "form", "지표 선택 이유 입력", _metric_rationale),
     RequiredItem("8.2-13", "8.2", "모델 용도에 비춘 해석", ALL, "ai_fact", "모델 용도", _purpose_reading, template=_purpose_fact),
+    RequiredItem("8.2-14", "8.2", "평가 데이터의 대표성과 한계", ALL, "ai_fact", "평가 데이터 출처가 제공됨", _representativeness, template=_representativeness_fact),
     RequiredItem("8.3-01", "8.3", "최약 클래스의 용도상 위험", ALL, "ai_fact", "항상(결정 A) + 모델 용도", _weakest_risk, template=_weakest_risk_fact),
     RequiredItem("8.3-02", "8.3", "아슬아슬 지표", ALL, "fixed_interpret", "목표값 지표 중 근소 차이", _near_target, template=_near_template),
     RequiredItem("8.3-03", "8.3", "임계값 부적합 위험", BINARY, "ai", "엔진이 부적합으로 봄", _threshold_risk, template=_threshold_risk_template),
