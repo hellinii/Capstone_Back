@@ -126,13 +126,15 @@ async def test_inference_marker_decided_by_code_and_client_input_count():
 
 
 async def test_agent_turn_cap_is_failure():
-    loop = [F.response([F.function_call_item("find_fields", {"query": "fn"})]) for _ in range(12)]
+    # 1.22: 묶음이 턴 상한에 걸리면 한 번 더 묻는다 — 두 번 다 걸려야 모듈 실패
+    loop = [F.response([F.function_call_item("find_fields", {"query": "fn"})]) for _ in range(24)]
     fake, res = await run([claim("C1", "number", "43건", number_text="43")], *loop)
-    assert res.failure == "agent_turns" and len(fake.calls) == 12
+    assert res.failure == "agent_turns" and len(fake.calls) == 24
 
 
 async def test_llm_failure_propagates():
-    _, res = await run([claim("C1", "number", "43건", number_text="43")], F.response([F.message_item("x", refusal=True)]))
+    refuse = lambda: F.response([F.message_item("x", refusal=True)])  # noqa: E731
+    _, res = await run([claim("C1", "number", "43건", number_text="43")], refuse(), refuse())
     assert res.failure == "refusal" and res.verdicts == []
 
 
@@ -203,3 +205,39 @@ def test_digits_inside_words_are_not_numbers():
     assert fa.printed_number(claim("C1", "number", "F1 Score")) is None
     assert fa.printed_number(claim("C1", "number", "M4 는 0.512 이다")) == "0.512"
     assert fa.printed_number(claim("C1", "number", "Class9 의 F1 은 37.4%")) == "37.4%"
+
+
+
+# ── 1.22 본 조사 나눠 묻기(V2 1.21 R-0061 — 주장 210개를 한 번에 묻다 12턴 상한) ─────────────
+
+
+def test_chunk_claims_keeps_pieces_together_and_caps_size():
+    cs = [claim(f"C{i}", "number", "43건", number_text="43", piece=p) for i, p in
+          enumerate(["slot:7.1"] * 3 + ["slot:8.2"] * 2 + ["slot:7.1"] * 5, 1)]
+    chunks = fa.chunk_claims(cs, 4)
+    assert [[c.id for c in ch] for ch in chunks] == [["C1", "C2", "C3"], ["C4", "C5"], ["C6", "C7", "C8", "C9"], ["C10"]]
+    assert sum(len(ch) for ch in chunks) == len(cs)  # 빠지는 주장이 없다
+
+
+async def test_claims_are_asked_in_chunks_and_answers_merge(monkeypatch):
+    monkeypatch.setattr(fa, "CHUNK_CLAIMS", 1)
+    claims = [claim("C1", "comparison", "FN 은 43건으로 FP 56건보다 적다"), claim("C2", "name", "가장 약한 클래스는 0 이다")]
+    fake, res = await run(claims,
+                          F.json_response({"claims": [answer("C1", expr="{confusion_counts.1.fn}", expr_b="{confusion_counts.1.fp}",
+                                                             relation="lt")]}),
+                          F.json_response({"claims": [answer("C2", name_field="facts.weakest_class.label", named="0")]}))
+    assert len(fake.calls) == 2 and [v.verdict for v in res.verdicts] == ["match", "match"]
+    assert "C1" in fake.calls[0]["input"][0]["content"] and "C2" not in fake.calls[0]["input"][0]["content"]
+    assert res.counts["chunks"] == 2 and res.counts["chunk_retries"] == 0
+
+
+async def test_failed_chunk_is_split_and_asked_again():
+    claims = [claim("C1", "comparison", "FN 은 43건으로 FP 56건보다 적다"), claim("C2", "name", "가장 약한 클래스는 0 이다")]
+    loop = [F.response([F.function_call_item("find_fields", {"query": "fn"})]) for _ in range(12)]  # 첫 묶음이 턴 상한
+    fake, res = await run(claims, *loop,
+                          F.json_response({"claims": [answer("C1", expr="{confusion_counts.1.fn}", expr_b="{confusion_counts.1.fp}",
+                                                             relation="lt")]}),
+                          F.json_response({"claims": [answer("C2", name_field="facts.weakest_class.label", named="0")]}))
+    assert res.failure is None and [v.verdict for v in res.verdicts] == ["match", "match"]
+    assert len(fake.calls) == 14 and res.counts["chunk_retries"] == 2
+    assert "C2" not in fake.calls[12]["input"][0]["content"]  # 반으로 쪼개 물었다

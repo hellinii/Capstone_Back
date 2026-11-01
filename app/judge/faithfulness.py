@@ -17,6 +17,7 @@ inference_violation(단정형 추론) · not_claim(추론으로 뽑혔지만 용
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -644,6 +645,72 @@ async def _ask_agent(client, content: str, ask: list[Claim], instructions: str, 
     return {}, calls, tool_calls, "agent_turns"
 
 
+# 본 조사를 주장 묶음으로 나눠 동시에 묻는다(1.22, V2 1.21 R-0061 — 주장 210개를 한 번에 물었더니 도구를 104번 부르다 12턴 상한에
+# 걸려 채점이 끝나지 않았다. 지난 회차도 9턴(72번)으로 여유가 3턴뿐이었다). 묶음마다 12턴이 따로 있다.
+CHUNK_CLAIMS = 40
+
+
+def chunk_claims(claims: list[Claim], size: int | None = None) -> list[list[Claim]]:
+    """주장을 조각(칸) 순서대로 묶는다. 한 조각의 주장은 되도록 같은 묶음에(문장 맥락), 묶음은 size 개 안팎. 한 조각이 size 를 넘으면
+    그 조각만 잘라 나눈다."""
+    size = size or CHUNK_CLAIMS
+    groups: list[list[Claim]] = []
+    for c in claims:
+        if groups and groups[-1][0].piece_id == c.piece_id:
+            groups[-1].append(c)
+        else:
+            groups.append([c])
+    chunks: list[list[Claim]] = []
+    for g in groups:
+        for i in range(0, len(g), size):
+            part = g[i:i + size]
+            if chunks and len(chunks[-1]) + len(part) <= size:
+                chunks[-1].extend(part)
+            else:
+                chunks.append(list(part))
+    return chunks
+
+
+async def _ask_in_chunks(client, scope: list[Piece], pending: list[Claim], sources: Sources, *, deadline: float | None,
+                         kw: dict) -> tuple[dict[str, dict], list[dict], int, str | None, dict]:
+    """본 조사를 묶음마다 동시에. 실패한 묶음은 반으로 쪼개 한 번 더 묻는다(시간 마감 실패는 빼고). 그래도 실패하면 모듈 실패."""
+    instructions = criteria.load_text("prompts/faithfulness.md")
+
+    async def one(chunk: list[Claim]):
+        return await _ask_agent(client, f"## 서술\n{render(scope)}\n\n## 조사할 주장\n{_listing(chunk)}", chunk, instructions,
+                                "faithfulness", sources, scope, deadline=deadline, kw=kw)
+
+    chunks = chunk_claims(pending)
+    results = await asyncio.gather(*(one(ch) for ch in chunks))
+    answers: dict[str, dict] = {}
+    calls: list[dict] = []
+    tool_calls = 0
+    again: list[list[Claim]] = []
+    first_failure = None
+    for ch, (ans, cl, tc, failure) in zip(chunks, results):
+        calls += cl
+        tool_calls += tc
+        if failure:
+            first_failure = first_failure or failure
+            if failure != "deadline":
+                half = max(1, (len(ch) + 1) // 2)
+                again += [ch[:half], ch[half:]] if len(ch) > 1 else [ch]
+        else:
+            answers.update(ans)
+    info = {"chunks": len(chunks), "chunk_retries": len(again)}
+    if first_failure and not again:
+        return answers, calls, tool_calls, first_failure, info
+    if again:
+        retried = await asyncio.gather(*(one(ch) for ch in again))
+        for ans, cl, tc, failure in retried:
+            calls += cl
+            tool_calls += tc
+            if failure:
+                return answers, calls, tool_calls, failure, info
+            answers.update(ans)
+    return answers, calls, tool_calls, None, info
+
+
 def _listing(claims: list[Claim]) -> str:
     # 숫자 주장은 대조할 숫자를 함께 준다 — 숫자가 여럿인 문장에서 다른 숫자의 칸을 찾아왔다(1.6, V2 1.5 R-0038)
     return "\n".join(f"- {c.id} [{c.kind}] (조각 {c.piece_id}) {c.quote}"
@@ -680,10 +747,10 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
     answers: dict[str, dict] = {}
     calls: list[dict] = []
     tool_calls = 0
+    chunk_info = {"chunks": 0, "chunk_retries": 0}
     if pending:
-        answers, calls, tool_calls, failure = await _ask_agent(
-            client, f"## 서술\n{render(scope)}\n\n## 조사할 주장\n{_listing(pending)}", pending,
-            criteria.load_text("prompts/faithfulness.md"), "faithfulness", sources, scope, deadline=deadline, kw=kw)
+        answers, calls, tool_calls, failure, chunk_info = await _ask_in_chunks(client, scope, pending, sources,
+                                                                               deadline=deadline, kw=kw)
         if failure:
             return FaithResult([], {}, calls, tool_calls, failure)
     verdicts = [direct.get(c.id) or judge_answer(c, answers.get(c.id), sources, metrics, refs, by_piece.get(c.piece_id))
@@ -735,6 +802,7 @@ async def judge_faithfulness(client, pieces: list[Piece], claims: list[Claim], s
     counts = _count(verdicts)
     counts["rechecked"] = len(targets)
     counts["recheck_retried"] = retried  # 재확인이 한 번 실패해 다시 물었나(1.21)
+    counts.update(chunk_info)  # 본 조사 묶음 수·쪼개 다시 물은 묶음 수(1.22)
     counts["recheck_failed"] = len(targets) if targets and failure else 0
     counts["recheck_changed"] = sum(1 for v in verdicts if v.detail.get("recheck", {}).get("first") and
                                     v.verdict != v.detail["recheck"]["first"])

@@ -32,6 +32,10 @@ POLARITIES = ("positive", "negative", "neutral", "")
 CALL_TIMEOUT_SECONDS = 120.0
 # 채우기(1.17)는 남은 시간이 이보다 적으면 건너뛴다 — 추출 뒤 사실 일치(실측 약 70~75초)와 채우기 자체(약 15~20초)가 들어갈 자리.
 FILL_MIN_SECONDS = 100.0
+# 1.22: 점검표가 '주장 있음'이라 했는데 하나도 안 들어간 문장(lost)은 채우기로 다시 묻지 않는다 — V2 1.21 R-0061 에서 lost 19문장이 거의
+# 권고·범위·계산 방식 문장(코드가 규칙대로 버린 것)이었고, 채우기가 꼬리표 '(P1)'·계산 방식 설명 같은 가짜 18개를 보탰다(정밀도 0.934→0.876).
+# 다만 lost 가 문장의 절반을 넘으면 첫 추출이 통째로 비었다고 보고(1.18 R-0059 — 주장 0개) 첫 추출만 한 번 다시 한다.
+REDO_MIN_LOST = 3
 _SPACE = re.compile(r"\s+")
 
 
@@ -193,6 +197,17 @@ def is_threshold_number(claim: Claim, sentence: str) -> bool:
     return any(matches(text, c) for c in constants) and any(rest.startswith(w) for w in criteria.claim_markers("threshold_after"))
 
 
+def is_ci_level(claim: Claim, sentence: str) -> bool:
+    """숫자 주장이 신뢰구간의 수준인가 — 백분율 숫자 바로 뒤에 '신뢰구간'('95% 신뢰구간'). 구간 끝값('0.917~0.997')은 아니다."""
+    if claim.kind != "number":
+        return False
+    text = (claim.number_text or claim.quote).strip()
+    if not text.endswith("%"):
+        return False
+    at = sentence.find(text)
+    return at >= 0 and sentence[at + len(text):].lstrip().startswith("신뢰구간")
+
+
 def drop_covered_thresholds(claims: list[Claim], pieces: dict[str, Piece], rejected: list[dict]) -> list[Claim]:
     """기준선 숫자는 같은 문장에 그 숫자를 담은 다른 종류 주장(대개 비교 '…0.1 미만')이 있을 때만 버린다 — 그 비교와 겹치는 중복이다.
     비교 주장이 없으면 남긴다(사람 정답지는 기준선을 비교 주장으로 표시했다 — 숫자만 뽑혀도 그 짝이다. 1.13, V2 1.12 R-0052:
@@ -201,6 +216,11 @@ def drop_covered_thresholds(claims: list[Claim], pieces: dict[str, Piece], rejec
     for c in claims:
         piece = pieces.get(c.piece_id)
         sentence = _sentence_of(c.quote, piece) if piece else c.quote
+        if piece and is_ci_level(c, sentence):
+            # 신뢰구간의 수준('95% 신뢰구간'의 95%)은 데이터 값이 아니라 방법 설정이다 — 늘 버린다(1.22: 민서 판정 6번 모두 '아니오',
+            # 사람 정답지에 맨 숫자 주장 0개. 1.13 은 비교 주장이 담을 때만 버려 yeast 네 회차 모두 가짜로 남았다)
+            rejected.append({"round": c.round, "reason": "ci_level", "piece_id": c.piece_id, "quote": c.quote[:200]})
+            continue
         if piece and is_threshold_number(c, sentence):
             text = (c.number_text or c.quote).strip()
             covered = any(o is not c and o.kind != "number" and o.piece_id == c.piece_id and text in o.quote
@@ -428,7 +448,18 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
         claims.extend(new)
         if round_no == 0:
             # 문장마다 판정 — 빠진 문장만, 한 번만 다시 묻는다(1.17). 채운 주장도 0번 시점이다.
-            gaps = sentence_gaps(sents, data.get("sentences") or [], claims, rejected)
+            found = sentence_gaps(sents, data.get("sentences") or [], claims, rejected)
+            lost = [sid for sid, why in found.items() if why == "lost"]
+            if len(lost) > max(REDO_MIN_LOST, len(sents) // 2):
+                # 첫 추출이 통째로 빈 꼴 — 첫 추출만 한 번 다시(1.22). 실패해도 지금 것으로 간다.
+                redo, redo_failure = await ask("extract_0_redo", base, sids)
+                checks["redo"] = redo_failure or "done"
+                if not redo_failure:
+                    more = _accept(redo.get("claims") or [], by_id, catalog, claims, round_no, rejected, checks["repaired"])
+                    claims.extend(more)
+                    found = sentence_gaps(sents, redo.get("sentences") or [], claims, rejected)
+            checks["lost"] = sum(1 for why in found.values() if why == "lost")
+            gaps = {sid: why for sid, why in found.items() if why != "lost"}
             checks["gaps"] = gaps
             remaining = None if deadline is None else deadline - (clock or time.monotonic)()
             if gaps and remaining is not None and remaining < FILL_MIN_SECONDS:
@@ -445,7 +476,8 @@ async def extract_claims(client, pieces: list[Piece], catalog: dict[str, FieldEn
                                      by_id, catalog, claims, 0, rejected, checks["repaired"])
                     claims.extend(filled)
                     checks["filled"] = len(filled)
-                    checks["left"] = sentence_gaps(asked, data.get("sentences") or [], claims, rejected)
+                    checks["left"] = {sid: why for sid, why in sentence_gaps(asked, data.get("sentences") or [], claims,
+                                                                              rejected).items() if why != "lost"}
         rounds.append(len(claims))
         if round_no > 0 and not new:
             break

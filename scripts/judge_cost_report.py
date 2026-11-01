@@ -36,8 +36,8 @@ TOKEN_COLUMNS = ("input_tokens", "cached_input_tokens", "output_tokens", "reason
 # 심판 기록의 모듈 이름 → 표에 쓰는 이름(설계 5.5·계획 16-1 의 단계). 순서도 이것.
 MODULES = (("extract", "전처리(주장 추출)"), ("faithfulness", "사실 일치"), ("coverage", "필수 내용"),
            ("consistency", "일관성"), ("readability", "표기"), ("aggregate", "합산"))
-EXTRACT_CALLS = ("extract_0", "extract_0_fill", "extract_1", "extract_2")  # 0_fill: 문장마다 판정의 채우기(기준 1.17)
-EXTRACT_LABELS = {"extract_0": "0번", "extract_0_fill": "채우기", "extract_1": "1번", "extract_2": "2번"}
+EXTRACT_CALLS = ("extract_0", "extract_0_redo", "extract_0_fill", "extract_1", "extract_2")  # 0_fill: 문장마다 판정의 채우기(기준 1.17)
+EXTRACT_LABELS = {"extract_0": "0번", "extract_0_redo": "다시 하기", "extract_0_fill": "채우기", "extract_1": "1번", "extract_2": "2번"}
 
 # 설계 8절 효용성 표 — 칸 이름 그대로.
 EFFICACY_HEAD = ("", "심판 없음 (사람만)", "심판 있음")

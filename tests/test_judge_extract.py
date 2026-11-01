@@ -172,7 +172,7 @@ async def test_first_call_lists_sentences_and_asks_verdict_before_claims():
 
 async def test_fully_judged_first_answer_needs_no_fill():
     fake, res = await run(first(item("0.912")), reply())
-    assert len(fake.calls) == 2 and res.sentence_checks == {"sentences": 3, "gaps": {}, "left": {}, "repaired": []}
+    assert len(fake.calls) == 2 and res.sentence_checks == {"sentences": 3, "gaps": {}, "left": {}, "repaired": [], "lost": 0}
 
 
 async def test_missing_sentences_are_asked_once_and_only_those():
@@ -204,7 +204,7 @@ async def test_fill_is_asked_at_most_once():
 
 @pytest.mark.parametrize("said, items, want", [
     ({"s1": (2, "")}, [item("0.912")], {}),  # 2개라 적고 1개만 — 1.18 부터 다시 묻지 않는다(R-0058 채우기 압박)
-    ({"s1": (1, "")}, [item("0.913")], {"s1": "lost"}),  # 인용이 틀려 하나도 안 들어감 — 본 것으로 치지 않는다
+    ({"s1": (1, "")}, [item("0.913")], {}),  # 인용이 틀려 하나도 안 들어감(lost) — 1.22 부터 채우기로 다시 묻지 않는다(R-0061 가짜)
     ({"s1": (0, "")}, [], {"s1": "no_reason"}),  # 까닭 없는 '없음'
     ({"s1": (0, "권고 문장")}, [], {}),
     ({}, [item("0.912")], {}),  # 판정은 없어도 주장이 들어간 문장은 본 것
@@ -314,7 +314,10 @@ def test_self_check_prompt_targets_five_kinds():
 def test_fill_prompt_names_every_reask_reason_and_does_not_push():
     # 1.20: 채우기 지시문이 1.19 의 다시 묻는 까닭(lost·missed)을 모두 말하고, 억지로 뽑지 말라고 한다
     text = extract.criteria.load_text("prompts/extract_fill.md")
-    for word in ("판정이 빠졌거나", "하나도 들어가지 않았거나", "'빠뜨림'", "까닭이 비어", "억지로 뽑지 않는다", "{by_sentence}"):
+    for word in ("판정이 빠졌거나", "'빠뜨림'", "까닭이 비어", "억지로 뽑지 않는다", "{by_sentence}"):
+        assert word in text, word
+    assert "하나도 들어가지 않았거나" not in text  # 1.22: lost 는 다시 묻지 않는다
+    for word in ():
         assert word in text, word
 
 
@@ -340,3 +343,41 @@ async def test_repaired_quote_is_kept_and_recorded():
     res = await extract.extract_claims(fake, pieces, CATALOG)
     assert [c.quote for c in res.claims] == ["세 매장 모두 하한선을 밑돌지 않"] and res.rejected == []
     assert res.sentence_checks["repaired"][0]["from"] == "세 매장 모두 하한선을 밑돌지 않는다"
+
+
+
+# ── 1.22 lost 는 채우기로 다시 묻지 않고, 첫 추출이 통째로 비면 첫 추출만 한 번 다시 ─────────
+
+
+def _many(n):
+    return [Piece("slot:7.1", "7.1", "5.2", "ai", " ".join(f"가상 값 {i} 은 {i}건이다." for i in range(1, n + 1)))]
+
+
+async def test_lost_sentences_are_counted_not_refilled():
+    pieces = _many(3)
+    said = [{"sid": f"s{i}", "n_claims": 1, "none_reason": ""} for i in range(1, 4)]  # 셋 다 '있음'인데 주장 0개
+    fake = F.FakeOpenAI([first(pieces=pieces, sentences=said), reply()])
+    res = await extract.extract_claims(fake, pieces, CATALOG)
+    assert len(fake.calls) == 2 and res.sentence_checks["lost"] == 3 and res.sentence_checks["gaps"] == {}
+    assert "redo" not in res.sentence_checks  # 3 은 다시 하기 문턱(REDO_MIN_LOST) 이하
+
+
+async def test_empty_first_extraction_is_redone_once():
+    # 1.18 R-0059 꼴 — 점검표는 다 '있음'인데 주장 목록이 비었다 → 첫 추출만 한 번 다시
+    pieces = _many(8)
+    said = [{"sid": f"s{i}", "n_claims": 1, "none_reason": ""} for i in range(1, 9)]
+    redo = [item(f"{i}건", piece="slot:7.1", field="", number_text=f"{i}") for i in range(1, 9)]
+    fake = F.FakeOpenAI([first(pieces=pieces, sentences=said), first(*redo, pieces=pieces), reply()])
+    res = await extract.extract_claims(fake, pieces, CATALOG)
+    assert [c["purpose"] for c in res.calls] == ["extract_0", "extract_0_redo", "extract_1"]
+    assert len(res.claims) == 8 and all(c.round == 0 for c in res.claims) and res.rounds == [8, 8]
+    assert res.sentence_checks["redo"] == "done" and res.sentence_checks["lost"] == 0
+
+
+async def test_redo_failure_keeps_going():
+    pieces = _many(8)
+    said = [{"sid": f"s{i}", "n_claims": 1, "none_reason": ""} for i in range(1, 9)]
+    fake = F.FakeOpenAI([first(pieces=pieces, sentences=said), F.response([F.message_item("x", refusal=True)]),
+                         reply(item("1건", field="", number_text="1")), reply()])
+    res = await extract.extract_claims(fake, pieces, CATALOG)
+    assert res.failure is None and res.sentence_checks["redo"] == "refusal" and [c.quote for c in res.claims] == ["1건"]

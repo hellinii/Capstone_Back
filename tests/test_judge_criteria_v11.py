@@ -1196,3 +1196,20 @@ def test_v121_class_sentence_with_a_chosen_metric(text, quote, polarity, metric_
         m = M(metric_id="M2", display_name="F1 Score", value=0.9, threshold=0.8, status="pass", is_core=True, near_target=False)
     c = Claim("C1", "degree", quote, PIECE.id, PIECE.slot, PIECE.place, PIECE.source, "", "", "", polarity, 0)
     assert _judge_in(c, ans(metric_id=metric_id), text, metrics=[m]).verdict == want
+
+
+
+# ── 1.22 신뢰구간 수준 숫자 ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize("quote, number_text, want", [
+    ("95%", "95%", True),  # '95% 신뢰구간' — 방법 설정
+    ("0.917", "0.917", False),  # 구간 끝값은 데이터
+    ("90%", "90%", False),  # 뒤에 '신뢰구간'이 없으면 아님
+])
+def test_v122_ci_level_number_is_dropped(quote, number_text, want):
+    piece = Piece("slot:8.2", "8.2", "5.1", "ai", "지표의 95% 신뢰구간은 0.917~0.997 이고 비율은 90% 이다.")
+    c = Claim("C1", "number", quote, piece.id, "8.2", "5.1", "ai", "", "", number_text, "", 0)
+    rejected = []
+    kept = ex.drop_covered_thresholds([c], {piece.id: piece}, rejected)
+    assert (kept == []) is want and ([r["reason"] for r in rejected] == ["ci_level"]) is want
