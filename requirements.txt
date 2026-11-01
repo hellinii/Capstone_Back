@@ -3,6 +3,8 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 pandas==2.2.3
 openai==3.30.0
+# openai 3.x 는 httpx 대신 httpx2 를 쓴다 — app/main.py(타임아웃)·starlette TestClient 가 httpx 를 쓰므로 직접 고정(전엔 openai 1.x 가 함께 깔았다)
+httpx==0.28.1
 anthropic==1.15.0
 python-dotenv==1.1.0
 pydantic==2.11.1
