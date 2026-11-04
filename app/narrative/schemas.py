@@ -737,14 +737,15 @@ class JudgeCounts(BaseModel):
     faithfulness: dict[Literal["checked", "matched"], int]
     consistency:  dict[Literal["checked", "contradictions"], int]
     coverage:     JudgeCoverageCounts | None = None  # 필수 내용 축을 뺀 기준(1.25~)에서는 없다 — axes 에 든 축만 싣는다
-    readability:  dict[Literal["rules", "violations"], int]
+    readability:  dict[Literal["rules", "violations"], int] | None = None  # 표기 축도 뺐다(2026-11-04 — V2 사람 일치도 미달)
 
     @model_serializer(mode="wrap")
     def _drop_absent_axis(self, handler):
         # 뺀 축은 키째 싣지 않는다 — 'coverage: null' 이 나가면 계약("counts 에는 axes 에 든 축만") 밖이다(2026-11-01)
         data = handler(self)
-        if data.get("coverage") is None:
-            data.pop("coverage", None)
+        for axis in ("coverage", "readability"):
+            if data.get(axis) is None:
+                data.pop(axis, None)
         return data
 
 

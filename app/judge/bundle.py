@@ -14,7 +14,9 @@ from app.judge import config, criteria
 # 필수 내용(coverage)은 뺐다 — V2 결함 검사에서 D03(권고 하나의 근거 문장 삭제)을 못 잡았다: 항목 '권고-1(각 권고의 근거)'을 항목
 # 하나로 보아 다른 권고의 근거로 '서술됨'이라 했다. 검증 README 미리 정한 기준 9("필수 내용·표기 축만 미달이면 그 축만 빼고 켠다"),
 # 민서 2026-11-01. 필수 내용 점검은 내부 기록으로만 계속 돌고(검증·분석용) 발급을 막지 않는다(core·safety 도 이 목록을 본다).
-PUBLISHED_AXES = ("faithfulness", "consistency", "readability")
+# 표기(readability)도 뺐다 — V2 사람 일치도 미달(시스템↔사람 0.84 vs 사람↔사람 1.00, 표기 축 0.58: 어긋남은 모두 AI '읽기 어려움'
+# 표시). 같은 기준 9, 민서 2026-11-04. 표기 점검도 내부 기록으로만 돌고, 그 호출 실패로 보류하지 않는다(core).
+PUBLISHED_AXES = ("faithfulness", "consistency")
 
 
 def _head(gate: str, held_kind: str | None, retry_allowed: bool) -> dict:
