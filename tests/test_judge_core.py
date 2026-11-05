@@ -176,7 +176,8 @@ async def test_module_failure_means_no_gate():
     quote = next(tok for tok in gen.response.conclusion.narrative.split() if any(ch.isdigit() for ch in tok))
     answers["claims"] = {"claims": [{"kind": "number", "quote": quote, "piece_id": "slot:8.2", "field": "", "field_b": "",
                                      "number_text": "", "polarity": ""}]}
-    answers["readability"] = lambda kw: {"slots": []}  # 칸 답 없음 → bad_output(필수 내용은 뺀 축이라 1.25~ 막지 않음)
+    # 주장 추출 답이 JSON 객체가 아님 → bad_output. 필수 내용(1.25~)·표기(2026-11-04)는 뺀 축이라 그 실패로는 막지 않는다
+    answers["claims"] = ["객체가 아닌 답"]
     fake = F.FakeOpenAI([router(answers)] * 20)
     run = await core.judge_once(fake, req, gen.response, gen.section_sources, refs)
     assert (run.gate, run.failure, run.scorecard) == (None, "bad_output", None)
@@ -234,3 +235,21 @@ async def test_coverage_quote_problem_does_not_hold_when_the_axis_is_not_publish
     fake = F.FakeOpenAI([router(answers)] * 20)
     run = await core.judge_once(fake, req, gen.response, gen.section_sources, refs)
     assert run.failure is None and not any(i.startswith("coverage:") for i in run.record["safety"])
+
+
+async def test_readability_failure_is_recorded_but_does_not_hold_when_the_axis_is_not_published():
+    # 표기 축을 뺐다(bundle.PUBLISHED_AXES, 2026-11-04 — V2 사람 일치도 미달). 그 AI 점검이 실패해도 판정은 나고, 기록에만 남는다.
+    # 코드 규칙 건수(점수)는 호출 실패와 상관없이 남는다.
+    assert "readability" not in bundle.PUBLISHED_AXES
+    req, gen, refs = await _setup()
+    answers = _empty_answers(None)
+    quote = next(tok for tok in gen.response.conclusion.narrative.split() if any(ch.isdigit() for ch in tok))
+    answers["claims"] = {"claims": [{"kind": "number", "quote": quote, "piece_id": "slot:8.2", "field": "", "field_b": "",
+                                     "number_text": "", "polarity": ""}]}
+    answers["readability"] = lambda kw: {"slots": []}  # 칸 답 없음 → bad_output
+    fake = F.FakeOpenAI([router(answers)] * 20)
+    run = await core.judge_once(fake, req, gen.response, gen.section_sources, refs)
+    assert run.failure is None and run.gate in ("pass", "blocked")
+    assert run.record["readability"]["failure"] == "bad_output"
+    assert run.scorecard["readability"]["rules"] == 2 and run.scorecard["readability"]["llm_flags"] == 0
+    assert "readability" not in bundle.passed(run.scorecard)["counts"]
