@@ -271,7 +271,7 @@ def judge_passes(monkeypatch):
         return JudgeRun("pass", None, [], [], {
             "faithfulness": {"checked": 0, "matched": 0}, "consistency": {"checked": 0, "contradictions": 0},
             "coverage": {"applicable": 0, "described": 0, "not_applicable": 18, "items": []},
-            "readability": {"rules": 2, "violations": 0}}, {})
+            "readability": {"rules": 2, "violations": 0}}, {}, issuance="pass")
 
     monkeypatch.setattr(jobs, "judge_once", passed)
     app.state.openai_client = object()  # _no_real_llm_clients 가 테스트 끝에 되돌린다

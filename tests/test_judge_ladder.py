@@ -34,8 +34,13 @@ def _req(name: str) -> NarrativeRequest:
     return NarrativeRequest.model_validate(json.loads((CONTRACT / f"fact_sheet_{name}.json").read_text()))
 
 
-def run_(gate, flagged=(), failure=None, unfixable=()):
-    return JudgeRun(gate, failure, list(flagged), [dict(u) for u in unfixable], None, {"criteria_version": "1.0-dev"})
+def run_(gate, flagged=(), failure=None, unfixable=(), *, issuance="same", repair=(), blocking=None):
+    """기본은 모순으로 걸린 채점 — 발급 규칙이 판정과 같고(issuance=gate) 걸린 칸이 곧 막는 칸이다. 사실 위반만 난 채점은
+    issuance="pass" 로(판정자 판정은 blocked 여도 발급은 막지 않는다), 숫자 위반 칸은 repair 로 준다."""
+    iss = gate if issuance == "same" else issuance
+    return JudgeRun(gate, failure, list(flagged), [dict(u) for u in unfixable], None, {"criteria_version": "1.0-dev"},
+                    issuance=iss, blocking_slots=list(flagged if blocking is None else blocking) if iss == "blocked" else [],
+                    repair_slots=list(repair))
 
 
 class FakeJudge:
@@ -350,8 +355,10 @@ async def test_judge_marker_never_reaches_the_generator(make_section_client):
     session, client = await _session(make_section_client)
     n_before = len(_calls(client))
     marked = JudgeRun("blocked", None, ["7.2", "8.2"], [{"type": "value_mismatch", "pieces": [MARKER], "quote": MARKER}],
-                      {"faithfulness": {"client_input_assertive": 0, "note": MARKER}}, {"reason": MARKER, "quote": MARKER})
-    judge = FakeJudge(marked, JudgeRun("blocked", None, ["9"], [], None, {"reason": MARKER}), run_("pass"))
+                      {"faithfulness": {"client_input_assertive": 0, "note": MARKER}}, {"reason": MARKER, "quote": MARKER},
+                      issuance="blocked", blocking_slots=["7.2", "8.2"])
+    judge = FakeJudge(marked, JudgeRun("blocked", None, ["9"], [], None, {"reason": MARKER}, issuance="blocked",
+                                       blocking_slots=["9"]), run_("pass"))
     out = await ladder.run_ladder(session, judge, deadline=None)
     new = _calls(client)[n_before:]
     assert new, "재생성 호출이 하나도 없으면 이 시험은 아무것도 보지 않는다"
@@ -369,13 +376,13 @@ async def test_record_is_written_into_the_given_dict_and_summarized(make_section
     calls = [{"cost_usd": 0.01}, {"cost_usd": 0.02}]
     r1 = JudgeRun("blocked", None, ["7.2"], [], {"faithfulness": {"client_input_assertive": 2}},
                   {"criteria_version": "1.0-dev", "criteria_fingerprint": "abc", "material_check_version": "m1",
-                   "extract": {"calls": calls}})
-    r2 = JudgeRun("pass", None, [], [], {"faithfulness": {"client_input_assertive": 1}}, {"extract": {"calls": calls}})
+                   "extract": {"calls": calls}}, issuance="blocked", blocking_slots=["7.2"])
+    r2 = JudgeRun("pass", None, [], [], {"faithfulness": {"client_input_assertive": 1}}, {"extract": {"calls": calls}}, issuance="pass")
     out = await ladder.run_ladder(session, FakeJudge(r1, r2), deadline=None, record=rec)
     assert out.record is rec and [r["round"] for r in rec["rounds"]] == [1, 2]
     s = ladder.summary(rec)
     assert s == {"gate": "passed", "held_kind": None, "failure": None, "retry_allowed": False, "rounds": 2,
-                 "regenerated": ["7.2"], "templated": [], "cost_usd": 0.06, "seconds": s["seconds"],
+                 "regenerated": ["7.2"], "templated": [], "number_templated": [], "cost_usd": 0.06, "seconds": s["seconds"],
                  "criteria_version": "1.0-dev", "criteria_fingerprint": "abc", "material_check_version": "m1",
                  "client_input_assertive": 1}
     json.dumps(rec, ensure_ascii=False)  # 직렬화된다
@@ -383,7 +390,7 @@ async def test_record_is_written_into_the_given_dict_and_summarized(make_section
 
 async def test_summary_cost_is_none_when_any_call_cost_is_unknown(make_section_client):
     session, _ = await _session(make_section_client)
-    r = JudgeRun("pass", None, [], [], None, {"extract": {"calls": [{"cost_usd": None}]}})
+    r = JudgeRun("pass", None, [], [], None, {"extract": {"calls": [{"cost_usd": None}]}}, issuance="pass")
     out = await ladder.run_ladder(session, FakeJudge(r), deadline=None)
     assert ladder.summary(out.record)["cost_usd"] is None
 
@@ -462,3 +469,50 @@ async def test_webhook_error_is_swallowed(monkeypatch):
 def test_webhook_url_env(monkeypatch, value, want):
     monkeypatch.setenv(alert.WEBHOOK_ENV, value)
     assert alert.webhook_url() == want
+
+
+# ── 발급 규칙(2026-11-05 평가 단계 뒤 민서 결정): 사실 위반만 난 채점은 사다리를 타지 않는다 ──
+
+
+async def test_fact_only_block_passes_at_once_and_templates_only_number_slots(make_section_client):
+    session, client = await _session(make_section_client)
+    before, n_before = dict(session.result.section_sources), len(_calls(client))
+    assert before["7.2"] == "llm" and before["8.2"] == "llm"
+    judge = FakeJudge(run_("blocked", ["7.2", "8.2"], issuance="pass", repair=["7.2"]))
+    out = await ladder.run_ladder(session, judge, deadline=None)
+    assert (out.gate, out.held_kind, len(out.record["rounds"]), len(judge.seen)) == ("passed", None, 1, 1)  # 다시 채점하지 않는다
+    assert (out.record["number_templated"], out.record["templated"], out.record["regenerated"]) == (["7.2"], [], {})
+    after = out.result.section_sources
+    assert after["7.2"] == "fallback" and {k: v for k, v in after.items() if k != "7.2"} == {
+        k: v for k, v in before.items() if k != "7.2"}
+    assert session.trace["sections"]["7.2"]["reason"] == "judge_number"
+    assert len(_calls(client)) == n_before  # 생성 호출 없음
+    assert out.record["rounds"][0]["gate"] == "blocked" and out.record["rounds"][0]["issuance"] == "pass"
+    assert ladder.summary(out.record)["number_templated"] == ["7.2"]
+
+
+async def test_fact_only_block_without_number_slots_changes_nothing(make_section_client):
+    session, _ = await _session(make_section_client)
+    before = dict(session.result.section_sources)
+    out = await ladder.run_ladder(session, FakeJudge(run_("blocked", ["8.2"], issuance="pass")), deadline=None)
+    assert out.gate == "passed" and out.result.section_sources == before and out.record["number_templated"] == []
+    assert out.record["ever_blocked"] is False
+
+
+async def test_ever_blocked_follows_the_issuance_rule_not_the_judge_gate(make_section_client):
+    # 발급 규칙이 막은 적이 있으면 그 뒤 일시적 실패 보류에 '서술 다시 만들기'를 주지 않는다(판정자 판정이 pass 여도)
+    session, _ = await _session(make_section_client)
+    judge = FakeJudge(run_("pass", ["8.2"], issuance="blocked"), run_(None, failure="transient"))
+    out = await ladder.run_ladder(session, judge, deadline=None)
+    assert (out.gate, out.held_kind, out.retry_allowed) == ("held", "judge_error", False)
+    assert out.record["ever_blocked"] is True
+
+
+async def test_ladder_regenerates_only_the_contradiction_slot_not_fact_violation_slots(make_section_client):
+    # 판정자 게이트는 7.2(사실 위반)·8.2(모순)를 걸었지만 발급을 막는 칸은 8.2 뿐 — 사다리는 8.2 만 다시 만든다
+    session, client = await _session(make_section_client)
+    n_before = len(_calls(client))
+    judge = FakeJudge(run_("blocked", ["7.2", "8.2"], blocking=["8.2"]), run_("pass"))
+    out = await ladder.run_ladder(session, judge, deadline=None)
+    assert out.gate == "passed" and len(out.record["rounds"]) == 2
+    assert [requested_fields(k) for k in _calls(client)[n_before:]] == [["section_8_2"]]

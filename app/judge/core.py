@@ -33,12 +33,16 @@ from app.narrative.derived import compute_derived
 
 @dataclass
 class JudgeRun:
-    gate: str | None  # pass | blocked | None(실패)
+    gate: str | None  # pass | blocked | None(실패) — 기준 1.25 판정자의 판정(검증 도구가 재는 값, aggregate.gate)
     failure: str | None
-    flagged_slots: list[str] = field(default_factory=list)
+    flagged_slots: list[str] = field(default_factory=list)  # 판정자 게이트에 걸린 칸 전부(기록·검증용)
     unfixable: list[dict] = field(default_factory=list)
     scorecard: dict | None = None
     record: dict = field(default_factory=dict)  # 내부 기록(모듈별 결과·호출·시간)
+    # 발급 규칙(aggregate.issuance — 사다리는 이것만 본다). pass | blocked | None(실패)
+    issuance: str | None = None
+    blocking_slots: list[str] = field(default_factory=list)  # 발급을 막는 모순의 칸 — 사다리가 다시 만든다
+    repair_slots: list[str] = field(default_factory=list)  # 숫자 위반 칸 — 발급 전에 규칙 문장으로 바꾼다
 
     def cost_usd(self) -> float | None:
         calls = [c for m in ("extract", "faithfulness", "consistency", "coverage", "readability")
@@ -116,7 +120,9 @@ async def judge_once(client, req, result, section_sources: dict, benchmark_refs:
         record["seconds"] = {**timings, "total": round(clock_fn() - started, 3)}
         return JudgeRun(None, "safety", record=record)
     slots, unfixable = aggregate.flagged_slots(faith, cons)
+    blocking, _ = aggregate.blocking_slots(cons)
     card = aggregate.scorecard(faith, cons, cov if not cov.failure else _empty_coverage(cov), rea)
     timings["aggregate"] = round(clock_fn() - t, 3)
     record["seconds"] = {**timings, "total": round(clock_fn() - started, 3)}
-    return JudgeRun(aggregate.gate(faith, cons), None, slots, unfixable, card, record)
+    return JudgeRun(aggregate.gate(faith, cons), None, slots, unfixable, card, record,
+                    issuance=aggregate.issuance(cons), blocking_slots=blocking, repair_slots=aggregate.repair_slots(faith))

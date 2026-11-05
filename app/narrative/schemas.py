@@ -734,7 +734,8 @@ class JudgeCoverageCounts(BaseModel):
 
 class JudgeCounts(BaseModel):
     """축별 검사 건수·결과 건수(통과한 성적서만). 근거 인용·사유·주장 내용은 싣지 않는다."""
-    faithfulness: dict[Literal["checked", "matched"], int]
+    # 사실 일치 축도 뺐다(2026-11-05 — 평가 단계 축 수준 미탐지·오판 과잉 차단). 옛 작업 결과에는 있다 — 있으면 그대로 싣는다
+    faithfulness: dict[Literal["checked", "matched"], int] | None = None
     consistency:  dict[Literal["checked", "contradictions"], int]
     coverage:     JudgeCoverageCounts | None = None  # 필수 내용 축을 뺀 기준(1.25~)에서는 없다 — axes 에 든 축만 싣는다
     readability:  dict[Literal["rules", "violations"], int] | None = None  # 표기 축도 뺐다(2026-11-04 — V2 사람 일치도 미달)
@@ -743,7 +744,7 @@ class JudgeCounts(BaseModel):
     def _drop_absent_axis(self, handler):
         # 뺀 축은 키째 싣지 않는다 — 'coverage: null' 이 나가면 계약("counts 에는 axes 에 든 축만") 밖이다(2026-11-01)
         data = handler(self)
-        for axis in ("coverage", "readability"):
+        for axis in ("faithfulness", "coverage", "readability"):
             if data.get(axis) is None:
                 data.pop(axis, None)
         return data
