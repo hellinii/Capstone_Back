@@ -1,19 +1,22 @@
-"""app/judge/validation/evaluation.py — 판정자 평가 실험 집계(사전 등록 v1 §6). 순수 함수(파일·네트워크 없음).
+"""app/judge/validation/evaluation.py — 판정자 평가 실험 집계(사전 등록 v1 §6 + v3 2절). 순수 함수(파일·네트워크 없음).
 
-사전 등록(평가/사전등록/v1/사전등록_v1.md)의 집계 규칙을 글자 그대로 옮긴다. 규칙에 없는 집계는 넣지 않는다 — 넣으면 이름에
-"사후 분석"을 붙인다. 모호한 곳은 가장 문자 그대로의 읽기를 택하고 그 자리에 적는다(해석 메모).
+사전 등록(평가/사전등록/v1/사전등록_v1.md, 채점 전에 바꾸거나 더한 규칙은 v3/사전등록_v3.md 2절)의 집계 규칙을 글자 그대로 옮긴다.
+규칙에 없는 집계는 넣지 않는다 — 넣으면 이름에 "사후 분석"을 붙인다. 모호한 곳은 가장 문자 그대로의 읽기를 택하고 그 자리에 적는다(해석 메모).
 
 - 6.1 문장 대조: 문서의 서술 조각(출처 ai·template)을 annotation.sentence_rows(정규식 `(?<=[.?!])\\s+|\\n+`)로 나눠 문장 번호를 붙인다
-  (DocIndex). 판정자 표시의 인용은 stats.touches 로 문장에 붙인다 — 같은 조각의 문장을 먼저 보고, 거기 없거나 조각을 모르면
-  문서 전체에서 찾는다(locate). 해석 메모: 조각이 서술 밖(고정 문구·표)으로 알려진 인용은 서술 문장에 붙이지 않는다(빈 목록).
+  (DocIndex). 판정자 표시의 인용은 stats.touches 로 문장에 붙인다 — 조각을 알면 그 조각 안에서만, 조각을 모르면(문서에 없는 조각
+  id 포함) 문서 전체에서 찾는다(locate). 해석 메모: 조각이 서술 밖(고정 문구·표)으로 알려진 인용은 서술 문장에 붙이지 않는다(빈 목록).
+  해석 메모: touches 의 '들어 있음'은 숫자 경계를 지킨다 — 인용 0.75 는 문장의 0.758 안에 '들어 있다'고 보지 않는다(_touches).
 - 주입 문장: 바탕 칸 글 ↔ 바뀐 칸 글을 같은 정규식으로 나눠 새로 생기거나 바뀐 문장(injected_sentences). 순서만 바뀌면 자리가
-  바뀐 문장 모두.
+  바뀐 문장 모두. 결함의 원래 문장(v3 2.1)은 그 반대쪽 — 바탕 글에서 바뀌거나 지워진 문장(replaced_sentences).
 - 6.2 탐지(detect): 게이트 수준·축 수준(C01 은 두 축 따로)·위치 불일치 표시. 실패 회차는 "실패"(미탐지로 세지 않음).
   두 회차 묶기(two_run_class), Wilson 95% 구간(app.evaluation.metrics.intervals.wilson_interval).
-- 6.3 미탐지 원인(miss_cause): 추출 누락 → 필드 오지정 → 대상 오답 → 규칙 허용 → 모순 미검출 순서로 가장 앞선 것.
+  v3 2.1: 원본 회차가 결함의 원래 문장을 같은 축으로 이미 표시한 결함은 분모에서 뺀다(original_flagged — 빼는 셈은 실행기).
+- 6.3 미탐지 원인(miss_cause): 추출 누락 → 필드 오지정 → 대상 오답 → 규칙 허용 → 모순 미검출 순서로 가장 앞선 것. 게이트 수준과
+  축 수준(axis=) 따로. v3 2.3: 추론 결함(F08·F09)은 데이터 필드가 없어 2·3단계를 건너뛰고, C01 의 일관성 축은 모순 미검출.
 - 6.4 과잉 차단 판정표(sheet_entries·build_sheet·sheet_leaks)와 셈(tally_overblocking).
-- 6.5 재현성(reproducibility), 6.6 불변성(invariance), 6.7 독립성(independence), 6.8 주입 문장 추출률(extraction_hit),
-  6.9 숫자 토큰 재현율(numeric_tokens·numeric_recall).
+- 6.5 재현성(reproducibility), 6.6 불변성(invariance — v3 2.4 V02·V06 은 결정과 차단 축만), 6.7 독립성(independence — v3 2.6
+  C03~C06 포괄성은 '예상된 변화'), 6.8 주입 문장 추출률(extraction_hit), 6.9 숫자 토큰 재현율(numeric_tokens·numeric_recall).
 - 5 베이스라인 1·2 탐지(baseline1_detection·baseline2_detection) — 1차 점검 실행 자체는 서술 쪽 규칙(app.narrative.checks)을
   쓰므로 scripts/judge_eval.py 가 하고(심판 패키지는 서술 규칙을 import 하지 않는다), 여기는 찾은 위치로 탐지만 센다.
 
@@ -72,16 +75,17 @@ def _d(report, axis, kind, expected, allowed=()):
 
 
 # §3 결함 18개(차단 축만). 결과서는 §3.5 대로 옮길 수 있다(plant 가 기록) — 축·기대 축·허용 부차 축은 바꿀 수 없다.
+# 허용 부차 축은 v3 2.2(민서 승인 의견 2)가 최종 — 충실성 결함 9개 모두 일관성(v1 에서 F03·F04·F06·F08·F09 는 "없음"이었다).
 PREREG_DEFECTS: dict[str, PlannedDefect] = {
     "F01": _d("pima_strong", FAITH, "숫자", [FAITH], [CONS]),
     "F02": _d("segment_weak", FAITH, "숫자", [FAITH], [CONS]),
-    "F03": _d("segment_weak", FAITH, "이름", [FAITH]),
-    "F04": _d("scene_strong", FAITH, "이름", [FAITH]),
+    "F03": _d("segment_weak", FAITH, "이름", [FAITH], [CONS]),  # v3 2.2(v1: 없음)
+    "F04": _d("scene_strong", FAITH, "이름", [FAITH], [CONS]),  # v3 2.2(v1: 없음)
     "F05": _d("pima_strong", FAITH, "비교·방향", [FAITH], [CONS]),
-    "F06": _d("scene_strong", FAITH, "비교·방향(비율)", [FAITH]),
+    "F06": _d("scene_strong", FAITH, "비교·방향(비율)", [FAITH], [CONS]),  # v3 2.2(v1: 없음)
     "F07": _d("segment_weak", FAITH, "정도 표현", [FAITH], [CONS]),
-    "F08": _d("pima_strong", FAITH, "단정형 추론", [FAITH]),
-    "F09": _d("scene_strong", FAITH, "단정형 추론", [FAITH]),
+    "F08": _d("pima_strong", FAITH, "단정형 추론", [FAITH], [CONS]),  # v3 2.2(v1: 없음)
+    "F09": _d("scene_strong", FAITH, "단정형 추론", [FAITH], [CONS]),  # v3 2.2(v1: 없음)
     "C01": _d("pima_strong", CONS, "값 불일치", [FAITH, CONS]),
     "C02": _d("segment_weak", CONS, "판정↔권고", [CONS], [FAITH]),
     "C03": _d("scene_strong", CONS, "판정↔권고", [CONS], [FAITH]),
@@ -106,6 +110,12 @@ RELATED_KINDS: dict[str, tuple[str, ...] | None] = {
     **{f"C{i:02d}": None for i in range(2, 10)},
 }
 EXTRACTION_IDS = ("F01", "F02", "F03", "F04", "F05", "F06", "F07", "F08", "F09", "C01")  # §6.8 (20회)
+
+# ── 사전 등록 v3 2절(채점 전에 바꾸거나 더한 규칙) ───────────────────────────────
+INFERENCE_DEFECTS = ("F08", "F09")  # v3 2.3 — 추론은 데이터 필드가 없어 미탐지 원인 2·3단계(필드 오지정·대상 오답)를 건너뛴다
+INVARIANCE_GATE_ONLY = ("V02", "V06")  # v3 2.4 — 불변성을 발급 결정과 차단 축 점수로만(포괄성·가독성은 보고만)
+EXPECTED_CHANGES: dict[str, tuple[str, ...]] = {i: ("coverage",) for i in ("C03", "C04", "C05", "C06")}  # v3 2.6 독립성 '예상된 변화'
+ORIGINAL_FLAGGED = "원본에서 이미 표시"  # v3 2.1 — 분모에서 빼고 따로 적는 결함
 
 # §6.6 허용 폭 — 비율 점수 0.05, 건수 점수 1건
 TOLERANCE = {"faithfulness": 0.05, "coverage": 0.05, "consistency": 1.0, "readability": 1.0}
@@ -148,6 +158,36 @@ class Sentence:
     text: str
 
 
+_DIGIT = re.compile(r"\d")
+
+
+def _number_edge_ok(text: str, start: int, end: int) -> bool:
+    """text[start:end] 의 앞뒤가 숫자를 이어 붙이지 않나 — 숫자로 시작하면 앞이 숫자·'숫자.'·'숫자,' 가 아니고, 숫자로 끝나면 뒤가
+    숫자·'.숫자'·',숫자' 가 아니다(0.75 가 0.758·10.75 의 일부가 아니게)."""
+    piece = text[start:end]
+    if _DIGIT.match(piece[:1]) and start > 0:
+        before = text[start - 1]
+        if before.isdigit() or (before in ".," and start > 1 and text[start - 2].isdigit()):
+            return False
+    if _DIGIT.match(piece[-1:]) and end < len(text):
+        after = text[end]
+        if after.isdigit() or (after in ".," and end + 1 < len(text) and text[end + 1].isdigit()):
+            return False
+    return True
+
+
+def _touches(quote: str, sentence: str) -> bool:
+    """stats.touches 그대로이되, 인용이 문장 안에 '들어 있음'은 숫자 경계를 지킨 자리가 하나라도 있을 때만(해석 메모, 6.1)."""
+    q, s = _norm(quote), _norm(sentence)
+    if q and s and q in s and s not in q:
+        starts, at = [], s.find(q)
+        while at >= 0:
+            starts.append(at)
+            at = s.find(q, at + 1)
+        return any(_number_edge_ok(s, i, i + len(q)) for i in starts)
+    return touches(quote, sentence)
+
+
 def _as_piece(p) -> Piece:
     if isinstance(p, Piece):
         return p
@@ -170,16 +210,13 @@ class DocIndex:
         return self.sentences[sid - 1]
 
     def locate(self, quote: str, piece_id: str = "") -> list[int]:
-        """인용 → 문장 번호들(stats.touches). 같은 조각 먼저, 거기 없거나 조각을 모르면 문서 전체. 서술 밖 조각의 인용은 []."""
+        """인용 → 문장 번호들(_touches). 조각을 알면 그 조각 안에서만(거기 없으면 []), 조각을 모르면(빈 값·문서에 없는 id) 문서
+        전체(6.1 '조각을 모르면 문서 전체에서'). 서술 밖 조각(고정 문구·표)의 인용은 [] — 서술 문장에 붙이지 않는다(해석 메모)."""
         if not _norm(quote):
             return []
-        if piece_id:
-            same = [s.id for s in self.sentences if s.piece_id == piece_id and touches(quote, s.text)]
-            if same:
-                return same
-            if piece_id in self.piece_sources and self.piece_sources[piece_id] not in ("ai", "template"):
-                return []  # 고정 문구·표 인용 — 서술 문장이 아니다(해석 메모)
-        return [s.id for s in self.sentences if touches(quote, s.text)]
+        if piece_id and piece_id in self.piece_sources:
+            return [s.id for s in self.sentences if s.piece_id == piece_id and _touches(quote, s.text)]
+        return [s.id for s in self.sentences if _touches(quote, s.text)]
 
     def neighbors(self, sid: int) -> tuple[str, str]:
         """같은 칸 안의 앞뒤 문장(없으면 빈 글)."""
@@ -200,6 +237,21 @@ def injected_sentences(base_text: str, new_text: str) -> list[tuple[int, str]]:
     for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes():
         if tag in ("replace", "insert"):
             out += [(j, b[j]) for j in range(j1, j2)]
+    return out
+
+
+def replaced_sentences(base_text: str, new_text: str) -> list[tuple[int, str]]:
+    """결함의 원래 문장(v3 2.1 '바꾸기 전 문장 — 결함본 주입 문장에 대응하는 원본 문장') [(바탕 글 안 문장 차례, 문장)].
+    injected_sentences 의 반대쪽 — 바뀌거나 지워진 바탕 문장. 덧붙이기만 한 결함(C02·C03)은 빈 목록(규칙에 해당하지 않음)."""
+    a, b = V.sentences(base_text), V.sentences(new_text)
+    if a == b:
+        return []
+    if sorted(a) == sorted(b):
+        return [(i, s) for i, s in enumerate(a) if b[i] != s]
+    out = []
+    for tag, i1, i2, _j1, _j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes():
+        if tag in ("replace", "delete"):
+            out += [(i, a[i]) for i in range(i1, i2)]
     return out
 
 
@@ -393,11 +445,19 @@ def _expected_fields(fields) -> set[str]:
     return {canon_field(f) for f in fields if str(f).strip()}
 
 
-def miss_cause(defect_id: str, run: dict, index: DocIndex, injected: list[int], expected_fields=None) -> dict:
+def miss_cause(defect_id: str, run: dict, index: DocIndex, injected: list[int], expected_fields=None, *,
+               axis: str | None = None) -> dict:
     """놓친 결함 한 회차의 원인(6.3) — 파이프라인 순서상 가장 앞선 것과 그 근거(주입 문장의 주장·필드·판정).
-    expected_fields = 결함 meta 의 근거 필드(grounds.field — 문자열 'a|b' 또는 목록). 비었으면 2·3단계를 판단할 수 없어 건너뛴다."""
+    axis=None 은 게이트 수준(차단 축 어디에서도 놓침), axis='faithfulness'·'consistency' 는 그 기대 축에서 놓친 것(축 수준, §8).
+    - 일관성 축(C01 포함 — v3 2.3)과 C02~C09 는 일관성 경로라 5번(모순 미검출)만.
+    - 충실성 축은 1~4번(추출 누락 → 필드 오지정 → 대상 오답 → 규칙 허용). 게이트 수준에서 일관성도 기대한 결함(C01)이 1~4번을
+      모두 지나면 5번.
+    expected_fields = 결함 meta 의 근거 필드(grounds.field — 'a|b' 또는 목록). 비었거나 추론 결함(F08·F09, v3 2.3 — 데이터 필드가
+    없다)이면 2·3단계를 건너뛴다."""
     if defect_id not in RELATED_KINDS:
         raise ValueError(f"평가 결함이 아니다: {defect_id}")
+    if axis is not None and axis not in PREREG_DEFECTS[defect_id].expected_axes:
+        raise ValueError(f"{defect_id} 의 기대 축이 아니다: {axis}")
     rec = run.get("record") or {}
     claims = claims_at(run, index, injected)
     verdicts = {v.get("claim_id"): v for v in (rec.get("faithfulness") or {}).get("verdicts") or []}
@@ -410,17 +470,18 @@ def miss_cause(defect_id: str, run: dict, index: DocIndex, injected: list[int], 
                  "answered_fields": answered_fields((verdicts.get(c.get("id")) or {}).get("detail"))} for c in cs]
 
     def result(order: int | None, note: str = "", cs=None) -> dict:
-        return {"cause": CAUSES[order - 1] if order else UNCLASSIFIED, "order": order, "note": note,
+        return {"axis": axis, "cause": CAUSES[order - 1] if order else UNCLASSIFIED, "order": order, "note": note,
                 "claims": evidence(claims if cs is None else cs), "contradictions": contradictions}
 
     kinds = RELATED_KINDS[defect_id]
-    if kinds is None:  # C02~C09 — 일관성 경로, 5번만
+    if kinds is None or axis == CONS:  # C02~C09·일관성 축 — 일관성 경로, 5번만
         return result(5)
     related = [c for c in claims if c.get("kind") in kinds]
     if not related:
         return result(1, f"주입 문장에서 {'·'.join(kinds)} 주장이 추출되지 않음")
-    wanted = _expected_fields(expected_fields)
-    note = "" if wanted else "근거 필드 없음 — 필드 오지정·대상 오답은 판단하지 않음"
+    wanted = set() if defect_id in INFERENCE_DEFECTS else _expected_fields(expected_fields)
+    note = "" if wanted else ("추론 결함 — 데이터 필드가 없어 필드 오지정·대상 오답은 판단하지 않음(v3 2.3)"
+                              if defect_id in INFERENCE_DEFECTS else "근거 필드 없음 — 필드 오지정·대상 오답은 판단하지 않음")
     if wanted:
         aimed = [c for c in related if {canon_field(c.get("field")), canon_field(c.get("field_b"))} & wanted]
         if not aimed:
@@ -432,7 +493,7 @@ def miss_cause(defect_id: str, run: dict, index: DocIndex, injected: list[int], 
         right = related
     if not any((verdicts.get(c.get("id")) or {}).get("verdict") in BLOCKING_VERDICTS for c in right):
         return result(4, note or "주장·대상은 맞았으나 코드 규칙이 위반으로 보지 않음", right)
-    if CONS in PREREG_DEFECTS[defect_id].expected_axes:
+    if axis is None and CONS in PREREG_DEFECTS[defect_id].expected_axes:
         return result(5, note, right)
     return result(None, "주입 문장의 위반 판정이 있는데 탐지되지 않음(인용 대조 확인 필요)", right)
 
@@ -466,50 +527,97 @@ def _tri(values) -> bool | None:
     return True
 
 
-def invariance(base_runs: list[dict | None], variant_runs: list[dict | None]) -> dict:
-    """변형 하나의 불변성(6.6). 두 회차 모두 발급 결정이 원본과 같고 축 점수가 원본 범위(허용 폭) 안이면 불변.
-    원본 두 회차의 결정이 갈렸으면 결정은 '판단 불가(원본 갈림)'."""
-    out: dict = {"base_gates": [r.get("gate") if r else None for r in base_runs],
-                 "variant_gates": [r.get("gate") if r else None for r in variant_runs]}
-    if len(base_runs) != 2 or len(variant_runs) != 2 or not all(base_runs) or not all(variant_runs):
-        return {**out, "status": "판단 불가(회차 부족)", "decision": None, "axes": {}, "invariant": None}
+def _base_problem(base_runs: list[dict | None]) -> str | None:
+    """원본 두 회차로 범위를 잡을 수 없는 까닭(없으면 None)."""
+    if len(base_runs) != 2 or not all(base_runs):
+        return "판단 불가(회차 부족)"
     if not all(run_ok(r) for r in base_runs):
-        return {**out, "status": "판단 불가(원본 실패)", "decision": None, "axes": {}, "invariant": None}
+        return "판단 불가(원본 실패)"
+    return None
+
+
+def invariance(base_runs: list[dict | None], variant_runs: list[dict | None], judged_axes=AXES) -> dict:
+    """변형 하나의 불변성(6.6). 두 회차가 모두 '발급 결정이 원본과 같고 축 점수가 원본 범위(허용 폭) 안'이면 불변.
+    회차마다 세 값(맞음·어긋남·모름)으로 보고 하나라도 확실히 어긋나면 '불변 아님' — 원본이 갈렸거나 변형 한 회차가 실패해도
+    다른 확실한 어긋남은 감추지 않는다. 확실한 어긋남 없이 모르는 것이 있으면 판단 불가(까닭: 회차 부족 > 변형 실패 > 원본 갈림
+    > 점수 없음 섞임). 원본 두 회차의 결정이 갈렸으면 결정은 모름(6.6 '판단 불가(원본 갈림)').
+    judged_axes = 불변성에 넣는 축(v3 2.4 V02·V06 은 차단 축만 — 나머지 축은 계산해 보고만, judged 거짓)."""
+    out: dict = {"base_gates": [r.get("gate") if r else None for r in base_runs],
+                 "variant_gates": [r.get("gate") if r else None for r in variant_runs], "judged_axes": list(judged_axes)}
+    problem = _base_problem(base_runs)
+    if problem:
+        return {**out, "status": problem, "decision": None, "axes": {}, "invariant": None}
     base_scores = [_scores(r) for r in base_runs]
+    split = len(set(out["base_gates"])) != 1
+    runs = list(variant_runs) + [None] * max(0, 2 - len(variant_runs))
+    decisions = [None if split or not run_ok(r) else r["gate"] == out["base_gates"][0] for r in runs]
     axes = {}
     for axis in AXES:
-        per = [within(_scores(r)[axis] if run_ok(r) else None, [s[axis] for s in base_scores], axis) for r in variant_runs]
-        axes[axis] = {"base": [s[axis] for s in base_scores], "variant": [_scores(r)[axis] if run_ok(r) else None for r in variant_runs],
-                      "ok": _tri(ok for ok, _ in per), "notes": [n for _, n in per]}
-    if not all(run_ok(r) for r in variant_runs):
-        return {**out, "status": "판단 불가(변형 실패)", "decision": None, "axes": axes, "invariant": None}
-    if len(set(out["base_gates"])) != 1:
-        return {**out, "status": "판단 불가(원본 갈림)", "decision": None, "axes": axes, "invariant": None}
-    decision = all(g == out["base_gates"][0] for g in out["variant_gates"])
-    inv = _tri([decision, *(a["ok"] for a in axes.values())])
-    status = {True: "불변", False: "불변 아님", None: "판단 불가(점수 없음 섞임)"}[inv]
-    return {**out, "status": status, "decision": decision, "axes": axes, "invariant": inv}
+        per = [within(_scores(r)[axis], [s[axis] for s in base_scores], axis) if run_ok(r) else (None, "회차 없음·실패")
+               for r in runs]
+        axes[axis] = {"base": [s[axis] for s in base_scores], "variant": [_scores(r)[axis] if run_ok(r) else None for r in runs],
+                      "ok": _tri(ok for ok, _ in per), "notes": [n for _, n in per], "judged": axis in judged_axes}
+    inv = _tri([*decisions, *(axes[a]["ok"] for a in judged_axes)])
+    if inv is True:
+        status = "불변"
+    elif inv is False:
+        status = "불변 아님"
+    elif len(variant_runs) != 2 or not all(variant_runs):
+        status = "판단 불가(회차 부족)"
+    elif not all(run_ok(r) for r in variant_runs):
+        status = "판단 불가(변형 실패)"
+    elif split:
+        status = "판단 불가(원본 갈림)"
+    else:
+        status = "판단 불가(점수 없음 섞임)"
+    return {**out, "status": status, "decision": _tri(decisions), "axes": axes, "invariant": inv}
 
 
-def independence(base_runs: list[dict | None], defect_runs: list[dict | None], expected_axes, allowed_secondary) -> dict:
+def independence(base_runs: list[dict | None], defect_runs: list[dict | None], expected_axes, allowed_secondary,
+                 expected_changes=()) -> dict:
     """결함 하나의 독립성 표(6.7) — 기대 축이 아닌 축마다 결함본 회차 점수가 원본 두 회차 범위(허용 폭) 안인가.
-    허용 부차 축에서 벗어난 것은 '허용'."""
-    ok_base = [r for r in base_runs if run_ok(r)]
+    불변성과 같은 세 값: 한 회차라도 확실히 벗어나면 벗어남(허용 부차 축이면 '허용', v3 2.6 예상된 변화 축이면 '예상된 변화'),
+    확실한 벗어남 없이 모르는 회차(실패·미실행)가 있으면 판단 불가."""
+    problem = _base_problem(base_runs)
+    runs = list(defect_runs) + [None] * max(0, 2 - len(defect_runs))
     rows = {}
     for axis in AXES:
         if axis in expected_axes:
             continue
-        base_vals = [_scores(r)[axis] for r in ok_base]
-        vals = [_scores(r)[axis] if run_ok(r) else None for r in defect_runs]
-        if len(ok_base) != 2 or not defect_runs or not all(run_ok(r) for r in defect_runs):
-            rows[axis] = {"base": base_vals, "defect": vals, "ok": None, "status": "판단 불가(실패·회차 부족)"}
+        base_vals = [_scores(r)[axis] for r in base_runs if run_ok(r)]
+        vals = [_scores(r)[axis] if run_ok(r) else None for r in runs]
+        if problem:
+            rows[axis] = {"base": base_vals, "defect": vals, "ok": None, "status": problem, "notes": []}
             continue
-        per = [within(v, base_vals, axis) for v in vals]
+        per = [within(v, base_vals, axis) if run_ok(r) else (None, "회차 없음·실패") for v, r in zip(vals, runs)]
         ok = _tri(o for o, _ in per)
-        status = {True: "범위 안", None: "판단 불가(점수 없음 섞임)"}.get(ok) if ok is not False else (
-            "허용" if axis in allowed_secondary else "벗어남")
+        if ok is False:
+            status = "허용" if axis in allowed_secondary else ("예상된 변화" if axis in expected_changes else "벗어남")
+        elif ok is True:
+            status = "범위 안"
+        else:
+            status = ("판단 불가(실패·회차 부족)" if any(not run_ok(r) for r in runs) else "판단 불가(점수 없음 섞임)")
         rows[axis] = {"base": base_vals, "defect": vals, "ok": ok, "status": status, "notes": [n for _, n in per]}
     return rows
+
+
+def original_flagged(base_runs: list[dict | None], index: DocIndex, original_ids: list[int]) -> dict:
+    """v3 2.1 — 원본 회차 가운데 하나라도 결함의 원래 문장(original_ids — 원본 문서의 문장 번호)을 이미 표시했나.
+    gate = 차단 축(충실성·일관성) 어느 것이든(게이트 수준), axes[축] = 그 축의 표시(축 수준 — 기대 축에 쓴다).
+    덧붙이기 결함(원래 문장 없음)은 applies 거짓 — 규칙에 해당하지 않는다. 실패·미실행 원본 회차는 보지 못하므로 checked_runs 로 남긴다."""
+    if not original_ids:
+        return {"applies": False, "gate": False, "axes": {a: False for a in GATE_AXES}, "checked_runs": 0, "rounds": []}
+    hit = set(original_ids)
+    rounds, at = [], []
+    for n, r in enumerate(base_runs, 1):
+        if not run_ok(r):
+            continue
+        mine = [f for f in (locate_flag(f, index) for f in flags_of(r)) if hit & set(f["sentence_ids"])]
+        if mine:
+            rounds.append(n)
+        at += mine
+    return {"applies": True, "gate": bool(at), "axes": {a: any(f["axis"] == a for f in at) for a in GATE_AXES},
+            "checked_runs": sum(1 for r in base_runs if run_ok(r)), "rounds": rounds}
 
 
 # ── 6.5 재현성 ──────────────────────────────────────────────────────────
@@ -701,9 +809,21 @@ def _reason(flag: dict) -> str:
     return "; ".join(parts)
 
 
+def context_neighbors(sid: int, index: DocIndex, context: DocIndex | None = None) -> tuple[str, str]:
+    """판정표의 앞뒤 문장 — 표시 문장이 원본(context)의 같은 칸에 글자 그대로 있으면 원본의 앞뒤 문장, 없으면 이 문서의 앞뒤 문장.
+    결함본·변형본의 바뀐 문장이 앞뒤 칸으로 새어 출처를 알려 주지 않게 한다(6.4 블라인드)."""
+    if context is not None:
+        me = index.get(sid)
+        twin = next((s for s in context.sentences if s.slot == me.slot and _norm(s.text) == _norm(me.text)), None)
+        if twin is not None:
+            return context.neighbors(twin.id)
+    return index.neighbors(sid)
+
+
 def sheet_entries(run_id: str, doc: str, source: str, round_no, located: list[dict], index: DocIndex,
-                  value_of=None) -> list[dict]:
-    """한 회차의 (문장 번호가 붙은) 표시 → 판정표 후보(묶기 전). value_of(필드) → 데이터 값(값 불일치의 필드 값 칸)."""
+                  value_of=None, context: DocIndex | None = None) -> list[dict]:
+    """한 회차의 (문장 번호가 붙은) 표시 → 판정표 후보(묶기 전). value_of(필드) → 데이터 값(값 불일치의 필드 값 칸).
+    context = 같은 결과서 원본의 문장 목록(앞뒤 문장을 원본에서 가져온다 — context_neighbors)."""
     out = []
     for f in located:
         per = f.get("quote_ids") or [f.get("sentence_ids") or []]
@@ -713,7 +833,7 @@ def sheet_entries(run_id: str, doc: str, source: str, round_no, located: list[di
         if f["axis"] == CONS and len(f.get("quotes") or []) > 1:
             second = per[1] if len(per) > 1 else []
             pair = " … ".join(_sentence_texts(second, index)) or f"{OUTSIDE} {f['quotes'][1]}"
-        prev, nxt = index.neighbors(first[0]) if first else ("", "")
+        prev, nxt = context_neighbors(first[0], index, context) if first else ("", "")
         value = f.get("data")
         if value is None and f.get("field") and value_of is not None:
             value = value_of(f["field"])
@@ -723,24 +843,28 @@ def sheet_entries(run_id: str, doc: str, source: str, round_no, located: list[di
     return out
 
 
-def b2_entries(run_id: str, doc: str, source: str, issues: list[dict], index: DocIndex) -> list[dict]:
-    """베이스라인 2 지적 → 판정표 후보. 종류는 '지적'으로만, 사유는 지적 글 그대로."""
+def b2_entries(run_id: str, doc: str, source: str, issues: list[dict], index: DocIndex,
+               context: DocIndex | None = None) -> list[dict]:
+    """베이스라인 2 지적 → 판정표 후보. 종류는 '지적'으로만, 사유는 지적 글 그대로. 앞뒤 문장은 sheet_entries 와 같이(context)."""
     out = []
     for i in issues:
         per = i["quote_ids"]
         first = per[0] if per else []
         texts = _sentence_texts(first, index) or [f"{OUTSIDE} {i['quotes'][0]}" if i["quotes"] else OUTSIDE]
         pair = " … ".join(_sentence_texts(per[1], index)) if len(per) > 1 else ""
-        prev, nxt = index.neighbors(first[0]) if first else ("", "")
+        prev, nxt = context_neighbors(first[0], index, context) if first else ("", "")
         out.append({"run_id": run_id, "doc": doc, "source": source, "round": "", "index": i["index"], "axis": i["axis"],
                     "label": B2_LABEL, "text": " … ".join(texts), "pair": pair, "prev": prev, "next": nxt,
                     "reason": i["reason"], "field": "", "value": ""})
     return out
 
 
+HEAD_ORDER = {SOURCE_ORIGINAL: 0, SOURCE_VARIANT: 1, SOURCE_B2: 2, SOURCE_DEFECT: 3}  # 묶음의 대표(앞뒤 문장을 보일 표시) 고르는 차례
+
+
 def build_sheet(entries: list[dict], seed: int) -> tuple[list[tuple], list[tuple], list[dict]]:
     """(판정표 줄, 열쇠 줄, 묶음). 같은 문장(글자 같음)·같은 표시 종류·같은 대상 필드의 표시는 한 문항(모순은 두 문장 짝 순서 무관).
-    문항 번호 J001… 은 시드로 섞은 차례."""
+    문항 번호 J001… 은 시드로 섞은 차례. 묶음의 대표(앞뒤 문장 칸)는 원본 → 변형 → 베이스라인 2 → 결함본 차례로 고른다."""
     groups: dict[tuple, list[dict]] = {}
     for e in entries:
         sentences = tuple(sorted([e["text"], e["pair"]])) if e["pair"] else (e["text"],)
@@ -751,7 +875,7 @@ def build_sheet(entries: list[dict], seed: int) -> tuple[list[tuple], list[tuple
     for n, k in enumerate(keys, 1):
         qid = f"J{n:03d}"
         members = groups[k]
-        head = members[0]
+        head = min(members, key=lambda m: HEAD_ORDER.get(m["source"], 9))
         reasons = list(dict.fromkeys(m["reason"] for m in members if m["reason"]))
         values = list(dict.fromkeys(m["value"] for m in members if m["value"]))
         rows.append((qid, head["label"], head["text"], head["pair"], head["prev"], head["next"], " / ".join(reasons),
@@ -799,9 +923,11 @@ def sheet_leaks(rows: list[tuple], *, doc_names=(), allowed_texts=()) -> list[st
 
 def tally_overblocking(key_rows: list[dict], answers: dict[str, str], runs: dict[str, dict]) -> dict:
     """판정 뒤 셈(6.4). key_rows = 열쇠 줄(dict), answers = {문항: 실제 오류|판정자 오판|''},
-    runs = {실행 번호: {doc, source, gate, checked(충실성 검사한 주장 수)}} — 원본·변형·결함본 회차.
+    runs = {실행 번호: {doc, source, gate, checked(충실성 검사한 주장 수), inference_checked(추론 판정 수)}} — 원본·변형·결함본 회차.
     차단된 원본·변형 회차: 표시가 모두 판정됐고 '판정자 오판'만 있으면 과잉 차단, '실제 오류'가 있으면 자연 발생 오류 검출,
-    덜 판정됐으면 판정 미완. 주장 단위: 원본·변형의 '판정자 오판' 충실성 위반 수 / 원본·변형 충실성 checked 합."""
+    덜 판정됐으면 판정 미완. 주장 단위: 원본·변형의 '판정자 오판' 충실성 위반 수 / 원본·변형 충실성 checked 합(6.4 글자 그대로 —
+    rate). checked 는 일치·위반만 세고 추론 주장(inference_ok·inference_violation)은 넣지 않으므로, 사실 일치 위반 오판 / checked 와
+    단정형 추론 오판 / 추론 판정 수를 나눠서도 적는다(violation·inference — 같은 수를 나눠 적은 것, 새 규칙이 아니다)."""
     bad = {v for v in answers.values() if v not in (REAL_ERROR, JUDGE_ERROR, "")}
     if bad:
         raise ValueError(f"판정은 '{REAL_ERROR}' 또는 '{JUDGE_ERROR}': {sorted(bad)}")
@@ -809,7 +935,7 @@ def tally_overblocking(key_rows: list[dict], answers: dict[str, str], runs: dict
     for k in key_rows:
         flags_by_run.setdefault(k["실행 번호"], []).append((k, answers.get(k["문항"], "")))
     per_run, counts = {}, {"과잉 차단": 0, "자연 발생 오류 검출": 0, "판정 미완": 0, "차단": 0, "통과": 0}
-    wrong_faith, checked = 0, 0
+    wrong_faith, checked, wrong_inference, inference_checked = 0, 0, 0, 0
     out_of_place = {REAL_ERROR: 0, JUDGE_ERROR: 0, "": 0}
     b2 = {REAL_ERROR: 0, JUDGE_ERROR: 0, "": 0}
     for k, v in (pair for pairs in flags_by_run.values() for pair in pairs):
@@ -821,8 +947,11 @@ def tally_overblocking(key_rows: list[dict], answers: dict[str, str], runs: dict
         if info["source"] not in (SOURCE_ORIGINAL, SOURCE_VARIANT) or info.get("gate") not in ("pass", "blocked"):
             continue
         checked += int(info.get("checked") or 0)
+        inference_checked += int(info.get("inference_checked") or 0)
         flags = flags_by_run.get(run_id, [])
         wrong_faith += sum(1 for k, v in flags if v == JUDGE_ERROR and k["축"] == FAITH)
+        wrong_inference += sum(1 for k, v in flags if v == JUDGE_ERROR and k["축"] == FAITH
+                               and k.get("표시 종류") == FAITH_LABEL["inference_violation"])
         if info["gate"] == "pass":
             counts["통과"] += 1
             continue
@@ -840,7 +969,13 @@ def tally_overblocking(key_rows: list[dict], answers: dict[str, str], runs: dict
                                         "미판정": verdicts.count("")}}
     return {"runs": per_run, "counts": counts,
             "claim_level": {"wrong_faithfulness_violations": wrong_faith, "checked": checked,
-                            "rate": wrong_faith / checked if checked else None},
+                            "rate": wrong_faith / checked if checked else None,
+                            "violation": {"wrong": wrong_faith - wrong_inference, "checked": checked,
+                                          "rate": (wrong_faith - wrong_inference) / checked if checked else None},
+                            "inference": {"wrong": wrong_inference, "checked": inference_checked,
+                                          "rate": wrong_inference / inference_checked if inference_checked else None},
+                            "note": "rate 는 6.4 글자 그대로(분자에 단정형 추론 오판 포함, 분모 checked 에는 추론 주장 없음) — "
+                                    "violation·inference 로 나눠 함께 본다"},
             "defect_out_of_place": {"실제 오류": out_of_place[REAL_ERROR], "판정자 오판": out_of_place[JUDGE_ERROR],
                                     "미판정": out_of_place[""]},
             "baseline2": {"실제 오류": b2[REAL_ERROR], "판정자 오판": b2[JUDGE_ERROR], "미판정": b2[""]}}

@@ -1,7 +1,8 @@
-"""판정자 평가 실험 집계 순수 함수(app/judge/validation/evaluation.py, 사전 등록 v1 §6) 시험.
+"""판정자 평가 실험 집계 순수 함수(app/judge/validation/evaluation.py, 사전 등록 v1 §6 + v3 2절) 시험.
 
 합성 문서·합성 채점 결과만 쓴다(실호출·봉인 서술 없음). 이빨: 경계값(허용 폭 딱 맞음/조금 넘음), 실패 회차를 미탐지로 세지 않음,
 C01 두 축 따로, 판정표에 새는 것 종류마다, 빈 묶음 막기(검사 전에 대상이 비지 않았는지 먼저 본다).
+뒤쪽 '검토 고침' 절은 두 검토(P0·P1, 변이 생존)를 고친 시험 — 고치기 전 코드에서 실패하거나 살아남은 변이를 죽인다.
 """
 from __future__ import annotations
 
@@ -66,7 +67,7 @@ def test_locate_same_piece_first_then_whole_doc_and_not_outside_pieces():
     idx = index()
     assert idx.locate("0.91", "slot:7.1") == [1]
     assert idx.locate("43건", "slot:7.1") == [2, 3]  # 같은 조각에서 여러 문장에 닿으면 모두(stats.touches 그대로)
-    assert idx.locate("총평 둘은", "slot:7.1") == [5]  # 같은 조각에 없으면 문서 전체
+    assert idx.locate("총평 둘은", "slot:7.1") == []  # 조각을 알면 그 조각 안에서만(6.1 — 검토 P1-5)
     assert idx.locate("총평 둘은") == [5]  # 조각을 모르면 문서 전체
     assert idx.locate("0.91", "m:fixed") == []  # 서술 밖(고정 문구) 조각의 인용은 서술 문장에 붙이지 않는다
     assert idx.locate("", "slot:7.1") == []
@@ -158,7 +159,9 @@ def test_wilson_18_of_18_lower_bound_is_082():
 
 
 def _scored(gate, faith=0.9, cov=0.8, cons=0, rea=0):
-    card = {"faithfulness": {"checked": 100, "matched": round(faith * 100)}, "coverage": {"applicable": 100, "described": round(cov * 100)},
+    """cov=None 이면 포괄성 분모 0(점수 없음)."""
+    coverage = {"applicable": 0, "described": 0} if cov is None else {"applicable": 100, "described": round(cov * 100)}
+    card = {"faithfulness": {"checked": 100, "matched": round(faith * 100)}, "coverage": coverage,
             "consistency": {"contradictions": cons}, "readability": {"violations": rea}}
     return {"gate": gate, "scorecard": card, "record": {}}
 
@@ -183,7 +186,7 @@ def test_invariance_rules_including_original_split():
     assert out["status"] == "불변 아님" and out["axes"]["faithfulness"]["ok"] is False
     out = E.invariance(base, [_scored("blocked"), _scored("pass")])
     assert out["status"] == "불변 아님" and out["decision"] is False
-    split = E.invariance([_scored("pass"), _scored("blocked")], same)
+    split = E.invariance([_scored("pass", faith=0.90), _scored("blocked", faith=0.92)], same)  # 점수는 범위 안, 결정만 모름
     assert split["status"] == "판단 불가(원본 갈림)" and split["invariant"] is None
     failed = E.invariance(base, [_scored("pass"), {"gate": None, "failure": "timeout"}])
     assert failed["status"] == "판단 불가(변형 실패)"
@@ -199,7 +202,7 @@ def test_independence_marks_allowed_secondary_axis():
     rows = E.independence(base, defect, ["faithfulness"], [])
     assert rows["consistency"]["status"] == "벗어남"
     rows = E.independence(base, [_scored("blocked"), {"gate": None}], ["faithfulness"], [])
-    assert all(r["ok"] is None for r in rows.values())
+    assert rows and all(r["ok"] is None and r["status"] == "판단 불가(실패·회차 부족)" for r in rows.values())
 
 
 # ── 6.5 재현성 ──
@@ -392,7 +395,8 @@ def test_tally_overblocking_rules():
     assert out["runs"]["E-1"]["status"] == "과잉 차단" and out["runs"]["E-3"]["status"] == "과잉 차단"
     assert out["runs"]["E-2"]["status"] == "자연 발생 오류 검출" and out["runs"]["E-4"]["status"] == "판정 미완"
     assert out["counts"]["과잉 차단"] == 2 and out["counts"]["통과"] == 1 and out["counts"]["차단"] == 4
-    assert out["claim_level"] == {"wrong_faithfulness_violations": 3, "checked": 400, "rate": 3 / 400}
+    cl = out["claim_level"]
+    assert (cl["wrong_faithfulness_violations"], cl["checked"], cl["rate"]) == (3, 400, 3 / 400)
     assert out["defect_out_of_place"]["판정자 오판"] == 1
     with pytest.raises(ValueError):
         E.tally_overblocking(key, {"J001": "모름"}, runs)
@@ -408,3 +412,246 @@ def test_prereg_tables_are_complete():
     assert E.ROUND_SEEDS == {1: 20261105, 2: 20261106} and (E.BUDGET_USD, E.BUDGET_RUNS) == (30.0, 110)
     assert E.SHEET_COLUMNS == ("문항", "표시 종류", "표시된 문장", "짝 문장(모순일 때)", "앞 문장", "뒤 문장", "판정자 사유",
                                "대상 필드", "필드 값", "판정(실제 오류/판정자 오판)", "판정 사유(필드 값과 함께 한 줄)")
+
+
+# ── 검토 고침 1 — P0·P1(고치기 전 코드에서 실패하던 시험) ──
+
+
+def test_review_p0_2_allowed_secondary_axes_follow_prereg_v3():
+    """v3 2.2 — 충실성 결함 9개 모두 허용 부차 축 일관성(v1 의 F03·F04·F06·F08·F09 '없음'을 바꿈)."""
+    assert all(E.PREREG_DEFECTS[f"F{i:02d}"].allowed_secondary_axes == ("consistency",) for i in range(1, 10))
+    assert E.PREREG_DEFECTS["C01"].allowed_secondary_axes == ()
+    assert all(E.PREREG_DEFECTS[f"C{i:02d}"].allowed_secondary_axes == ("faithfulness",) for i in range(2, 10))
+    assert E.INVARIANCE_GATE_ONLY == ("V02", "V06") and set(E.EXPECTED_CHANGES) == {"C03", "C04", "C05", "C06"}
+    assert E.INFERENCE_DEFECTS == ("F08", "F09")
+
+
+def test_review_p1_1_invariance_definite_mismatch_is_not_hidden():
+    split = [_scored("pass"), _scored("blocked")]
+    out = E.invariance(split, [_scored("pass", rea=5), _scored("pass", rea=5)])
+    assert out["status"] == "불변 아님" and out["decision"] is None and out["axes"]["readability"]["ok"] is False
+    base = [_scored("pass", faith=0.90), _scored("pass", faith=0.92)]
+    out = E.invariance(base, [_scored("pass", faith=0.50), {"gate": None, "failure": "timeout"}])
+    assert out["status"] == "불변 아님" and out["invariant"] is False
+    # 결정이 다르면 다른 축의 점수 없음(None)이 섞여도 불변 아님(변이 T9)
+    out = E.invariance(base, [_scored("blocked"), _scored("pass", cov=None)])
+    assert out["axes"]["coverage"]["ok"] is None and out["decision"] is False and out["status"] == "불변 아님"
+    # 확실한 어긋남이 없을 때만 판단 불가 — 까닭도 맞게(변이 T16 포함)
+    assert E.invariance(base, [_scored("pass"), {"gate": None}])["status"] == "판단 불가(변형 실패)"
+    assert E.invariance(base, [_scored("pass"), None])["status"] == "판단 불가(회차 부족)"
+    assert E.invariance([_scored("pass"), {"gate": None, "failure": "timeout"}],
+                        [_scored("pass"), _scored("pass")])["status"] == "판단 불가(원본 실패)"
+    assert E.invariance(base, [_scored("pass", cov=None), _scored("pass")])["status"] == "판단 불가(점수 없음 섞임)"
+
+
+def test_review_p1_1_independence_same_three_valued_rule_and_v3_expected_change():
+    base = [_scored("pass", cov=0.8), _scored("pass", cov=0.8)]
+    out = E.independence(base, [_scored("blocked", cov=0.5), {"gate": None}], ["consistency"], ["faithfulness"])
+    assert out["coverage"]["status"] == "벗어남" and out["coverage"]["ok"] is False  # 한 회차 실패여도 확실한 벗어남은 벗어남
+    assert out["faithfulness"]["status"] == "판단 불가(실패·회차 부족)"  # 범위 안 + 실패 → 모름(변이 T13)
+    out = E.independence(base, [_scored("blocked", cov=0.5), _scored("blocked")], ["consistency"], ["faithfulness"],
+                         ("coverage",))
+    assert out["coverage"]["status"] == "예상된 변화"  # v3 2.6
+    out = E.independence([_scored("pass"), {"gate": None, "failure": "x"}], [_scored("blocked"), _scored("blocked")],
+                         ["faithfulness"], [])
+    assert out and all(r["ok"] is None and r["status"] == "판단 불가(원본 실패)" for r in out.values())  # 변이 T14
+
+
+def test_review_v3_2_4_invariance_judges_decision_and_gate_axes_only():
+    base = [_scored("pass", rea=0), _scored("pass", rea=0)]
+    noisy = [_scored("pass", rea=4, cov=0.2), _scored("pass", rea=4, cov=0.2)]
+    assert E.invariance(base, noisy)["status"] == "불변 아님"
+    out = E.invariance(base, noisy, E.GATE_AXES)
+    assert out["status"] == "불변" and out["axes"]["readability"]["ok"] is False and out["axes"]["readability"]["judged"] is False
+    assert E.invariance(base, [_scored("blocked"), _scored("pass")], E.GATE_AXES)["status"] == "불변 아님"
+    assert E.invariance(base, [_scored("pass", faith=0.5), _scored("pass")], E.GATE_AXES)["status"] == "불변 아님"
+
+
+def test_review_p1_5_locate_stays_in_known_piece_and_keeps_number_boundaries():
+    idx = index()
+    assert idx.locate("총평 둘은", "slot:7.1") == []  # 조각을 알면 그 조각 안에서만
+    assert idx.locate("총평 둘은", "slot:문서에없음") == [5]  # 문서에 없는 조각 id 는 조각을 모르는 것
+    num = index(t71="값은 0.758 이다. 다른 값은 0.75 이다. 큰 값은 10.75 이다.")
+    assert num.locate("0.75", "slot:7.1") == [2] and num.locate("0.75") == [2]
+    assert num.locate("0.758", "slot:7.1") == [1] and num.locate("75") == []
+    assert idx.locate("43건", "slot:7.1") == [2, 3]  # 숫자 앞이 빈칸이면 그대로
+
+
+def test_review_p1_6_axis_level_miss_causes_and_v3_2_3():
+    idx = index()
+    inj = [2]
+    faith_only = run(verdicts=[verdict("c1", "FN 43건")], claims=[claim("c1", "FN 43건")])
+    d = E.detect(faith_only, idx, inj, ["consistency"])
+    assert d["gate_detected"] is True and d["axes"] == {"consistency": False}
+    out = E.miss_cause("C04", faith_only, idx, inj, axis="consistency")
+    assert out["cause"] == "모순 미검출" and out["axis"] == "consistency"
+    c01 = run(contradictions=[contradiction("value_mismatch", "0.91 이다", "총평 둘은", pb="slot:8.2")],
+              claims=[claim("c1", "FN 43건", field="per_class.x.f1")],
+              verdicts=[verdict("c1", "FN 43건", verdict="match", expr="{per_class.x.f1}")])
+    assert E.miss_cause("C01", c01, idx, inj, "per_class.x.f1", axis="faithfulness")["cause"] == "규칙 허용"
+    assert E.miss_cause("C01", c01, idx, inj, "per_class.x.f1", axis="consistency")["cause"] == "모순 미검출"
+    inference = run(gate="pass", claims=[claim("c1", "FN 43건", kind="inference")],
+                    verdicts=[verdict("c1", "FN 43건", verdict="inference_ok", kind="inference")])
+    out = E.miss_cause("F08", inference, idx, inj, "facts.declared_risk_errors.count")  # 근거 필드가 있어도 추론은 2·3단계 없음
+    assert out["cause"] == "규칙 허용" and "v3 2.3" in out["note"]
+    with pytest.raises(ValueError):
+        E.miss_cause("F01", inference, idx, inj, axis="consistency")  # F01 의 기대 축이 아니다
+
+
+def test_review_p1_2_sheet_context_from_original_and_head_prefers_original():
+    orig = index()
+    changed = "문장 나는 FN 56건이다."
+    defect = index(t71=f"문장 가는 0.91 이다. {changed} 문장 다는 43건과 같다.")
+    located = [E.locate_flag(f, defect) for f in E.flags_of(run(verdicts=[verdict("c1", "0.91 이다")]))]
+    assert located and E.sheet_entries("E-0002", "F01", "결함본", 1, located, defect)[0]["next"] == changed
+    e = E.sheet_entries("E-0002", "F01", "결함본", 1, located, defect, context=orig)[0]
+    assert e["next"] == "문장 나는 FN 43건이다." and e["prev"] == ""  # 바뀐 문장이 앞뒤 칸으로 새지 않는다
+    own = [E.locate_flag(f, defect) for f in E.flags_of(run(verdicts=[verdict("c1", "FN 56건")]))]
+    e2 = E.sheet_entries("E-0002", "F01", "결함본", 1, own, defect, context=orig)[0]
+    assert (e2["prev"], e2["next"]) == ("문장 가는 0.91 이다.", "문장 다는 43건과 같다.")  # 원본에 없는 문장은 자기 문서에서
+    defect_entry = dict(e, prev="결함 앞", next="결함 뒤")
+    base_entry = dict(e, source="원본", run_id="E-0001", prev="원본 앞", next="원본 뒤")
+    rows, _, _ = E.build_sheet([defect_entry, base_entry], seed=1)
+    assert len(rows) == 1 and rows[0][4:6] == ("원본 앞", "원본 뒤")
+
+
+def test_review_p1_9_claim_level_rate_split_and_only_faithfulness_counts():
+    key = [{"문항": "J001", "실행 번호": "E-1", "출처": "원본", "축": "faithfulness", "표시 종류": "단정형 추론"},
+           {"문항": "J002", "실행 번호": "E-1", "출처": "원본", "축": "faithfulness", "표시 종류": "사실 일치 위반"},
+           {"문항": "J003", "실행 번호": "E-1", "출처": "원본", "축": "consistency", "표시 종류": "모순(값 불일치)"},
+           {"문항": "J004", "실행 번호": "B-1", "출처": "베이스라인2", "축": "faithfulness", "표시 종류": "지적"},
+           {"문항": "J005", "실행 번호": "B-2", "출처": "베이스라인2", "축": "consistency", "표시 종류": "지적"}]
+    answers = {"J001": "판정자 오판", "J002": "판정자 오판", "J003": "판정자 오판", "J004": "실제 오류", "J005": "판정자 오판"}
+    runs = {"E-1": {"doc": "a", "source": "원본", "gate": "blocked", "checked": 40, "inference_checked": 5}}
+    out = E.tally_overblocking(key, answers, runs)
+    cl = out["claim_level"]
+    assert cl["wrong_faithfulness_violations"] == 2 and cl["rate"] == 2 / 40  # 6.4 글자 그대로(모순 오판은 넣지 않는다 — 변이 O3)
+    assert cl["violation"] == {"wrong": 1, "checked": 40, "rate": 1 / 40}
+    assert cl["inference"] == {"wrong": 1, "checked": 5, "rate": 1 / 5}
+    assert out["baseline2"] == {"실제 오류": 1, "판정자 오판": 1, "미판정": 0}  # 변이 O6
+    assert out["runs"]["E-1"]["status"] == "과잉 차단"
+
+
+def test_review_v3_2_1_replaced_sentences_and_original_flagged():
+    base = "가는 하나다. 나는 둘이다. 다는 셋이다."
+    assert E.replaced_sentences(base, "가는 하나다. 나는 넷이다. 다는 셋이다.") == [(1, "나는 둘이다.")]
+    assert E.replaced_sentences(base, "가는 하나다. 나는 둘이다. 더한 문장이다. 다는 셋이다.") == []  # 덧붙이기(C02·C03)
+    assert E.replaced_sentences(base, "가는 하나다. 나는 둘. 이다. 다는 셋이다.") == [(1, "나는 둘이다.")]
+    assert E.replaced_sentences(base, base) == []
+    idx = index()
+    faith = [run(verdicts=[verdict("c1", "FN 43건")]), run(gate="pass")]
+    out = E.original_flagged(faith, idx, [2])
+    assert out["applies"] and out["gate"] and out["axes"] == {"faithfulness": True, "consistency": False} and out["rounds"] == [1]
+    cons = [run(gate="pass"), run(contradictions=[contradiction("analysis_vs_finding", "총평 둘은", "FN 43건이다",
+                                                                pa="slot:8.2", pb="slot:7.1")])]
+    out = E.original_flagged(cons, idx, [2])
+    assert out["gate"] and out["axes"] == {"faithfulness": False, "consistency": True} and out["rounds"] == [2]
+    assert E.original_flagged(faith, idx, [])["applies"] is False and E.original_flagged(faith, idx, [5])["gate"] is False
+    assert E.original_flagged([run(gate=None, failure="timeout"), None], idx, [2])["checked_runs"] == 0
+
+
+# ── 검토 고침 2 — 살아남은 변이를 죽이는 시험(지금 코드가 맞는 곳의 빈틈) ──
+
+
+def test_teeth_inference_violation_blocks_and_second_quote_and_axis_from_injected_only():
+    idx = index()
+    inferred = run(verdicts=[verdict("c1", "FN 43건", verdict="inference_violation", kind="inference", marked=False)])
+    flags = E.flags_of(inferred)
+    assert len(flags) == 1 and flags[0]["label"] == "단정형 추론"  # 변이 D5
+    d = E.detect(inferred, idx, [2], ["faithfulness"])
+    assert d["gate_detected"] is True and d["axes"] == {"faithfulness": True}
+    second = run(contradictions=[contradiction("analysis_vs_finding", "총평 둘은", "FN 43건이다", pa="slot:8.2", pb="slot:7.1")])
+    d = E.detect(second, idx, [2], ["consistency"])
+    assert d["gate_detected"] is True and d["axes"] == {"consistency": True}  # 짝의 두 번째 인용이 주입 문장(변이 L3)
+    mixed = run(verdicts=[verdict("c1", "0.91 이다")],
+                contradictions=[contradiction("value_mismatch", "FN 43건", "총평 둘은", pb="slot:8.2")])
+    d = E.detect(mixed, idx, [2], ["faithfulness", "consistency"])
+    assert d["axes"] == {"faithfulness": False, "consistency": True} and len(d["out_of_place"]) == 1  # 변이 D2
+
+
+def test_teeth_quotes_use_their_own_piece():
+    idx = index(t82="총평 하나다. 총평 둘은 43건이다.")
+    assert idx.locate("43건", "slot:7.1") == [2, 3] and idx.locate("43건", "slot:8.2") == [5]  # 변이 L1
+    assert idx.locate("43건") == [2, 3, 5]
+    pair = E.locate_flag(E.flags_of(run(contradictions=[contradiction("value_mismatch", "0.91", "43건")]))[0], idx)
+    assert pair["quote_ids"] == [[1], [5]]  # 두 번째 인용은 두 번째 조각에서(변이 L4)
+    other_piece = run(claims=[claim("c1", "43건", piece="slot:8.2")])
+    assert E.claims_at(other_piece, idx, [2]) == [] and E.extraction_hit("F01", other_piece, idx, [2]) is False  # 변이 L7
+    b2 = {"decision": "block", "issues": [{"axis": "consistency", "type": "x", "quotes": ["총평 하나다", "FN 43건이다"],
+                                           "reason": "r"}]}
+    assert E.baseline2_detection(b2, index(), [2])["status"] == "탐지"  # 두 번째 인용이 주입 문장(변이 L8)
+
+
+def test_teeth_injected_ids_recommendation_rows_and_duplicate_sentences():
+    ps = pieces(t71="임계값을 다시 고른다는 말이다. 둘째다.") + [Piece("slot:9:6.2", "9", "6.2", "ai", "다시 고른다")]
+    idx = E.DocIndex.from_pieces(ps)
+    row = next(s.id for s in idx.sentences if s.piece_id == "rec:6.2:P1:0")
+    # 같은 칸(9)에서 글을 담은 문장만 — touches 로 넓히면 '다시 고른다'(인용 안에 든 짧은 문장)도 붙고(변이 I4), 칸을 넓히면
+    # 7.1 의 문장도 붙는다(변이 I5)
+    assert E.injected_ids(idx, "recommendations.0.action", [(0, "임계값을 다시 고른다")]) == [row]
+    twice = index(t71="같은 문장이다. 같은 문장이다. 끝이다.")
+    assert E.injected_ids(twice, "interpretation.confusion_analysis", [(1, "같은 문장이다.")]) == [2]  # 자리로(변이 I7)
+
+
+def test_teeth_tolerance_float_order_and_coverage():
+    assert E.within(0.35, [0.4, 0.45], "faithfulness")[0] is True  # 0.4 − 0.05 = 0.35000000000000003(변이 T3)
+    assert E.within(0.86, [0.92, 0.90], "faithfulness")[0] is True and E.within(0.96, [0.92, 0.90], "faithfulness")[0] is True
+    assert E.within(0.84, [0.92, 0.90], "faithfulness")[0] is False and E.within(0.98, [0.92, 0.90], "faithfulness")[0] is False
+    assert E.within(0.85, [0.90, 0.92], "coverage")[0] is True and E.within(0.84, [0.90, 0.92], "coverage")[0] is False  # 변이 T6
+
+
+def _entry(text, label="사실 일치 위반", field="x", pair="", source="원본", run_id="E-0001", index=1, reason="r", value="v"):
+    return {"run_id": run_id, "doc": "d", "source": source, "round": 1, "index": index, "axis": "faithfulness", "label": label,
+            "text": text, "pair": pair, "prev": "", "next": "", "reason": reason, "field": field, "value": value}
+
+
+def test_teeth_build_sheet_group_keys_merge_and_key_index():
+    es = [_entry("가."), _entry("가.", field="y"), _entry("가.", label="단정형 추론"),
+          _entry("가.", label="모순(분석↔소견)", pair="나.", field=""),
+          _entry("나.", label="모순(분석↔소견)", pair="가.", field="", run_id="E-0002", index=3)]
+    rows, key, items = E.build_sheet(es, seed=3)
+    assert len(rows) == 4 and len(key) == 5  # 필드·종류가 다르면 따로(변이 S1·S2), 짝 순서만 다른 모순은 하나(변이 S3)
+    assert sorted(len(i["members"]) for i in items) == [1, 1, 1, 2]
+    rows, key, _ = E.build_sheet([_entry("가.", reason="r1", value="1", index=2),
+                                  _entry("가.", reason="r2", value="2", run_id="E-0003", index=5),
+                                  _entry("가.", reason="r1", value="1", run_id="E-0004", index=7)], seed=1)
+    assert rows[0][6] == "r1 / r2" and rows[0][8] == "1 / 2"  # 묶인 표시 모두에서(변이 S12·S13)
+    assert sorted((k[1], k[5]) for k in key) == [("E-0001", 2), ("E-0003", 5), ("E-0004", 7)]  # 표시 순번(변이 S18)
+
+
+def test_teeth_build_sheet_numbers_are_shuffled():
+    es = [_entry(f"문장 {i:02d}.") for i in range(12)]
+    orders = [tuple(r[2] for r in E.build_sheet(es, seed=s)[0]) for s in range(5)]
+    assert len(set(orders)) > 1 and any(list(o) != sorted(o) for o in orders)  # 변이 S5
+
+
+def test_teeth_leak_checker_ignores_case_of_document_names():
+    row = ("J001", "사실 일치 위반", "문장.", "", "", "", "Pima_Strong 에서", "", "", "", "")
+    assert any("문서 이름" in p for p in E.sheet_leaks([row], allowed_texts=["문장."]))  # 변이 S6
+
+
+def test_teeth_miss_cause_c01_step5_field_b_and_step4_scope():
+    idx = index()
+    inj = [2]
+    # 위반 판정이 있는데 인용이 다른 문장에 붙어 놓친 C01 — 충실성 1~4 를 지나 게이트 수준은 5번(변이 C1)
+    off = run(claims=[claim("c1", "FN 43건", field="f1")], verdicts=[verdict("c1", "0.91 이다", expr="{f1}")])
+    assert E.miss_cause("C01", off, idx, inj, "f1")["cause"] == "모순 미검출"
+    assert E.miss_cause("C01", off, idx, inj, "f1", axis="faithfulness")["cause"] == "분류 불가"
+    assert E.miss_cause("F01", off, idx, inj, "f1")["cause"] == "분류 불가"
+    # 두 번째 필드(field_b)로 겨냥해도 필드 오지정이 아니다(변이 C2)
+    second = run(claims=[claim("c1", "FN 43건", kind="comparison", field="other", field_b="f1")],
+                 verdicts=[verdict("c1", "FN 43건", verdict="match", kind="comparison", expr_b="{f1}")])
+    assert E.miss_cause("F05", second, idx, inj, "f1")["cause"] == "규칙 허용"
+    # 4단계는 대상이 맞은 주장만 본다 — 대상이 틀린 주장의 위반은 세지 않는다(변이 C3)
+    scoped = run(claims=[claim("c1", "FN 43건", field="f1"), claim("c2", "FN 43건", field="f1")],
+                 verdicts=[verdict("c1", "0.91 이다", expr="{f9}"), verdict("c2", "FN 43건", verdict="match", expr="{f1}")])
+    assert E.miss_cause("F01", scoped, idx, inj, "f1")["cause"] == "규칙 허용"
+
+
+def test_teeth_extraction_failure_and_numeric_recall_same_sentence():
+    idx = index()
+    failed = run(claims=[claim("c1", "FN 43건")])
+    failed["record"]["extract"]["failure"] = "timeout"
+    assert E.extraction_hit("F01", failed, idx, [2]) is None  # 변이 X1
+    out = E.numeric_recall(run(claims=[claim("c1", "FN 43건")]), idx)
+    assert out["tokens"] == 3 and out["matched"] == 1  # 문장 3 의 43 은 다른 문장의 주장으로 세지 않는다(변이 N3)

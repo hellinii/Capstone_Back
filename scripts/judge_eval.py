@@ -1,13 +1,15 @@
 """
-judge_eval.py — 판정자 평가 실험 실행기(사전 등록 v1 — 평가/사전등록/v1/사전등록_v1.md). pytest 시험이 아니다.
+judge_eval.py — 판정자 평가 실험 실행기(사전 등록 v1 — 평가/사전등록/v1/사전등록_v1.md, 채점 전에 바꾼 규칙은 v3/사전등록_v3.md 2절).
+pytest 시험이 아니다.
 
 두 모드(judge_validate 와 같은 뜻)
 - dev    : 가짜 LLM(scripts/dev_fake_llm_server 의 가짜 OpenAI)과 개발 입력(tests/data/judge_dev — 규칙 문장 서술)만. 평가 폴더는
            임시 폴더(--root, 없으면 새로 만든다)다. 검증 폴더·평가 폴더(저장소 옆 JUDGE_ROUND/평가·JUDGE_VALIDATION_DIR) 안은 어떤
            철자로 적어도 거부한다(judge_validate.guard + 평가 폴더).
 - verify : 진짜 평가. 평가 폴더 = --root, 없으면 환경변수 JUDGE_VALIDATION_DIR, 없으면 저장소 옆 JUDGE_ROUND/평가. 바탕 서술은
-           00_봉인/<태그>.json(SHA256SUMS 와 맞아야). 실호출 명령(run·baseline2)은 judge_validate.verify_problems 다섯 조건(깨끗한
-           작업 트리·고정 기준·태그 MANIFEST·--live·장부 쓰기) + 사전 등록 지문(980e9bcc…)·모델 설정(§0)이 모두 맞아야 시작한다.
+           00_봉인/<태그>.json(SHA256SUMS 와 맞아야). 실호출 명령(run·baseline2)은 .env 를 먼저 읽은 뒤(load_env) judge_validate.
+           verify_problems 다섯 조건(깨끗한 작업 트리·고정 기준·태그 MANIFEST·--live·장부 쓰기) + 사전 등록 지문(980e9bcc…)·모델
+           설정(§0)이 모두 맞아야 시작한다.
 
 평가 폴더
 - 00_봉인/      바탕 결과서 3건(pima_strong·segment_weak·scene_strong) — 봉인 서술(judge_live seal-generate 꼴)
@@ -30,15 +32,23 @@ judge_eval.py — 판정자 평가 실험 실행기(사전 등록 v1 — 평가/
                            이어 하기: 판정이 난 회차(pass·blocked)와 API 실패가 아닌 판정자 실패(최종 실패)는 건너뛰고, API 실패·시간
                            초과(재시도 대상, §7.4)만 같은 문서·같은 회차로 다시 돈다(시도 횟수 attempt·장부 error 열). 확인 입력은 없다:
                            --yes 가 없으면 계획만 찍고 멈춘다. 상한 = JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS(없으면 §7.7 $30·110회,
-                           장부 누계 포함, 회당 예상 $0.30). 시작 전 넘으면 거부, 돌다가 다음 회차가 넘으면 새 회차를 띄우지 않는다.
+                           장부 누계 포함, 회당 예상 $0.30 — verify 는 §7.7 값보다 올리면 거부). 시작 전 넘으면 거부, 돌다가 다음
+                           회차가 넘으면 새 회차를 띄우지 않는다. 다시 도는 실패는 API 실패·시간 초과(호출 경계의 timeout·transient
+                           ·api_error 등과 네트워크 계열 예외)뿐이고, 코드 예외는 최종 실패다(§7.4).
 - baseline1              : 1차 점검만(코드, 비용 0) — 33문서 → 05_결과/baseline1.json(칸·문장 위치, 결함본 탐지).
 - baseline2              : 문서 전체 판정(사전등록/v1/베이스라인2_프롬프트.md 의 지시문·입력 틀·스키마 — SHA256SUMS 와 맞아야). 문서마다
                            1회, 03_실행/B2-<문서>.json, 장부 단계 baseline2. --limit K·--concurrency N.
-- aggregate [--partial]  : §6 집계 전부 → 05_결과/집계.json·집계.md. 회차가 덜 끝났으면 --partial 일 때만(부분 집계 표시).
-- sheet [--seed S]       : 과잉 차단 판정표(§6.4·판정표_양식.md) — 04_판정표/판정표.csv(첫 줄 '# 열쇠 sha256: …'), 열쇠는 따로(읽기 전용).
-                           쓰기 전에 새는 것 검사(evaluation.sheet_leaks). 판정표가 이미 있으면 거부.
-- report --answers <csv> : 판정한 표(열쇠 해시 맞대기) → §6.4 셈 + 집계 → 05_결과/최종보고.md·.json. 봉인(00_봉인/SHA256SUMS)과
-                           결함(사전등록/v3/SHA256SUMS 가 있으면) 해시도 다시 맞대 본다.
+- aggregate [--partial]  : §6 집계 → 05_결과/집계.json·집계.md. 회차가 덜 끝났으면 --partial 일 때만(부분 집계 표시). 판정 전에 보는
+                           블라인드 집계다 — 표시 인용·위치·종류, 회차별 차단 목록·표시 수처럼 판정표 문항과 출처를 잇는 것은 싣지
+                           않는다(§6.4 '열쇠는 판정을 마친 뒤 연다'). 그런 것은 report 의 최종보고에만.
+- sheet [--seed S]       : 과잉 차단 판정표(§6.4·판정표_양식.md) — 04_판정표/판정표.csv(첫 줄 '# 열쇠 sha256: …'), 열쇠는 따로(읽기 전용
+                           — 열쇠.csv·열쇠.sha256·출처별 표시 수와 시드를 담은 열쇠/기록.json). 쓰기 전에 새는 것 검사
+                           (evaluation.sheet_leaks). 판정표가 이미 있으면 거부.
+- report --answers <csv> : 판정한 표(열쇠 해시 맞대기) → §6.4 셈 + 전체 집계(표시 세부 포함) → 05_결과/최종보고.md·.json. 봉인
+                           (00_봉인/SHA256SUMS)과 사전등록 v3 해시(결함_SHA256SUMS — 02_결함 파일, SHA256SUMS — 목록·precheck 등)도
+                           다시 맞대 본다.
+- 차례(verify)            : plant → precheck → (v3 동결) → baseline1 → run 1 → run 2 → baseline2 → sheet → 판정 → report.
+                           aggregate 는 그 사이 아무 때나(블라인드).
 - status                 : 회차별 끝남·실패·남음, 장부 누계와 상한.
 
 상호작용
@@ -94,15 +104,38 @@ MAX_CONCURRENCY = 3  # §7.2 동시에 3개까지
 RUN_ID = re.compile(r"E-(\d{4,})")
 STAGE_OF_ROUND = {1: "eval_r1", 2: "eval_r2"}
 B2_STAGE = "baseline2"
-# §7.4 다시 돌리는 실패 — API 실패·시간 초과(호출 경계 llm.FAILURES 의 시간·전송 갈래)와 실행기 예외. 판정자 실패(거절·잘림·인용 없음·
-# 출력 틀림·안전장치 등)는 결과를 이유로 다시 돌리지 않는다(최종 실패 — 집계에서 '실패').
+# §7.4 다시 돌리는 실패 — API 실패·시간 초과뿐: 호출 경계 llm.FAILURES 의 시간·전송 갈래와, 호출 밖으로 새어 나온 네트워크 계열
+# 예외(api_exception:). 판정자 실패(거절·잘림·인용 없음·출력 틀림·안전장치 등)와 코드 예외(exception: — 매번 나는 버그이거나 판정자 출력
+# 때문)는 결과를 이유로 다시 돌리지 않는다(최종 실패 — 집계에서 '실패').
 RETRYABLE = frozenset({"timeout", "transient", "api_error", "error", "deadline", "no_client"})
 EXCEPTION_PREFIX = "exception:"
+API_EXCEPTION_PREFIX = "api_exception:"
 
 
 def retryable(error: str) -> bool:
     error = (error or "").strip()
-    return error in RETRYABLE or error.startswith(EXCEPTION_PREFIX)
+    return error in RETRYABLE or error.startswith(API_EXCEPTION_PREFIX)
+
+
+def _network_exceptions() -> tuple[type, ...]:
+    import httpx
+    import openai
+
+    return (TimeoutError, asyncio.TimeoutError, ConnectionError, openai.APIError, httpx.HTTPError)
+
+
+def exception_error(exc: BaseException) -> str:
+    """회차 하나를 끝낸 예외 → 장부 error 칸. 네트워크 계열(API 실패·시간 초과)만 다시 도는 api_exception:, 나머지는 exception:."""
+    prefix = API_EXCEPTION_PREFIX if isinstance(exc, _network_exceptions()) else EXCEPTION_PREFIX
+    return f"{prefix}{type(exc).__name__}: {str(exc)[:200]}"
+
+
+def load_env() -> None:
+    """.env 를 읽는다(judge_live.make_clients 와 같은 load_dotenv — 이미 있는 환경변수는 덮지 않는다). verify 의 실호출 명령은 모델
+    설정 검사와 상한 계산 전에 부른다 — 검사는 통과하고 채점은 .env 의 다른 설정으로 도는 일이 없게."""
+    from dotenv import load_dotenv
+
+    load_dotenv()
 
 
 # ── 평가 폴더·경계 ────────────────────────────────────────────────────────
@@ -150,6 +183,15 @@ def make_ctx(mode: str, root: Path | str | None, echo: Callable[[str], None] = p
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def defect_files(root: Path) -> dict[str, str]:
+    """02_결함 의 파일 → sha256(평가 폴더 기준 경로). 점으로 시작하는 이름(.DS_Store 등 — 파일 탐색기가 만드는 것)은 뺀다."""
+    folder = Path(root) / DEFECTS
+    if not folder.is_dir():
+        return {}
+    return {p.relative_to(root).as_posix(): sha256_file(p) for p in sorted(folder.rglob("*"))
+            if p.is_file() and not any(part.startswith(".") for part in p.relative_to(folder).parts)}
 
 
 def read_sums(path: Path) -> dict[str, str]:
@@ -283,6 +325,13 @@ def injected_of(doc: Doc, base: jv.Base, index: E.DocIndex) -> list[int]:
     return E.injected_ids(index, slot, again)
 
 
+def original_ids_of(doc: Doc, base: jv.Base, original_index: E.DocIndex) -> list[int]:
+    """결함의 원래 문장(v3 2.1 — 바꾸기 전 원본 문장) → 원본 문서의 문장 번호. 덧붙이기만 한 결함은 []."""
+    slot = doc.meta["slot"]
+    replaced = E.replaced_sentences(V.read_slot(base.result, slot), doc.slots[slot])
+    return E.injected_ids(original_index, slot, replaced) if replaced else []
+
+
 # ── plant ─────────────────────────────────────────────────────────────
 
 PLANT_FIELDS = ("id", "base", "axis", "type", "slot", "old", "new", "grounds", "expected_axes", "allowed_secondary_axes",
@@ -363,8 +412,9 @@ def check_plant_row(row: dict, bases: dict[str, jv.Base], *, mode: str, existing
     if row["type"] != "문장 순서 교체" and len(ops) != 1:
         problems.append(f"바뀐 곳이 한 곳이어야 한다(지금 {len(ops)}곳 — §3.1 결함본 1개에 결함 1개)")
     if rid in E.PREREG_DEFECTS and rid != "C01" and E.PREREG_DEFECTS[rid].axis == "consistency":
-        if Counter(E.numeric_tokens(base_text, exclude=False)) != Counter(E.numeric_tokens(new_text, exclude=False)):
-            problems.append("일관성 결함(C01 제외)의 변경문은 숫자를 바꾸지 않는다(§3.4)")
+        # v3 2.8 — 숫자는 §6.9 숫자 토큰 정의로 센다(F1·M4 같은 이름 속 숫자는 숫자가 아니다)
+        if Counter(E.numeric_tokens(base_text)) != Counter(E.numeric_tokens(new_text)):
+            problems.append("일관성 결함(C01 제외)의 변경문은 숫자를 바꾸지 않는다(§3.4·v3 2.8)")
     try:
         E.injected_ids(doc_index(base, {slot: new_text}), slot, injected)
     except ValueError as exc:
@@ -588,9 +638,7 @@ def cmd_precheck(ctx: Ctx, *, echo: Callable[[str], None] | None = None) -> dict
             ok = rea_same
         out["items"][vid] = entry
         echo(f"{vid} {'같음' if ok else '다름'}" + ("" if vid.startswith("V") else " (가독성 코드 규칙만)"))
-    folder = ctx.path(DEFECTS)
-    out["files"] = {p.relative_to(ctx.root).as_posix(): sha256_file(p)
-                    for p in sorted(folder.rglob("*")) if p.is_file()}  # 사전 등록 v3 SHA256SUMS 에 옮겨 적을 값
+    out["files"] = defect_files(ctx.root)  # 사전 등록 v3 결함_SHA256SUMS 에 옮겨 적을 값
     out["variants_differ"] = variant_bad
     target = ctx.path(BUILD, "precheck.json")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -640,16 +688,21 @@ class LedgerWriter:
 
 @dataclass(frozen=True)
 class Cap:
-    """이 실험 장부 상한(§7.7 $30·110회) — JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS 로 바꾼다."""
+    """이 실험 장부 상한(§7.7 $30·110회) — JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS 로 낮출 수 있다. verify 는 §7.7 값보다 높이면
+    거부한다(상한은 사전 등록 값이다). dev 는 시험용으로 아무 값이나."""
 
     usd: float
     runs: int
 
     @classmethod
-    def from_env(cls) -> "Cap":
+    def from_env(cls, mode: str = "verify") -> "Cap":
         usd = os.getenv("JUDGE_LIVE_BUDGET_USD", "").strip()
         runs = os.getenv("JUDGE_LIVE_MAX_RUNS", "").strip()
-        return cls(float(usd) if usd else E.BUDGET_USD, int(runs) if runs else E.BUDGET_RUNS)
+        cap = cls(float(usd) if usd else E.BUDGET_USD, int(runs) if runs else E.BUDGET_RUNS)
+        if mode == "verify" and (cap.usd > E.BUDGET_USD + 1e-9 or cap.runs > E.BUDGET_RUNS):
+            raise RunnerError(f"상한이 사전 등록 §7.7(${E.BUDGET_USD:.0f}·{E.BUDGET_RUNS}회)보다 높다: ${cap.usd:.2f}·{cap.runs}회 "
+                              "(JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS — .env 포함)")
+        return cap
 
 
 def spent(rows: list[dict]) -> tuple[float, int]:
@@ -737,11 +790,10 @@ def full_set_problems(docs: list[Doc]) -> list[str]:
 
 
 def frozen_problems(ctx: Ctx) -> list[str]:
-    """verify 채점 전 — precheck 가 변형 다름 없이 끝났고 그 뒤 02_결함 이 바뀌지 않았으며, 사전등록/v3/SHA256SUMS 가 있으면 맞다."""
+    """verify 채점 전 — precheck 가 변형 다름 없이 끝났고 그 뒤 02_결함 이 바뀌지 않았으며, 사전등록 v3 해시가 있으면 맞다."""
     out = []
     pre = ctx.root / BUILD / "precheck.json"
-    files = {p.relative_to(ctx.root).as_posix(): sha256_file(p) for p in sorted((ctx.root / DEFECTS).rglob("*")) if p.is_file()} \
-        if (ctx.root / DEFECTS).is_dir() else {}
+    files = defect_files(ctx.root)
     if not pre.exists():
         out.append("01_구성/precheck.json 이 없다 — precheck 를 먼저 돌린다(§4 동결 전 확인)")
     else:
@@ -754,23 +806,68 @@ def frozen_problems(ctx: Ctx) -> list[str]:
     return out
 
 
+V3_DEFECT_SUMS, V3_SUMS = "결함_SHA256SUMS", "SHA256SUMS"
+
+
 def defect_sum_problems(ctx: Ctx) -> list[str]:
-    """사전등록/v3/SHA256SUMS(있으면)의 줄 가운데 평가 폴더(또는 02_결함) 안 파일을 가리키는 것이 모두 맞는가."""
-    sums_path = ctx.root / PREREG_V3 / "SHA256SUMS"
-    if not sums_path.exists():
-        return []
-    out, checked = [], 0
-    for name, digest in read_sums(sums_path).items():
-        cands = [ctx.root / name, ctx.root / DEFECTS / name, ctx.root / PREREG_V3 / name]
-        path = next((p for p in cands if p.is_file()), None)
-        if path is None:
-            if name.startswith(f"{DEFECTS}/"):
-                out.append(f"사전등록 v3 에 적힌 파일이 없다: {name}")
-            continue
-        checked += 1
-        if sha256_file(path) != digest:
-            out.append(f"사전등록 v3 해시와 다르다: {name}")
+    """사전등록 v3 해시(§5)를 맞대 본다 — 있는 것만.
+    - 결함_SHA256SUMS: 02_결함 파일마다(이름은 '02_결함/F01/meta.json' 또는 'F01/meta.json'). 적힌 파일이 모두 있고 같아야 하며,
+      02_결함 의 파일(숨김 파일 빼고)이 모두 적혀 있어야 한다.
+    - SHA256SUMS: 결함변형_목록.json·precheck.json·사전등록_v3.md 등. 평가 폴더·02_결함·01_구성·v3 폴더에서 찾은 것은 같아야 한다
+      (찾지 못한 이름은 이 도구가 볼 수 없는 파일로 보고 넘어간다)."""
+    out: list[str] = []
+    folder = ctx.root / PREREG_V3
+    dsums = folder / V3_DEFECT_SUMS
+    if dsums.exists():
+        listed = {}
+        for name, digest in read_sums(dsums).items():
+            rel = name[len(DEFECTS) + 1:] if name.startswith(f"{DEFECTS}/") else name
+            listed[f"{DEFECTS}/{rel}"] = digest
+        have = defect_files(ctx.root)
+        for name, digest in sorted(listed.items()):
+            if name not in have:
+                out.append(f"사전등록 v3 {V3_DEFECT_SUMS} 에 적힌 파일이 없다: {name}")
+            elif have[name] != digest:
+                out.append(f"사전등록 v3 {V3_DEFECT_SUMS} 와 다르다: {name}")
+        out += [f"사전등록 v3 {V3_DEFECT_SUMS} 에 없는 02_결함 파일: {name}" for name in sorted(set(have) - set(listed))]
+    sums = folder / V3_SUMS
+    if sums.exists():
+        for name, digest in read_sums(sums).items():
+            cands = [ctx.root / name, ctx.root / DEFECTS / name, ctx.root / BUILD / name, folder / name]
+            path = next((p for p in cands if p.is_file()), None)
+            if path is not None and sha256_file(path) != digest:
+                out.append(f"사전등록 v3 {V3_SUMS} 와 다르다: {name}")
     return out
+
+
+async def launch(ctx: Ctx, writer: LedgerWriter, todo: list[Doc], one: Callable, *, concurrency: int, cap: Cap,
+                 what: str) -> dict:
+    """todo 를 차례로 동시에 concurrency 개씩 띄운다(run·baseline2 공용). 새 회차를 띄우기 전마다 장부 누계 + 지금 도는 회차 + 이 회차가
+    상한을 넘는지 보고, 넘으면 남은 것을 띄우지 않는다(stopped)."""
+    sem = asyncio.Semaphore(concurrency)
+    state = {"in_flight": 0}
+
+    async def guarded(doc: Doc) -> dict:
+        try:
+            return await one(doc)
+        finally:
+            state["in_flight"] -= 1
+            sem.release()
+
+    ctx.path(RUNS_OUT).mkdir(parents=True, exist_ok=True)
+    tasks, stopped = [], []
+    for i, doc in enumerate(todo):
+        await sem.acquire()
+        async with writer.lock:
+            problem = cap_problem(writer.ledger.rows(), cap, state["in_flight"] + 1)
+        if problem:
+            sem.release()
+            stopped = [d.id for d in todo[i:]]
+            ctx.echo(f"상한에 닿아 새 {what} 띄우지 않는다({problem}) — 남은 {len(stopped)}회")
+            break
+        state["in_flight"] += 1
+        tasks.append(asyncio.create_task(guarded(doc)))
+    return {"rows": await asyncio.gather(*tasks), "stopped": stopped}
 
 
 async def run_round(ctx: Ctx, round_no: int, order: list[Doc], todo: list[Doc], bases: dict[str, jv.Base], *, client,
@@ -779,8 +876,6 @@ async def run_round(ctx: Ctx, round_no: int, order: list[Doc], todo: list[Doc], 
     stage = STAGE_OF_ROUND[round_no]
     seed = E.ROUND_SEEDS[round_no]
     writer = LedgerWriter(ctx.ledger_path)
-    sem = asyncio.Semaphore(concurrency)
-    state = {"in_flight": 0}
     position = {d.id: i for i, d in enumerate(order)}
 
     async def one(doc: Doc) -> dict:
@@ -790,8 +885,8 @@ async def run_round(ctx: Ctx, round_no: int, order: list[Doc], todo: list[Doc], 
         try:
             run, sha = await judge(client, bases[doc.report], doc.slots)
             error = run.failure or ""
-        except Exception as exc:  # noqa: BLE001 — 회차 하나의 예외로 나머지를 멈추지 않는다(재시도 대상으로 남긴다)
-            error = f"{EXCEPTION_PREFIX}{type(exc).__name__}: {str(exc)[:200]}"
+        except Exception as exc:  # noqa: BLE001 — 회차 하나의 예외로 나머지를 멈추지 않는다(네트워크 계열만 재시도 대상)
+            error = exception_error(exc)
         seconds = round(time.monotonic() - t0, 3)
 
         def build(run_id: str, rows: list[dict]):
@@ -817,30 +912,10 @@ async def run_round(ctx: Ctx, round_no: int, order: list[Doc], todo: list[Doc], 
 
         return await writer.commit(build)
 
-    async def guarded(doc: Doc) -> dict:
-        try:
-            return await one(doc)
-        finally:
-            state["in_flight"] -= 1
-            sem.release()
-
-    ctx.path(RUNS_OUT).mkdir(parents=True, exist_ok=True)
-    tasks, stopped = [], []
-    for i, doc in enumerate(todo):
-        await sem.acquire()
-        async with writer.lock:
-            problem = cap_problem(writer.ledger.rows(), cap, state["in_flight"] + 1)
-        if problem:
-            sem.release()
-            stopped = [d.id for d in todo[i:]]
-            ctx.echo(f"상한에 닿아 새 회차를 띄우지 않는다({problem}) — 남은 {len(stopped)}회")
-            break
-        state["in_flight"] += 1
-        tasks.append(asyncio.create_task(guarded(doc)))
-    rows = await asyncio.gather(*tasks)
-    for r in rows:
+    out = await launch(ctx, writer, todo, one, concurrency=concurrency, cap=cap, what="회차를")
+    for r in out["rows"]:
         ctx.echo(f"  {r['run_id']} {r['stage']} {E.doc_id(r['report'], r['variant'])} — {r['gate'] or '실패 ' + r['error']}")
-    return {"rows": rows, "stopped": stopped}
+    return out
 
 
 def cmd_run(ctx: Ctx, round_no: int, *, concurrency: int = MAX_CONCURRENCY, only: list[str] | None = None, live: bool = False,
@@ -851,9 +926,11 @@ def cmd_run(ctx: Ctx, round_no: int, *, concurrency: int = MAX_CONCURRENCY, only
     if not 1 <= concurrency <= MAX_CONCURRENCY:
         raise RunnerError(f"동시 실행은 1~{MAX_CONCURRENCY}개(§7.2): {concurrency}")
     if ctx.mode == "verify":
+        load_env()  # 모델 설정 검사·상한 계산 전에(.env 의 JUDGE_* 가 검사를 비켜 가지 않게)
         problems = eval_verify_problems(live=live, ledger_path=ctx.ledger_path, git=git)
         if problems:
             raise RunnerError("verify 를 시작하지 않는다:\n  - " + "\n  - ".join(problems))
+    cap = Cap.from_env(ctx.mode)
     bases = load_bases(ctx)
     docs = documents(bases, load_items(ctx))
     if ctx.mode == "verify":
@@ -875,7 +952,6 @@ def cmd_run(ctx: Ctx, round_no: int, *, concurrency: int = MAX_CONCURRENCY, only
         if unknown:
             raise RunnerError(f"없는 문서: {', '.join(unknown)}")
         todo = [d for d in todo if d.id in set(only)]
-    cap = Cap.from_env()
     usd, n = spent(rows)
     retries = sum(1 for d in todo if (states.get((d.report, d.variant)) or {}).get("status") == "retry")
     done = sum(finished(states.get((d.report, d.variant))) for d in order)
@@ -908,6 +984,8 @@ def cmd_run(ctx: Ctx, round_no: int, *, concurrency: int = MAX_CONCURRENCY, only
 
 
 def cmd_status(ctx: Ctx) -> dict:
+    if ctx.mode == "verify":
+        load_env()  # 상한 표시가 run 과 같게
     rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
     fp = criteria.fingerprint()
     out = {}
@@ -918,7 +996,7 @@ def cmd_status(ctx: Ctx) -> dict:
                       "attempts": sum(v["attempts"] for v in st.values())}
         ctx.echo(f"{stage}: 끝남 {c['done']} · 최종 실패 {c['final']} · 다시 돌 것 {c['retry']} · 줄 {out[stage]['attempts']}")
     usd, n = spent(rows)
-    cap = Cap.from_env()
+    cap = Cap.from_env(ctx.mode)
     out["ledger"] = {"usd": round(usd, 6), "rows": n, "cap_usd": cap.usd, "cap_runs": cap.runs}
     ctx.echo(f"장부 누계 ${usd:.2f}·{n}회 | 상한 ${cap.usd:.2f}·{cap.runs}회")
     return out
@@ -1072,8 +1150,6 @@ async def run_baseline2(ctx: Ctx, todo: list[Doc], bases: dict[str, jv.Base], pr
     from app.judge import llm
 
     writer = LedgerWriter(ctx.ledger_path)
-    sem = asyncio.Semaphore(concurrency)
-    state = {"in_flight": 0}
     fmt = llm.json_schema_format("baseline2", prompt["schema"])
 
     async def one(doc: Doc) -> dict:
@@ -1104,30 +1180,10 @@ async def run_baseline2(ctx: Ctx, todo: list[Doc], bases: dict[str, jv.Base], pr
 
         return await writer.commit(build)
 
-    async def guarded(doc: Doc) -> dict:
-        try:
-            return await one(doc)
-        finally:
-            state["in_flight"] -= 1
-            sem.release()
-
-    ctx.path(RUNS_OUT).mkdir(parents=True, exist_ok=True)
-    tasks, stopped = [], []
-    for i, doc in enumerate(todo):
-        await sem.acquire()
-        async with writer.lock:
-            problem = cap_problem(writer.ledger.rows(), cap, state["in_flight"] + 1)
-        if problem:
-            sem.release()
-            stopped = [d.id for d in todo[i:]]
-            ctx.echo(f"상한에 닿아 새 호출을 띄우지 않는다({problem}) — 남은 {len(stopped)}회")
-            break
-        state["in_flight"] += 1
-        tasks.append(asyncio.create_task(guarded(doc)))
-    rows = await asyncio.gather(*tasks)
-    for r in rows:
+    out = await launch(ctx, writer, todo, one, concurrency=concurrency, cap=cap, what="호출을")
+    for r in out["rows"]:
         ctx.echo(f"  {r['run_id']} baseline2 {E.doc_id(r['report'], r['variant'])} — {r['gate'] or '실패 ' + r['error']}")
-    return {"rows": rows, "stopped": stopped}
+    return out
 
 
 def cmd_baseline2(ctx: Ctx, *, live: bool = False, yes: bool = False, limit: int | None = None,
@@ -1137,6 +1193,7 @@ def cmd_baseline2(ctx: Ctx, *, live: bool = False, yes: bool = False, limit: int
         raise RunnerError(f"동시 실행은 1~{MAX_CONCURRENCY}개(§7.2): {concurrency}")
     prompt = load_b2_prompt(ctx)
     if ctx.mode == "verify":
+        load_env()  # 검사·상한 전에(cmd_run 과 같음)
         problems = eval_verify_problems(live=live, ledger_path=ctx.ledger_path, git=git)
         if (prompt["model"], prompt["effort"]) != (E.PREREG_JUDGE_MODEL, E.PREREG_JUDGE_EFFORT):
             problems.append(f"베이스라인 2 모델 설정이 판정자와 다르다: {prompt['model']}·{prompt['effort']}")
@@ -1154,7 +1211,7 @@ def cmd_baseline2(ctx: Ctx, *, live: bool = False, yes: bool = False, limit: int
     todo = [d for d in order if not finished(states.get((d.report, d.variant)))]
     if limit is not None:
         todo = todo[:max(limit, 0)]
-    cap = Cap.from_env()
+    cap = Cap.from_env(ctx.mode)
     usd, n = spent(rows)
     done = sum(finished(states.get((d.report, d.variant))) for d in order)
     ctx.echo(f"[{ctx.mode}] baseline2: 문서 {len(order)} · 끝남 {done}"
@@ -1251,6 +1308,8 @@ class World:
             raise RunnerError("문서가 없다")
         self.index = {d.id: doc_index(self.bases[d.report], d.slots) for d in self.docs}
         self.injected = {d.id: injected_of(d, self.bases[d.report], self.index[d.id]) for d in self.docs if d.variant != E.BASE}
+        # v3 2.1 결함의 원래 문장 — 원본 문서의 문장 번호(덧붙이기 결함은 빈 목록)
+        self.original_ids = {d.id: original_ids_of(d, self.bases[d.report], self.index[d.report]) for d in self.docs if d.is_defect}
         self.rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
         self.runs = collect_runs(ctx, self.docs, self.rows)
         self.b2 = collect_b2(ctx, self.docs, self.rows)
@@ -1287,8 +1346,15 @@ def _status_of(world: World, doc: Doc, n: int) -> str:
     return {"done": "완료", "final": "실패", "retry": "재시도 대상", NOT_RUN: NOT_RUN}[st]
 
 
-def aggregate(ctx: Ctx, *, partial: bool = False, world: World | None = None) -> dict:
-    """§6 집계 전부(규칙에 없는 것은 넣지 않는다). partial 이 아니면 33문서 × 2회차가 모두 끝나고 베이스라인 1 이 있어야 한다."""
+def _flag_detail(f: dict) -> dict:
+    return {"index": f["index"], "axis": f["axis"], "label": f["label"], "slots": f["slots"], "quotes": f["quotes"],
+            "field": f["field"], **({"sentence_ids": f["sentence_ids"]} if "sentence_ids" in f else {})}
+
+
+def aggregate(ctx: Ctx, *, partial: bool = False, world: World | None = None, blind: bool = True) -> dict:
+    """§6 집계 전부(규칙에 없는 것은 넣지 않는다). partial 이 아니면 33문서 × 2회차가 모두 끝나고 베이스라인 1 이 있어야 한다.
+    blind(판정 전 — aggregate 명령)는 판정표 문항과 출처를 잇는 것(표시 인용·위치·종류·필드, 문서·회차별 표시 목록과 표시 수, 재현성
+    검출 문장 집합, 미탐지 원인의 모순 인용)을 싣지 않는다(§6.4). report 는 blind=False 로 모두 싣는다."""
     w = world or World(ctx)
     missing = w.missing()
     if not partial and (missing or w.b1 is None):
@@ -1297,66 +1363,85 @@ def aggregate(ctx: Ctx, *, partial: bool = False, world: World | None = None) ->
     defects_docs = [d for d in w.docs if d.is_defect]
     variant_docs = [d for d in w.docs if d.source == E.SOURCE_VARIANT]
     originals = {tag: w.pair(w.original(tag)) for tag in w.bases}
-    out: dict = {"mode": ctx.mode, "partial": bool(partial and (missing or w.b1 is None)), "missing": missing,
+
+    def run_entry(d: Doc, n: int) -> dict:
+        r, info = w.run(d, n), w.runs[(n, d.id)]
+        entry = {"round": n, "status": _status_of(w, d, n), "attempts": info["attempts"], "run_id": (info["row"] or {}).get("run_id"),
+                 "model_served": (info["row"] or {}).get("model_served"), "at": (info["row"] or {}).get("at"),
+                 "gate": (r or {}).get("gate"), "failure": (r or {}).get("failure"), "error": (info["row"] or {}).get("error") or None,
+                 "claims": len((((r or {}).get("record") or {}).get("extract") or {}).get("claims") or []),
+                 "scores": E.axis_scores(r) if E.run_ok(r) else None}
+        if not blind:
+            entry["flags"] = [_flag_detail(E.locate_flag(f, w.index[d.id])) for f in E.flags_of(r)] if E.run_ok(r) else []
+        return entry
+
+    out: dict = {"mode": ctx.mode, "blind": blind, "partial": bool(partial and (missing or w.b1 is None)), "missing": missing,
                  "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(),
                  "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                  "docs": {d.id: {"report": d.report, "variant": d.variant, "source": d.source, "sentences": len(w.index[d.id].sentences),
-                                 "runs": [{"round": n, "status": _status_of(w, d, n), "attempts": w.runs[(n, d.id)]["attempts"],
-                                           "run_id": (w.runs[(n, d.id)]["row"] or {}).get("run_id"),
-                                           "model_served": (w.runs[(n, d.id)]["row"] or {}).get("model_served"),
-                                           "at": (w.runs[(n, d.id)]["row"] or {}).get("at"),
-                                           "flags": [{"axis": f["axis"], "label": f["label"], "slots": f["slots"], "quotes": f["quotes"],
-                                                      "field": f["field"]} for f in E.flags_of(w.run(d, n))]
-                                           if E.run_ok(w.run(d, n)) else [],
-                                           "gate": (w.run(d, n) or {}).get("gate"), "failure": (w.run(d, n) or {}).get("failure"),
-                                           "claims": len((((w.run(d, n) or {}).get("record") or {}).get("extract") or {}).get("claims") or []),
-                                           "scores": E.axis_scores(w.run(d, n)) if E.run_ok(w.run(d, n)) else None}
-                                          for n in (1, 2)]} for d in w.docs}}
+                                 "runs": [run_entry(d, n) for n in (1, 2)]} for d in w.docs}}
 
-    # 6.2·6.3·6.7·6.8 결함본
+    # 6.2·6.3·6.7·6.8 결함본 (+ v3 2.1 원본에서 이미 표시)
     defects = {}
     for doc in defects_docs:
         idx, inj, meta = w.index[doc.id], w.injected[doc.id], doc.meta
         expected = list(meta["expected_axes"])
+        fields = (meta.get("grounds") or {}).get("field")
         dets = [E.detect(r, idx, inj, expected) for r in w.pair(doc)]
-        causes = [{"round": n, **E.miss_cause(doc.variant, w.run(doc, n), idx, inj, (meta.get("grounds") or {}).get("field"))}
+        causes = [{"round": n, **E.miss_cause(doc.variant, w.run(doc, n), idx, inj, fields)}
                   for n, d in zip((1, 2), dets) if d["gate_detected"] is False]
+        axis_causes = [{"round": n, **E.miss_cause(doc.variant, w.run(doc, n), idx, inj, fields, axis=a)}
+                       for n, d in zip((1, 2), dets) for a in expected if d["axes"][a] is False]
+        if blind:
+            for c in causes + axis_causes:
+                c["contradictions"] = len(c["contradictions"])  # 위치 불일치 모순의 인용은 판정표 문항이다
+        pre = E.original_flagged(originals[doc.report], w.index[doc.report], w.original_ids[doc.id])
         defects[doc.id] = {
             "report": doc.report, "type": meta["type"], "axis": meta["axis"], "expected_axes": expected,
             "allowed_secondary_axes": meta["allowed_secondary_axes"], "injected": inj,
             "first_check_pass_by_design": meta.get("first_check_pass_by_design"),
+            "original_flagged": {k: pre[k] for k in ("applies", "gate", "axes", "checked_runs")},
             "gate": [E.word(d["gate_detected"], d["status"]) for d in dets],
             "gate_class": E.two_run_class([d["gate_detected"] for d in dets]),
             "axes": {a: {"runs": [E.word(d["axes"][a], d["status"]) for d in dets],
                          "class": E.two_run_class([d["axes"][a] for d in dets])} for a in expected},
             "out_of_place": [{"round": n, "count": len(d["out_of_place"]),
-                              "flags": [{"index": f["index"], "axis": f["axis"], "label": f["label"], "sentence_ids": f["sentence_ids"]}
-                                        for f in d["out_of_place"]]} for n, d in zip((1, 2), dets)],
-            "miss_causes": causes,
-            "independence": E.independence(originals[doc.report], w.pair(doc), expected, meta["allowed_secondary_axes"]),
+                              **({} if blind else {"flags": [_flag_detail(f) for f in d["out_of_place"]]})}
+                             for n, d in zip((1, 2), dets)],
+            "miss_causes": causes, "axis_miss_causes": axis_causes,
+            "independence": E.independence(originals[doc.report], w.pair(doc), expected, meta["allowed_secondary_axes"],
+                                           E.EXPECTED_CHANGES.get(doc.variant, ())),
             "extraction": [E.extraction_hit(doc.variant, r, idx, inj) for r in w.pair(doc)],
         }
-    n_def = len(defects_docs)
-    both = sum(d["gate_class"] == E.BOTH for d in defects.values())
+    # v3 2.1 — 원본에서 이미 표시된 결함은 분모에서 빼고 따로(게이트 수준: 차단 축 어느 것이든, 축 수준: 그 기대 축)
+    counted = {v: d for v, d in defects.items() if not d["original_flagged"]["gate"]}
+    both = sum(d["gate_class"] == E.BOTH for d in counted.values())
     by_type: dict[str, list] = {}
     for vid, d in defects.items():
-        by_type.setdefault(d["type"], []).append({"defect": vid, "class": d["gate_class"]})
-    axis_misses = {a: sorted(v for v, d in defects.items() if a in d["axes"] and any(x == E.MISSED for x in d["axes"][a]["runs"]))
-                   for a in E.GATE_AXES}
-    out["q1_gate"] = {"defects": n_def, "classes": dict(Counter(d["gate_class"] for d in defects.values())),
-                      "both_detected": E.wilson(both, n_def), "by_type": by_type}
-    out["q2_axis"] = {"by_axis": {a: {"defects": sum(a in d["axes"] for d in defects.values()),
-                                      "both_detected": sum(d["axes"][a]["class"] == E.BOTH for d in defects.values() if a in d["axes"]),
-                                      "any_run_missed": axis_misses[a]} for a in E.GATE_AXES}}
+        by_type.setdefault(d["type"], []).append({"defect": vid, "class": d["gate_class"] if vid in counted else E.ORIGINAL_FLAGGED})
+    out["q1_gate"] = {"defects": len(defects), "counted": len(counted),
+                      "original_flagged": sorted(set(defects) - set(counted)),
+                      "classes": dict(Counter(d["gate_class"] for d in counted.values())),
+                      "both_detected": E.wilson(both, len(counted)), "by_type": by_type}
+    by_axis = {}
+    for a in E.GATE_AXES:
+        mine = {v: d for v, d in defects.items() if a in d["axes"]}
+        kept = {v: d for v, d in mine.items() if not d["original_flagged"]["axes"][a]}
+        by_axis[a] = {"defects": len(mine), "counted": len(kept),
+                      "original_flagged": sorted(set(mine) - set(kept)),
+                      "both_detected": sum(d["axes"][a]["class"] == E.BOTH for d in kept.values()),
+                      "any_run_missed": sorted(v for v, d in kept.items() if any(x == E.MISSED for x in d["axes"][a]["runs"]))}
+    out["q2_axis"] = {"by_axis": by_axis}
     out["defects"] = defects
     related = [v for vid in E.EXTRACTION_IDS if vid in defects for v in defects[vid]["extraction"]]
     reference = [v for vid, d in defects.items() if E.RELATED_KINDS[vid] is None for v in d["extraction"]]
     out["extraction_rate"] = {"related": E.rate(related), "reference_c02_c09": E.rate(reference)}
 
-    # 6.6 불변성
+    # 6.6 불변성 (v3 2.4 — V02·V06 은 결정과 차단 축만)
     variants = {}
     for doc in variant_docs:
-        inv = E.invariance(originals[doc.report], w.pair(doc))
+        judged = E.GATE_AXES if doc.variant in E.INVARIANCE_GATE_ONLY else E.AXES
+        inv = E.invariance(originals[doc.report], w.pair(doc), judged)
         variants[doc.id] = {"report": doc.report, "type": doc.meta.get("type"), **inv}
     out["q3_invariance"] = {"variants": variants, "by_type": {
         t: dict(Counter(v["status"] for v in variants.values() if v["type"] == t)) for t in E.VARIANT_TYPES}}
@@ -1364,10 +1449,13 @@ def aggregate(ctx: Ctx, *, partial: bool = False, world: World | None = None) ->
                 "flags": len(E.flags_of(w.run(d, n)))}
                for d in w.docs if d.source in (E.SOURCE_ORIGINAL, E.SOURCE_VARIANT) for n in (1, 2)
                if (w.run(d, n) or {}).get("gate") == "blocked"]
-    out["q3_blocked_before_judgement"] = {"blocked_runs": blocked, "count": len(blocked)}
+    out["q3_blocked_before_judgement"] = {"count": len(blocked), **({} if blind else {"blocked_runs": blocked})}
 
     # 6.5 재현성
-    out["q4_reproducibility"] = E.reproducibility({d.id: w.pair(d) for d in w.docs}, w.index)
+    rep = E.reproducibility({d.id: w.pair(d) for d in w.docs}, w.index)
+    if blind:
+        rep["docs"] = {doc: {k: v for k, v in x.items() if k != "sets"} for doc, x in rep["docs"].items()}
+    out["q4_reproducibility"] = rep
 
     # 5 베이스라인
     b1 = (w.b1 or {}).get("docs", {})
@@ -1390,7 +1478,8 @@ def aggregate(ctx: Ctx, *, partial: bool = False, world: World | None = None) ->
                           "judge_gate": d["gate_class"]} for vid, d in defects.items()},
         "originals_variants": {d.id: {"baseline1_findings": (b1.get(d.id) or {}).get("n_findings"), "baseline2_issues": b2[d.id]["issues"],
                                       "baseline2_decision": b2[d.id]["decision"],
-                                      "judge_flags": [len(E.flags_of(r)) if E.run_ok(r) else None for r in w.pair(d)]}
+                                      **({} if blind else {"judge_flags": [len(E.flags_of(r)) if E.run_ok(r) else None
+                                                                           for r in w.pair(d)]})}
                                for d in w.docs if not d.is_defect},
         "baseline1_present": w.b1 is not None, "baseline2": b2}
 
@@ -1435,38 +1524,49 @@ def md_table(headers: list[str], rows: list[list]) -> str:
 def aggregate_markdown(agg: dict) -> str:
     q1, q4 = agg["q1_gate"], agg["q4_reproducibility"]
     wil = q1["both_detected"]
-    parts = [f"# 판정자 평가 집계 (사전 등록 v1 §6)\n\n- 모드 {agg['mode']} · 기준 {agg['criteria_version']} · 지문 {agg['fingerprint'][:8]}… · {agg['at']}\n"
-             + (f"- **부분 집계** — 덜 끝난 회차: {', '.join(agg['missing']) or '없음(베이스라인 1 없음)'}\n" if agg["partial"] else "")]
+    parts = [f"# 판정자 평가 집계 (사전 등록 v1 §6 · v3 2절)\n\n- 모드 {agg['mode']} · 기준 {agg['criteria_version']} · 지문 {agg['fingerprint'][:8]}… · {agg['at']}\n"
+             + (f"- **부분 집계** — 덜 끝난 회차: {', '.join(agg['missing']) or '없음(베이스라인 1 없음)'}\n" if agg["partial"] else "")
+             + ("- 판정 전 블라인드 집계 — 표시 인용·위치와 회차별 차단 목록은 판정 뒤 최종보고에만 싣는다(§6.4).\n" if agg["blind"] else "")]
     parts.append("\n## Q1 게이트 탐지 (6.2)\n\n" + md_table(
-        ["결함", "결과서", "유형", "1회차", "2회차", "분류", "위치 불일치 표시(1·2회차)"],
+        ["결함", "결과서", "유형", "1회차", "2회차", "분류", "위치 불일치 표시(1·2회차)", "원본에서 이미 표시(v3 2.1)"],
         [[v, d["report"], d["type"], d["gate"][0], d["gate"][1], d["gate_class"],
-          f"{d['out_of_place'][0]['count']}·{d['out_of_place'][1]['count']}"] for v, d in agg["defects"].items()]))
+          f"{d['out_of_place'][0]['count']}·{d['out_of_place'][1]['count']}",
+          d["original_flagged"]["gate"] if d["original_flagged"]["applies"] else "해당 없음"] for v, d in agg["defects"].items()]))
     parts.append(f"\n두 회차 모두 탐지 {wil['k']}/{wil['n']}"
-                 + (f" — Wilson 95% [{wil['low']:.2f}, {wil['high']:.2f}]" if wil["low"] is not None else "") + "\n")
+                 + (f" — Wilson 95% [{wil['low']:.2f}, {wil['high']:.2f}]" if wil["low"] is not None else "")
+                 + (f" (분모에서 뺀 '{E.ORIGINAL_FLAGGED}' 결함: {', '.join(q1['original_flagged'])})" if q1["original_flagged"] else "")
+                 + "\n")
     parts.append("\n유형별(표본 2~3개 — 기술 통계만)\n\n" + md_table(
         ["유형", "결함·분류"], [[t, ", ".join(f"{x['defect']} {x['class']}" for x in xs)] for t, xs in q1["by_type"].items()]))
     parts.append("\n## Q2 축 수준 탐지 (6.2)\n\n" + md_table(
-        ["결함", "기대 축", "1회차", "2회차", "분류"],
-        [[v, a, x["runs"][0], x["runs"][1], x["class"]] for v, d in agg["defects"].items() for a, x in d["axes"].items()]))
-    parts.append("\n" + md_table(["축", "기대 축 결함 수", "두 회차 모두 탐지", "한 회차라도 축 수준 미탐지"],
-                                 [[a, x["defects"], x["both_detected"], x["any_run_missed"]] for a, x in agg["q2_axis"]["by_axis"].items()]))
+        ["결함", "기대 축", "1회차", "2회차", "분류", "원본에서 이미 표시(v3 2.1)"],
+        [[v, a, x["runs"][0], x["runs"][1], x["class"],
+          d["original_flagged"]["axes"][a] if d["original_flagged"]["applies"] else "해당 없음"]
+         for v, d in agg["defects"].items() for a, x in d["axes"].items()]))
+    parts.append("\n" + md_table(["축", "기대 축 결함 수", "분모(원본에서 이미 표시 뺌)", "두 회차 모두 탐지", "한 회차라도 축 수준 미탐지",
+                                   "원본에서 이미 표시"],
+                                 [[a, x["defects"], x["counted"], x["both_detected"], x["any_run_missed"], x["original_flagged"]]
+                                  for a, x in agg["q2_axis"]["by_axis"].items()]))
     parts.append("\n## 독립성 (6.7) — 기대 축이 아닌 축, 원본 두 회차 범위 ± 허용 폭\n\n" + md_table(
         ["결함", "축", "원본 두 회차", "결함본 두 회차", "판정"],
         [[v, a, x["base"], x["defect"], x["status"]] for v, d in agg["defects"].items() for a, x in d["independence"].items()]))
-    parts.append("\n## 미탐지 원인 (6.3) — 게이트 수준에서 놓친 회차\n\n" + md_table(
-        ["결함", "회차", "원인", "근거"],
-        [[v, c["round"], c["cause"], c["note"] or "; ".join(f"{x['kind']} '{x['quote']}' 필드 {x['field'] or '-'} 판정 {x['verdict'] or '-'}"
-                                                         for x in c["claims"][:3])]
-         for v, d in agg["defects"].items() for c in d["miss_causes"]]))
+    parts.append("\n## 미탐지 원인 (6.3) — 게이트 수준·축 수준에서 놓친 회차\n\n" + md_table(
+        ["결함", "회차", "수준", "원인", "근거"],
+        [[v, c["round"], "게이트" if c["axis"] is None else f"축 {c['axis']}", c["cause"],
+          c["note"] or "; ".join(f"{x['kind']} '{x['quote']}' 필드 {x['field'] or '-'} 판정 {x['verdict'] or '-'}" for x in c["claims"][:3])]
+         for v, d in agg["defects"].items() for c in d["miss_causes"] + d["axis_miss_causes"]]))
     parts.append("\n## Q3 불변성 (6.6)\n\n" + md_table(
-        ["변형", "결과서", "유형", "원본 결정", "변형 결정", "판정", "벗어난 축"],
+        ["변형", "결과서", "유형", "원본 결정", "변형 결정", "판정", "벗어난 축", "보고만 하는 축의 벗어남(v3 2.4)"],
         [[v, x["report"], x["type"], x["base_gates"], x["variant_gates"], x["status"],
-          [a for a, s in x["axes"].items() if s["ok"] is False]] for v, x in agg["q3_invariance"]["variants"].items()]))
+          [a for a, s in x["axes"].items() if s["ok"] is False and s["judged"]],
+          [a for a, s in x["axes"].items() if s["ok"] is False and not s["judged"]]]
+         for v, x in agg["q3_invariance"]["variants"].items()]))
     parts.append("\n변형 유형별\n\n" + md_table(["유형", "판정별 수"], [[t, ", ".join(f"{k} {v}" for k, v in c.items()) or "—"]
                                                                   for t, c in agg["q3_invariance"]["by_type"].items()]))
     blocked = agg["q3_blocked_before_judgement"]
-    parts.append(f"\n## Q3 과잉 차단 — 판정 전\n\n차단된 원본·변형 회차 {blocked['count']}개(과잉 차단 여부는 판정표 판정 뒤 report 가 센다).\n\n"
-                 + md_table(["문서", "회차", "표시 수"], [[b["doc"], b["round"], b["flags"]] for b in blocked["blocked_runs"]]))
+    parts.append(f"\n## Q3 과잉 차단 — 판정 전\n\n차단된 원본·변형 회차 {blocked['count']}개(과잉 차단 여부는 판정표 판정 뒤 report 가 센다).\n"
+                 + ("" if "blocked_runs" not in blocked else "\n" + md_table(
+                     ["문서", "회차", "표시 수"], [[b["doc"], b["round"], b["flags"]] for b in blocked["blocked_runs"]])))
     parts.append("\n## Q4 재현성 (6.5)\n\n" + md_table(
         ["묶음", "문서 수", "발급 결정 일치", "검출 문장 집합 완전 일치", "평균 Jaccard"],
         [["전체", q4["overall"]["n"], q4["overall"]["decision_agreement"], q4["overall"]["exact_rate"], q4["overall"]["mean_jaccard"]]]
@@ -1479,9 +1579,10 @@ def aggregate_markdown(agg: dict) -> str:
     parts.append("\n## Q5 베이스라인 (§5)\n\n" + md_table(
         ["결함", "설계상 1차 점검 통과", "베이스라인 1", "베이스라인 2", "판정자(게이트)"],
         [[v, x["first_check_pass_by_design"], x["baseline1"], x["baseline2"], x["judge_gate"]] for v, x in q5["defects"].items()]))
+    blind = agg["blind"]
     parts.append("\n원본·변형 — 문서당 지적 수\n\n" + md_table(
-        ["문서", "베이스라인 1 검출", "베이스라인 2 지적", "베이스라인 2 결정", "판정자 표시(1·2회차)"],
-        [[d, x["baseline1_findings"], x["baseline2_issues"], x["baseline2_decision"], x["judge_flags"]]
+        ["문서", "베이스라인 1 검출", "베이스라인 2 지적", "베이스라인 2 결정"] + ([] if blind else ["판정자 표시(1·2회차)"]),
+        [[d, x["baseline1_findings"], x["baseline2_issues"], x["baseline2_decision"]] + ([] if blind else [x["judge_flags"]])
          for d, x in q5["originals_variants"].items()]))
     ex, nr = agg["extraction_rate"], agg["numeric_recall"]
     parts.append("\n## 보조 측정\n\n" + md_table(
@@ -1520,10 +1621,12 @@ def _csv_text(columns, rows) -> str:
 
 
 def sheet_entries_of(world: World, *, include_b2: bool) -> list[dict]:
-    """판정 대상 — 원본·변형의 모든 위반·모순 표시(두 회차), 결함본의 주입 문장 밖 표시, (원하면) 원본·변형의 베이스라인 2 지적."""
+    """판정 대상 — 원본·변형의 모든 위반·모순 표시(두 회차), 결함본의 주입 문장 밖 표시, (원하면) 원본·변형의 베이스라인 2 지적.
+    앞뒤 문장은 같은 결과서 원본에서(표시 문장이 원본에 있으면 — 바뀐 문장이 앞뒤 칸으로 새지 않게)."""
     entries = []
     for doc in world.docs:
         idx = world.index[doc.id]
+        context = world.index[doc.report]
         for n in (1, 2):
             run = world.run(doc, n)
             if not E.run_ok(run):
@@ -1532,10 +1635,12 @@ def sheet_entries_of(world: World, *, include_b2: bool) -> list[dict]:
                 located = E.detect(run, idx, world.injected[doc.id], doc.meta["expected_axes"])["out_of_place"]
             else:
                 located = [E.locate_flag(f, idx) for f in E.flags_of(run)]
-            entries += E.sheet_entries(run["run_id"], doc.id, doc.source, n, located, idx, value_of=world.value_of(doc.report))
+            entries += E.sheet_entries(run["run_id"], doc.id, doc.source, n, located, idx, value_of=world.value_of(doc.report),
+                                       context=context)
         body = world.b2[doc.id]["body"]
         if include_b2 and not doc.is_defect and body and not body.get("failure"):
-            entries += E.b2_entries(body["run_id"], doc.id, E.SOURCE_B2, E.baseline2_issues(body["result"], idx), idx)
+            entries += E.b2_entries(body["run_id"], doc.id, E.SOURCE_B2, E.baseline2_issues(body["result"], idx), idx,
+                                    context=context)
     return entries
 
 
@@ -1550,7 +1655,10 @@ def cmd_sheet(ctx: Ctx, *, seed: int | None = None, include_b2: bool = False) ->
     seed = random.SystemRandom().randrange(1, 10**9) if seed is None else seed
     entries = sheet_entries_of(world, include_b2=include_b2)
     rows, key_rows, items = E.build_sheet(entries, seed)
-    allowed = [s.text for idx in world.index.values() for s in idx.sentences] + [e["value"] for e in entries if e["value"]]
+    # 출처 낱말 검사에서 걷어 낼 글 — 문서 문장, 데이터 값, 베이스라인 2 의 사유(LLM 이 쓴 글 — '원본 데이터와 다르다' 같은 말은 출처가
+    # 아니다). 문서 이름·태그·ID·실행 번호·회차는 이 글들 안이라도 모두 잡는다.
+    allowed = ([s.text for idx in world.index.values() for s in idx.sentences] + [e["value"] for e in entries if e["value"]]
+               + [e["reason"] for e in entries if e["source"] == E.SOURCE_B2 and e["reason"]])
     leaks = E.sheet_leaks(rows, doc_names=[d.id for d in world.docs] + list(world.bases), allowed_texts=allowed)
     if leaks:
         raise RunnerError("판정표에 출처를 알려 주는 것이 있어 쓰지 않는다:\n  - " + "\n  - ".join(leaks[:20]))
@@ -1560,14 +1668,16 @@ def cmd_sheet(ctx: Ctx, *, seed: int | None = None, include_b2: bool = False) ->
     key_dir.mkdir(parents=True, exist_ok=True)
     (key_dir / "열쇠.csv").write_text(key_body, encoding="utf-8")
     (key_dir / "열쇠.sha256").write_text(f"{key_sha}  열쇠.csv\n", encoding="utf-8")
+    at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 출처별 표시 수와 시드(문항 번호를 다시 만들 수 있다)는 열쇠와 같이 둔다 — 판정을 마친 뒤 연다(§6.4)
+    key_record = {"seed": seed, "by_source": dict(Counter(e["source"] for e in entries)), "key_sha256": key_sha, "at": at}
+    (key_dir / "기록.json").write_text(json.dumps(key_record, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     target.write_text(jv.KEY_HEAD + key_sha + "\n" + _csv_text(E.SHEET_COLUMNS, rows), encoding="utf-8")
-    record = {"seed": seed, "items": len(rows), "flags": len(entries), "include_baseline2": include_b2, "key_sha256": key_sha,
-              "by_source": dict(Counter(e["source"] for e in entries)),
-              "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    record = {"items": len(rows), "flags": len(entries), "include_baseline2": include_b2, "key_sha256": key_sha, "at": at}
     (ctx.path(SHEET_DIR, "기록.json")).write_text(json.dumps(record, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    for f in (key_dir / "열쇠.csv", key_dir / "열쇠.sha256"):
+    for f in (key_dir / "열쇠.csv", key_dir / "열쇠.sha256", key_dir / "기록.json"):
         os.chmod(f, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
-    ctx.echo(f"판정표 {len(rows)}문항(표시 {len(entries)}개) · 시드 {seed} · 열쇠 sha256 {key_sha}")
+    ctx.echo(f"판정표 {len(rows)}문항(표시 {len(entries)}개) · 열쇠 sha256 {key_sha} · 시드·출처별 수는 열쇠/기록.json(판정 뒤에 연다)")
     return record
 
 
@@ -1575,7 +1685,7 @@ def cmd_sheet(ctx: Ctx, *, seed: int | None = None, include_b2: bool = False) ->
 
 
 def integrity(ctx: Ctx) -> dict:
-    """봉인(00_봉인/SHA256SUMS)과 결함(사전등록/v3/SHA256SUMS — 있으면) 해시를 다시 맞대 본다."""
+    """봉인(00_봉인/SHA256SUMS)과 사전등록 v3 해시(결함_SHA256SUMS·SHA256SUMS — 있으면) 를 다시 맞대 본다."""
     out: dict = {"sealed": None, "defects_v3": None}
     sums = ctx.root / SEALED / "SHA256SUMS"
     if sums.exists():
@@ -1584,7 +1694,7 @@ def integrity(ctx: Ctx) -> dict:
         out["sealed"] = {"ok": not bad, "mismatch": bad}
     elif ctx.mode == "verify":
         out["sealed"] = {"ok": False, "mismatch": ["00_봉인/SHA256SUMS 없음"]}
-    if (ctx.root / PREREG_V3 / "SHA256SUMS").exists():
+    if any((ctx.root / PREREG_V3 / name).exists() for name in (V3_DEFECT_SUMS, V3_SUMS)):
         bad = defect_sum_problems(ctx)
         out["defects_v3"] = {"ok": not bad, "mismatch": bad}
     return out
@@ -1628,14 +1738,16 @@ def read_answers(ctx: Ctx, answers: Path) -> tuple[list[dict], dict[str, str], l
 def cmd_report(ctx: Ctx, answers: Path) -> dict:
     key_rows, verdicts, filled = read_answers(ctx, answers)
     world = World(ctx)
-    agg = aggregate(ctx, partial=False, world=world)
+    agg = aggregate(ctx, partial=False, world=world, blind=False)  # 판정을 마친 뒤 — 표시 세부까지
     runs_info = {}
     for doc in world.docs:
         for n in (1, 2):
             run = world.run(doc, n)
             if E.run_ok(run):
-                runs_info[run["run_id"]] = {"doc": doc.id, "source": doc.source, "gate": run["gate"],
-                                            "checked": ((run.get("scorecard") or {}).get("faithfulness") or {}).get("checked", 0)}
+                faith = (run.get("scorecard") or {}).get("faithfulness") or {}
+                runs_info[run["run_id"]] = {"doc": doc.id, "source": doc.source, "gate": run["gate"], "checked": faith.get("checked", 0),
+                                            "inference_checked": int(faith.get("inference_ok") or 0)
+                                            + int(faith.get("inference_violations") or 0)}
     tally = E.tally_overblocking(key_rows, verdicts, runs_info)
     checks = integrity(ctx)
     out = {**agg, "overblocking": tally, "integrity": checks, "answers_file_sha256": sha256_file(Path(answers)),
@@ -1644,12 +1756,17 @@ def cmd_report(ctx: Ctx, answers: Path) -> dict:
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "최종보고.json").write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str) + "\n", encoding="utf-8")
     c, cl = tally["counts"], tally["claim_level"]
-    md = aggregate_markdown(agg).replace("# 판정자 평가 집계 (사전 등록 v1 §6)", "# 판정자 평가 최종 보고 (사전 등록 v1)", 1)
+    md = aggregate_markdown(agg).replace("# 판정자 평가 집계 (사전 등록 v1 §6 · v3 2절)", "# 판정자 평가 최종 보고 (사전 등록 v1 · v3)", 1)
     md += ("\n## Q3 과잉 차단 — 판정 뒤 (6.4)\n\n"
            + md_table(["셈", "값"], [["차단된 원본·변형 회차", c["차단"]], ["과잉 차단(판정자 오판만)", c["과잉 차단"]],
                                     ["자연 발생 오류 검출(실제 오류 있음)", c["자연 발생 오류 검출"]], ["통과한 원본·변형 회차", c["통과"]],
-                                    ["주장 단위: 판정자 오판 충실성 위반 / 검사한 주장", f"{cl['wrong_faithfulness_violations']} / {cl['checked']}"],
-                                    ["주장 단위 오판율", cl["rate"]]])
+                                    ["주장 단위: 판정자 오판 충실성 위반 / 검사한 주장(6.4 글자 그대로)",
+                                     f"{cl['wrong_faithfulness_violations']} / {cl['checked']}"],
+                                    ["주장 단위 오판율(6.4 글자 그대로)", cl["rate"]],
+                                    ["  나눠 보기 — 사실 일치 위반 오판 / 검사한 주장", f"{cl['violation']['wrong']} / {cl['violation']['checked']}"],
+                                    ["  나눠 보기 — 단정형 추론 오판 / 추론 판정(inference_ok + inference_violations)",
+                                     f"{cl['inference']['wrong']} / {cl['inference']['checked']}"]])
+           + f"\n{cl['note']}\n"
            + "\n" + md_table(["회차", "문서", "출처", "판정", "실제 오류", "판정자 오판"],
                              [[r, x["doc"], x["source"], x["status"], x["verdicts"][E.REAL_ERROR], x["verdicts"][E.JUDGE_ERROR]]
                               for r, x in tally["runs"].items()])
@@ -1657,7 +1774,7 @@ def cmd_report(ctx: Ctx, answers: Path) -> dict:
            + "\n\n베이스라인 2 지적(섞었을 때): " + ", ".join(f"{k} {v}" for k, v in tally["baseline2"].items()) + "\n")
     md += ("\n## 해시 다시 맞대기\n\n" + md_table(["대상", "결과", "다른 것"], [
         ["00_봉인/SHA256SUMS", None if checks["sealed"] is None else checks["sealed"]["ok"], (checks["sealed"] or {}).get("mismatch")],
-        ["사전등록/v3/SHA256SUMS(02_결함)", "없음" if checks["defects_v3"] is None else checks["defects_v3"]["ok"],
+        ["사전등록 v3(결함_SHA256SUMS·SHA256SUMS)", "없음" if checks["defects_v3"] is None else checks["defects_v3"]["ok"],
          (checks["defects_v3"] or {}).get("mismatch")]]))
     (folder / "최종보고.md").write_text(md, encoding="utf-8")
     ctx.echo(f"최종 보고 {folder}/최종보고.md·.json — 과잉 차단 {c['과잉 차단']}회, 주장 단위 오판 {cl['wrong_faithfulness_violations']}/{cl['checked']}")
