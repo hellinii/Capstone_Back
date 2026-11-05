@@ -16,7 +16,11 @@ from app.judge import config, criteria
 # 민서 2026-11-01. 필수 내용 점검은 내부 기록으로만 계속 돌고(검증·분석용) 발급을 막지 않는다(core·safety 도 이 목록을 본다).
 # 표기(readability)도 뺐다 — V2 사람 일치도 미달(시스템↔사람 0.84 vs 사람↔사람 1.00, 표기 축 0.58: 어긋남은 모두 AI '읽기 어려움'
 # 표시). 같은 기준 9, 민서 2026-11-04. 표기 점검도 내부 기록으로만 돌고, 그 호출 실패로 보류하지 않는다(core).
-PUBLISHED_AXES = ("faithfulness", "consistency")
+# 사실 일치(faithfulness)도 뺐다 — 평가 단계(2026-11-05, 사전 등록·개발에 쓰지 않은 결과서 3건)에서 축 수준 미탐지(F03 필드
+# 오지정·F08 문장 단위 추론 표시)와 판정자 오판 과잉 차단(오류 없는 원본·변형 30회 중 17회, 오판은 모두 사실 일치)이 났다. 사전
+# 등록 해석 규칙 §8("그 축을 고객 부록에서 뺀다"), 민서. 사실 일치는 발급도 막지 않는다 — 숫자 위반 칸만 규칙 문장으로 바꾼다
+# (aggregate.issuance·ladder). 기록 JUDGE_ROUND/평가/05_결과/평가_실험기록.md.
+PUBLISHED_AXES = ("consistency",)
 
 
 def _head(gate: str, held_kind: str | None, retry_allowed: bool) -> dict:

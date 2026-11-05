@@ -485,7 +485,8 @@ async def pilot(runner: "Runner", clients: Clients, paths: list[Path], out_dir: 
         cost = run.cost_usd()
         body = json.dumps({"tag": tag, "narrative": narrative, "sources": gen.section_sources,
                            "result": gen.response.model_dump(), "gate": run.gate, "failure": run.failure,
-                           "flagged_slots": run.flagged_slots, "scorecard": run.scorecard, "record": run.record},
+                           "flagged_slots": run.flagged_slots, "issuance": run.issuance, "blocking_slots": run.blocking_slots,
+                           "repair_slots": run.repair_slots, "scorecard": run.scorecard, "record": run.record},
                           ensure_ascii=False, indent=1) + "\n"
         target = out_dir / f"{tag}.{narrative}.json"
         target.write_text(body, encoding="utf-8")

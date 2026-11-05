@@ -1,7 +1,8 @@
 """app/judge — 판 4 서술 심판(LLM-as-judge 평가 시스템).
 
 서술 작업이 판 4 서술을 다 만든 직후, 초안이 나오기 전에 서술을 검사한다. 4축(사실 일치·필수 내용·일관성·표기)을
-따로 재고, 사실 위반이나 모순이 있으면 발급을 막는다. 심판 사유는 서술 생성 지시문에 넣지 않는다.
+따로 재고, 모순이 있으면 발급을 막는다(사실 위반은 막지 않고 숫자 위반 칸만 규칙 문장으로 바꾼다 — 2026-11-05, aggregate.issuance).
+심판 사유는 서술 생성 지시문에 넣지 않는다.
 
 import 규칙(tests/test_judge_import_rules.py 가 지킨다)
 - 서술 생성 지시문 쪽 모듈(app.narrative 의 prompt·generator·checks·grounding·required_items·fact_view*·fallback·wording*)은

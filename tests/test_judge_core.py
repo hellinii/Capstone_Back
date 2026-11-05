@@ -253,3 +253,73 @@ async def test_readability_failure_is_recorded_but_does_not_hold_when_the_axis_i
     assert run.record["readability"]["failure"] == "bad_output"
     assert run.scorecard["readability"]["rules"] == 2 and run.scorecard["readability"]["llm_flags"] == 0
     assert "readability" not in bundle.passed(run.scorecard)["counts"]
+
+
+# ── 발급 규칙(2026-11-05 평가 단계 뒤 민서 결정): 모순만 발급을 막고, 숫자 위반 칸은 고친다 ──
+
+
+def fvk(kind, verdict, slot="7.1"):
+    return ClaimVerdict("C", kind, verdict, slot, f"slot:{slot}", "q")
+
+
+@pytest.mark.parametrize("verdicts, contradictions, gate, issuance", [
+    ([fv("match")], [], "pass", "pass"),
+    ([fv("violation")], [], "blocked", "pass"),                 # 사실 위반은 판정자 판정만 막고 발급은 막지 않는다
+    ([fv("inference_violation")], [], "blocked", "pass"),
+    ([fv("match")], [ct(["7.1", "8.2"], ["ai", "ai"])], "blocked", "blocked"),
+    ([fv("violation")], [ct(["7.1", "7.1"], ["fixed", "table"])], "blocked", "blocked"),
+])
+def test_issuance_blocks_only_on_contradictions(verdicts, contradictions, gate, issuance):
+    f, c = faith(*verdicts), cons(*contradictions)
+    assert (aggregate.gate(f, c), aggregate.issuance(c)) == (gate, issuance)
+
+
+@pytest.mark.parametrize("verdicts, want", [
+    ([fvk("number", "violation", "7.2")], ["7.2"]),
+    ([fvk("number", "violation", "9"), fvk("number", "violation", "7.1"), fvk("number", "violation", "9")], ["7.1", "9"]),
+    ([fvk(k, "violation", "7.2") for k in ("name", "comparison", "degree")], []),   # 숫자 주장만 고친다
+    ([fvk("inference", "inference_violation", "7.2"), fvk("inference", "violation", "7.2")], []),
+    ([fvk("number", "match", "7.2"), fvk("number", "unverifiable", "8.1")], []),
+    ([fvk("number", "violation", "4.3")], []),                                       # 서술 칸 밖
+])
+def test_repair_slots_are_number_violation_narrative_slots(verdicts, want):
+    assert aggregate.repair_slots(faith(*verdicts)) == want
+
+
+def test_blocking_slots_ignore_fact_violations():
+    contradiction = ct(["7.1", "8.2"], ["ai", "ai"])
+    assert aggregate.blocking_slots(cons(contradiction)) == (["8.2"], [])
+    assert aggregate.blocking_slots(cons()) == ([], [])
+    flagged, _ = aggregate.flagged_slots(faith(fv("violation", slot="7.3")), cons(contradiction))
+    assert flagged == ["7.3", "8.2"]  # 판정자 게이트 기록은 사실 위반 칸까지 — 사다리는 blocking_slots 만 본다
+
+
+async def test_judge_once_hands_the_issuance_rule_to_the_run(monkeypatch):
+    """배선 — judge_once 가 발급 규칙(aggregate.issuance·blocking_slots·repair_slots)의 답을 그대로 싣는다."""
+    req, gen, refs = await _setup()
+    text = gen.response.conclusion.narrative
+    answers = _empty_answers(None)
+    quote = next(tok for tok in text.split() if any(ch.isdigit() for ch in tok))
+    answers["claims"] = {"claims": [{"kind": "number", "quote": quote, "piece_id": "slot:8.2", "field": "", "field_b": "",
+                                     "number_text": "", "polarity": ""}]}
+    answers["faithfulness"] = lambda kw: {"claims": [{"claim_id": "C1", "resolution": "no_data", "expr": "", "expr_b": "",
+                                                      "relation": "", "name_field": "", "named": "", "metric_id": "",
+                                                      "inference_basis": ""}]}
+    monkeypatch.setattr(aggregate, "issuance", lambda c: "발급-표식")
+    monkeypatch.setattr(aggregate, "blocking_slots", lambda c: (["9"], []))
+    monkeypatch.setattr(aggregate, "flagged_slots", lambda f, c: (["7.1", "9"], []))  # 걸린 칸 전부 ≠ 막는 칸
+    monkeypatch.setattr(aggregate, "repair_slots", lambda f: ["8.3"])
+    run = await core.judge_once(F.FakeOpenAI([router(answers)] * 20), req, gen.response, gen.section_sources, refs)
+    assert (run.gate, run.issuance, run.blocking_slots, run.repair_slots) == ("pass", "발급-표식", ["9"], ["8.3"])
+    assert run.flagged_slots == ["7.1", "9"]
+
+
+def test_safety_checks_quotes_only_of_number_violations():
+    # 발급 규칙이 쓰는 사실 위반은 숫자 위반뿐 — 기록만 하는 위반의 인용 문제로 보류하지 않는다(2026-11-05)
+    pieces = [Piece("slot:7.1", "7.1", "5.2", "ai", "FN 은 43건이다.")]
+    none = CoverageResult([], [], {})
+    bad = [ClaimVerdict("C", kind, verdict, "7.1", "slot:7.1", "없는 인용")
+           for kind, verdict in (("name", "violation"), ("comparison", "violation"), ("degree", "violation"),
+                                 ("inference", "inference_violation"))]
+    assert safety.problems(pieces, faith(*bad), cons(), none) == []
+    assert safety.problems(pieces, faith(*bad, fvk("number", "violation")), cons(), none) == ["faithfulness:C"]
