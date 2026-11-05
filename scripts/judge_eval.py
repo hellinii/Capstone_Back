@@ -148,10 +148,10 @@ def eval_root(root: Path | str | None) -> Path:
 
 def dev_guard(path: Path | str) -> Path:
     """dev 경계 — judge_validate.guard(검증 폴더 거부·허용 목록) + 평가 폴더 거부."""
-    resolved = jv.guard(path, "dev")
-    if judge_paths.inside(resolved, DEFAULT_EVAL):
-        raise RunnerError(f"dev 모드는 평가 폴더를 읽거나 쓰지 않는다: {resolved}")
-    return resolved
+    # 평가 폴더 검사를 먼저 — 저장소 옆 평가 폴더는 허용 목록 밖이기도 해서, 순서가 거꾸로면 거부 사유가 저장소 위치마다 달라진다.
+    if judge_paths.inside(Path(path).resolve(), DEFAULT_EVAL):
+        raise RunnerError(f"dev 모드는 평가 폴더를 읽거나 쓰지 않는다: {Path(path).resolve()}")
+    return jv.guard(path, "dev")
 
 
 @dataclass
