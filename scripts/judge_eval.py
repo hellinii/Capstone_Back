@@ -599,6 +599,331 @@ def cmd_precheck(ctx: Ctx, *, echo: Callable[[str], None] | None = None) -> dict
     return out
 
 
+# ── 장부·실행 번호·상한 ──────────────────────────────────────────────────
+
+
+class LedgerWriter:
+    """장부 쓰기 한 곳 — 프로세스 안은 asyncio.Lock, 프로세스 사이는 장부 파일 flock. 실행 번호(E-0001 …)는 잠근 채 장부의 가장 큰
+    E 번호 + 1 로 정하고, 결과 원본 파일과 장부 줄을 같은 잠금 안에서 쓴다(동시에 끝난 회차가 같은 번호를 받지 않게)."""
+
+    def __init__(self, path: Path):
+        self.ledger = jl.Ledger(path)
+        self.lock = asyncio.Lock()
+
+    @contextlib.contextmanager
+    def _flock(self):
+        with open(self.ledger.path, "a", encoding="utf-8") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    @staticmethod
+    def next_id(rows: list[dict]) -> str:
+        used = [int(m.group(1)) for r in rows if (m := RUN_ID.fullmatch(r.get("run_id", "")))]
+        return f"E-{max(used, default=0) + 1:04d}"
+
+    async def commit(self, build: Callable[[str, list[dict]], tuple[dict, list[tuple[Path, str]]]]) -> dict:
+        """build(실행 번호, 지금 장부 줄) → (장부 줄, [(파일, 글)]). 파일을 먼저 쓰고 장부 줄을 단다."""
+        async with self.lock:
+            with self._flock():
+                rows = self.ledger.rows()
+                run_id = self.next_id(rows)
+                row, files = build(run_id, rows)
+                for path, text in files:
+                    if path.exists():
+                        raise RunnerError(f"결과 파일이 이미 있다(덮어쓰지 않는다): {path}")
+                    path.write_text(text, encoding="utf-8")
+                return self.ledger.append({**row, "run_id": run_id})
+
+
+@dataclass(frozen=True)
+class Cap:
+    """이 실험 장부 상한(§7.7 $30·110회) — JUDGE_LIVE_BUDGET_USD·JUDGE_LIVE_MAX_RUNS 로 바꾼다."""
+
+    usd: float
+    runs: int
+
+    @classmethod
+    def from_env(cls) -> "Cap":
+        usd = os.getenv("JUDGE_LIVE_BUDGET_USD", "").strip()
+        runs = os.getenv("JUDGE_LIVE_MAX_RUNS", "").strip()
+        return cls(float(usd) if usd else E.BUDGET_USD, int(runs) if runs else E.BUDGET_RUNS)
+
+
+def spent(rows: list[dict]) -> tuple[float, int]:
+    """(장부 누계 달러, 줄 수). 비용을 모르는 줄은 회당 예상($0.30)으로 센다(상한을 넘지 않게 보수적으로)."""
+    usd = sum(float(r["cost_usd"]) if (r.get("cost_usd") or "").strip() else E.EST_USD_PER_RUN for r in rows)
+    return usd, len(rows)
+
+
+def cap_problem(rows: list[dict], cap: Cap, more: int) -> str | None:
+    usd, n = spent(rows)
+    est = more * E.EST_USD_PER_RUN
+    if n + more > cap.runs:
+        return f"회차 상한을 넘는다: 장부 {n}회 + {more}회 > {cap.runs}회"
+    if usd + est > cap.usd + 1e-9:
+        return f"비용 상한을 넘는다: 장부 ${usd:.2f} + 예상 ${est:.2f}({more}회 × ${E.EST_USD_PER_RUN:.2f}) > ${cap.usd:.2f}"
+    return None
+
+
+def row_status(row: dict, *, fingerprint: str, mode: str) -> str | None:
+    """장부 줄 하나의 상태 — done(판정이 남) · final(판정자 실패 — 다시 돌리지 않는다) · retry(API 실패·시간 초과·예외).
+    다른 모드·다른 기준 지문의 줄은 None(이 실험 회차가 아니다)."""
+    if row.get("mode") != mode or row.get("manifest_sha256") != fingerprint:
+        return None
+    if (row.get("result_file") or "").strip() and row.get("gate") in ("pass", "blocked"):
+        return "done"
+    if (row.get("result_file") or "").strip() and not retryable(row.get("error", "")):
+        return "final"
+    return "retry"
+
+
+def stage_states(rows: list[dict], stage: str, *, fingerprint: str, mode: str) -> dict[tuple[str, str], dict]:
+    """(결과서, 변형) → {status: done|final|retry, row: 끝낸 줄(없으면 마지막 줄), attempts}."""
+    out: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        if row.get("stage") != stage:
+            continue
+        st = row_status(row, fingerprint=fingerprint, mode=mode)
+        if st is None:
+            continue
+        key = (row["report"], row["variant"])
+        cur = out.setdefault(key, {"status": "retry", "row": row, "attempts": 0})
+        cur["attempts"] += 1
+        if cur["status"] in ("done", "final"):
+            continue  # 끝난 뒤의 줄은 없어야 한다 — 있어도 처음 끝낸 줄을 쓴다
+        cur["status"], cur["row"] = st, row
+    return out
+
+
+def finished(state: dict | None) -> bool:
+    return bool(state) and state["status"] in ("done", "final")
+
+
+# ── run ──────────────────────────────────────────────────────────────
+
+
+def plan_order(ctx: Ctx, round_no: int, docs: list[Doc], *, write: bool) -> list[Doc]:
+    """회차 안 순서(§7.2 시드). plan-r<회차>.json 이 있으면 지금 문서 목록·순서가 같은지 보고, 없으면 write 일 때 쓴다."""
+    seed = E.ROUND_SEEDS[round_no]
+    order = sorted(docs, key=lambda d: (d.report, d.variant))
+    random.Random(seed).shuffle(order)
+    listed = [[d.report, d.variant, d.id] for d in order]
+    path = ctx.path(RUNS_OUT, f"plan-r{round_no}.json")
+    if path.exists():
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        if saved.get("seed") != seed or saved.get("order") != listed:
+            raise RunnerError(f"{path.name} 의 순서가 지금 문서 목록과 다르다 — 02_결함 이 바뀌었나(동결 뒤에는 고치지 않는다)")
+    elif write:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"round": round_no, "seed": seed, "fingerprint": criteria.fingerprint(),
+                                    "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "order": listed},
+                                   ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return order
+
+
+def full_set_problems(docs: list[Doc]) -> list[str]:
+    """verify — 사전 등록 33문서(원본 3·결함 18·변형 12)가 모두 있어야 한다."""
+    want = {*E.EVAL_REPORTS, *E.DEFECT_IDS, *E.VARIANT_IDS}
+    have = {d.id for d in docs}
+    out = []
+    if want - have:
+        out.append(f"없는 문서: {', '.join(sorted(want - have))}")
+    if have - want:
+        out.append(f"사전 등록에 없는 문서: {', '.join(sorted(have - want))}")
+    return out
+
+
+def frozen_problems(ctx: Ctx) -> list[str]:
+    """verify 채점 전 — precheck 가 변형 다름 없이 끝났고 그 뒤 02_결함 이 바뀌지 않았으며, 사전등록/v3/SHA256SUMS 가 있으면 맞다."""
+    out = []
+    pre = ctx.root / BUILD / "precheck.json"
+    files = {p.relative_to(ctx.root).as_posix(): sha256_file(p) for p in sorted((ctx.root / DEFECTS).rglob("*")) if p.is_file()} \
+        if (ctx.root / DEFECTS).is_dir() else {}
+    if not pre.exists():
+        out.append("01_구성/precheck.json 이 없다 — precheck 를 먼저 돌린다(§4 동결 전 확인)")
+    else:
+        saved = json.loads(pre.read_text(encoding="utf-8"))
+        if saved.get("variants_differ"):
+            out.append(f"precheck 에서 원본과 다른 변형이 있다: {', '.join(saved['variants_differ'])}")
+        if saved.get("files") != files:
+            out.append("precheck 뒤에 02_결함 파일이 바뀌었다 — precheck 를 다시 돌린다")
+    out += defect_sum_problems(ctx)
+    return out
+
+
+def defect_sum_problems(ctx: Ctx) -> list[str]:
+    """사전등록/v3/SHA256SUMS(있으면)의 줄 가운데 평가 폴더(또는 02_결함) 안 파일을 가리키는 것이 모두 맞는가."""
+    sums_path = ctx.root / PREREG_V3 / "SHA256SUMS"
+    if not sums_path.exists():
+        return []
+    out, checked = [], 0
+    for name, digest in read_sums(sums_path).items():
+        cands = [ctx.root / name, ctx.root / DEFECTS / name, ctx.root / PREREG_V3 / name]
+        path = next((p for p in cands if p.is_file()), None)
+        if path is None:
+            if name.startswith(f"{DEFECTS}/"):
+                out.append(f"사전등록 v3 에 적힌 파일이 없다: {name}")
+            continue
+        checked += 1
+        if sha256_file(path) != digest:
+            out.append(f"사전등록 v3 해시와 다르다: {name}")
+    return out
+
+
+async def run_round(ctx: Ctx, round_no: int, order: list[Doc], todo: list[Doc], bases: dict[str, jv.Base], *, client,
+                    judge, concurrency: int, cap: Cap, meta: dict) -> dict:
+    """남은 회차를 동시에 concurrency 개씩. 회차마다 결과 원본 03_실행/<E-…>.json + 장부 한 줄(잠금 안에서)."""
+    stage = STAGE_OF_ROUND[round_no]
+    seed = E.ROUND_SEEDS[round_no]
+    writer = LedgerWriter(ctx.ledger_path)
+    sem = asyncio.Semaphore(concurrency)
+    state = {"in_flight": 0}
+    position = {d.id: i for i, d in enumerate(order)}
+
+    async def one(doc: Doc) -> dict:
+        started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        t0 = time.monotonic()
+        run, sha, error = None, narrative_sha(bases[doc.report], doc.slots), ""
+        try:
+            run, sha = await judge(client, bases[doc.report], doc.slots)
+            error = run.failure or ""
+        except Exception as exc:  # noqa: BLE001 — 회차 하나의 예외로 나머지를 멈추지 않는다(재시도 대상으로 남긴다)
+            error = f"{EXCEPTION_PREFIX}{type(exc).__name__}: {str(exc)[:200]}"
+        seconds = round(time.monotonic() - t0, 3)
+
+        def build(run_id: str, rows: list[dict]):
+            attempt = 1 + sum(1 for r in rows if r.get("stage") == stage and r.get("report") == doc.report
+                              and r.get("variant") == doc.variant and r.get("mode") == ctx.runner_mode)
+            body = {
+                "run_id": run_id, "key": {"stage": stage, "round": round_no, "report": doc.report, "variant": doc.variant,
+                                          "doc": doc.id, "source": doc.source},
+                "attempt": attempt, "order_seed": seed, "order_index": position[doc.id], "mode": ctx.mode, **meta,
+                "narrative_sha256": sha, "variant_meta": doc.meta, "started_at": started_at,
+                "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "seconds": seconds,
+                "gate": run.gate if run else None, "failure": run.failure if run else None, "error": error,
+                "flagged_slots": run.flagged_slots if run else [], "unfixable": run.unfixable if run else [],
+                "scorecard": run.scorecard if run else None, "record": run.record if run else {},
+            }
+            text = json.dumps(body, ensure_ascii=False, indent=1, default=str) + "\n"
+            target = ctx.path(RUNS_OUT, f"{run_id}.json")
+            cols = jl.judge_run_row(run) if run else {"model_requested": "gpt-6.1-sol+gpt-6-luna", "seconds": seconds}
+            row = {**meta, **cols, "stage": stage, "report": doc.report, "variant": doc.variant, "repeat": round_no,
+                   "mode": ctx.runner_mode, "result_file": target.relative_to(ctx.root).as_posix(),
+                   "result_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "error": error}
+            return row, [(target, text)]
+
+        return await writer.commit(build)
+
+    async def guarded(doc: Doc) -> dict:
+        try:
+            return await one(doc)
+        finally:
+            state["in_flight"] -= 1
+            sem.release()
+
+    ctx.path(RUNS_OUT).mkdir(parents=True, exist_ok=True)
+    tasks, stopped = [], []
+    for i, doc in enumerate(todo):
+        await sem.acquire()
+        async with writer.lock:
+            problem = cap_problem(writer.ledger.rows(), cap, state["in_flight"] + 1)
+        if problem:
+            sem.release()
+            stopped = [d.id for d in todo[i:]]
+            ctx.echo(f"상한에 닿아 새 회차를 띄우지 않는다({problem}) — 남은 {len(stopped)}회")
+            break
+        state["in_flight"] += 1
+        tasks.append(asyncio.create_task(guarded(doc)))
+    rows = await asyncio.gather(*tasks)
+    for r in rows:
+        ctx.echo(f"  {r['run_id']} {r['stage']} {E.doc_id(r['report'], r['variant'])} — {r['gate'] or '실패 ' + r['error']}")
+    return {"rows": rows, "stopped": stopped}
+
+
+def cmd_run(ctx: Ctx, round_no: int, *, concurrency: int = MAX_CONCURRENCY, only: list[str] | None = None, live: bool = False,
+            yes: bool = False, client=None, judge=None, git=jv._git) -> dict:
+    """채점 한 회차(§7.2). 확인 입력이 없다 — --yes 가 없으면 계획만 찍고 멈춘다."""
+    if round_no not in E.ROUND_SEEDS:
+        raise RunnerError(f"회차는 1 또는 2: {round_no}")
+    if not 1 <= concurrency <= MAX_CONCURRENCY:
+        raise RunnerError(f"동시 실행은 1~{MAX_CONCURRENCY}개(§7.2): {concurrency}")
+    if ctx.mode == "verify":
+        problems = eval_verify_problems(live=live, ledger_path=ctx.ledger_path, git=git)
+        if problems:
+            raise RunnerError("verify 를 시작하지 않는다:\n  - " + "\n  - ".join(problems))
+    bases = load_bases(ctx)
+    docs = documents(bases, load_items(ctx))
+    if ctx.mode == "verify":
+        problems = full_set_problems(docs) + frozen_problems(ctx)
+        if problems:
+            raise RunnerError("채점을 시작하지 않는다:\n  - " + "\n  - ".join(problems))
+    fp = criteria.fingerprint()
+    rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
+    if round_no == 2:
+        first = stage_states(rows, STAGE_OF_ROUND[1], fingerprint=fp, mode=ctx.runner_mode)
+        left = [d.id for d in docs if not finished(first.get((d.report, d.variant)))]
+        if left:
+            raise RunnerError(f"1회차가 끝나지 않았다(§7.2 — 1회차 33문서를 마친 뒤 2회차): 남은 {len(left)}개 {', '.join(left[:6])}")
+    order = plan_order(ctx, round_no, docs, write=False)
+    states = stage_states(rows, STAGE_OF_ROUND[round_no], fingerprint=fp, mode=ctx.runner_mode)
+    todo = [d for d in order if not finished(states.get((d.report, d.variant)))]
+    if only:
+        unknown = sorted(set(only) - {d.id for d in docs})
+        if unknown:
+            raise RunnerError(f"없는 문서: {', '.join(unknown)}")
+        todo = [d for d in todo if d.id in set(only)]
+    cap = Cap.from_env()
+    usd, n = spent(rows)
+    retries = sum(1 for d in todo if (states.get((d.report, d.variant)) or {}).get("status") == "retry")
+    done = sum(finished(states.get((d.report, d.variant))) for d in order)
+    ctx.echo(f"[{ctx.mode}] {STAGE_OF_ROUND[round_no]}: 계획 {len(order)}문서 · 끝남 {done}"
+             f" · 이번 {len(todo)}회(다시 도는 것 {retries}) · 시드 {E.ROUND_SEEDS[round_no]} · 동시 {concurrency}"
+             f" | 장부 ${usd:.2f}·{n}회 | 상한 ${cap.usd:.2f}·{cap.runs}회 | 예상 ${len(todo) * E.EST_USD_PER_RUN:.2f}")
+    problem = cap_problem(rows, cap, len(todo))
+    if problem:
+        raise RunnerError(problem)
+    if not yes:
+        raise RunnerError("--yes 가 없어 시작하지 않는다(위 계획을 보고 다시 실행)")
+    plan_order(ctx, round_no, docs, write=True)
+    if not todo:
+        ctx.echo("남은 회차가 없다")
+        return {"round": round_no, "ran": 0, "stopped": [], "gates": {}}
+    if client is None:
+        if ctx.mode == "dev":
+            from dev_fake_llm_server import FakeOpenAI
+
+            client = FakeOpenAI("pass")
+        else:
+            client = jl.make_clients(live=True).openai
+            if client is None:
+                raise RunnerError("OPENAI_API_KEY 가 없다")
+    out = asyncio.run(run_round(ctx, round_no, order, todo, bases, client=client, judge=judge or jv.judge_one,
+                                concurrency=concurrency, cap=cap, meta=jl.run_meta()))
+    gates = Counter(r["gate"] or ("재시도 대상" if retryable(r["error"]) else "최종 실패") for r in out["rows"])
+    return {"round": round_no, "ran": len(out["rows"]), "stopped": out["stopped"], "gates": dict(gates),
+            "run_ids": [r["run_id"] for r in out["rows"]]}
+
+
+def cmd_status(ctx: Ctx) -> dict:
+    rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
+    fp = criteria.fingerprint()
+    out = {}
+    for stage in (*STAGE_OF_ROUND.values(), B2_STAGE):
+        st = stage_states(rows, stage, fingerprint=fp, mode=ctx.runner_mode)
+        c = Counter(v["status"] for v in st.values())
+        out[stage] = {"done": c["done"], "final_failure": c["final"], "retry": c["retry"],
+                      "attempts": sum(v["attempts"] for v in st.values())}
+        ctx.echo(f"{stage}: 끝남 {c['done']} · 최종 실패 {c['final']} · 다시 돌 것 {c['retry']} · 줄 {out[stage]['attempts']}")
+    usd, n = spent(rows)
+    cap = Cap.from_env()
+    out["ledger"] = {"usd": round(usd, 6), "rows": n, "cap_usd": cap.usd, "cap_runs": cap.runs}
+    ctx.echo(f"장부 누계 ${usd:.2f}·{n}회 | 상한 ${cap.usd:.2f}·{cap.runs}회")
+    return out
+
+
 # ── 명령줄 ───────────────────────────────────────────────────────────
 
 
@@ -615,6 +940,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("plant", "결함·변형 표 → 02_결함/<ID>/")
     p.add_argument("--table", required=True)
     add("precheck", "동결 전 확인 → 01_구성/precheck.json")
+    p = add("run", "채점 한 회차(33문서, 시드 순서, 동시 실행)")
+    p.add_argument("--round", type=int, required=True, choices=(1, 2))
+    p.add_argument("--concurrency", type=int, default=MAX_CONCURRENCY)
+    p.add_argument("--only", default="", help="이 문서만(쉼표 — F01·V03·pima_strong 꼴)")
+    p.add_argument("--live", action="store_true")
+    p.add_argument("--yes", action="store_true")
+    add("status", "회차별 끝남·실패·남음과 장부 누계")
     return parser
 
 
@@ -628,6 +960,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "precheck":
             out = cmd_precheck(ctx)
             return 1 if out["variants_differ"] else 0
+        if args.command == "run":
+            out = cmd_run(ctx, args.round, concurrency=args.concurrency, only=[x for x in args.only.split(",") if x],
+                          live=args.live, yes=args.yes)
+            print(json.dumps({k: v for k, v in out.items() if k != "run_ids"}, ensure_ascii=False))
+            return 3 if out["stopped"] or out["gates"].get("재시도 대상") else 0
+        if args.command == "status":
+            cmd_status(ctx)
+            return 0
         raise RunnerError(f"모르는 명령: {args.command}")
     except RunnerError as exc:
         print(f"멈춤: {exc}", file=sys.stderr)

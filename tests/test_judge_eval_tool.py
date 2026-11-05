@@ -195,3 +195,233 @@ def test_precheck_flags_variant_that_changes_first_check(ctx, tmp_path):
     diff = out["items"]["V03"]["first_check_diff"]
     assert list(diff) == ["7.2"] and diff["7.2"]["this"]["numbers"] == ["201"]
     assert je.main(["precheck", "--mode", "dev", "--root", str(ctx.root)]) == 1
+
+
+# ── run: 장부·실행 번호·동시 실행·이어 하기·상한 ──
+
+
+def _rows(path: Path) -> list[dict]:
+    with path.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+@pytest.fixture
+def planted(ctx, tmp_path):
+    je.cmd_plant(ctx, write_table(tmp_path, table_rows()))
+    return ctx
+
+
+class FakeJudge:
+    """judge_validate.judge_one 자리 — 가짜 OpenAI 없이 JudgeRun 을 돌려준다. 동시에 몇 개가 돌았는지 센다.
+    plan[문서 서술 해시] 로 문서마다 (게이트, 실패, 비용, 표시) 를 정한다."""
+
+    def __init__(self, *, delay=0.0, gate="pass", failure=None, cost=0.01, raise_once: set | None = None, per_doc=None):
+        self.delay, self.gate, self.failure, self.cost = delay, gate, failure, cost
+        self.raise_once = set(raise_once or ())
+        self.per_doc = per_doc or {}
+        self.now = self.peak = self.calls = 0
+
+    async def __call__(self, client, base, slots):
+        from app.judge.core import JudgeRun
+
+        self.calls += 1
+        self.now += 1
+        self.peak = max(self.peak, self.now)
+        try:
+            await asyncio.sleep(self.delay() if callable(self.delay) else self.delay)
+            doc = next(iter(slots)) if slots else base.tag
+            sha = je.narrative_sha(base, slots)
+            if sha in self.raise_once:
+                self.raise_once.discard(sha)
+                raise ConnectionError("끊김(시험)")
+            spec = self.per_doc.get(sha, {})
+            gate, failure = spec.get("gate", self.gate), spec.get("failure", self.failure)
+            record = {"extract": {"claims": spec.get("claims", []), "calls": [{"cost_usd": spec.get("cost", self.cost),
+                                                                                 "response_model": "gpt-6-luna"}]},
+                      "faithfulness": {"verdicts": spec.get("verdicts", [])},
+                      "consistency": {"contradictions": spec.get("contradictions", [])}, "seconds": {"total": 0.01}}
+            card = None if failure else spec.get("card", {
+                "faithfulness": {"checked": 10, "matched": 10}, "coverage": {"applicable": 5, "described": 5},
+                "consistency": {"contradictions": len(spec.get("contradictions", []))}, "readability": {"violations": 0}})
+            return JudgeRun(None if failure else gate, failure, scorecard=card, record=record), sha
+        finally:
+            self.now -= 1
+
+
+def _sha_of(doc_id: str) -> str:
+    items = {}
+    for row in table_rows():
+        b = bases()[row["base"]]
+        text = V.read_slot(b.result, row["slot"]).replace(row["old"], row["new"], 1)
+        items[row["id"]] = je.narrative_sha(b, {row["slot"]: text})
+    for tag, b in bases().items():
+        items[tag] = je.narrative_sha(b, None)
+    return items[doc_id]
+
+
+def test_run_writes_one_row_and_file_per_doc_then_resume_skips(planted):
+    ctx = planted
+    judge = FakeJudge(delay=0.01)
+    out = je.cmd_run(ctx, 1, concurrency=3, yes=True, judge=judge, client=object())
+    rows = _rows(ctx.ledger_path)
+    assert out["ran"] == 8 and len(rows) == 8 and judge.calls == 8
+    assert sorted(r["run_id"] for r in rows) == [f"E-{i:04d}" for i in range(1, 9)]
+    assert {r["stage"] for r in rows} == {"eval_r1"} and {r["repeat"] for r in rows} == {"1"} and {r["mode"] for r in rows} == {"dev"}
+    assert sorted(E.doc_id(r["report"], r["variant"]) for r in rows) == sorted(["dev_binary", "dev_multiclass", "dev_multilabel",
+                                                                               "F01", "C02", "F08", "V01", "V02"])
+    assert tuple(rows[0]) == je.jl.LEDGER_COLUMNS  # 24열 그대로
+    for r in rows:
+        path = ctx.root / r["result_file"]
+        assert r["result_file"].startswith("03_실행/") and je.sha256_file(path) == r["result_sha256"]
+        body = json.loads(path.read_text(encoding="utf-8"))
+        assert body["run_id"] == r["run_id"] and body["key"]["round"] == 1 and body["attempt"] == 1
+        assert body["manifest_sha256"] == je.criteria.fingerprint() and body["gate"] == "pass"
+        assert body["order_seed"] == 20261105 and body["narrative_sha256"] == _sha_of(body["key"]["doc"])
+    plan = json.loads((ctx.root / "03_실행" / "plan-r1.json").read_text(encoding="utf-8"))
+    import random as _r
+
+    expect = sorted(je.documents(bases(), je.load_items(ctx)), key=lambda d: (d.report, d.variant))
+    _r.Random(20261105).shuffle(expect)
+    assert plan["seed"] == 20261105 and [o[2] for o in plan["order"]] == [d.id for d in expect]
+    # 이어 하기 — 끝난 회차는 건너뛴다
+    again = je.cmd_run(ctx, 1, concurrency=3, yes=True, judge=FakeJudge(), client=object())
+    assert again["ran"] == 0 and len(_rows(ctx.ledger_path)) == 8
+
+
+def test_concurrent_runs_get_unique_ids_and_respect_concurrency(planted):
+    ctx = planted
+    import random as _r
+
+    rng = _r.Random(3)
+    judge = FakeJudge(delay=lambda: rng.uniform(0.0, 0.03))
+    je.cmd_run(ctx, 1, concurrency=3, yes=True, judge=judge, client=object())
+    rows = _rows(ctx.ledger_path)
+    ids = [r["run_id"] for r in rows]
+    assert len(ids) == len(set(ids)) == 8 and 2 <= judge.peak <= 3  # 실제로 동시에 돌았고 3개를 넘지 않았다
+    files = sorted(p.name for p in (ctx.root / "03_실행").glob("E-*.json"))
+    assert files == sorted(f"{i}.json" for i in ids)
+
+
+def test_ledger_writer_ids_unique_under_many_concurrent_commits(tmp_path):
+    writer_path = tmp_path / "장부.csv"
+
+    async def main():
+        writer = je.LedgerWriter(writer_path)
+
+        async def commit(k):
+            await asyncio.sleep(0.001 * (k % 5))
+
+            def build(run_id, rows):
+                return {"stage": "eval_r1", "report": "x", "variant": f"v{k}", "repeat": 1}, [(tmp_path / f"{run_id}.json", "{}")]
+            return await writer.commit(build)
+
+        return await asyncio.gather(*(commit(k) for k in range(40)))
+
+    rows = asyncio.run(main())
+    assert sorted(r["run_id"] for r in rows) == [f"E-{i:04d}" for i in range(1, 41)]
+    assert len(_rows(writer_path)) == 40 and len(list(tmp_path.glob("E-*.json"))) == 40
+
+
+def test_round2_waits_for_round1_and_uses_its_seed(planted):
+    ctx = planted
+    je.cmd_run(ctx, 1, yes=True, judge=FakeJudge(), client=object(), only=["F01", "dev_binary"])
+    with pytest.raises(je.RunnerError, match="1회차가 끝나지 않았다"):
+        je.cmd_run(ctx, 2, yes=True, judge=FakeJudge(), client=object())
+    je.cmd_run(ctx, 1, yes=True, judge=FakeJudge(), client=object())
+    out = je.cmd_run(ctx, 2, yes=True, judge=FakeJudge(), client=object())
+    rows = _rows(ctx.ledger_path)
+    assert out["ran"] == 8 and len(rows) == 16 and sum(r["stage"] == "eval_r2" for r in rows) == 8
+    assert json.loads((ctx.root / "03_실행" / "plan-r2.json").read_text(encoding="utf-8"))["seed"] == 20261106
+    assert len({r["run_id"] for r in rows}) == 16
+
+
+def test_api_failures_are_retried_but_judge_failures_are_final(planted):
+    ctx = planted
+    boom = FakeJudge(raise_once={_sha_of("F01")}, per_doc={_sha_of("C02"): {"failure": "uncited"},
+                                                          _sha_of("V01"): {"failure": "timeout"}})
+    out = je.cmd_run(ctx, 1, yes=True, judge=boom, client=object())
+    assert out["gates"] == {"pass": 5, "재시도 대상": 2, "최종 실패": 1}
+    rows = _rows(ctx.ledger_path)
+    err = {E.doc_id(r["report"], r["variant"]): r["error"] for r in rows}
+    assert err["F01"].startswith("exception:ConnectionError") and err["C02"] == "uncited" and err["V01"] == "timeout"
+    # 다시 부르면 재시도 대상(예외·시간 초과)만 — 판정자 실패(uncited)는 결과를 이유로 다시 돌리지 않는다(§7.4)
+    again = FakeJudge()
+    out = je.cmd_run(ctx, 1, yes=True, judge=again, client=object())
+    assert out["ran"] == 2 and again.calls == 2
+    rows = _rows(ctx.ledger_path)
+    f01 = [r for r in rows if r["variant"] == "F01"]
+    assert len(f01) == 2 and f01[-1]["gate"] == "pass"
+    assert json.loads((ctx.root / f01[-1]["result_file"]).read_text(encoding="utf-8"))["attempt"] == 2
+    states = je.stage_states(rows, "eval_r1", fingerprint=je.criteria.fingerprint(), mode="dev")
+    assert states[("dev_multiclass", "C02")]["status"] == "final" and states[("dev_binary", "F01")]["attempts"] == 2
+
+
+def test_cap_refuses_start_and_stops_launching_mid_run(planted, monkeypatch):
+    ctx = planted
+    monkeypatch.setenv("JUDGE_LIVE_MAX_RUNS", "5")
+    with pytest.raises(je.RunnerError, match="회차 상한을 넘는다: 장부 0회 \\+ 8회 > 5회"):
+        je.cmd_run(ctx, 1, yes=True, judge=FakeJudge(), client=object())
+    assert not ctx.ledger_path.exists() and not (ctx.root / "03_실행" / "plan-r1.json").exists()
+    monkeypatch.setenv("JUDGE_LIVE_MAX_RUNS", "110")
+    monkeypatch.setenv("JUDGE_LIVE_BUDGET_USD", "3")  # 예상 8 × $0.30 = $2.40 → 시작은 된다
+    out = je.cmd_run(ctx, 1, concurrency=1, yes=True, judge=FakeJudge(cost=2.8), client=object())
+    assert out["ran"] == 1 and len(out["stopped"]) == 7  # 첫 회차 실비 $2.80 + 다음 예상 $0.30 > $3 — 새 회차를 띄우지 않는다
+    assert any("상한에 닿아 새 회차를 띄우지 않는다" in line for line in ctx.lines)
+    assert je.main(["status", "--mode", "dev", "--root", str(ctx.root)]) == 0
+
+
+def test_run_never_prompts_even_past_ten_dollar_marks(planted, monkeypatch):
+    ctx = planted
+    monkeypatch.setenv("JUDGE_LIVE_BUDGET_USD", "1000")
+    monkeypatch.setattr("builtins.input", lambda *a: (_ for _ in ()).throw(AssertionError("확인 입력을 물었다")))
+    out = je.cmd_run(ctx, 1, yes=True, judge=FakeJudge(cost=6.0), client=object())
+    assert out["ran"] == 8 and je.spent(_rows(ctx.ledger_path))[0] == pytest.approx(48.0)
+
+
+def test_run_without_yes_or_with_bad_args_touches_nothing(planted):
+    ctx = planted
+    with pytest.raises(je.RunnerError, match="--yes"):
+        je.cmd_run(ctx, 1, judge=FakeJudge(), client=object())
+    with pytest.raises(je.RunnerError, match="동시 실행은 1~3개"):
+        je.cmd_run(ctx, 1, concurrency=4, yes=True, judge=FakeJudge(), client=object())
+    with pytest.raises(je.RunnerError, match="없는 문서"):
+        je.cmd_run(ctx, 1, yes=True, only=["F09"], judge=FakeJudge(), client=object())
+    assert not ctx.ledger_path.exists() and not (ctx.root / "03_실행").exists()
+
+
+def test_dev_run_with_fake_openai_scores_end_to_end(planted):
+    """가짜 OpenAI(dev 서버의 '문제 없음' 답)로 진짜 judge_once 를 돈다 — 원본 하나만."""
+    ctx = planted
+    out = je.cmd_run(ctx, 1, yes=True, only=["dev_binary"])
+    rows = _rows(ctx.ledger_path)
+    assert out["ran"] == 1 and rows[0]["gate"] == "pass" and float(rows[0]["cost_usd"]) > 0
+
+
+def test_verify_problems_add_prereg_fingerprint_and_models(tmp_path, monkeypatch):
+    monkeypatch.setattr(je.criteria, "version", lambda: "1.25")
+    monkeypatch.setattr(je.criteria, "version_problem", lambda *a, **k: None)
+    manifest = je.criteria.recorded_manifest()
+
+    def git(*args):
+        return (0, "") if args[0] == "status" else (0, manifest)
+
+    assert je.eval_verify_problems(live=True, ledger_path=tmp_path / "장부.csv", git=git) == []
+    monkeypatch.setenv("JUDGE_MODEL", "gpt-other")
+    monkeypatch.setenv("JUDGE_EXTRACT_EFFORT", "high")
+    problems = je.eval_verify_problems(live=True, ledger_path=tmp_path / "장부.csv", git=git)
+    assert len(problems) == 2 and "판정자 모델" in problems[0] and "추출 추론 강도" in problems[1]
+    monkeypatch.delenv("JUDGE_MODEL")
+    monkeypatch.delenv("JUDGE_EXTRACT_EFFORT")
+    monkeypatch.setattr(je.criteria, "fingerprint", lambda: "0" * 64)
+    problems = je.eval_verify_problems(live=False, ledger_path=tmp_path / "장부.csv", git=git)
+    assert any("사전 등록 값과 다르다" in p for p in problems) and any("--live" in p for p in problems)
+
+
+def test_verify_run_refuses_incomplete_set_and_unfrozen_defects(tmp_path, monkeypatch):
+    monkeypatch.setattr(je, "eval_verify_problems", lambda **kw: [])
+    monkeypatch.setattr(je, "load_bases", lambda ctx: {t: b for t, b in zip(E.EVAL_REPORTS, bases().values())})
+    ctx = je.make_ctx("verify", tmp_path / "평가")
+    with pytest.raises(je.RunnerError) as err:
+        je.cmd_run(ctx, 1, live=True, yes=True, judge=FakeJudge(), client=object())
+    assert "없는 문서: C01" in str(err.value) and "precheck.json 이 없다" in str(err.value)
+    assert not (tmp_path / "평가" / "장부.csv").exists()
