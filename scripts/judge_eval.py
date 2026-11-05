@@ -107,7 +107,10 @@ B2_STAGE = "baseline2"
 # §7.4 다시 돌리는 실패 — API 실패·시간 초과뿐: 호출 경계 llm.FAILURES 의 시간·전송 갈래와, 호출 밖으로 새어 나온 네트워크 계열
 # 예외(api_exception:). 판정자 실패(거절·잘림·인용 없음·출력 틀림·안전장치 등)와 코드 예외(exception: — 매번 나는 버그이거나 판정자 출력
 # 때문)는 결과를 이유로 다시 돌리지 않는다(최종 실패 — 집계에서 '실패').
-RETRYABLE = frozenset({"timeout", "transient", "api_error", "error", "deadline", "no_client"})
+RETRYABLE = frozenset({"timeout", "transient", "api_error", "error", "deadline", "no_client", "api_call_failed"})
+# 판정자가 결과를 냈어도 회차 안의 호출 하나가 응답을 끝내 받지 못하고 API 오류로 끝났으면(예: 크레딧 소진 429 를 두 번 다 받음)
+# 그 회차는 §7.4 의 API 실패다 — 장부 error 칸에 이 값을 적고 같은 문서·같은 회차로 다시 돈다(2026-11-05 E-0003).
+API_CALL_FAILED = "api_call_failed"
 EXCEPTION_PREFIX = "exception:"
 API_EXCEPTION_PREFIX = "api_exception:"
 
@@ -721,11 +724,41 @@ def cap_problem(rows: list[dict], cap: Cap, more: int) -> str | None:
     return None
 
 
-def row_status(row: dict, *, fingerprint: str, mode: str) -> str | None:
+def failed_calls(record) -> list[dict]:
+    """결과 기록 안에서 응답을 끝내 받지 못하고 오류로 끝난 LLM 호출(purpose 가 있고 error 가 있는데 response_model 이 없음)."""
+    out: list[dict] = []
+
+    def walk(o):
+        if isinstance(o, dict):
+            if "purpose" in o and "attempts" in o and o.get("error") and not o.get("response_model"):
+                out.append(o)
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(record or {})
+    return out
+
+
+def _result_has_failed_call(root: Path | None, row: dict) -> bool:
+    if root is None or not (row.get("result_file") or "").strip():
+        return False
+    path = root / row["result_file"]
+    if not path.exists():
+        return False
+    return bool(failed_calls(json.loads(path.read_text(encoding="utf-8")).get("record")))
+
+
+def row_status(row: dict, *, fingerprint: str, mode: str, root: Path | None = None) -> str | None:
     """장부 줄 하나의 상태 — done(판정이 남) · final(판정자 실패 — 다시 돌리지 않는다) · retry(API 실패·시간 초과·예외).
-    다른 모드·다른 기준 지문의 줄은 None(이 실험 회차가 아니다)."""
+    다른 모드·다른 기준 지문의 줄은 None(이 실험 회차가 아니다). root 를 주면 결과 원본에서 응답을 끝내 받지 못한 호출이
+    있는지도 본다 — 있으면 판정이 났어도 API 실패로 다시 돈다(§7.4, API_CALL_FAILED)."""
     if row.get("mode") != mode or row.get("manifest_sha256") != fingerprint:
         return None
+    if retryable(row.get("error", "")) or _result_has_failed_call(root, row):
+        return "retry"
     if (row.get("result_file") or "").strip() and row.get("gate") in ("pass", "blocked"):
         return "done"
     if (row.get("result_file") or "").strip() and not retryable(row.get("error", "")):
@@ -733,13 +766,14 @@ def row_status(row: dict, *, fingerprint: str, mode: str) -> str | None:
     return "retry"
 
 
-def stage_states(rows: list[dict], stage: str, *, fingerprint: str, mode: str) -> dict[tuple[str, str], dict]:
+def stage_states(rows: list[dict], stage: str, *, fingerprint: str, mode: str,
+                 root: Path | None = None) -> dict[tuple[str, str], dict]:
     """(결과서, 변형) → {status: done|final|retry, row: 끝낸 줄(없으면 마지막 줄), attempts}."""
     out: dict[tuple[str, str], dict] = {}
     for row in rows:
         if row.get("stage") != stage:
             continue
-        st = row_status(row, fingerprint=fingerprint, mode=mode)
+        st = row_status(row, fingerprint=fingerprint, mode=mode, root=root)
         if st is None:
             continue
         key = (row["report"], row["variant"])
@@ -884,7 +918,7 @@ async def run_round(ctx: Ctx, round_no: int, order: list[Doc], todo: list[Doc], 
         run, sha, error = None, narrative_sha(bases[doc.report], doc.slots), ""
         try:
             run, sha = await judge(client, bases[doc.report], doc.slots)
-            error = run.failure or ""
+            error = run.failure or (API_CALL_FAILED if failed_calls(run.record) else "")
         except Exception as exc:  # noqa: BLE001 — 회차 하나의 예외로 나머지를 멈추지 않는다(네트워크 계열만 재시도 대상)
             error = exception_error(exc)
         seconds = round(time.monotonic() - t0, 3)
@@ -940,12 +974,12 @@ def cmd_run(ctx: Ctx, round_no: int, *, concurrency: int = MAX_CONCURRENCY, only
     fp = criteria.fingerprint()
     rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
     if round_no == 2:
-        first = stage_states(rows, STAGE_OF_ROUND[1], fingerprint=fp, mode=ctx.runner_mode)
+        first = stage_states(rows, STAGE_OF_ROUND[1], fingerprint=fp, mode=ctx.runner_mode, root=ctx.root)
         left = [d.id for d in docs if not finished(first.get((d.report, d.variant)))]
         if left:
             raise RunnerError(f"1회차가 끝나지 않았다(§7.2 — 1회차 33문서를 마친 뒤 2회차): 남은 {len(left)}개 {', '.join(left[:6])}")
     order = plan_order(ctx, round_no, docs, write=False)
-    states = stage_states(rows, STAGE_OF_ROUND[round_no], fingerprint=fp, mode=ctx.runner_mode)
+    states = stage_states(rows, STAGE_OF_ROUND[round_no], fingerprint=fp, mode=ctx.runner_mode, root=ctx.root)
     todo = [d for d in order if not finished(states.get((d.report, d.variant)))]
     if only:
         unknown = sorted(set(only) - {d.id for d in docs})
@@ -990,7 +1024,7 @@ def cmd_status(ctx: Ctx) -> dict:
     fp = criteria.fingerprint()
     out = {}
     for stage in (*STAGE_OF_ROUND.values(), B2_STAGE):
-        st = stage_states(rows, stage, fingerprint=fp, mode=ctx.runner_mode)
+        st = stage_states(rows, stage, fingerprint=fp, mode=ctx.runner_mode, root=ctx.root)
         c = Counter(v["status"] for v in st.values())
         out[stage] = {"done": c["done"], "final_failure": c["final"], "retry": c["retry"],
                       "attempts": sum(v["attempts"] for v in st.values())}
@@ -1206,7 +1240,7 @@ def cmd_baseline2(ctx: Ctx, *, live: bool = False, yes: bool = False, limit: int
         if problems:
             raise RunnerError("베이스라인 2 를 시작하지 않는다:\n  - " + "\n  - ".join(problems))
     rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
-    states = stage_states(rows, B2_STAGE, fingerprint=criteria.fingerprint(), mode=ctx.runner_mode)
+    states = stage_states(rows, B2_STAGE, fingerprint=criteria.fingerprint(), mode=ctx.runner_mode, root=ctx.root)
     order = plan_order(ctx, 1, docs, write=False)
     todo = [d for d in order if not finished(states.get((d.report, d.variant)))]
     if limit is not None:
@@ -1255,7 +1289,7 @@ def collect_runs(ctx: Ctx, docs: list[Doc], rows: list[dict]) -> dict[tuple[int,
     fp = criteria.fingerprint()
     out = {}
     for round_no, stage in STAGE_OF_ROUND.items():
-        states = stage_states(rows, stage, fingerprint=fp, mode=ctx.runner_mode)
+        states = stage_states(rows, stage, fingerprint=fp, mode=ctx.runner_mode, root=ctx.root)
         for doc in docs:
             s = states.get((doc.report, doc.variant))
             if s is None:
@@ -1267,7 +1301,7 @@ def collect_runs(ctx: Ctx, docs: list[Doc], rows: list[dict]) -> dict[tuple[int,
 
 
 def collect_b2(ctx: Ctx, docs: list[Doc], rows: list[dict]) -> dict[str, dict]:
-    states = stage_states(rows, B2_STAGE, fingerprint=criteria.fingerprint(), mode=ctx.runner_mode)
+    states = stage_states(rows, B2_STAGE, fingerprint=criteria.fingerprint(), mode=ctx.runner_mode, root=ctx.root)
     out = {}
     for doc in docs:
         s = states.get((doc.report, doc.variant))

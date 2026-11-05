@@ -1182,3 +1182,40 @@ def test_teeth_sheet_allows_source_words_inside_data_values(planted):
     rec = je.cmd_sheet(ctx, seed=2)
     body = (ctx.root / "04_판정표" / "판정표.csv").read_text(encoding="utf-8")
     assert rec["items"] == 1 and "변형 클래스" in body  # 데이터 값의 낱말은 출처가 아니다(변이 S16)
+
+
+# ── 2026-11-05 실호출 E-0003: 판정은 났지만 호출 하나가 응답 없이 API 오류(크레딧 소진 429)로 끝남 → §7.4 API 실패로 다시 돈다 ──
+
+
+def _call(error="", response_model="gpt-6.1-sol"):
+    return {"purpose": "faithfulness", "requested_model": "gpt-6.1-sol", "response_model": response_model, "attempts": 2,
+            "error": error, "status": "completed" if response_model else None, "cost_usd": 0.01 if response_model else None}
+
+
+def test_failed_calls_finds_only_calls_without_a_response():
+    err = "RateLimitError: Error code: 429 - insufficient_quota"
+    record = {"faithfulness": {"calls": [_call(), _call(err), _call(err, response_model=None)]},
+              "extract": {"calls": [_call()]}}
+    got = je.failed_calls(record)
+    assert len(got) == 1 and got[0]["response_model"] is None  # 두 번째 시도에서 받은 호출(오류 글 있음)은 실패가 아니다
+    assert je.failed_calls({"faithfulness": {"calls": [_call(err)]}}) == []
+    assert je.failed_calls({}) == []
+
+
+def test_judged_run_with_a_failed_call_is_retried_not_done(tmp_path):
+    fp = je.criteria.fingerprint()
+    (tmp_path / "03_실행").mkdir()
+    bad = {"record": {"faithfulness": {"calls": [_call(), _call("RateLimitError: 429", response_model=None)]}}}
+    good = {"record": {"faithfulness": {"calls": [_call(), _call("RateLimitError: 429")]}}}
+    (tmp_path / "03_실행" / "E-0003.json").write_text(json.dumps(bad), encoding="utf-8")
+    (tmp_path / "03_실행" / "E-0004.json").write_text(json.dumps(good), encoding="utf-8")
+    row = {"stage": "eval_r1", "report": "r", "variant": "C03", "mode": "live", "manifest_sha256": fp,
+           "result_file": "03_실행/E-0003.json", "gate": "blocked", "error": "", "run_id": "E-0003"}
+    assert je.row_status(row, fingerprint=fp, mode="live") == "done"  # 결과 원본을 안 보면 끝난 줄로 보인다
+    assert je.row_status(row, fingerprint=fp, mode="live", root=tmp_path) == "retry"
+    ok = {**row, "result_file": "03_실행/E-0004.json", "run_id": "E-0004"}
+    assert je.row_status(ok, fingerprint=fp, mode="live", root=tmp_path) == "done"
+    st = je.stage_states([row, ok], "eval_r1", fingerprint=fp, mode="live", root=tmp_path)[("r", "C03")]
+    assert st["status"] == "done" and st["row"]["run_id"] == "E-0004" and st["attempts"] == 2
+    marked = {**ok, "error": je.API_CALL_FAILED}
+    assert je.retryable(je.API_CALL_FAILED) and je.row_status(marked, fingerprint=fp, mode="live") == "retry"
