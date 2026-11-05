@@ -666,7 +666,7 @@ def test_sheet_is_blind_grouped_and_report_tallies(scored):
     out_rows = [rows[0]] + [r[:9] + ["판정자 오판", "필드 값 1.105 와 문장의 1.105 가 같다"] for r in items]
     buf = io.StringIO()
     csv.writer(buf, lineterminator="\n").writerows(out_rows)
-    filled.write_text(first + "\n" + buf.getvalue(), encoding="utf-8")
+    filled.write_text("\ufeff" + first + "\r\n" + buf.getvalue().replace("\n", "\r\n"), encoding="utf-8")  # 표 프로그램 저장 꼴(BOM·CRLF)
     report = je.cmd_report(ctx, filled)
     tally = report["overblocking"]
     assert tally["counts"]["과잉 차단"] == 1 and tally["counts"]["차단"] == 1

@@ -1590,6 +1590,15 @@ def integrity(ctx: Ctx) -> dict:
     return out
 
 
+def _read_keyed(path: Path) -> tuple[str | None, list[dict]]:
+    """judge_validate.read_keyed_sheet 와 같되 BOM(표 프로그램이 UTF-8 로 저장할 때 붙이는 것)을 걷는다."""
+    text = Path(path).read_text(encoding="utf-8-sig")
+    first, _, rest = text.partition("\n")
+    sha = first[len(jv.KEY_HEAD):].strip() if first.startswith(jv.KEY_HEAD) else None
+    body = rest if sha is not None else text
+    return sha, [r for r in csv.DictReader(io.StringIO(body)) if any((v or "").strip() for v in r.values())]
+
+
 def read_answers(ctx: Ctx, answers: Path) -> tuple[list[dict], dict[str, str], list[dict]]:
     """판정한 표 → (열쇠 줄, {문항: 판정}, 판정 줄). 열쇠 해시(표 첫 줄·열쇠.sha256·열쇠 파일)가 모두 같아야 하고, 도구가 쓴 칸은
     만든 판정표와 글자까지 같아야 하며, 모든 문항에 판정과 판정 사유가 있어야 한다(판정을 마친 뒤에만 열쇠를 연다)."""
@@ -1597,7 +1606,7 @@ def read_answers(ctx: Ctx, answers: Path) -> tuple[list[dict], dict[str, str], l
     sheet_path = ctx.path(SHEET_DIR, "판정표.csv")
     if not key_path.exists() or not sheet_path.exists():
         raise RunnerError("판정표·열쇠가 없다 — sheet 를 먼저 만든다")
-    sha, rows = jv.read_keyed_sheet(Path(answers))
+    sha, rows = _read_keyed(Path(answers))
     jv.check_key(key_path, {"판정한 표": sha}, recorded={"열쇠.sha256": jv._sha_file(key_path.parent / "열쇠.sha256")})
     _, made = jv.read_keyed_sheet(sheet_path)
     made_by_id = {r["문항"]: r for r in made}
