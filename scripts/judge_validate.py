@@ -296,6 +296,7 @@ async def run_batch(ctx: Ctx, batch: str, *, client, bases: dict[str, Base], rep
             "run_id": run_id, "key": key.__dict__, "order_seed": seed, "order_index": index, "mode": ctx.mode,
             **ctx.meta, "narrative_sha256": narrative_sha, "variant_meta": meta,
             "gate": run.gate, "failure": run.failure, "flagged_slots": run.flagged_slots, "unfixable": run.unfixable,
+            "issuance": run.issuance, "blocking_slots": run.blocking_slots, "repair_slots": run.repair_slots,
             "scorecard": run.scorecard, "record": run.record,
         }, ensure_ascii=False, indent=1) + "\n"
         target.write_text(body, encoding="utf-8")

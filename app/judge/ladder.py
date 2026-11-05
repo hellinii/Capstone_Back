@@ -1,6 +1,12 @@
 """app/judge/ladder.py — 발급 불가 흐름(사다리, 설계 5.5 6단계, 계획 13-2·정6).
 
 채점 1 → 걸린 칸 재생성 1번 → 채점 2 → 걸린 칸 규칙 문장 → 채점 3 → 서술 칸 전부 규칙 문장 → 채점 4 → 보류.
+- 사다리는 발급 규칙(core.JudgeRun.issuance·blocking_slots — app.judge.aggregate.issuance)만 본다: 모순이 있을 때만 오른다.
+  판정자 판정(gate — 사실 위반 포함)은 기록에만 남는다(2026-11-05 평가 단계 뒤 민서 결정).
+- 통과하면 숫자 위반 칸(repair_slots)을 규칙 문장으로 바꾸고 다시 채점하지 않는다 — 규칙 문장은 코드가 데이터로 만들어 숫자가
+  틀릴 수 없다. 바꾼 칸은 number_templated 에 적는다. 서술 글 지문은 바꾼 뒤의 글로 만든다(작업 흐름이 통과 뒤 결과로 만든다).
+  7.3 은 규칙 문장이 없어 비우고 '해당 없음'이 찍힌다(아래 정6 ③과 같다).
+- 사실 일치 모듈 자체가 실패하면(호출·형식·회차 초과) 여전히 보류다 — 어느 숫자가 틀렸는지 몰라 고칠 칸을 정할 수 없다.
 - 재생성은 작업당 한 바퀴(1차 채점에 걸린 칸만, 정6 ①). 2차 채점에 걸린 칸은 새로 걸렸든 또 걸렸든 바로 규칙 문장.
 - 이미 규칙 문장·고정 문구인 칸은 다시 만들지 않는다(정6 ②). 7.3 은 비우고 '해당 없음'(정6 ③).
 - 단(rung)이 아무 칸도 바꾸지 못하면(걸린 칸이 모두 규칙 문장·표·고정 문구) 같은 글을 다시 채점하지 않고 다음 단으로 간다.
@@ -85,7 +91,7 @@ async def run_ladder(session, judge: Judge, *, deadline: float | None, clock: Ca
                      record: dict | None = None) -> LadderOutcome:
     """사다리를 돈다. record 를 주면 그 dict 에 바로 쓴다 — 바깥 제한이 도중에 끊어도 그때까지의 채점 기록이 남는다."""
     rec = record if record is not None else {}
-    rec.update({"rounds": [], "regenerated": {}, "templated": [], "ever_blocked": False})
+    rec.update({"rounds": [], "regenerated": {}, "templated": [], "number_templated": [], "ever_blocked": False})
     rounds: list[dict] = rec["rounds"]
 
     def left() -> float | None:
@@ -105,11 +111,12 @@ async def run_ladder(session, judge: Judge, *, deadline: float | None, clock: Ca
         t = clock()
         run = await judge(session.result, deadline)
         rounds.append({
-            "round": len(rounds) + 1, "after": after, "gate": run.gate, "failure": run.failure,
-            "flagged": list(run.flagged_slots), "unfixable": list(run.unfixable), "seconds": round(clock() - t, 3),
+            "round": len(rounds) + 1, "after": after, "gate": run.gate, "issuance": run.issuance, "failure": run.failure,
+            "flagged": list(run.flagged_slots), "blocking": list(run.blocking_slots), "repair": list(run.repair_slots),
+            "unfixable": list(run.unfixable), "seconds": round(clock() - t, 3),
             "cost_usd": run.cost_usd(), "scorecard": run.scorecard, "record": run.record,
         })
-        if run.gate == "blocked":
+        if run.issuance == "blocked":
             rec["ever_blocked"] = True
         return run
 
@@ -118,16 +125,17 @@ async def run_ladder(session, judge: Judge, *, deadline: float | None, clock: Ca
     while True:
         if run is None:
             return held("deadline")
-        if run.failure is not None or run.gate not in ("pass", "blocked"):
+        if run.failure is not None or run.issuance not in ("pass", "blocked"):
             return held(run.failure or "error")
-        if run.gate == "pass":
+        if run.issuance == "pass":
+            rec["number_templated"] = session.to_template(run.repair_slots, "judge_number")
             rec.update({"gate": "passed", "held_kind": None, "failure": None, "retry_allowed": False})
             return LadderOutcome("passed", None, False, run, session.result, rec)
         changed: list[str] = []
         after = None
         while rungs and not changed:
             after = rungs.pop(0)
-            changed = await _climb(session, after, run.flagged_slots, left, rec)
+            changed = await _climb(session, after, run.blocking_slots, left, rec)
         if not changed:
             return held("gate_failed")
         run = await judge_round(after)
@@ -167,6 +175,7 @@ def summary(rec: dict) -> dict:
         "retry_allowed": rec.get("retry_allowed"), "rounds": len(judged),
         "regenerated": sorted(s for s, o in (rec.get("regenerated") or {}).items() if o != "skipped"),
         "templated": list(rec.get("templated") or []),
+        "number_templated": list(rec.get("number_templated") or []),
         "cost_usd": None if any(c is None for c in costs) else round(sum(costs), 6),
         "seconds": round(sum(r.get("seconds") or 0 for r in judged), 3),
         "criteria_version": first.get("criteria_version"), "criteria_fingerprint": first.get("criteria_fingerprint"),

@@ -19,7 +19,7 @@ from app.core import concurrency, llm_budget
 from app.judge import alert, bundle, consistency, coverage, extract, faithfulness, ladder, readability
 from app.judge.core import JudgeRun
 from app.main import app
-from app.narrative import generator, jobs
+from app.narrative import digest, generator, jobs
 from app.narrative.schemas import JudgeBundle, NarrativeJobResult
 from tests import judge_fakes as F
 from tests.test_judge_core import _empty_answers, router
@@ -147,8 +147,8 @@ async def test_edition4_passes_through_the_real_judge_and_edition3_never_calls_i
     assert (j["gate"], j["held_kind"], j["retry_allowed"]) == ("passed", None, False)
     assert list(j) == ["gate", "held_kind", "retry_allowed", "criteria_version", "model", "axes", "counts"]
     # 응답에는 싣는 축만 — 뺀 축(필수 내용·표기)은 'null' 도 아니고 키째 없다(JudgeCounts 직렬화)
-    assert list(j["counts"]) == list(bundle.PUBLISHED_AXES) == ["faithfulness", "consistency"]
-    assert j["axes"] == ["faithfulness", "consistency"]
+    assert list(j["counts"]) == list(bundle.PUBLISHED_AXES) == ["consistency"]
+    assert j["axes"] == ["consistency"]
     internal = _internal(factory, c4.job_id)
     assert internal["judge"]["gate"] == "passed" and internal["judge"]["summary"]["rounds"] == 1
     assert "judging" in _stages(factory, c4.job_id)
@@ -183,7 +183,7 @@ async def test_judge_wallet_exhausted_holds_with_retry_and_spares_the_narrative_
 
 
 async def test_judge_wallet_is_reserved_only_for_edition4(factory, make_section_client, monkeypatch):
-    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}))
+    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="pass"))
     before = llm_budget.judge.remaining()
     await _create(factory, _ed3(), client=make_section_client(), judge_client=F.FakeOpenAI([]))
     assert llm_budget.judge.remaining() == before
@@ -217,8 +217,8 @@ class Unserializable:
     (JudgeRun(None, "no_material"), "no_material", False),
     (JudgeRun(None, "deadline"), "timeout", True),
     (RuntimeError("심판 안에서 터짐"), "judge_error", False),
-    (JudgeRun("pass", None, [], [], CARD, {"weird": Unserializable()}), "judge_error", False),  # 직렬화 안 되는 기록
-    (JudgeRun("blocked", None, [], [{"type": "value_mismatch"}], CARD, {}), "gate_failed", False),
+    (JudgeRun("pass", None, [], [], CARD, {"weird": Unserializable()}, issuance="pass"), "judge_error", False),  # 직렬화 안 되는 기록
+    (JudgeRun("blocked", None, [], [{"type": "value_mismatch"}], CARD, {}, issuance="blocked"), "gate_failed", False),
 ])
 async def test_failure_matrix_is_done_and_held(factory, make_section_client, alerts, monkeypatch, run, kind, retry):
     _fake_judge(monkeypatch, run)
@@ -243,8 +243,9 @@ async def test_transient_http_errors_are_tried_twice_then_held_with_retry(factor
     assert len(oa.calls) == sum(attempts)
 
 
-async def test_unknown_gate_value_is_held(factory, make_section_client, alerts, monkeypatch):
-    _fake_judge(monkeypatch, JudgeRun("PASS", None, [], [], CARD, {}))
+async def test_unknown_issuance_value_is_held(factory, make_section_client, alerts, monkeypatch):
+    # 사다리는 발급 규칙(issuance)만 본다 — 모르는 값('PASS')이면 판정자 판정이 pass 여도 보류(닫힌 쪽)
+    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="PASS"))
     c = await _create(factory, _ed4(), client=make_section_client(), judge_client=F.FakeOpenAI([]))
     assert (await _read(factory, c.job_id))["result"]["judge"]["gate"] == "held"
     _no_passed_anywhere(factory, c.job_id)
@@ -256,7 +257,7 @@ async def test_unknown_gate_value_is_held(factory, make_section_client, alerts, 
 async def test_outer_timeout_after_the_narrative_is_held_timeout(factory, make_section_client, alerts, monkeypatch):
     monkeypatch.setattr(jobs, "JOB_DEADLINE_SECONDS", 0.5)
     monkeypatch.setattr(ladder, "JUDGE_MIN_SECONDS", 0.0)
-    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}), sleep=5)
+    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="pass"), sleep=5)
     c = await _create(factory, _ed4(), client=make_section_client(), judge_client=F.FakeOpenAI([]))
     view = await _read(factory, c.job_id)
     j = view["result"]["judge"]
@@ -273,7 +274,7 @@ async def test_outer_timeout_before_the_narrative_is_failed(factory, make_sectio
 
 
 async def test_edition4_generation_gets_its_own_cap_and_edition3_does_not(factory, make_section_client, monkeypatch):
-    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}))
+    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="pass"))
     seen = []
     real = generator.GenerationSession.__init__
 
@@ -289,14 +290,14 @@ async def test_edition4_generation_gets_its_own_cap_and_edition3_does_not(factor
 
 async def test_judging_refreshes_the_stage_while_it_runs(factory, make_section_client, monkeypatch):
     monkeypatch.setattr(jobs, "JUDGE_HEARTBEAT_SECONDS", 0.05)
-    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}), sleep=0.3)
+    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="pass"), sleep=0.3)
     c = await _create(factory, _ed4(), client=make_section_client(), judge_client=F.FakeOpenAI([]))
     assert _stages(factory, c.job_id).count("judging") >= 4
 
 
 async def test_busy_judge_slot_is_held_with_retry(factory, make_section_client, alerts, monkeypatch):
     monkeypatch.setattr(jobs, "JUDGE_SLOT_WAIT_SECONDS", 0.1)
-    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}))
+    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="pass"))
     release = asyncio.Event()
 
     async def hog():
@@ -330,7 +331,7 @@ def test_time_invariants():
 
 async def test_customer_view_has_no_judge_internals(factory, make_section_client, monkeypatch):
     card = {**CARD, "faithfulness": {**CARD["faithfulness"], "note": MARKER}}
-    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [{"quote": MARKER}], card, {"reason": MARKER}))
+    _fake_judge(monkeypatch, JudgeRun("pass", None, [], [{"quote": MARKER}], card, {"reason": MARKER}, issuance="pass"))
     c = await _create(factory, _ed4(), client=make_section_client(), judge_client=F.FakeOpenAI([]))
     view = await _read(factory, c.job_id)
     assert MARKER not in json.dumps(view, ensure_ascii=False)
@@ -371,9 +372,9 @@ def test_contract_examples_validate_and_bundle_matches_the_passed_example_shape(
     example = contract["examples"]["passed"]
     assert list(built) == list(example)
     # 싣는 축(bundle.PUBLISHED_AXES)만 — 예시는 네 축을 다 싣던 때의 모양이고, 축을 빼면 그 축만 빠진다(계약 axes)
-    assert list(built["counts"]) == list(bundle.PUBLISHED_AXES) == ["faithfulness", "consistency"]
+    assert list(built["counts"]) == list(bundle.PUBLISHED_AXES) == ["consistency"]
     assert {a: set(v) for a, v in built["counts"].items()} == {a: set(example["counts"][a]) for a in built["counts"]}
-    assert built["axes"] == ["faithfulness", "consistency"]
+    assert built["axes"] == ["consistency"]
     JudgeBundle.model_validate(built)  # 뺀 축이 없는 counts 도 계약 모양
     assert list(bundle.held("budget", retry_allowed=True)) == list(contract["examples"]["held"])
 
@@ -447,7 +448,7 @@ async def test_pilot_timeline_reaches_the_rule_sentence_rung():
 
     async def judge(res, dl):
         clock.t += 150
-        return JudgeRun("blocked", None, ["8.2"], [], None, {})
+        return JudgeRun("blocked", None, ["8.2"], [], None, {}, issuance="blocked", blocking_slots=["8.2"])
 
     out = await ladder.run_ladder(Sess(), judge, deadline=jobs.JOB_GENERATION_SECONDS, clock=clock)
     assert [r.get("after") for r in out.record["rounds"] if "gate" in r] == [None, "regenerate", "template_flagged"]
@@ -474,7 +475,7 @@ def _lock_calls(monkeypatch, answers):
 async def test_lock_at_create_spends_no_ai_and_no_judge_wallet(factory, make_section_client, alerts, monkeypatch):
     """만들 때 겹만 잠김(심판 갈래 겹은 통과라고 답함) — 서술 AI·심판·두 지갑 모두 쓰지 않고 규칙 문장 + 보류(judge_error)."""
     calls = _lock_calls(monkeypatch, ["unvalidated", None])
-    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}))
+    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="pass"))
     an = make_section_client()
     judge_before, narr_before = llm_budget.judge.remaining(), llm_budget.narrative.remaining()
     c = await _create(factory, _ed4(), client=an, judge_client=F.FakeOpenAI([]))
@@ -495,7 +496,7 @@ async def test_lock_at_create_spends_no_ai_and_no_judge_wallet(factory, make_sec
 async def test_lock_in_judge_branch_alone_still_holds(factory, make_section_client, alerts, monkeypatch):
     """만들 때 겹은 통과(None), 심판 갈래 겹만 잠김 — 그래도 심판을 부르지 않고 보류. 두 겹이 서로를 가리지 않는다."""
     calls = _lock_calls(monkeypatch, [None, "fingerprint_mismatch"])
-    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}))
+    seen = _fake_judge(monkeypatch, JudgeRun("pass", None, [], [], CARD, {}, issuance="pass"))
     an = make_section_client()
     c = await _create(factory, _ed4(), client=an, judge_client=F.FakeOpenAI([]))
     assert len(calls) == 2 and seen == []
@@ -517,3 +518,15 @@ async def test_locked_result_has_the_same_shape_as_no_key(factory, make_section_
     assert list(ja) == list(jb) and {k: v for k, v in ja.items() if k != "held_kind"} == \
         {k: v for k, v in jb.items() if k != "held_kind"}
     assert (ja["held_kind"], jb["held_kind"]) == ("no_key", "judge_error")
+
+
+async def test_number_repair_reaches_the_customer_text_and_its_fingerprint(factory, make_section_client, monkeypatch):
+    """발급 규칙(2026-11-05): 사실 위반만 난 판 4 작업은 통과하고, 숫자 위반 칸은 규칙 문장으로 바꾼 글이 고객 결과·지문에 간다."""
+    _fake_judge(monkeypatch, JudgeRun("blocked", None, ["7.2"], [], CARD, {}, issuance="pass", repair_slots=["7.2"]))
+    c = await _create(factory, _ed4(), client=make_section_client(), judge_client=F.FakeOpenAI([]))
+    res = (await _read(factory, c.job_id))["result"]
+    assert res["judge"]["gate"] == "passed" and res["judge"]["axes"] == ["consistency"]
+    assert res["section_sources"]["7.2"] == "fallback"
+    internal = _internal(factory, c.job_id)["judge"]
+    assert internal["number_templated"] == ["7.2"] and internal["summary"]["number_templated"] == ["7.2"]
+    assert internal["narrative_sha256"] == digest.of_result(res)
