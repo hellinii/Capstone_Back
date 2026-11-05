@@ -92,9 +92,11 @@ async def judge_once(client, req, result, section_sources: dict, benchmark_refs:
                                                source_notes=[r.get("source_note", "") for r in benchmark_refs], **kw)),
     )
     record.update({"extract": ext.as_record(), "coverage": cov.as_record(), "readability": rea.as_record()})
-    # 필수 내용 축을 고객 묶음에서 뺐으면(bundle.PUBLISHED_AXES) 그 점검의 실패·인용 문제로 보류하지 않는다 — 기록에만 남는다
+    # 필수 내용·표기 축을 고객 묶음에서 뺐으면(bundle.PUBLISHED_AXES) 그 점검의 실패·인용 문제로 보류하지 않는다 — 기록에만 남는다.
+    # 표기는 호출이 실패해도 코드 규칙 건수(점수)는 남는다(readability.judge_readability).
     coverage_gates = "coverage" in PUBLISHED_AXES
-    first_failure = ext.failure or (cov.failure if coverage_gates else None) or rea.failure
+    readability_gates = "readability" in PUBLISHED_AXES
+    first_failure = ext.failure or (cov.failure if coverage_gates else None) or (rea.failure if readability_gates else None)
     if first_failure:
         record["seconds"] = {**timings, "total": round(clock_fn() - started, 3)}
         return JudgeRun(None, first_failure, record=record)

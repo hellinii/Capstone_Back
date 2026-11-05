@@ -20,7 +20,7 @@ app/
 ├── analysis/     # 컬럼 자동 매핑(LLM/규칙 폴백) + 데이터 검증
 ├── evaluation/   # ISO4213 지표 계산 (engine · metrics/{common,binary,multiclass,multilabel})
 ├── narrative/    # LLM 서술(7·8·9절) — 작업 번호(job)·장별 생성·칸별 검문 사다리·규칙 템플릿(ARCHITECTURE §10)
-├── judge/        # 판 4 서술 심판 — 4축 검사(고객 묶음엔 3축)·발급 보류 사다리·기준 묶음(criteria/)·검증 도구 함수(ARCHITECTURE §14)
+├── judge/        # 판 4 서술 심판 — 4축 검사(고객 묶음엔 게이트 2축)·발급 보류 사다리·기준 묶음(criteria/)·검증 도구 함수(ARCHITECTURE §14)
 └── issuance/     # 성적서 발급/채번 (DB 사용, 판 4 발급 검사 judge_gate)
 ```
 

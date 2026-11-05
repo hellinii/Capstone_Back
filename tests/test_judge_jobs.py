@@ -146,7 +146,9 @@ async def test_edition4_passes_through_the_real_judge_and_edition3_never_calls_i
     j = r4["result"]["judge"]
     assert (j["gate"], j["held_kind"], j["retry_allowed"]) == ("passed", None, False)
     assert list(j) == ["gate", "held_kind", "retry_allowed", "criteria_version", "model", "axes", "counts"]
-    assert list(j["counts"]) == list(bundle.PUBLISHED_AXES) and j["counts"]["readability"]["rules"] == 2
+    # 응답에는 싣는 축만 — 뺀 축(필수 내용·표기)은 'null' 도 아니고 키째 없다(JudgeCounts 직렬화)
+    assert list(j["counts"]) == list(bundle.PUBLISHED_AXES) == ["faithfulness", "consistency"]
+    assert j["axes"] == ["faithfulness", "consistency"]
     internal = _internal(factory, c4.job_id)
     assert internal["judge"]["gate"] == "passed" and internal["judge"]["summary"]["rounds"] == 1
     assert "judging" in _stages(factory, c4.job_id)
@@ -369,9 +371,10 @@ def test_contract_examples_validate_and_bundle_matches_the_passed_example_shape(
     example = contract["examples"]["passed"]
     assert list(built) == list(example)
     # 싣는 축(bundle.PUBLISHED_AXES)만 — 예시는 네 축을 다 싣던 때의 모양이고, 축을 빼면 그 축만 빠진다(계약 axes)
-    assert list(built["counts"]) == list(bundle.PUBLISHED_AXES) and "coverage" not in built["counts"]
+    assert list(built["counts"]) == list(bundle.PUBLISHED_AXES) == ["faithfulness", "consistency"]
     assert {a: set(v) for a, v in built["counts"].items()} == {a: set(example["counts"][a]) for a in built["counts"]}
-    assert built["counts"]["readability"]["rules"] == example["counts"]["readability"]["rules"] == 2
+    assert built["axes"] == ["faithfulness", "consistency"]
+    JudgeBundle.model_validate(built)  # 뺀 축이 없는 counts 도 계약 모양
     assert list(bundle.held("budget", retry_allowed=True)) == list(contract["examples"]["held"])
 
 
