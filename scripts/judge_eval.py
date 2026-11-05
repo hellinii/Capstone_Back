@@ -924,6 +924,259 @@ def cmd_status(ctx: Ctx) -> dict:
     return out
 
 
+# ── 베이스라인 1(1차 점검만, §5) ───────────────────────────────────────────
+
+
+def cmd_baseline1(ctx: Ctx, *, echo: Callable[[str], None] | None = None) -> dict:
+    """33문서에 1차 점검(코드, 비용 0) → 05_결과/baseline1.json. verify 는 동결(precheck·v3 해시) 뒤에만(§3.8 — 결함본에 1차 점검을
+    미리 돌리지 않는다)."""
+    from app.judge.validation.sheets import slot_of_path
+
+    echo = echo or ctx.echo
+    bases = load_bases(ctx)
+    docs = documents(bases, load_items(ctx))
+    if ctx.mode == "verify":
+        problems = full_set_problems(docs) + frozen_problems(ctx)
+        if problems:
+            raise RunnerError("베이스라인 1 을 돌리지 않는다(동결 전):\n  - " + "\n  - ".join(problems))
+    checks = {tag: FirstCheck(b) for tag, b in bases.items()}
+    out_docs = {}
+    for doc in docs:
+        base = bases[doc.report]
+        index = doc_index(base, doc.slots)
+        findings = checks[doc.report].findings(doc_result(base, doc.slots), index)
+        entry = {"report": doc.report, "variant": doc.variant, "source": doc.source, "sentences": len(index.sentences),
+                 "n_findings": len(findings), "findings": findings}
+        if doc.is_defect:
+            inj = injected_of(doc, base, index)
+            det = E.baseline1_detection(findings, inj, [slot_of_path(doc.meta["slot"])])
+            entry.update({"injected": inj, "status": det["status"], "detected": det["detected"],
+                          "first_check_pass_by_design": doc.meta.get("first_check_pass_by_design")})
+        out_docs[doc.id] = entry
+        echo(f"{doc.id} 1차 점검 검출 {len(findings)}건" + (f" — {entry['status']}" if doc.is_defect else ""))
+    out = {"mode": ctx.mode, "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(),
+           "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "docs": out_docs}
+    target = ctx.path(RESULTS_OUT, "baseline1.json")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return out
+
+
+# ── 베이스라인 2(문서 전체 판정, §5) ─────────────────────────────────────────
+
+B2_TIMEOUT_SECONDS = 300.0
+B2_PLACEHOLDER_HEADS = ("[문서]", "[데이터]", "[고객 입력]")
+_FENCE = re.compile(r"^```[A-Za-z]*\s*$")
+_B2_MODEL = re.compile(r"모델:\s*`([^`]+)`\s*,\s*추론 강도\s*`([^`]+)`")
+
+
+def _fenced(section: str) -> str:
+    lines = section.splitlines()
+    start = next((i for i, ln in enumerate(lines) if _FENCE.match(ln)), None)
+    if start is None:
+        raise RunnerError("베이스라인 2 프롬프트 파일에서 코드 블록을 찾지 못했다")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].strip() == "```"), None)
+    if end is None:
+        raise RunnerError("베이스라인 2 프롬프트 파일의 코드 블록이 닫히지 않았다")
+    return "\n".join(lines[start + 1:end])
+
+
+def load_b2_prompt(ctx: Ctx) -> dict:
+    """사전등록/v1/베이스라인2_프롬프트.md — 먼저 같은 폴더 SHA256SUMS 와 맞대 보고(다르면 거부), 지시문·입력 틀·스키마·모델을 읽는다."""
+    folder = ctx.path(PREREG_V1)
+    path, sums = folder / B2_PROMPT, folder / "SHA256SUMS"
+    if not path.exists() or not sums.exists():
+        raise RunnerError(f"베이스라인 2 프롬프트 또는 SHA256SUMS 가 없다: {folder}")
+    digest = sha256_file(path)
+    if read_sums(sums).get(B2_PROMPT) != digest:
+        raise RunnerError(f"{B2_PROMPT} 의 sha256 이 사전 등록 SHA256SUMS 와 다르다({digest[:12]}…) — 돌리지 않는다")
+    text = path.read_text(encoding="utf-8")
+    parts = {}
+    for chunk in re.split(r"(?m)^## ", text)[1:]:
+        title, _, body = chunk.partition("\n")
+        parts[title.strip()] = body
+
+    def part(prefix: str) -> str:
+        found = [body for title, body in parts.items() if title.startswith(prefix)]
+        if len(found) != 1:
+            raise RunnerError(f"베이스라인 2 프롬프트 파일에 '## {prefix}' 절이 하나가 아니다")
+        return _fenced(found[0])
+
+    template = part("입력")
+    lines = template.splitlines()
+    heads = [i for i, ln in enumerate(lines) if ln.strip() in B2_PLACEHOLDER_HEADS]
+    if [lines[i].strip() for i in heads] != list(B2_PLACEHOLDER_HEADS) or any(
+            i + 1 >= len(lines) or not (lines[i + 1].startswith("<") and lines[i + 1].rstrip().endswith(">")) for i in heads):
+        raise RunnerError("베이스라인 2 입력 틀이 [문서]·[데이터]·[고객 입력] 과 그 아래 <자리> 줄 꼴이 아니다")
+    m = _B2_MODEL.search(text)
+    if not m:
+        raise RunnerError("베이스라인 2 프롬프트 파일에서 모델·추론 강도를 읽지 못했다")
+    return {"instructions": part("지시문"), "template": template, "schema": json.loads(part("출력 스키마")),
+            "model": m.group(1), "effort": m.group(2), "sha256": digest}
+
+
+def b2_input(prompt: dict, base: jv.Base, slots: dict | None) -> str:
+    """입력 틀의 세 자리 줄을 차례로 채운다 — reading.render(조각)(판정자가 읽는 글, 머리 줄 없음), fact_sheet JSON, client_inputs JSON."""
+    from app.judge.reading import render
+
+    fills = [render(doc_pieces(base, slots)), json.dumps(base.request.get("fact_sheet"), ensure_ascii=False),
+             json.dumps(base.request.get("client_inputs"), ensure_ascii=False)]
+    lines = prompt["template"].splitlines()
+    for k, i in enumerate([i for i, ln in enumerate(lines) if ln.strip() in B2_PLACEHOLDER_HEADS]):
+        lines[i + 1] = fills[k]
+    return "\n".join(lines)
+
+
+def b2_shape_ok(data: dict) -> bool:
+    """스키마 꼴 확인(구조화 출력이 지키지만 다시 본다) — decision·issues(axis·type·quotes 1~2개·reason)."""
+    if data.get("decision") not in ("issue", "block") or not isinstance(data.get("issues"), list):
+        return False
+    for i in data["issues"]:
+        q = i.get("quotes") if isinstance(i, dict) else None
+        if (not isinstance(i, dict) or i.get("axis") not in ("faithfulness", "consistency") or not isinstance(q, list)
+                or not 1 <= len(q) <= 2 or not all(isinstance(x, str) for x in q)):
+            return False
+    return True
+
+
+class DevBaseline2Fake:
+    """dev 전용 가짜 OpenAI — 베이스라인 2 형식에 '문제 없음' 답(실호출 없음)."""
+
+    def __init__(self):
+        self.responses = self
+        self.calls = 0
+
+    def with_options(self, **_kw):
+        return self
+
+    async def create(self, **kwargs):
+        from openai.types.responses import Response
+
+        self.calls += 1
+        text = json.dumps({"decision": "issue", "issues": []})
+        return Response.model_validate({
+            "id": f"resp_b2_{self.calls}", "object": "response", "created_at": 1, "model": kwargs["model"], "status": "completed",
+            "parallel_tool_calls": True, "tool_choice": "auto", "tools": [],
+            "output": [{"id": f"msg_b2_{self.calls}", "type": "message", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": text, "annotations": []}]}],
+            "usage": {"input_tokens": 1000, "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                      "output_tokens": 50, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 1050}})
+
+
+def b2_file(ctx: Ctx, doc: Doc) -> Path:
+    return ctx.path(RUNS_OUT, f"B2-{doc.id}.json")
+
+
+async def run_baseline2(ctx: Ctx, todo: list[Doc], bases: dict[str, jv.Base], prompt: dict, *, client, concurrency: int,
+                        cap: Cap, meta: dict) -> dict:
+    from app.judge import llm
+
+    writer = LedgerWriter(ctx.ledger_path)
+    sem = asyncio.Semaphore(concurrency)
+    state = {"in_flight": 0}
+    fmt = llm.json_schema_format("baseline2", prompt["schema"])
+
+    async def one(doc: Doc) -> dict:
+        text = b2_input(prompt, bases[doc.report], doc.slots)
+        out = await llm.create_response(client, purpose="baseline2", model=prompt["model"], instructions=prompt["instructions"],
+                                        input=[{"role": "user", "content": text}], timeout_s=B2_TIMEOUT_SECONDS,
+                                        text_format=fmt, effort=prompt["effort"])
+        data, failure = llm.parse_json(out)
+        if data is not None and not b2_shape_ok(data):
+            data, failure = None, "bad_output"
+        error = failure or ""
+
+        def build(run_id: str, rows: list[dict]):
+            attempt = 1 + sum(1 for r in rows if r.get("stage") == B2_STAGE and r.get("report") == doc.report
+                              and r.get("variant") == doc.variant and r.get("mode") == ctx.runner_mode)
+            body = {"run_id": run_id, "key": {"stage": B2_STAGE, "report": doc.report, "variant": doc.variant, "doc": doc.id,
+                                              "source": doc.source},
+                    "attempt": attempt, "mode": ctx.mode, **meta, "narrative_sha256": narrative_sha(bases[doc.report], doc.slots),
+                    "prompt_sha256": prompt["sha256"], "input_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                    "input_chars": len(text), "call": out.record.as_dict(), "failure": failure, "result": data}
+            body_text = json.dumps(body, ensure_ascii=False, indent=1, default=str) + "\n"
+            target = b2_file(ctx, doc) if not retryable(error) else ctx.path(RUNS_OUT, f"B2-{doc.id}-{run_id}.json")
+            row = {**jl.ledger_row(out, stage=B2_STAGE, report=doc.report, variant=doc.variant, repeat=1, meta=meta),
+                   "mode": ctx.runner_mode, "gate": {"block": "blocked", "issue": "pass"}.get((data or {}).get("decision"), ""),
+                   "result_file": target.relative_to(ctx.root).as_posix(),
+                   "result_sha256": hashlib.sha256(body_text.encode("utf-8")).hexdigest(), "error": error}
+            return row, [(target, body_text)]
+
+        return await writer.commit(build)
+
+    async def guarded(doc: Doc) -> dict:
+        try:
+            return await one(doc)
+        finally:
+            state["in_flight"] -= 1
+            sem.release()
+
+    ctx.path(RUNS_OUT).mkdir(parents=True, exist_ok=True)
+    tasks, stopped = [], []
+    for i, doc in enumerate(todo):
+        await sem.acquire()
+        async with writer.lock:
+            problem = cap_problem(writer.ledger.rows(), cap, state["in_flight"] + 1)
+        if problem:
+            sem.release()
+            stopped = [d.id for d in todo[i:]]
+            ctx.echo(f"상한에 닿아 새 호출을 띄우지 않는다({problem}) — 남은 {len(stopped)}회")
+            break
+        state["in_flight"] += 1
+        tasks.append(asyncio.create_task(guarded(doc)))
+    rows = await asyncio.gather(*tasks)
+    for r in rows:
+        ctx.echo(f"  {r['run_id']} baseline2 {E.doc_id(r['report'], r['variant'])} — {r['gate'] or '실패 ' + r['error']}")
+    return {"rows": rows, "stopped": stopped}
+
+
+def cmd_baseline2(ctx: Ctx, *, live: bool = False, yes: bool = False, limit: int | None = None,
+                  concurrency: int = MAX_CONCURRENCY, client=None, git=jv._git) -> dict:
+    """문서마다 1회(§5). 이미 끝난 문서(B2-<문서>.json)는 건너뛰고 API 실패만 다시 부른다. 순서는 1회차 시드 순서."""
+    if not 1 <= concurrency <= MAX_CONCURRENCY:
+        raise RunnerError(f"동시 실행은 1~{MAX_CONCURRENCY}개(§7.2): {concurrency}")
+    prompt = load_b2_prompt(ctx)
+    if ctx.mode == "verify":
+        problems = eval_verify_problems(live=live, ledger_path=ctx.ledger_path, git=git)
+        if (prompt["model"], prompt["effort"]) != (E.PREREG_JUDGE_MODEL, E.PREREG_JUDGE_EFFORT):
+            problems.append(f"베이스라인 2 모델 설정이 판정자와 다르다: {prompt['model']}·{prompt['effort']}")
+        if problems:
+            raise RunnerError("verify 를 시작하지 않는다:\n  - " + "\n  - ".join(problems))
+    bases = load_bases(ctx)
+    docs = documents(bases, load_items(ctx))
+    if ctx.mode == "verify":
+        problems = full_set_problems(docs) + frozen_problems(ctx)
+        if problems:
+            raise RunnerError("베이스라인 2 를 시작하지 않는다:\n  - " + "\n  - ".join(problems))
+    rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
+    states = stage_states(rows, B2_STAGE, fingerprint=criteria.fingerprint(), mode=ctx.runner_mode)
+    order = plan_order(ctx, 1, docs, write=False)
+    todo = [d for d in order if not finished(states.get((d.report, d.variant)))]
+    if limit is not None:
+        todo = todo[:max(limit, 0)]
+    cap = Cap.from_env()
+    usd, n = spent(rows)
+    done = sum(finished(states.get((d.report, d.variant))) for d in order)
+    ctx.echo(f"[{ctx.mode}] baseline2: 문서 {len(order)} · 끝남 {done}"
+             f" · 이번 {len(todo)}회 · 모델 {prompt['model']}·{prompt['effort']} | 장부 ${usd:.2f}·{n}회 | 상한 ${cap.usd:.2f}·{cap.runs}회")
+    problem = cap_problem(rows, cap, len(todo))
+    if problem:
+        raise RunnerError(problem)
+    if not yes:
+        raise RunnerError("--yes 가 없어 시작하지 않는다(위 계획을 보고 다시 실행)")
+    if not todo:
+        ctx.echo("남은 문서가 없다")
+        return {"ran": 0, "stopped": [], "gates": {}}
+    if client is None:
+        client = DevBaseline2Fake() if ctx.mode == "dev" else jl.make_clients(live=True).openai
+        if client is None:
+            raise RunnerError("OPENAI_API_KEY 가 없다")
+    out = asyncio.run(run_baseline2(ctx, todo, bases, prompt, client=client, concurrency=concurrency, cap=cap,
+                                    meta=jl.run_meta()))
+    gates = Counter(r["gate"] or ("재시도 대상" if retryable(r["error"]) else "최종 실패") for r in out["rows"])
+    return {"ran": len(out["rows"]), "stopped": out["stopped"], "gates": dict(gates)}
+
+
 # ── 명령줄 ───────────────────────────────────────────────────────────
 
 
@@ -947,6 +1200,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--live", action="store_true")
     p.add_argument("--yes", action="store_true")
     add("status", "회차별 끝남·실패·남음과 장부 누계")
+    add("baseline1", "베이스라인 1(1차 점검만) → 05_결과/baseline1.json")
+    p = add("baseline2", "베이스라인 2(문서 전체 판정, 문서마다 1회)")
+    p.add_argument("--live", action="store_true")
+    p.add_argument("--yes", action="store_true")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--concurrency", type=int, default=MAX_CONCURRENCY)
     return parser
 
 
@@ -968,6 +1227,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             cmd_status(ctx)
             return 0
+        if args.command == "baseline1":
+            cmd_baseline1(ctx)
+            return 0
+        if args.command == "baseline2":
+            out = cmd_baseline2(ctx, live=args.live, yes=args.yes, limit=args.limit, concurrency=args.concurrency)
+            print(json.dumps(out, ensure_ascii=False))
+            return 3 if out["stopped"] or out["gates"].get("재시도 대상") else 0
         raise RunnerError(f"모르는 명령: {args.command}")
     except RunnerError as exc:
         print(f"멈춤: {exc}", file=sys.stderr)

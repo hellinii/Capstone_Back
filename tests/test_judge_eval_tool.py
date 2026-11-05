@@ -425,3 +425,118 @@ def test_verify_run_refuses_incomplete_set_and_unfrozen_defects(tmp_path, monkey
         je.cmd_run(ctx, 1, live=True, yes=True, judge=FakeJudge(), client=object())
     assert "없는 문서: C01" in str(err.value) and "precheck.json 이 없다" in str(err.value)
     assert not (tmp_path / "평가" / "장부.csv").exists()
+
+
+# ── 베이스라인 1·2 ──
+
+
+def _f02_row() -> dict:
+    """허용 목록 밖 숫자로 바꾼 결함 — 1차 점검이 그 문장에서 잡는다."""
+    return _row("F02", "dev_binary", "interpretation.distribution_analysis", "불균형 비율(1.105)", "불균형 비율(1.205)",
+                first_check_pass_by_design=False)
+
+
+def test_baseline1_locates_findings_and_counts_defect_detection(ctx, tmp_path):
+    je.cmd_plant(ctx, write_table(tmp_path, [*table_rows(), _f02_row()]))
+    out = je.cmd_baseline1(ctx)
+    docs = out["docs"]
+    assert len(docs) == 9 and set(docs) >= {"dev_binary", "F01", "F02", "V01"}
+    f02 = docs["F02"]
+    assert f02["status"] == "탐지" and f02["first_check_pass_by_design"] is False
+    hit = [f for f in f02["findings"] if f["check"] == "numbers"]
+    assert hit and hit[0]["value"] == "1.205" and hit[0]["sentence_ids"] == f02["injected"]
+    assert docs["F01"]["status"] == "미탐지"  # 허용 목록 안의 다른 값(FP 건수) — 1차 점검을 피한다
+    assert "status" not in docs["V01"] and docs["dev_binary"]["source"] == "원본"
+    saved = json.loads((ctx.root / "05_결과" / "baseline1.json").read_text(encoding="utf-8"))
+    assert saved["docs"]["F02"]["status"] == "탐지"
+
+
+def test_verify_baseline1_waits_for_freeze(tmp_path, monkeypatch):
+    monkeypatch.setattr(je, "load_bases", lambda ctx: {t: b for t, b in zip(E.EVAL_REPORTS, bases().values())})
+    with pytest.raises(je.RunnerError, match="동결 전"):
+        je.cmd_baseline1(je.make_ctx("verify", tmp_path / "평가"))
+
+
+B2_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["decision", "issues"],
+    "properties": {"decision": {"type": "string", "enum": ["issue", "block"]},
+                   "issues": {"type": "array", "items": {
+                       "type": "object", "additionalProperties": False, "required": ["axis", "type", "quotes", "reason"],
+                       "properties": {"axis": {"type": "string", "enum": ["faithfulness", "consistency"]}, "type": {"type": "string"},
+                                      "quotes": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
+                                      "reason": {"type": "string"}}}}}}
+
+
+def write_b2_prompt(root: Path) -> Path:
+    """사전 등록 v1 베이스라인 2 파일과 같은 꼴(절 제목·코드 블록·입력 틀)의 시험용 파일 + SHA256SUMS."""
+    folder = root / "사전등록" / "v1"
+    folder.mkdir(parents=True, exist_ok=True)
+    body = ("# 베이스라인 2 — 시험용\n\n모델: `gpt-6.1-sol`, 추론 강도 `medium`(판정자와 같음).\n\n"
+            "## 지시문 (instructions)\n\n```text\n시험용 지시문이다.\n둘째 줄.\n```\n\n"
+            "## 입력 (input)\n\n```text\n[문서]\n<reading.render(pieces)>\n\n[데이터]\n<fact_sheet JSON>\n\n[고객 입력]\n"
+            "<client_inputs JSON>\n```\n\n## 출력 스키마\n\n```json\n" + json.dumps(B2_SCHEMA, ensure_ascii=False, indent=2)
+            + "\n```\n\n## 탐지로 세는 법\n\n- 시험.\n")
+    path = folder / "베이스라인2_프롬프트.md"
+    path.write_text(body, encoding="utf-8")
+    (folder / "SHA256SUMS").write_text(f"{je.sha256_file(path)}  베이스라인2_프롬프트.md\n", encoding="utf-8")
+    return path
+
+
+def b2_client(planted_sentence: str, *, n: int, fail_first: bool = False):
+    """judge_fakes.FakeOpenAI — 입력 글에 심은 문장이 있으면 그 문장을 인용한 지적(block), 없으면 지적 없음(issue)."""
+    fakes = _load_fakes()
+
+    def reply(kwargs):
+        content = kwargs["input"][0]["content"]
+        if planted_sentence in content:
+            return fakes.json_response({"decision": "block", "issues": [
+                {"axis": "faithfulness", "type": "숫자", "quotes": [planted_sentence], "reason": "데이터와 다른 건수"}]})
+        return fakes.json_response({"decision": "issue", "issues": []})
+
+    replies = ([fakes.timeout()] if fail_first else []) + [reply] * n
+    return fakes.FakeOpenAI(replies)
+
+
+def _load_fakes():
+    sys.path.insert(0, str(ROOT / "tests"))
+    import judge_fakes
+
+    return judge_fakes
+
+
+def test_baseline2_runs_each_doc_once_with_prereg_prompt_and_skips_done(planted):
+    ctx = planted
+    write_b2_prompt(ctx.root)
+    f01_new = table_rows()[0]["new"]
+    client = b2_client(f01_new, n=8)
+    out = je.cmd_baseline2(ctx, yes=True, client=client)
+    assert out["ran"] == 8 and out["gates"] == {"pass": 7, "blocked": 1}
+    call = client.calls[0]
+    assert call["model"] == "gpt-6.1-sol" and call["reasoning"] == {"effort": "medium"} and call["store"] is False
+    assert call["instructions"] == "시험용 지시문이다.\n둘째 줄." and call["text"]["format"]["name"] == "baseline2"
+    assert call["text"]["format"]["schema"] == B2_SCHEMA
+    content = call["input"][0]["content"]
+    assert content.startswith("[문서]\n[slot:") and "\n\n[데이터]\n{" in content and "\n\n[고객 입력]\n" in content
+    rows = _rows(ctx.ledger_path)
+    assert {r["stage"] for r in rows} == {"baseline2"} and sorted(r["run_id"] for r in rows) == [f"E-{i:04d}" for i in range(1, 9)]
+    body = json.loads((ctx.root / "03_실행" / "B2-F01.json").read_text(encoding="utf-8"))
+    assert body["result"]["decision"] == "block" and body["prompt_sha256"] == je.sha256_file(
+        ctx.root / "사전등록" / "v1" / "베이스라인2_프롬프트.md")
+    assert je.cmd_baseline2(ctx, yes=True, client=b2_client(f01_new, n=0))["ran"] == 0
+
+
+def test_baseline2_refuses_changed_prompt_and_retries_api_failure(planted):
+    ctx = planted
+    path = write_b2_prompt(ctx.root)
+    path.write_text(path.read_text(encoding="utf-8") + "\n덧붙임\n", encoding="utf-8")
+    with pytest.raises(je.RunnerError, match="sha256 이 사전 등록 SHA256SUMS 와 다르다"):
+        je.cmd_baseline2(ctx, yes=True, client=b2_client("※없는 문장※", n=8))
+    write_b2_prompt(ctx.root)
+    out = je.cmd_baseline2(ctx, yes=True, limit=2, concurrency=1, client=b2_client("※없는 문장※", n=2, fail_first=True))
+    assert out["ran"] == 2 and out["gates"] == {"재시도 대상": 1, "pass": 1}
+    failed = [r for r in _rows(ctx.ledger_path) if r["error"]]
+    assert failed[0]["error"] == "timeout" and "-E-0001.json" in failed[0]["result_file"]
+    out = je.cmd_baseline2(ctx, yes=True, limit=1, client=b2_client("※없는 문장※", n=1))
+    assert out["ran"] == 1 and out["gates"] == {"pass": 1}  # 실패한 문서부터 다시
+    states = je.stage_states(_rows(ctx.ledger_path), "baseline2", fingerprint=je.criteria.fingerprint(), mode="dev")
+    assert sum(s["status"] == "done" for s in states.values()) == 2
