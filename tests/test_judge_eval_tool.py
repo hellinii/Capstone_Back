@@ -1219,3 +1219,25 @@ def test_judged_run_with_a_failed_call_is_retried_not_done(tmp_path):
     assert st["status"] == "done" and st["row"]["run_id"] == "E-0004" and st["attempts"] == 2
     marked = {**ok, "error": je.API_CALL_FAILED}
     assert je.retryable(je.API_CALL_FAILED) and je.row_status(marked, fingerprint=fp, mode="live") == "retry"
+
+
+def test_teeth_report_when_answers_saved_over_sheet_with_bom(scored):
+    """판정 담당이 판정표.csv 에 바로 적어 BOM 을 붙여 저장해도 원본 사본(판정표_원본.csv)과 맞대 report 가 된다(2026-11-05 판정)."""
+    ctx = scored
+    je.cmd_baseline1(ctx)
+    je.cmd_sheet(ctx, seed=11)
+    sheet = ctx.root / "04_판정표" / "판정표.csv"
+    assert (ctx.root / "04_판정표" / je.PRISTINE_SHEET).read_text(encoding="utf-8") == sheet.read_text(encoding="utf-8")
+    first, _, body = sheet.read_text(encoding="utf-8").partition("\n")
+    rows = list(csv.reader(body.splitlines()))
+    filled = [rows[0]] + [r[:9] + ["판정자 오판", "필드 값 1.105 와 같다"] for r in rows[1:]]
+    edited = [r[:] for r in filled]
+    edited[1][7] += " 고침"
+    for table in (edited, filled):
+        buf = io.StringIO()
+        csv.writer(buf).writerows(table)
+        sheet.write_text("﻿" + first + "\n" + buf.getvalue(), encoding="utf-8")
+        if table is edited:  # 같은 파일에 덮어 써도 원본 사본과 맞대므로 칸 밖 변경을 잡는다
+            with pytest.raises(je.RunnerError, match="판정 칸 밖을 고친"):
+                je.cmd_report(ctx, sheet)
+    assert je.cmd_report(ctx, sheet)["overblocking"]["counts"]["과잉 차단"] == 1

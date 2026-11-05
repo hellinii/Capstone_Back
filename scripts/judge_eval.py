@@ -1707,6 +1707,10 @@ def cmd_sheet(ctx: Ctx, *, seed: int | None = None, include_b2: bool = False) ->
     key_record = {"seed": seed, "by_source": dict(Counter(e["source"] for e in entries)), "key_sha256": key_sha, "at": at}
     (key_dir / "기록.json").write_text(json.dumps(key_record, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     target.write_text(jv.KEY_HEAD + key_sha + "\n" + _csv_text(E.SHEET_COLUMNS, rows), encoding="utf-8")
+    # 판정 담당이 판정표에 바로 적어 저장하면 만든 표가 덮인다 — report 가 '판정 칸 밖을 고치지 않았나'를 맞댈 원본 사본(읽기 전용)
+    pristine = ctx.path(SHEET_DIR, PRISTINE_SHEET)
+    pristine.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+    os.chmod(pristine, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
     record = {"items": len(rows), "flags": len(entries), "include_baseline2": include_b2, "key_sha256": key_sha, "at": at}
     (ctx.path(SHEET_DIR, "기록.json")).write_text(json.dumps(record, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     for f in (key_dir / "열쇠.csv", key_dir / "열쇠.sha256", key_dir / "기록.json"):
@@ -1734,6 +1738,9 @@ def integrity(ctx: Ctx) -> dict:
     return out
 
 
+PRISTINE_SHEET = "판정표_원본.csv"  # sheet 가 판정표와 함께 쓰는 원본 사본(읽기 전용) — report 가 판정 칸 밖 변경을 맞댄다
+
+
 def _read_keyed(path: Path) -> tuple[str | None, list[dict]]:
     """judge_validate.read_keyed_sheet 와 같되 BOM(표 프로그램이 UTF-8 로 저장할 때 붙이는 것)을 걷는다."""
     text = Path(path).read_text(encoding="utf-8-sig")
@@ -1747,12 +1754,15 @@ def read_answers(ctx: Ctx, answers: Path) -> tuple[list[dict], dict[str, str], l
     """판정한 표 → (열쇠 줄, {문항: 판정}, 판정 줄). 열쇠 해시(표 첫 줄·열쇠.sha256·열쇠 파일)가 모두 같아야 하고, 도구가 쓴 칸은
     만든 판정표와 글자까지 같아야 하며, 모든 문항에 판정과 판정 사유가 있어야 한다(판정을 마친 뒤에만 열쇠를 연다)."""
     key_path = ctx.path(SHEET_DIR, "열쇠", "열쇠.csv")
-    sheet_path = ctx.path(SHEET_DIR, "판정표.csv")
+    sheet_path = ctx.path(SHEET_DIR, PRISTINE_SHEET)
+    if not sheet_path.exists():
+        sheet_path = ctx.path(SHEET_DIR, "판정표.csv")  # 원본 사본이 없던 때(2026-11-05 판정표) — 판정표 자체와 맞댄다
     if not key_path.exists() or not sheet_path.exists():
         raise RunnerError("판정표·열쇠가 없다 — sheet 를 먼저 만든다")
     sha, rows = _read_keyed(Path(answers))
     jv.check_key(key_path, {"판정한 표": sha}, recorded={"열쇠.sha256": jv._sha_file(key_path.parent / "열쇠.sha256")})
-    _, made = jv.read_keyed_sheet(sheet_path)
+    made_sha, made = _read_keyed(sheet_path)  # BOM 을 걷고 읽는다(판정표에 바로 적어 저장하면 편집기가 BOM 을 붙인다)
+    jv.check_key(key_path, {"만든 판정표": made_sha}, recorded={"열쇠.sha256": jv._sha_file(key_path.parent / "열쇠.sha256")})
     made_by_id = {r["문항"]: r for r in made}
     got_by_id = {r.get("문항"): r for r in rows}
     if set(got_by_id) != set(made_by_id):
