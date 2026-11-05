@@ -1177,6 +1177,484 @@ def cmd_baseline2(ctx: Ctx, *, live: bool = False, yes: bool = False, limit: int
     return {"ran": len(out["rows"]), "stopped": out["stopped"], "gates": dict(gates)}
 
 
+# ── 집계(§6) ────────────────────────────────────────────────────────────
+
+FINAL = ("done", "final")
+NOT_RUN = "미실행"
+
+
+def _load_result(ctx: Ctx, row: dict) -> dict:
+    path = ctx.root / row["result_file"]
+    if ctx.mode == "dev":
+        path = dev_guard(path)
+    body = path.read_bytes()
+    if row.get("result_sha256") and hashlib.sha256(body).hexdigest() != row["result_sha256"]:
+        raise RunnerError(f"결과 원본 해시가 장부와 다르다: {row['result_file']}")
+    return json.loads(body)
+
+
+def collect_runs(ctx: Ctx, docs: list[Doc], rows: list[dict]) -> dict[tuple[int, str], dict]:
+    """(회차, 문서) → {status: done|final|retry|미실행, run: 결과 원본(끝난 회차만), attempts, row}."""
+    fp = criteria.fingerprint()
+    out = {}
+    for round_no, stage in STAGE_OF_ROUND.items():
+        states = stage_states(rows, stage, fingerprint=fp, mode=ctx.runner_mode)
+        for doc in docs:
+            s = states.get((doc.report, doc.variant))
+            if s is None:
+                out[(round_no, doc.id)] = {"status": NOT_RUN, "run": None, "attempts": 0, "row": None}
+                continue
+            run = _load_result(ctx, s["row"]) if s["status"] in FINAL else None
+            out[(round_no, doc.id)] = {"status": s["status"], "run": run, "attempts": s["attempts"], "row": s["row"]}
+    return out
+
+
+def collect_b2(ctx: Ctx, docs: list[Doc], rows: list[dict]) -> dict[str, dict]:
+    states = stage_states(rows, B2_STAGE, fingerprint=criteria.fingerprint(), mode=ctx.runner_mode)
+    out = {}
+    for doc in docs:
+        s = states.get((doc.report, doc.variant))
+        if s is None:
+            out[doc.id] = {"status": NOT_RUN, "body": None, "attempts": 0, "row": None}
+        else:
+            out[doc.id] = {"status": s["status"], "body": _load_result(ctx, s["row"]) if s["status"] in FINAL else None,
+                           "attempts": s["attempts"], "row": s["row"]}
+    return out
+
+
+def ledger_costs(rows: list[dict], mode: str) -> dict:
+    """단계별 줄 수·비용 합·평균 시간·재시도(같은 문서·회차의 두 번째 이후 줄)·API 실패 줄."""
+    out = {}
+    fp = criteria.fingerprint()
+    for stage in (*STAGE_OF_ROUND.values(), B2_STAGE):
+        mine = [r for r in rows if r.get("stage") == stage and r.get("mode") == mode and r.get("manifest_sha256") == fp]
+        secs = [float(r["seconds"]) for r in mine if (r.get("seconds") or "").strip()]
+        keys = Counter((r["report"], r["variant"]) for r in mine)
+        out[stage] = {"rows": len(mine), "cost_usd": round(sum(float(r["cost_usd"]) for r in mine if (r.get("cost_usd") or "").strip()), 6),
+                      "unknown_cost_rows": sum(1 for r in mine if not (r.get("cost_usd") or "").strip()),
+                      "mean_seconds": round(sum(secs) / len(secs), 3) if secs else None,
+                      "retries": sum(n - 1 for n in keys.values()),
+                      "api_failures": sum(1 for r in mine if retryable(r.get("error", ""))),
+                      "models_served": sorted({m for r in mine for m in (r.get("model_served") or "").split(",") if m})}
+    out["total"] = {"rows": sum(v["rows"] for v in out.values()), "cost_usd": round(sum(v["cost_usd"] for v in out.values()), 6)}
+    return out
+
+
+class World:
+    """집계에 쓰는 재료 한 벌 — 바탕·문서·문장 목록·주입 문장·회차 결과·베이스라인."""
+
+    def __init__(self, ctx: Ctx):
+        self.ctx = ctx
+        self.bases = load_bases(ctx)
+        self.docs = documents(self.bases, load_items(ctx))
+        if not self.docs:
+            raise RunnerError("문서가 없다")
+        self.index = {d.id: doc_index(self.bases[d.report], d.slots) for d in self.docs}
+        self.injected = {d.id: injected_of(d, self.bases[d.report], self.index[d.id]) for d in self.docs if d.variant != E.BASE}
+        self.rows = jl.Ledger(ctx.ledger_path).rows() if ctx.ledger_path.exists() else []
+        self.runs = collect_runs(ctx, self.docs, self.rows)
+        self.b2 = collect_b2(ctx, self.docs, self.rows)
+        b1 = ctx.root / RESULTS_OUT / "baseline1.json"
+        self.b1 = json.loads(b1.read_text(encoding="utf-8")) if b1.exists() else None
+        self._sources: dict = {}
+
+    def run(self, doc: Doc, round_no: int) -> dict | None:
+        return self.runs[(round_no, doc.id)]["run"]
+
+    def pair(self, doc: Doc) -> list[dict | None]:
+        return [self.run(doc, 1), self.run(doc, 2)]
+
+    def original(self, report: str) -> Doc:
+        return next(d for d in self.docs if d.report == report and d.variant == E.BASE)
+
+    def missing(self) -> list[str]:
+        return [f"{doc.id} {n}회차({self.runs[(n, doc.id)]['status']})" for n in (1, 2) for doc in self.docs
+                if self.runs[(n, doc.id)]["status"] not in FINAL]
+
+    def value_of(self, report: str):
+        if report not in self._sources:
+            self._sources[report] = sources_of(self.bases[report])
+        src = self._sources[report]
+
+        def lookup(name: str):
+            got = src.lookup(name)
+            return got.get("value") if got.get("found", True) else None
+        return lookup
+
+
+def _status_of(world: World, doc: Doc, n: int) -> str:
+    st = world.runs[(n, doc.id)]["status"]
+    return {"done": "완료", "final": "실패", "retry": "재시도 대상", NOT_RUN: NOT_RUN}[st]
+
+
+def aggregate(ctx: Ctx, *, partial: bool = False, world: World | None = None) -> dict:
+    """§6 집계 전부(규칙에 없는 것은 넣지 않는다). partial 이 아니면 33문서 × 2회차가 모두 끝나고 베이스라인 1 이 있어야 한다."""
+    w = world or World(ctx)
+    missing = w.missing()
+    if not partial and (missing or w.b1 is None):
+        raise RunnerError("집계할 회차가 덜 끝났다(--partial 로 부분 집계): "
+                          + ", ".join(missing[:8]) + (" …" if len(missing) > 8 else "") + ("" if w.b1 else " · baseline1.json 없음"))
+    defects_docs = [d for d in w.docs if d.is_defect]
+    variant_docs = [d for d in w.docs if d.source == E.SOURCE_VARIANT]
+    originals = {tag: w.pair(w.original(tag)) for tag in w.bases}
+    out: dict = {"mode": ctx.mode, "partial": bool(partial and (missing or w.b1 is None)), "missing": missing,
+                 "criteria_version": criteria.version(), "fingerprint": criteria.fingerprint(),
+                 "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 "docs": {d.id: {"report": d.report, "variant": d.variant, "source": d.source, "sentences": len(w.index[d.id].sentences),
+                                 "runs": [{"round": n, "status": _status_of(w, d, n), "attempts": w.runs[(n, d.id)]["attempts"],
+                                           "run_id": (w.runs[(n, d.id)]["row"] or {}).get("run_id"),
+                                           "model_served": (w.runs[(n, d.id)]["row"] or {}).get("model_served"),
+                                           "at": (w.runs[(n, d.id)]["row"] or {}).get("at"),
+                                           "flags": [{"axis": f["axis"], "label": f["label"], "slots": f["slots"], "quotes": f["quotes"],
+                                                      "field": f["field"]} for f in E.flags_of(w.run(d, n))]
+                                           if E.run_ok(w.run(d, n)) else [],
+                                           "gate": (w.run(d, n) or {}).get("gate"), "failure": (w.run(d, n) or {}).get("failure"),
+                                           "claims": len((((w.run(d, n) or {}).get("record") or {}).get("extract") or {}).get("claims") or []),
+                                           "scores": E.axis_scores(w.run(d, n)) if E.run_ok(w.run(d, n)) else None}
+                                          for n in (1, 2)]} for d in w.docs}}
+
+    # 6.2·6.3·6.7·6.8 결함본
+    defects = {}
+    for doc in defects_docs:
+        idx, inj, meta = w.index[doc.id], w.injected[doc.id], doc.meta
+        expected = list(meta["expected_axes"])
+        dets = [E.detect(r, idx, inj, expected) for r in w.pair(doc)]
+        causes = [{"round": n, **E.miss_cause(doc.variant, w.run(doc, n), idx, inj, (meta.get("grounds") or {}).get("field"))}
+                  for n, d in zip((1, 2), dets) if d["gate_detected"] is False]
+        defects[doc.id] = {
+            "report": doc.report, "type": meta["type"], "axis": meta["axis"], "expected_axes": expected,
+            "allowed_secondary_axes": meta["allowed_secondary_axes"], "injected": inj,
+            "first_check_pass_by_design": meta.get("first_check_pass_by_design"),
+            "gate": [E.word(d["gate_detected"], d["status"]) for d in dets],
+            "gate_class": E.two_run_class([d["gate_detected"] for d in dets]),
+            "axes": {a: {"runs": [E.word(d["axes"][a], d["status"]) for d in dets],
+                         "class": E.two_run_class([d["axes"][a] for d in dets])} for a in expected},
+            "out_of_place": [{"round": n, "count": len(d["out_of_place"]),
+                              "flags": [{"index": f["index"], "axis": f["axis"], "label": f["label"], "sentence_ids": f["sentence_ids"]}
+                                        for f in d["out_of_place"]]} for n, d in zip((1, 2), dets)],
+            "miss_causes": causes,
+            "independence": E.independence(originals[doc.report], w.pair(doc), expected, meta["allowed_secondary_axes"]),
+            "extraction": [E.extraction_hit(doc.variant, r, idx, inj) for r in w.pair(doc)],
+        }
+    n_def = len(defects_docs)
+    both = sum(d["gate_class"] == E.BOTH for d in defects.values())
+    by_type: dict[str, list] = {}
+    for vid, d in defects.items():
+        by_type.setdefault(d["type"], []).append({"defect": vid, "class": d["gate_class"]})
+    axis_misses = {a: sorted(v for v, d in defects.items() if a in d["axes"] and any(x == E.MISSED for x in d["axes"][a]["runs"]))
+                   for a in E.GATE_AXES}
+    out["q1_gate"] = {"defects": n_def, "classes": dict(Counter(d["gate_class"] for d in defects.values())),
+                      "both_detected": E.wilson(both, n_def), "by_type": by_type}
+    out["q2_axis"] = {"by_axis": {a: {"defects": sum(a in d["axes"] for d in defects.values()),
+                                      "both_detected": sum(d["axes"][a]["class"] == E.BOTH for d in defects.values() if a in d["axes"]),
+                                      "any_run_missed": axis_misses[a]} for a in E.GATE_AXES}}
+    out["defects"] = defects
+    related = [v for vid in E.EXTRACTION_IDS if vid in defects for v in defects[vid]["extraction"]]
+    reference = [v for vid, d in defects.items() if E.RELATED_KINDS[vid] is None for v in d["extraction"]]
+    out["extraction_rate"] = {"related": E.rate(related), "reference_c02_c09": E.rate(reference)}
+
+    # 6.6 불변성
+    variants = {}
+    for doc in variant_docs:
+        inv = E.invariance(originals[doc.report], w.pair(doc))
+        variants[doc.id] = {"report": doc.report, "type": doc.meta.get("type"), **inv}
+    out["q3_invariance"] = {"variants": variants, "by_type": {
+        t: dict(Counter(v["status"] for v in variants.values() if v["type"] == t)) for t in E.VARIANT_TYPES}}
+    blocked = [{"doc": d.id, "round": n, "run_id": (w.runs[(n, d.id)]["row"] or {}).get("run_id"),
+                "flags": len(E.flags_of(w.run(d, n)))}
+               for d in w.docs if d.source in (E.SOURCE_ORIGINAL, E.SOURCE_VARIANT) for n in (1, 2)
+               if (w.run(d, n) or {}).get("gate") == "blocked"]
+    out["q3_blocked_before_judgement"] = {"blocked_runs": blocked, "count": len(blocked)}
+
+    # 6.5 재현성
+    out["q4_reproducibility"] = E.reproducibility({d.id: w.pair(d) for d in w.docs}, w.index)
+
+    # 5 베이스라인
+    b1 = (w.b1 or {}).get("docs", {})
+    b2 = {}
+    for doc in w.docs:
+        st = w.b2[doc.id]["status"]
+        result = w.b2[doc.id]["body"]["result"] if st == "done" else None
+        if st != "done":
+            b2[doc.id] = {"status": {"final": E.FAILED, "retry": "재시도 대상"}.get(st, NOT_RUN), "detected": None, "issues": None,
+                          "decision": None}
+        elif doc.is_defect:
+            det = E.baseline2_detection(result, w.index[doc.id], w.injected[doc.id])
+            b2[doc.id] = {k: det.get(k) for k in ("status", "detected", "issues", "decision")}
+        else:
+            b2[doc.id] = {"status": "완료", "detected": None, "issues": len(E.baseline2_issues(result, w.index[doc.id])),
+                          "decision": result.get("decision")}
+    out["q5_baselines"] = {
+        "defects": {vid: {"first_check_pass_by_design": d["first_check_pass_by_design"],
+                          "baseline1": (b1.get(vid) or {}).get("status", NOT_RUN), "baseline2": b2[vid]["status"],
+                          "judge_gate": d["gate_class"]} for vid, d in defects.items()},
+        "originals_variants": {d.id: {"baseline1_findings": (b1.get(d.id) or {}).get("n_findings"), "baseline2_issues": b2[d.id]["issues"],
+                                      "baseline2_decision": b2[d.id]["decision"],
+                                      "judge_flags": [len(E.flags_of(r)) if E.run_ok(r) else None for r in w.pair(d)]}
+                               for d in w.docs if not d.is_defect},
+        "baseline1_present": w.b1 is not None, "baseline2": b2}
+
+    # 6.9 숫자 토큰 재현율 — 원본 3건 × 2회
+    recall_rows = {}
+    for tag in sorted(w.bases):
+        doc = w.original(tag)
+        for n, r in zip((1, 2), w.pair(doc)):
+            if E.run_ok(r):
+                got = E.numeric_recall(r, w.index[doc.id])
+                recall_rows[f"{doc.id} {n}회차"] = {k: got[k] for k in ("tokens", "matched", "recall")}
+    tokens = sum(v["tokens"] for v in recall_rows.values())
+    matched = sum(v["matched"] for v in recall_rows.values())
+    out["numeric_recall"] = {"runs": recall_rows, "tokens": tokens, "matched": matched, "recall": matched / tokens if tokens else None}
+    out["costs"] = ledger_costs(w.rows, ctx.runner_mode)
+    return out
+
+
+# ── 보고 글(마크다운) ──────────────────────────────────────────────────────
+
+
+def _cell(v) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, bool):
+        return "예" if v else "아니오"
+    if isinstance(v, float):
+        return f"{v:.3f}"
+    if isinstance(v, (list, tuple)):
+        return ", ".join(_cell(x) for x in v) or "—"
+    return str(v).replace("|", "\\|").replace("\n", " ")
+
+
+def md_table(headers: list[str], rows: list[list]) -> str:
+    if not rows:
+        return "(없음)\n"
+    lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
+    lines += ["| " + " | ".join(_cell(c) for c in r) + " |" for r in rows]
+    return "\n".join(lines) + "\n"
+
+
+def aggregate_markdown(agg: dict) -> str:
+    q1, q4 = agg["q1_gate"], agg["q4_reproducibility"]
+    wil = q1["both_detected"]
+    parts = [f"# 판정자 평가 집계 (사전 등록 v1 §6)\n\n- 모드 {agg['mode']} · 기준 {agg['criteria_version']} · 지문 {agg['fingerprint'][:8]}… · {agg['at']}\n"
+             + (f"- **부분 집계** — 덜 끝난 회차: {', '.join(agg['missing']) or '없음(베이스라인 1 없음)'}\n" if agg["partial"] else "")]
+    parts.append("\n## Q1 게이트 탐지 (6.2)\n\n" + md_table(
+        ["결함", "결과서", "유형", "1회차", "2회차", "분류", "위치 불일치 표시(1·2회차)"],
+        [[v, d["report"], d["type"], d["gate"][0], d["gate"][1], d["gate_class"],
+          f"{d['out_of_place'][0]['count']}·{d['out_of_place'][1]['count']}"] for v, d in agg["defects"].items()]))
+    parts.append(f"\n두 회차 모두 탐지 {wil['k']}/{wil['n']}"
+                 + (f" — Wilson 95% [{wil['low']:.2f}, {wil['high']:.2f}]" if wil["low"] is not None else "") + "\n")
+    parts.append("\n유형별(표본 2~3개 — 기술 통계만)\n\n" + md_table(
+        ["유형", "결함·분류"], [[t, ", ".join(f"{x['defect']} {x['class']}" for x in xs)] for t, xs in q1["by_type"].items()]))
+    parts.append("\n## Q2 축 수준 탐지 (6.2)\n\n" + md_table(
+        ["결함", "기대 축", "1회차", "2회차", "분류"],
+        [[v, a, x["runs"][0], x["runs"][1], x["class"]] for v, d in agg["defects"].items() for a, x in d["axes"].items()]))
+    parts.append("\n" + md_table(["축", "기대 축 결함 수", "두 회차 모두 탐지", "한 회차라도 축 수준 미탐지"],
+                                 [[a, x["defects"], x["both_detected"], x["any_run_missed"]] for a, x in agg["q2_axis"]["by_axis"].items()]))
+    parts.append("\n## 독립성 (6.7) — 기대 축이 아닌 축, 원본 두 회차 범위 ± 허용 폭\n\n" + md_table(
+        ["결함", "축", "원본 두 회차", "결함본 두 회차", "판정"],
+        [[v, a, x["base"], x["defect"], x["status"]] for v, d in agg["defects"].items() for a, x in d["independence"].items()]))
+    parts.append("\n## 미탐지 원인 (6.3) — 게이트 수준에서 놓친 회차\n\n" + md_table(
+        ["결함", "회차", "원인", "근거"],
+        [[v, c["round"], c["cause"], c["note"] or "; ".join(f"{x['kind']} '{x['quote']}' 필드 {x['field'] or '-'} 판정 {x['verdict'] or '-'}"
+                                                         for x in c["claims"][:3])]
+         for v, d in agg["defects"].items() for c in d["miss_causes"]]))
+    parts.append("\n## Q3 불변성 (6.6)\n\n" + md_table(
+        ["변형", "결과서", "유형", "원본 결정", "변형 결정", "판정", "벗어난 축"],
+        [[v, x["report"], x["type"], x["base_gates"], x["variant_gates"], x["status"],
+          [a for a, s in x["axes"].items() if s["ok"] is False]] for v, x in agg["q3_invariance"]["variants"].items()]))
+    parts.append("\n변형 유형별\n\n" + md_table(["유형", "판정별 수"], [[t, ", ".join(f"{k} {v}" for k, v in c.items()) or "—"]
+                                                                  for t, c in agg["q3_invariance"]["by_type"].items()]))
+    blocked = agg["q3_blocked_before_judgement"]
+    parts.append(f"\n## Q3 과잉 차단 — 판정 전\n\n차단된 원본·변형 회차 {blocked['count']}개(과잉 차단 여부는 판정표 판정 뒤 report 가 센다).\n\n"
+                 + md_table(["문서", "회차", "표시 수"], [[b["doc"], b["round"], b["flags"]] for b in blocked["blocked_runs"]]))
+    parts.append("\n## Q4 재현성 (6.5)\n\n" + md_table(
+        ["묶음", "문서 수", "발급 결정 일치", "검출 문장 집합 완전 일치", "평균 Jaccard"],
+        [["전체", q4["overall"]["n"], q4["overall"]["decision_agreement"], q4["overall"]["exact_rate"], q4["overall"]["mean_jaccard"]]]
+        + [[g, x["n"], x["decision_agreement"], x["exact_rate"], x["mean_jaccard"]] for g, x in q4["groups"].items()]))
+    if q4["excluded"]:
+        parts.append(f"\n실패·미실행 회차가 있어 뺀 문서: {', '.join(q4['excluded'])}\n")
+    split = [d for d, x in q4["docs"].items() if x["group"] == "갈림"]
+    parts.append(f"\n발급 결정이 회차에 따라 갈린 문서: {', '.join(split) or '없음'}\n")
+    q5 = agg["q5_baselines"]
+    parts.append("\n## Q5 베이스라인 (§5)\n\n" + md_table(
+        ["결함", "설계상 1차 점검 통과", "베이스라인 1", "베이스라인 2", "판정자(게이트)"],
+        [[v, x["first_check_pass_by_design"], x["baseline1"], x["baseline2"], x["judge_gate"]] for v, x in q5["defects"].items()]))
+    parts.append("\n원본·변형 — 문서당 지적 수\n\n" + md_table(
+        ["문서", "베이스라인 1 검출", "베이스라인 2 지적", "베이스라인 2 결정", "판정자 표시(1·2회차)"],
+        [[d, x["baseline1_findings"], x["baseline2_issues"], x["baseline2_decision"], x["judge_flags"]]
+         for d, x in q5["originals_variants"].items()]))
+    ex, nr = agg["extraction_rate"], agg["numeric_recall"]
+    parts.append("\n## 보조 측정\n\n" + md_table(
+        ["측정", "맞음", "분모", "비율", "기록 없음(실패)"],
+        [["주입 문장 추출률 F01~F09·C01(관련 종류, 6.8)", ex["related"]["k"], ex["related"]["n"], ex["related"]["rate"], ex["related"]["no_record"]],
+         ["참고: C02~C09 어떤 종류든", ex["reference_c02_c09"]["k"], ex["reference_c02_c09"]["n"], ex["reference_c02_c09"]["rate"],
+          ex["reference_c02_c09"]["no_record"]],
+         ["숫자 토큰 재현율(원본 × 2회, 6.9)", nr["matched"], nr["tokens"], nr["recall"], None]]))
+    costs = agg["costs"]
+    parts.append("\n## 비용·시간·재시도\n\n" + md_table(
+        ["단계", "장부 줄", "비용($)", "비용 모름 줄", "평균 시간(초)", "재시도", "API 실패 줄", "응답 모델"],
+        [[s, c["rows"], c["cost_usd"], c["unknown_cost_rows"], c["mean_seconds"], c["retries"], c["api_failures"], c["models_served"]]
+         for s, c in costs.items() if s != "total"]) + f"\n합계 {costs['total']['rows']}줄 · ${costs['total']['cost_usd']:.2f}\n")
+    return "".join(parts)
+
+
+def cmd_aggregate(ctx: Ctx, *, partial: bool = False) -> dict:
+    agg = aggregate(ctx, partial=partial)
+    folder = ctx.path(RESULTS_OUT)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "집계.json").write_text(json.dumps(agg, ensure_ascii=False, indent=1, default=str) + "\n", encoding="utf-8")
+    (folder / "집계.md").write_text(aggregate_markdown(agg), encoding="utf-8")
+    ctx.echo(f"집계 {folder}/집계.json·집계.md" + (" — 부분 집계" if agg["partial"] else ""))
+    return agg
+
+
+# ── 과잉 차단 판정표(§6.4) ──────────────────────────────────────────────────
+
+
+def _csv_text(columns, rows) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(columns)
+    w.writerows(rows)
+    return buf.getvalue()
+
+
+def sheet_entries_of(world: World, *, include_b2: bool) -> list[dict]:
+    """판정 대상 — 원본·변형의 모든 위반·모순 표시(두 회차), 결함본의 주입 문장 밖 표시, (원하면) 원본·변형의 베이스라인 2 지적."""
+    entries = []
+    for doc in world.docs:
+        idx = world.index[doc.id]
+        for n in (1, 2):
+            run = world.run(doc, n)
+            if not E.run_ok(run):
+                continue
+            if doc.is_defect:
+                located = E.detect(run, idx, world.injected[doc.id], doc.meta["expected_axes"])["out_of_place"]
+            else:
+                located = [E.locate_flag(f, idx) for f in E.flags_of(run)]
+            entries += E.sheet_entries(run["run_id"], doc.id, doc.source, n, located, idx, value_of=world.value_of(doc.report))
+        body = world.b2[doc.id]["body"]
+        if include_b2 and not doc.is_defect and body and not body.get("failure"):
+            entries += E.b2_entries(body["run_id"], doc.id, E.SOURCE_B2, E.baseline2_issues(body["result"], idx), idx)
+    return entries
+
+
+def cmd_sheet(ctx: Ctx, *, seed: int | None = None, include_b2: bool = False) -> dict:
+    """블라인드 판정표·열쇠. 33문서 × 2회차가 끝나야 만든다(표시가 빠지지 않게). 쓰기 전에 새는 것 검사 — 걸리면 쓰지 않는다."""
+    target = ctx.path(SHEET_DIR, "판정표.csv")
+    if target.exists():
+        raise RunnerError(f"판정표가 이미 있다(덮어쓰지 않는다 — 나눠 준 표와 열쇠가 어긋나지 않게): {target}")
+    world = World(ctx)
+    if world.missing():
+        raise RunnerError(f"채점이 덜 끝나 판정표를 만들지 않는다: {', '.join(world.missing()[:8])}")
+    seed = random.SystemRandom().randrange(1, 10**9) if seed is None else seed
+    entries = sheet_entries_of(world, include_b2=include_b2)
+    rows, key_rows, items = E.build_sheet(entries, seed)
+    allowed = [s.text for idx in world.index.values() for s in idx.sentences] + [e["value"] for e in entries if e["value"]]
+    leaks = E.sheet_leaks(rows, doc_names=[d.id for d in world.docs] + list(world.bases), allowed_texts=allowed)
+    if leaks:
+        raise RunnerError("판정표에 출처를 알려 주는 것이 있어 쓰지 않는다:\n  - " + "\n  - ".join(leaks[:20]))
+    key_body = _csv_text(E.KEY_COLUMNS, key_rows)
+    key_sha = hashlib.sha256(key_body.encode("utf-8")).hexdigest()
+    key_dir = ctx.path(SHEET_DIR, "열쇠")
+    key_dir.mkdir(parents=True, exist_ok=True)
+    (key_dir / "열쇠.csv").write_text(key_body, encoding="utf-8")
+    (key_dir / "열쇠.sha256").write_text(f"{key_sha}  열쇠.csv\n", encoding="utf-8")
+    target.write_text(jv.KEY_HEAD + key_sha + "\n" + _csv_text(E.SHEET_COLUMNS, rows), encoding="utf-8")
+    record = {"seed": seed, "items": len(rows), "flags": len(entries), "include_baseline2": include_b2, "key_sha256": key_sha,
+              "by_source": dict(Counter(e["source"] for e in entries)),
+              "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    (ctx.path(SHEET_DIR, "기록.json")).write_text(json.dumps(record, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    for f in (key_dir / "열쇠.csv", key_dir / "열쇠.sha256"):
+        os.chmod(f, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    ctx.echo(f"판정표 {len(rows)}문항(표시 {len(entries)}개) · 시드 {seed} · 열쇠 sha256 {key_sha}")
+    return record
+
+
+# ── 최종 보고(§6.4 셈) ──────────────────────────────────────────────────────
+
+
+def integrity(ctx: Ctx) -> dict:
+    """봉인(00_봉인/SHA256SUMS)과 결함(사전등록/v3/SHA256SUMS — 있으면) 해시를 다시 맞대 본다."""
+    out: dict = {"sealed": None, "defects_v3": None}
+    sums = ctx.root / SEALED / "SHA256SUMS"
+    if sums.exists():
+        bad = [name for name, digest in read_sums(sums).items()
+               if not (ctx.root / SEALED / name).is_file() or sha256_file(ctx.root / SEALED / name) != digest]
+        out["sealed"] = {"ok": not bad, "mismatch": bad}
+    elif ctx.mode == "verify":
+        out["sealed"] = {"ok": False, "mismatch": ["00_봉인/SHA256SUMS 없음"]}
+    if (ctx.root / PREREG_V3 / "SHA256SUMS").exists():
+        bad = defect_sum_problems(ctx)
+        out["defects_v3"] = {"ok": not bad, "mismatch": bad}
+    return out
+
+
+def read_answers(ctx: Ctx, answers: Path) -> tuple[list[dict], dict[str, str], list[dict]]:
+    """판정한 표 → (열쇠 줄, {문항: 판정}, 판정 줄). 열쇠 해시(표 첫 줄·열쇠.sha256·열쇠 파일)가 모두 같아야 하고, 도구가 쓴 칸은
+    만든 판정표와 글자까지 같아야 하며, 모든 문항에 판정과 판정 사유가 있어야 한다(판정을 마친 뒤에만 열쇠를 연다)."""
+    key_path = ctx.path(SHEET_DIR, "열쇠", "열쇠.csv")
+    sheet_path = ctx.path(SHEET_DIR, "판정표.csv")
+    if not key_path.exists() or not sheet_path.exists():
+        raise RunnerError("판정표·열쇠가 없다 — sheet 를 먼저 만든다")
+    sha, rows = jv.read_keyed_sheet(Path(answers))
+    jv.check_key(key_path, {"판정한 표": sha}, recorded={"열쇠.sha256": jv._sha_file(key_path.parent / "열쇠.sha256")})
+    _, made = jv.read_keyed_sheet(sheet_path)
+    made_by_id = {r["문항"]: r for r in made}
+    got_by_id = {r.get("문항"): r for r in rows}
+    if set(got_by_id) != set(made_by_id):
+        raise RunnerError(f"판정한 표의 문항이 만든 판정표와 다르다: 빠짐 {sorted(set(made_by_id) - set(got_by_id))[:5]} · "
+                          f"더함 {sorted(set(got_by_id) - set(made_by_id))[:5]}")
+    changed = [q for q, r in got_by_id.items() if any(r.get(c, "") != made_by_id[q].get(c, "") for c in E.SHEET_COLUMNS[:9])]
+    if changed:
+        raise RunnerError(f"판정 칸 밖을 고친 문항이 있다: {', '.join(sorted(changed)[:5])}")
+    verdicts = {q: (r.get(E.VERDICT_COLUMN) or "").strip() for q, r in got_by_id.items()}
+    bad = sorted(q for q, v in verdicts.items() if v not in (E.REAL_ERROR, E.JUDGE_ERROR))
+    no_reason = sorted(q for q, r in got_by_id.items() if not (r.get(E.VERDICT_REASON_COLUMN) or "").strip())
+    if bad or no_reason:
+        raise RunnerError(f"판정을 마치지 않았다 — 열쇠를 열지 않는다(판정 빈칸·틀린 글 {bad[:5]}, 판정 사유 빈칸 {no_reason[:5]})")
+    return jv._csv_rows(key_path), verdicts, rows
+
+
+def cmd_report(ctx: Ctx, answers: Path) -> dict:
+    key_rows, verdicts, filled = read_answers(ctx, answers)
+    world = World(ctx)
+    agg = aggregate(ctx, partial=False, world=world)
+    runs_info = {}
+    for doc in world.docs:
+        for n in (1, 2):
+            run = world.run(doc, n)
+            if E.run_ok(run):
+                runs_info[run["run_id"]] = {"doc": doc.id, "source": doc.source, "gate": run["gate"],
+                                            "checked": ((run.get("scorecard") or {}).get("faithfulness") or {}).get("checked", 0)}
+    tally = E.tally_overblocking(key_rows, verdicts, runs_info)
+    checks = integrity(ctx)
+    out = {**agg, "overblocking": tally, "integrity": checks, "answers_file_sha256": sha256_file(Path(answers)),
+           "sheet": [{c: r.get(c, "") for c in E.SHEET_COLUMNS} for r in filled]}
+    folder = ctx.path(RESULTS_OUT)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "최종보고.json").write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str) + "\n", encoding="utf-8")
+    c, cl = tally["counts"], tally["claim_level"]
+    md = aggregate_markdown(agg).replace("# 판정자 평가 집계 (사전 등록 v1 §6)", "# 판정자 평가 최종 보고 (사전 등록 v1)", 1)
+    md += ("\n## Q3 과잉 차단 — 판정 뒤 (6.4)\n\n"
+           + md_table(["셈", "값"], [["차단된 원본·변형 회차", c["차단"]], ["과잉 차단(판정자 오판만)", c["과잉 차단"]],
+                                    ["자연 발생 오류 검출(실제 오류 있음)", c["자연 발생 오류 검출"]], ["통과한 원본·변형 회차", c["통과"]],
+                                    ["주장 단위: 판정자 오판 충실성 위반 / 검사한 주장", f"{cl['wrong_faithfulness_violations']} / {cl['checked']}"],
+                                    ["주장 단위 오판율", cl["rate"]]])
+           + "\n" + md_table(["회차", "문서", "출처", "판정", "실제 오류", "판정자 오판"],
+                             [[r, x["doc"], x["source"], x["status"], x["verdicts"][E.REAL_ERROR], x["verdicts"][E.JUDGE_ERROR]]
+                              for r, x in tally["runs"].items()])
+           + "\n결함본 주입 문장 밖 표시: " + ", ".join(f"{k} {v}" for k, v in tally["defect_out_of_place"].items())
+           + "\n\n베이스라인 2 지적(섞었을 때): " + ", ".join(f"{k} {v}" for k, v in tally["baseline2"].items()) + "\n")
+    md += ("\n## 해시 다시 맞대기\n\n" + md_table(["대상", "결과", "다른 것"], [
+        ["00_봉인/SHA256SUMS", None if checks["sealed"] is None else checks["sealed"]["ok"], (checks["sealed"] or {}).get("mismatch")],
+        ["사전등록/v3/SHA256SUMS(02_결함)", "없음" if checks["defects_v3"] is None else checks["defects_v3"]["ok"],
+         (checks["defects_v3"] or {}).get("mismatch")]]))
+    (folder / "최종보고.md").write_text(md, encoding="utf-8")
+    ctx.echo(f"최종 보고 {folder}/최종보고.md·.json — 과잉 차단 {c['과잉 차단']}회, 주장 단위 오판 {cl['wrong_faithfulness_violations']}/{cl['checked']}")
+    return out
+
+
 # ── 명령줄 ───────────────────────────────────────────────────────────
 
 
@@ -1206,6 +1684,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--yes", action="store_true")
     p.add_argument("--limit", type=int)
     p.add_argument("--concurrency", type=int, default=MAX_CONCURRENCY)
+    p = add("aggregate", "§6 집계 → 05_결과/집계.json·집계.md")
+    p.add_argument("--partial", action="store_true", help="덜 끝난 회차가 있어도 있는 것으로(부분 집계 표시)")
+    p = add("sheet", "과잉 차단 판정표(블라인드)·열쇠 → 04_판정표/")
+    p.add_argument("--seed", type=int)
+    p.add_argument("--include-baseline2", action="store_true", help="원본·변형의 베이스라인 2 지적도 섞는다(종류는 '지적')")
+    p = add("report", "판정한 표 → §6.4 셈 + 집계 → 05_결과/최종보고.md·.json")
+    p.add_argument("--answers", required=True)
     return parser
 
 
@@ -1234,6 +1719,16 @@ def main(argv: list[str] | None = None) -> int:
             out = cmd_baseline2(ctx, live=args.live, yes=args.yes, limit=args.limit, concurrency=args.concurrency)
             print(json.dumps(out, ensure_ascii=False))
             return 3 if out["stopped"] or out["gates"].get("재시도 대상") else 0
+        if args.command == "aggregate":
+            cmd_aggregate(ctx, partial=args.partial)
+            return 0
+        if args.command == "sheet":
+            cmd_sheet(ctx, seed=args.seed, include_b2=args.include_baseline2)
+            return 0
+        if args.command == "report":
+            out = cmd_report(ctx, Path(args.answers))
+            bad = [k for k, v in out["integrity"].items() if v is not None and not v["ok"]]
+            return 1 if bad else 0
         raise RunnerError(f"모르는 명령: {args.command}")
     except RunnerError as exc:
         print(f"멈춤: {exc}", file=sys.stderr)

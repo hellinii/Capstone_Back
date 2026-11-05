@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -220,6 +221,7 @@ class FakeJudge:
         self.raise_once = set(raise_once or ())
         self.per_doc = per_doc or {}
         self.now = self.peak = self.calls = 0
+        self.seen: dict[str, int] = {}
 
     async def __call__(self, client, base, slots):
         from app.judge.core import JudgeRun
@@ -235,6 +237,10 @@ class FakeJudge:
                 self.raise_once.discard(sha)
                 raise ConnectionError("끊김(시험)")
             spec = self.per_doc.get(sha, {})
+            if isinstance(spec, list):  # 문서마다 부른 차례대로(1회차·2회차)
+                seen = self.seen.get(sha, 0)
+                self.seen[sha] = seen + 1
+                spec = spec[min(seen, len(spec) - 1)]
             gate, failure = spec.get("gate", self.gate), spec.get("failure", self.failure)
             record = {"extract": {"claims": spec.get("claims", []), "calls": [{"cost_usd": spec.get("cost", self.cost),
                                                                                  "response_model": "gpt-6-luna"}]},
@@ -540,3 +546,194 @@ def test_baseline2_refuses_changed_prompt_and_retries_api_failure(planted):
     assert out["ran"] == 1 and out["gates"] == {"pass": 1}  # 실패한 문서부터 다시
     states = je.stage_states(_rows(ctx.ledger_path), "baseline2", fingerprint=je.criteria.fingerprint(), mode="dev")
     assert sum(s["status"] == "done" for s in states.values()) == 2
+
+
+# ── 집계·판정표·최종 보고 — 합성 채점 결과로 처음부터 끝까지 ──
+
+
+def _v(cid, quote, piece, kind="number", verdict="violation", **detail):
+    return {"claim_id": cid, "kind": kind, "verdict": verdict, "slot": piece.split(":")[1], "piece_id": piece, "quote": quote,
+            "detail": detail}
+
+
+def _c(cid, quote, piece, kind="number", field=""):
+    return {"id": cid, "kind": kind, "quote": quote, "piece_id": piece, "slot": piece.split(":")[1], "field": field, "field_b": ""}
+
+
+def synthetic_plan() -> dict:
+    """문서 서술 해시 → 회차별 채점 결과. F01 두 회차 탐지(2회차엔 주입 문장 밖 표시도), C02 한 회차만(모순), F08 두 회차 미탐지
+    (추론 주장이 추출됐지만 허용 — 규칙 허용), 원본 dev_binary 1회차만 주입과 무관한 위반(과잉 차단 후보·재현성 갈림)."""
+    rows = {r["id"]: r for r in table_rows()}
+    elsewhere = {"verdicts": [_v("k9", "불균형 비율(1.105)", "slot:7.2", expr="{facts.imbalance_ratio}", data=1.105)],
+                 "claims": [_c("k9", "불균형 비율(1.105)", "slot:7.2", field="facts.imbalance_ratio")]}
+    f01_hit = {"verdicts": [_v("k1", "거짓 음성(FN)은 56건", "slot:7.1", expr="{confusion_counts.1.fn}", data=43)],
+               "claims": [_c("k1", "거짓 음성(FN)은 56건", "slot:7.1", field="confusion_counts.1.fn")]}
+    added = "현 상태로 운영해도 무방할 것으로 보인다."
+    mc = bases()["dev_multiclass"]
+    rec = V.sentences(V.read_slot(mc.result, "recommendation_narrative.model_ops"))[0]
+    c02_hit = {"contradictions": [{"type": "verdict_vs_recommendation", "pieces": ["slot:8.2", "slot:9:6.2"], "slots": ["8.2", "9"],
+                                   "sources": ["template", "template"], "quotes": [added, rec], "detail": {}}]}
+    f08 = rows["F08"]["new"]
+    f08_spec = {"gate": "pass", "claims": [_c("k3", f08[:20], "slot:8.3", kind="inference")],
+                "verdicts": [_v("k3", f08[:20], "slot:8.3", kind="inference", verdict="inference_ok", marked=False)]}
+    return {
+        _sha_of("F01"): [{"gate": "blocked", **f01_hit},
+                         {"gate": "blocked", "verdicts": f01_hit["verdicts"] + elsewhere["verdicts"],
+                          "claims": f01_hit["claims"] + elsewhere["claims"]}],
+        _sha_of("C02"): [{"gate": "blocked", **c02_hit}, {"gate": "pass"}],
+        _sha_of("F08"): [f08_spec, f08_spec],
+        _sha_of("dev_binary"): [{"gate": "blocked", **elsewhere}, {"gate": "pass"}],
+    }
+
+
+@pytest.fixture
+def scored(planted):
+    ctx = planted
+    judge = FakeJudge(per_doc=synthetic_plan())
+    je.cmd_run(ctx, 1, yes=True, judge=judge, client=object())
+    je.cmd_run(ctx, 2, yes=True, judge=judge, client=object())
+    return ctx
+
+
+def test_aggregate_refuses_incomplete_unless_partial(planted):
+    ctx = planted
+    je.cmd_run(ctx, 1, yes=True, judge=FakeJudge(), client=object(), only=["F01"])
+    with pytest.raises(je.RunnerError, match="덜 끝났다"):
+        je.cmd_aggregate(ctx)
+    agg = je.cmd_aggregate(ctx, partial=True)
+    assert agg["partial"] is True and "F01 2회차(미실행)" in agg["missing"]
+    assert agg["defects"]["F01"]["gate"] == ["미탐지", "미실행"] and agg["defects"]["F01"]["gate_class"] == "한 회차 미탐지 · 한 회차 실패"
+    assert (ctx.root / "05_결과" / "집계.md").read_text(encoding="utf-8").count("부분 집계") >= 1
+
+
+def test_aggregate_counts_detection_causes_invariance_reproducibility(scored):
+    ctx = scored
+    je.cmd_baseline1(ctx)
+    agg = je.cmd_aggregate(ctx)
+    d = agg["defects"]
+    assert agg["partial"] is False and agg["q1_gate"]["defects"] == 3
+    assert d["F01"]["gate_class"] == "두 회차 모두 탐지" and d["F01"]["axes"]["faithfulness"]["class"] == "두 회차 모두 탐지"
+    assert [o["count"] for o in d["F01"]["out_of_place"]] == [0, 1]
+    assert d["C02"]["gate_class"] == "한 회차만 탐지" and d["C02"]["miss_causes"][0]["cause"] == "모순 미검출"
+    assert d["F08"]["gate_class"] == "두 회차 모두 미탐지"
+    assert [c["cause"] for c in d["F08"]["miss_causes"]] == ["규칙 허용", "규칙 허용"]
+    assert agg["q1_gate"]["both_detected"]["k"] == 1 and agg["q1_gate"]["both_detected"]["n"] == 3
+    assert agg["q2_axis"]["by_axis"]["consistency"]["any_run_missed"] == ["C02"]
+    assert d["F01"]["independence"]["consistency"]["status"] in ("범위 안", "허용")
+    assert agg["extraction_rate"]["related"] == {"k": 4, "n": 4, "rate": 1.0, "no_record": 0}  # F01·F08 × 2회
+    assert agg["q3_invariance"]["variants"]["V01"]["status"] == "판단 불가(원본 갈림)"  # 원본 dev_binary 가 갈렸다
+    rep = agg["q4_reproducibility"]
+    assert rep["docs"]["dev_binary"]["group"] == "갈림" and rep["docs"]["dev_multiclass"]["group"] == "두 회차 모두 통과"
+    assert rep["overall"]["n"] == 8 and rep["overall"]["decision_agreement"] == pytest.approx(6 / 8)
+    assert agg["q3_blocked_before_judgement"]["count"] == 1
+    assert agg["q5_baselines"]["defects"]["F01"]["baseline1"] == "미탐지"
+    assert agg["costs"]["eval_r1"]["rows"] == 8 and agg["costs"]["total"]["cost_usd"] == pytest.approx(0.16)
+    assert agg["numeric_recall"]["tokens"] > 0
+    md = (ctx.root / "05_결과" / "집계.md").read_text(encoding="utf-8")
+    assert "## Q1 게이트 탐지" in md and "두 회차 모두 탐지 1/3" in md and "규칙 허용" in md
+
+
+def test_sheet_is_blind_grouped_and_report_tallies(scored):
+    ctx = scored
+    je.cmd_baseline1(ctx)
+    rec = je.cmd_sheet(ctx, seed=11)
+    sheet = ctx.root / "04_판정표" / "판정표.csv"
+    key = ctx.root / "04_판정표" / "열쇠" / "열쇠.csv"
+    text = sheet.read_text(encoding="utf-8")
+    first, _, body = text.partition("\n")
+    assert first == f"# 열쇠 sha256: {je.sha256_file(key)}" and rec["key_sha256"] == je.sha256_file(key)
+    rows = list(csv.reader(body.splitlines()))
+    assert tuple(rows[0]) == E.SHEET_COLUMNS
+    items = rows[1:]
+    assert len(items) == 1 and rec["flags"] == 2  # 원본 1회차와 F01 2회차(주입 밖)의 같은 문장·종류·필드 표시가 한 문항
+    assert items[0][0] == "J001" and items[0][1] == "사실 일치 위반" and items[0][7] == "facts.imbalance_ratio"
+    world = je.World(ctx)
+    allowed = [x.text for idx in world.index.values() for x in idx.sentences] + ["1.105"]
+    assert items and E.sheet_leaks([tuple(r) for r in items], doc_names=[d.id for d in world.docs], allowed_texts=allowed) == []
+    for word in ("dev_binary", "F01", "E-00", "원본", "결함본", "회차"):
+        assert word not in body, word  # 문서 이름·결함 ID·실행 번호·출처·회차가 표에 없다
+    assert not os.access(key, os.W_OK) and not os.access(key.parent / "열쇠.sha256", os.W_OK)
+    key_rows = list(csv.DictReader(key.open(encoding="utf-8")))
+    assert {(k["문서"], k["출처"], k["회차"]) for k in key_rows} == {("dev_binary", "원본", "1"), ("F01", "결함본", "2")}
+    with pytest.raises(je.RunnerError, match="이미 있다"):
+        je.cmd_sheet(ctx, seed=11)
+    # 판정 — 빈칸이면 열쇠를 열지 않는다
+    blank = ctx.root.parent / "판정_빈칸.csv"
+    blank.write_text(text, encoding="utf-8")
+    with pytest.raises(je.RunnerError, match="판정을 마치지 않았다"):
+        je.cmd_report(ctx, blank)
+    filled = ctx.root.parent / "판정.csv"
+    out_rows = [rows[0]] + [r[:9] + ["판정자 오판", "필드 값 1.105 와 문장의 1.105 가 같다"] for r in items]
+    buf = io.StringIO()
+    csv.writer(buf, lineterminator="\n").writerows(out_rows)
+    filled.write_text(first + "\n" + buf.getvalue(), encoding="utf-8")
+    report = je.cmd_report(ctx, filled)
+    tally = report["overblocking"]
+    assert tally["counts"]["과잉 차단"] == 1 and tally["counts"]["차단"] == 1
+    assert tally["claim_level"]["wrong_faithfulness_violations"] == 1 and tally["claim_level"]["checked"] == 10 * 10
+    assert tally["defect_out_of_place"]["판정자 오판"] == 1
+    md = (ctx.root / "05_결과" / "최종보고.md").read_text(encoding="utf-8")
+    assert "과잉 차단(판정자 오판만) | 1" in md and "# 판정자 평가 최종 보고" in md
+    # 열쇠 해시가 다른 표·도구 칸을 고친 표는 거부
+    wrong = ctx.root.parent / "판정_다른열쇠.csv"
+    wrong.write_text("# 열쇠 sha256: " + "0" * 64 + "\n" + buf.getvalue(), encoding="utf-8")
+    with pytest.raises(je.RunnerError, match="짝과 맞지 않는다"):
+        je.cmd_report(ctx, wrong)
+    edited = ctx.root.parent / "판정_고침.csv"
+    out_rows[1][2] = out_rows[1][2] + " 고침"
+    buf = io.StringIO()
+    csv.writer(buf, lineterminator="\n").writerows(out_rows)
+    edited.write_text(first + "\n" + buf.getvalue(), encoding="utf-8")
+    with pytest.raises(je.RunnerError, match="판정 칸 밖을 고친"):
+        je.cmd_report(ctx, edited)
+
+
+def test_sheet_refuses_before_all_runs_finish_and_leaks(planted, monkeypatch):
+    ctx = planted
+    je.cmd_run(ctx, 1, yes=True, judge=FakeJudge(), client=object())
+    with pytest.raises(je.RunnerError, match="덜 끝나"):
+        je.cmd_sheet(ctx, seed=1)
+    je.cmd_run(ctx, 2, yes=True, judge=FakeJudge(per_doc=synthetic_plan()), client=object())
+    real = E.sheet_entries
+
+    def leaky(*a, **k):
+        return [{**e, "reason": e["reason"] + " (E-0001)"} for e in real(*a, **k)]
+
+    monkeypatch.setattr(E, "sheet_entries", leaky)
+    with pytest.raises(je.RunnerError, match="출처를 알려 주는 것"):
+        je.cmd_sheet(ctx, seed=1)
+    assert not (ctx.root / "04_판정표" / "판정표.csv").exists()
+
+
+def test_cli_end_to_end_dev(planted, tmp_path):
+    root = str(planted.root)
+    assert je.main(["run", "--mode", "dev", "--root", root, "--round", "1", "--yes", "--only", "dev_multiclass"]) == 0
+    assert je.main(["aggregate", "--mode", "dev", "--root", root, "--partial"]) == 0
+    assert je.main(["baseline1", "--mode", "dev", "--root", root]) == 0
+    assert je.main(["status", "--mode", "dev", "--root", root]) == 0
+    assert je.main(["aggregate", "--mode", "dev", "--root", root]) == 2  # 덜 끝남 — --partial 없이 거부
+
+
+def test_baseline2_detection_in_aggregate_and_mixed_into_sheet(scored):
+    ctx = scored
+    je.cmd_baseline1(ctx)
+    write_b2_prompt(ctx.root)
+    fakes = _load_fakes()
+    f01_new = table_rows()[0]["new"]
+    s82 = _sentence("dev_multiclass", "conclusion.narrative", 0)
+
+    def reply(kwargs):
+        content = kwargs["input"][0]["content"]
+        issues = [{"axis": "faithfulness", "type": "숫자", "quotes": [q], "reason": "데이터와 다르다"} for q in (f01_new, s82) if q in content]
+        return fakes.json_response({"decision": "block" if issues else "issue", "issues": issues})
+
+    je.cmd_baseline2(ctx, yes=True, client=fakes.FakeOpenAI([reply] * 8))
+    agg = je.cmd_aggregate(ctx)
+    q5 = agg["q5_baselines"]
+    assert q5["defects"]["F01"]["baseline2"] == "탐지" and q5["defects"]["F08"]["baseline2"] == "미탐지"
+    assert q5["originals_variants"]["dev_multiclass"]["baseline2_issues"] == 1
+    assert q5["originals_variants"]["dev_binary"]["baseline2_issues"] == 0
+    rec = je.cmd_sheet(ctx, seed=4, include_b2=True)
+    assert rec["by_source"] == {"원본": 1, "결함본": 1, "베이스라인2": 1} and rec["items"] == 2
+    body = (ctx.root / "04_판정표" / "판정표.csv").read_text(encoding="utf-8")
+    assert ",지적," in body and "베이스라인" not in body
